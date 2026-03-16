@@ -25,7 +25,7 @@ class SummarizerService:
             model: Groq model ID (defaults to settings.GROQ_MODEL or 'llama-3.3-70b-versatile').
             temperature: LLM temperature (default 0.5).
         """
-        self.model = model or getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
+        self.model = model or getattr(settings, "GROQ_MODEL", "llama-3.1-8b-instant")
         self.temperature = temperature
         self.llm = ChatGroq(
             model=self.model,

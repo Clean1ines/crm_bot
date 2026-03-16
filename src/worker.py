@@ -6,16 +6,14 @@ Currently supports:
 
 import asyncio
 import signal
-import logging
 import asyncpg
 import httpx
 
 from src.core.config import settings
+from src.core.logging import get_logger
 from src.database.repositories.queue_repository import QueueRepository
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 shutdown_event = asyncio.Event()
 

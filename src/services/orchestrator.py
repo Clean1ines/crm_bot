@@ -46,7 +46,7 @@ class OrchestratorService:
 
         # 5. Проверяем, нужно ли запустить фоновую суммаризацию
         if len(full_history) > self.SUMMARY_THRESHOLD:
-            asyncio.create_task(self._summarize_history(thread_id))
+            #asyncio.create_task(self._summarize_history(thread_id))
             logger.info(f"Scheduled background summarization for thread {thread_id}")
 
         # 6. Получаем thread с summary (используем get_thread_with_project, чтобы также получить summary)
@@ -161,18 +161,18 @@ class OrchestratorService:
         logger.info(f"Manager reply sent for thread {thread_id}")
         return True
 
-    async def _summarize_history(self, thread_id: str) -> None:
+    #async def _summarize_history(self, thread_id: str) -> None:
         """
         Фоновая задача: генерирует краткое содержание диалога и сохраняет его в поле context_summary треда.
         """
-        try:
-            logger.info(f"Starting summarization for thread {thread_id}")
-            messages = await self.threads.get_messages_for_langgraph(thread_id)
-            if not messages:
-                logger.warning(f"No messages found for thread {thread_id}, skipping summarization")
-                return
-            summary = await self.summarizer.summarize(messages)
-            await self.threads.update_summary(thread_id, summary)
-            logger.info(f"Summarization completed for thread {thread_id}")
-        except Exception as e:
-            logger.exception(f"Summarization failed for thread {thread_id}: {e}")
+        #try:
+            #logger.info(f"Starting summarization for thread {thread_id}")
+           # messages = await self.threads.get_messages_for_langgraph(thread_id)
+            #if not messages:
+                #logger.warning(f"No messages found for thread {thread_id}, skipping summarization")
+               # return
+            #summary = await self.summarizer.summarize(messages)
+            #await self.threads.update_summary(thread_id, summary)
+            #logger.info(f"Summarization completed for thread {thread_id}")
+        #except Exception as e:
+            #logger.exception(f"Summarization failed for thread {thread_id}: {e}")

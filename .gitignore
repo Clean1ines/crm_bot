@@ -21,3 +21,5 @@ pgdata_test/
 
 docs/
 tree_output.txt
+db_diagnostic.sh
+*.log

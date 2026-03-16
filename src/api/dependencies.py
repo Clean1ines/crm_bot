@@ -1,8 +1,8 @@
 """
-FastAPI dependency injection for database pool, orchestrator, repositories, and Redis.
+FastAPI dependency injection for database pool, orchestrator, and repositories.
 """
 
-from src.core.lifespan import pool, orchestrator
+import src.core.lifespan
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
@@ -10,15 +10,15 @@ from src.services.redis_client import get_redis_client
 
 def get_pool():
     """Return the global database connection pool."""
-    if pool is None:
+    if src.core.lifespan.pool is None:
         raise RuntimeError("Database pool not initialized")
-    return pool
+    return src.core.lifespan.pool
 
 def get_orchestrator():
     """Return the global orchestrator instance."""
-    if orchestrator is None:
+    if src.core.lifespan.orchestrator is None:
         raise RuntimeError("Orchestrator not initialized")
-    return orchestrator
+    return src.core.lifespan.orchestrator
 
 def get_project_repo():
     """Return a new ProjectRepository instance (uses the global pool)."""

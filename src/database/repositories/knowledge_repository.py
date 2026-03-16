@@ -1,6 +1,9 @@
 import uuid
 from typing import List, Optional
 from src.services.embedding_service import embed_text
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 class KnowledgeRepository:
     def __init__(self, conn):
@@ -14,6 +17,7 @@ class KnowledgeRepository:
         Ищет релевантные фрагменты в базе знаний проекта.
         Возвращает список текстов.
         """
+        logger.info(f"Searching knowledge base for project {project_id}", extra={"query": query, "limit": limit})
         # Генерируем эмбеддинг запроса
         query_emb = await embed_text(query)
         # Преобразуем в строку для PostgreSQL
@@ -28,4 +32,6 @@ class KnowledgeRepository:
             LIMIT $3
         """, uuid.UUID(project_id), emb_str, limit)
 
-        return [row['content'] for row in rows]
+        results = [row['content'] for row in rows]
+        logger.info(f"Found {len(results)} results for project {project_id}")
+        return results
