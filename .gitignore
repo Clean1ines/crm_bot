@@ -1,0 +1,23 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+.env.test
+.env.prod
+.pytest_cache/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Databases
+pgdata_dev/
+pgdata_test/
+
+# OS
+.DS_Store
+
+docs/
+tree_output.txt

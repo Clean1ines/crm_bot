@@ -1,0 +1,12 @@
+venv/
+.git/
+.env*
+pgdata_dev/
+pgdata_test/
+frontend/node_modules/
+**/__pycache__
+*.sql
+
+
+docs/
+tree_output.txt
