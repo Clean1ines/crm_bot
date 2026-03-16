@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import String, Text, ForeignKey, DateTime, func, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector

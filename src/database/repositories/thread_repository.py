@@ -66,8 +66,6 @@ class ThreadRepository:
                 WHERE id = $2
             """, status.value, uuid.UUID(thread_id))
 
-    # NEW METHODS
-
     async def update_manager_chat(self, thread_id: str, manager_chat_id: str) -> None:
         """
         Сохраняет идентификатор менеджера (Telegram chat_id), назначенного для ответа на этот тред.
@@ -92,3 +90,23 @@ class ThreadRepository:
                 ORDER BY updated_at DESC
             """, manager_chat_id)
             return [dict(row) for row in rows]
+
+    # NEW METHOD
+    async def get_thread_with_project(self, thread_id: str) -> Optional[Dict]:
+        """
+        Возвращает информацию о треде вместе с project_id клиента.
+        Выполняет JOIN с таблицей clients для получения project_id.
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT 
+                    t.id, t.client_id, t.status, t.manager_chat_id, 
+                    t.context_summary, t.created_at, t.updated_at,
+                    c.project_id
+                FROM threads t
+                JOIN clients c ON t.client_id = c.id
+                WHERE t.id = $1
+            """, uuid.UUID(thread_id))
+            if not row:
+                return None
+            return dict(row)

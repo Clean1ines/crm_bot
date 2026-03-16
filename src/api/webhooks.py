@@ -13,6 +13,7 @@ from src.api.dependencies import (
     get_project_repo,
     get_thread_repo,
     get_queue_repo,
+    get_redis,
 )
 from src.admin_handlers import handle_admin_command
 
@@ -90,7 +91,111 @@ async def telegram_webhook(
         logger.exception("Error processing webhook")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# Placeholder for future manager bot webhook
-# @router.post("/manager/webhook")
-# async def manager_webhook(request: Request):
-#     ...
+
+@router.post("/manager/webhook")
+async def manager_webhook(
+    request: Request,
+    redis=Depends(get_redis),
+    orchestrator=Depends(get_orchestrator),
+):
+    """
+    Endpoint for the manager bot (the bot that sends notifications to managers).
+    Handles callback queries from inline buttons and text replies from managers.
+    """
+    try:
+        update = await request.json()
+        logger.info(f"Received manager bot update: {update}")
+
+        # 1. Handle callback query (button press)
+        if "callback_query" in update:
+            cb = update["callback_query"]
+            callback_id = cb["id"]
+            manager_chat_id = str(cb["from"]["id"])
+            data = cb.get("data", "")
+
+            # Expected format: "reply:<thread_id>"
+            if data.startswith("reply:"):
+                thread_id = data.split(":", 1)[1]
+
+                # Store in Redis: awaiting_reply:<manager_chat_id> = thread_id, TTL 10 minutes
+                key = f"awaiting_reply:{manager_chat_id}"
+                await redis.setex(key, 600, thread_id)
+                logger.info(f"Stored awaiting reply for manager {manager_chat_id}, thread {thread_id}")
+
+                # Answer the callback to remove the loading indicator
+                answer_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/answerCallbackQuery"
+                payload = {
+                    "callback_query_id": callback_id,
+                    "text": "✍️ Введите ваш ответ",
+                    "show_alert": False
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(answer_url, json=payload)
+
+                return {"ok": True}
+            else:
+                logger.warning(f"Unknown callback data: {data}")
+                return {"ok": True}
+
+        # 2. Handle text messages (manager's reply)
+        if "message" in update:
+            msg = update["message"]
+            manager_chat_id = str(msg["chat"]["id"])
+            text = msg.get("text")
+            if not text:
+                return {"ok": True}
+
+            # Check if we are expecting a reply from this manager
+            key = f"awaiting_reply:{manager_chat_id}"
+            thread_id = await redis.get(key)
+
+            if not thread_id:
+                # No pending reply, send instructions
+                send_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": manager_chat_id,
+                    "text": "Нет активного ожидания ответа. Пожалуйста, нажмите кнопку ✏️ Ответить под уведомлением."
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(send_url, json=payload)
+                return {"ok": True}
+
+            try:
+                # Call orchestrator to send the reply to the client
+                success = await orchestrator.manager_reply(thread_id, text)
+
+                if success:
+                    # Clear the Redis key
+                    await redis.delete(key)
+
+                    # Notify manager that reply was sent
+                    send_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/sendMessage"
+                    payload = {
+                        "chat_id": manager_chat_id,
+                        "text": "✅ Ответ успешно отправлен клиенту."
+                    }
+                    async with httpx.AsyncClient() as client:
+                        await client.post(send_url, json=payload)
+                else:
+                    # Should not happen because manager_reply raises exceptions on failure
+                    pass
+            except Exception as e:
+                logger.exception(f"Error sending manager reply for thread {thread_id}")
+                # Notify manager of error
+                send_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": manager_chat_id,
+                    "text": f"❌ Ошибка при отправке ответа: {str(e)}"
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(send_url, json=payload)
+
+            return {"ok": True}
+
+        # Ignore other update types
+        return {"ok": True}
+
+    except Exception as e:
+        logger.exception("Error processing manager webhook")
+        # We still return 200 to Telegram to avoid resending
+        return {"ok": True}

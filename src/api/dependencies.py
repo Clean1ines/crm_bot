@@ -1,11 +1,12 @@
 """
-FastAPI dependency injection for database pool, orchestrator, and repositories.
+FastAPI dependency injection for database pool, orchestrator, repositories, and Redis.
 """
 
 from src.core.lifespan import pool, orchestrator
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
+from src.services.redis_client import get_redis_client
 
 def get_pool():
     """Return the global database connection pool."""
@@ -30,3 +31,7 @@ def get_thread_repo():
 def get_queue_repo():
     """Return a new QueueRepository instance (uses the global pool)."""
     return QueueRepository(get_pool())
+
+async def get_redis():
+    """Return the Redis client instance."""
+    return await get_redis_client()
