@@ -1,6 +1,7 @@
 import asyncio
 import os
 import logging
+import uuid
 import asyncpg
 from fastapi import FastAPI, Request, HTTPException
 import httpx
@@ -8,6 +9,7 @@ from src.services.orchestrator import OrchestratorService
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
+from src.admin_handlers import handle_admin_command
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +18,14 @@ logger = logging.getLogger(__name__)
 # Глобальные переменные для пула и сервисов
 pool = None
 orchestrator = None
+
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+if not ADMIN_CHAT_ID:
+    raise RuntimeError("ADMIN_CHAT_ID is not set")
+
+# Токен для автоматического создания первого проекта (админ-бота)
+ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN")
+# Не ругаемся, если его нет – просто не создаём автоматически
 
 async def init_db():
     """Инициализирует пул соединений с БД."""
@@ -47,6 +57,40 @@ async def lifespan(app: FastAPI):
         thread_repo=thread_repo,
         queue_repo=queue_repo
     )
+
+    # При первом запуске, если нет ни одного проекта и задан ADMIN_BOT_TOKEN,
+    # создаём административный проект и устанавливаем вебхук
+    if ADMIN_BOT_TOKEN:
+        async with pool.acquire() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM projects")
+            if count == 0:
+                logger.info("No projects found. Creating initial admin project with ADMIN_BOT_TOKEN.")
+                # Вставляем проект с фиксированным owner_id (можно любой UUID)
+                project_id = await conn.fetchval("""
+                    INSERT INTO projects (id, name, owner_id, bot_token, system_prompt)
+                    VALUES (gen_random_uuid(), 'Admin Project', '11111111-1111-1111-1111-111111111111', $1, 'Ты — полезный AI-ассистент.')
+                    RETURNING id
+                """, ADMIN_BOT_TOKEN)
+
+                # Устанавливаем вебхук для этого проекта
+                base_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("PUBLIC_URL")
+                if base_url:
+                    webhook_url = f"{base_url.rstrip('/')}/webhook/{project_id}"
+                    async with httpx.AsyncClient() as client:
+                        try:
+                            resp = await client.post(
+                                f"https://api.telegram.org/bot{ADMIN_BOT_TOKEN}/setWebhook",
+                                json={"url": webhook_url}
+                            )
+                            if resp.status_code == 200:
+                                logger.info(f"Webhook set to {webhook_url}")
+                            else:
+                                logger.error(f"Failed to set webhook: {resp.text}")
+                        except Exception as e:
+                            logger.error(f"Exception while setting webhook: {e}")
+                else:
+                    logger.warning("RENDER_EXTERNAL_URL not set, cannot set webhook automatically")
+
     yield
     await shutdown_db()
 
@@ -83,7 +127,18 @@ async def telegram_webhook(project_id: str, request: Request):
             logger.error(f"Bot token not found for project {project_id}")
             raise HTTPException(status_code=404, detail="Project not found or bot token missing")
 
-        # Вызываем оркестратор для генерации ответа
+        # Проверяем, является ли отправитель администратором и команда ли это
+        if str(chat_id) == ADMIN_CHAT_ID and text.startswith("/"):
+            # Обрабатываем админ-команду
+            result = await handle_admin_command(text, pool)
+            # Отправляем ответ через того же бота
+            send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {"chat_id": chat_id, "text": result}
+            async with httpx.AsyncClient() as client:
+                await client.post(send_url, json=payload)
+            return {"ok": True}
+
+        # Иначе продолжаем обычную обработку сообщения...
         response_text = await orchestrator.process_message(
             project_id=project_id,
             chat_id=chat_id,
