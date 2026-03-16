@@ -32,17 +32,31 @@ async def telegram_webhook(
     """
     Unified endpoint for receiving Telegram webhooks.
     Processes incoming messages and sends responses via Telegram API.
+    The request must include the correct secret token in the header
+    `X-Telegram-Bot-Api-Secret-Token` matching the project's webhook_secret.
     """
     try:
-        # Get the update from Telegram
-        update = await request.json()
-        logger.info(f"Received update from project {project_id}: {update}")
+        # Get the secret token from the header
+        secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if not secret_token:
+            logger.warning("Missing secret token in webhook request")
+            raise HTTPException(status_code=401, detail="Missing secret token")
 
-        # Get bot token for this project via repository
+        # Get bot token and secret for this project
         bot_token = await project_repo.get_bot_token(project_id)
         if not bot_token:
             logger.error(f"Bot token not found for project {project_id}")
             raise HTTPException(status_code=404, detail="Project not found or bot token missing")
+
+        # Verify the secret token
+        expected_secret = await project_repo.get_webhook_secret(project_id)
+        if secret_token != expected_secret:
+            logger.warning(f"Invalid secret token for project {project_id}")
+            raise HTTPException(status_code=401, detail="Invalid secret token")
+
+        # Get the update from Telegram
+        update = await request.json()
+        logger.info(f"Received update from project {project_id}: {update}")
 
         # ---- Handle callback query (admin buttons) ----
         if "callback_query" in update:
@@ -117,6 +131,8 @@ async def telegram_webhook(
 
         return {"ok": True}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error processing webhook")
         raise HTTPException(status_code=500, detail="Internal server error")

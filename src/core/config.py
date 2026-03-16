@@ -19,10 +19,6 @@ class Settings(BaseSettings):
     ADMIN_CHAT_ID: str = Field(..., description="Telegram chat ID of the platform administrator")
     ADMIN_BOT_TOKEN: str = Field("", description="Token of the admin bot (used for first project creation)")
 
-    # Manager bot (notifications)
-    MANAGER_BOT_TOKEN: str = Field("", description="Token of the bot that sends notifications to managers")
-    MANAGER_CHAT_ID: str = Field("", description="Telegram chat ID of the manager (who receives notifications)")
-
     # External URLs
     RENDER_EXTERNAL_URL: str = Field("", description="Public URL of the service (set by Render)")
     PUBLIC_URL: str = Field("", description="Alternative public URL if not using Render")
@@ -32,6 +28,9 @@ class Settings(BaseSettings):
 
     # Optional Redis (for future use)
     REDIS_URL: str = Field("", description="Redis connection string (optional)")
+
+    # Encryption key for bot tokens (must be a valid Fernet key)
+    TOKEN_ENCRYPTION_KEY: str = Field(..., description="Fernet key for encrypting bot tokens")
 
     # Other settings
     PROJECT_NAME: str = "MRAK-OS CRM Bot"
@@ -44,6 +43,13 @@ class Settings(BaseSettings):
             int(v)
         except ValueError:
             raise ValueError("ADMIN_CHAT_ID must be a numeric string (Telegram chat ID)")
+        return v
+
+    @field_validator("TOKEN_ENCRYPTION_KEY")
+    def validate_encryption_key(cls, v: str) -> str:
+        """Basic length check for Fernet key (should be 32 base64 bytes)."""
+        if len(v) < 20:
+            raise ValueError("TOKEN_ENCRYPTION_KEY must be a valid Fernet key (minimum length 20)")
         return v
 
     class Config:

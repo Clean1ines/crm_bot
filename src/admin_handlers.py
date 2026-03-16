@@ -27,6 +27,7 @@ STATE_SETTOKEN_AWAIT_TOKEN = "settoken:await_token"
 STATE_SETMANAGER_AWAIT_PROJECT = "setmanager:await_project"
 STATE_SETMANAGER_AWAIT_TOKEN = "setmanager:await_token"
 STATE_SETMANAGER_AWAIT_CHAT_ID = "setmanager:await_chat_id"
+STATE_LISTMANAGERS_AWAIT_PROJECT = "listmanagers:await_project"
 
 # ----------------------------------------------------------------------
 # Redis helpers
@@ -74,7 +75,7 @@ async def handle_admin_command(text: str, pool) -> str:
     if cmd == "/start":
         return await _cmd_start()
     elif cmd == "/help":
-        return await _cmd_help()
+        return _cmd_help()
     elif cmd == "/newproject":
         if len(parts) < 2:
             return "Использование: /newproject <название>"
@@ -108,7 +109,6 @@ async def handle_admin_command(text: str, pool) -> str:
         return await cmd_listprojects(pool)
     else:
         # Unknown command – maybe it's a step in a flow?
-        # Will be handled by the step processor.
         return await _process_admin_step(text, None, pool)
 
 async def _cmd_start() -> str:
@@ -157,7 +157,6 @@ async def handle_admin_step(chat_id: str, text: str, pool) -> Optional[str]:
 async def _process_admin_step(text: str, data: Dict[str, Any], pool, chat_id: Optional[str] = None, state: Optional[str] = None) -> str:
     """Process one step of an interactive flow."""
     if chat_id is None or state is None:
-        # Called directly from command – no active flow
         return "Неизвестная команда. Используйте /start для списка команд."
 
     if state == STATE_NEWPROJECT_AWAIT_NAME:
@@ -172,6 +171,8 @@ async def _process_admin_step(text: str, data: Dict[str, Any], pool, chat_id: Op
         return await _step_setmanager_token(chat_id, text, pool)
     elif state == STATE_SETMANAGER_AWAIT_CHAT_ID:
         return await _step_setmanager_chat_id(chat_id, text, pool)
+    elif state == STATE_LISTMANAGERS_AWAIT_PROJECT:
+        return await _step_listmanagers_project(chat_id, text, pool)
     else:
         await _clear_state(chat_id)
         return "Неизвестное состояние. Диалог сброшен."
@@ -239,7 +240,6 @@ async def _step_setmanager_token(chat_id: str, manager_token: str, pool) -> str:
     if not project_id:
         await _clear_state(chat_id)
         return "Ошибка: данные о проекте утеряны. Начните заново."
-    # Optionally validate token by calling getMe?
     await _set_data(chat_id, {"project_id": project_id, "manager_token": manager_token})
     await _set_state(chat_id, STATE_SETMANAGER_AWAIT_CHAT_ID)
     return "Введите chat_id менеджера (получите у бота @echoManagersBot):"
@@ -253,6 +253,12 @@ async def _step_setmanager_chat_id(chat_id: str, manager_chat_id: str, pool) -> 
         await _clear_state(chat_id)
         return "Ошибка: данные утеряны. Начните заново."
     result = await cmd_setmanager(project_id, manager_token, manager_chat_id, pool)
+    await _clear_state(chat_id)
+    return result
+
+async def _step_listmanagers_project(chat_id: str, project_id: str, pool) -> str:
+    """Show managers for a given project ID."""
+    result = await cmd_listmanagers(project_id, pool)
     await _clear_state(chat_id)
     return result
 
@@ -275,7 +281,6 @@ async def handle_admin_callback(callback_data: str, chat_id: str, pool) -> str:
     elif callback_data == "listprojects":
         return await cmd_listprojects(pool)
     elif callback_data == "listmanagers":
-        # Ask for project ID via step flow
         await _set_state(chat_id, STATE_LISTMANAGERS_AWAIT_PROJECT)
         return "Введите ID проекта для просмотра менеджеров:"
     elif callback_data == "help":
@@ -290,7 +295,6 @@ async def cmd_newproject(name: str, pool) -> str:
     """Create a new project, return its ID."""
     logger.info(f"Creating new project with name: {name}")
     async with pool.acquire() as conn:
-        project_repo = ProjectRepository(pool)
         project_id = await conn.fetchval("""
             INSERT INTO projects (id, name, owner_id, bot_token, system_prompt)
             VALUES (gen_random_uuid(), $1, 'admin', '', 'Ты — полезный AI-ассистент.')
@@ -300,15 +304,21 @@ async def cmd_newproject(name: str, pool) -> str:
     return f"✅ Проект «{name}» создан.\nID: {project_id}\nТеперь установи токен командой /settoken {project_id} <токен>"
 
 async def cmd_settoken(project_id: str, token: str, pool) -> str:
-    """Set bot token for project and set webhook."""
+    """Set bot token for project and set webhook with secret token."""
     logger.info(f"Setting token for project {project_id}")
-    async with pool.acquire() as conn:
-        result = await conn.execute("""
-            UPDATE projects SET bot_token = $1 WHERE id = $2
-        """, token, uuid.UUID(project_id))
-        if result.split()[-1] == "0":
-            logger.warning(f"Project {project_id} not found")
-            return f"❌ Проект с ID {project_id} не найден."
+
+    # Generate a random secret token for webhook verification
+    secret_token = uuid.uuid4().hex
+    logger.debug(f"Generated webhook secret for project {project_id}")
+
+    # Store the secret in the database
+    project_repo = ProjectRepository(pool)
+    try:
+        await project_repo.set_bot_token(project_id, token)
+        await project_repo.set_webhook_secret(project_id, secret_token)
+    except Exception as e:
+        logger.exception(f"Failed to set bot token or secret for project {project_id}")
+        return f"❌ Не удалось сохранить токен или секрет: {str(e)}"
 
     base_url = settings.RENDER_EXTERNAL_URL or settings.PUBLIC_URL
     if not base_url:
@@ -317,9 +327,14 @@ async def cmd_settoken(project_id: str, token: str, pool) -> str:
 
     webhook_url = f"{base_url.rstrip('/')}/webhook/{project_id}"
     api_url = f"https://api.telegram.org/bot{token}/setWebhook"
+    payload = {
+        "url": webhook_url,
+        "secret_token": secret_token
+    }
+
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(api_url, json={"url": webhook_url})
+            resp = await client.post(api_url, json=payload)
             if resp.status_code != 200:
                 error_detail = "неизвестная ошибка"
                 try:
@@ -332,7 +347,7 @@ async def cmd_settoken(project_id: str, token: str, pool) -> str:
             data = resp.json()
             if data.get("ok"):
                 logger.info(f"Webhook set successfully for project {project_id} at {webhook_url}")
-                return f"✅ Токен для проекта {project_id} успешно обновлён и вебхук установлен на {webhook_url}"
+                return f"✅ Токен для проекта {project_id} успешно обновлён и вебхук установлен на {webhook_url}\nСекретный токен: `{secret_token}` (сохранён в базе)."
             else:
                 error_msg = data.get('description', 'неизвестно')
                 logger.error(f"Telegram API error for project {project_id}: {error_msg}")
@@ -424,7 +439,9 @@ async def cmd_listprojects(pool) -> str:
         return "Проектов пока нет."
     lines = ["📋 Список проектов:"]
     for r in rows:
-        token_part = r['bot_token'][:10] + "..." if r['bot_token'] else "(нет токена)"
+        # We cannot decrypt tokens here because we don't have the key in this raw SQL.
+        # We'll just show placeholders.
+        token_part = "***" if r['bot_token'] else "(нет токена)"
         manager_part = " +менеджер" if r['manager_bot_token'] else ""
         lines.append(f"• {r['id']} – {r['name']} (токен: {token_part}{manager_part})")
     return "\n".join(lines)

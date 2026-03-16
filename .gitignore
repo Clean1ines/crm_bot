@@ -23,3 +23,5 @@ docs/
 tree_output.txt
 db_diagnostic.sh
 *.log
+
+scripts/

@@ -1,6 +1,7 @@
 import uuid
 from typing import Optional, Dict, Any, List
 from src.core.logging import get_logger
+from src.utils.encryption import encrypt_token, decrypt_token
 
 logger = get_logger(__name__)
 
@@ -11,17 +12,29 @@ class ProjectRepository:
         """
         self.pool = pool
 
+    # ------------------------------------------------------------------
+    # Private helpers to encrypt/decrypt token fields
+    # ------------------------------------------------------------------
+    def _encrypt_if_present(self, token: Optional[str]) -> Optional[str]:
+        return encrypt_token(token) if token else None
+
+    def _decrypt_if_present(self, encrypted: Optional[str]) -> Optional[str]:
+        return decrypt_token(encrypted) if encrypted else None
+
+    # ------------------------------------------------------------------
+    # Public methods
+    # ------------------------------------------------------------------
     async def get_project_settings(self, project_id: str) -> Dict[str, Any]:
         """
         Возвращает настройки проекта: system_prompt, bot_token, webhook_url,
-        manager_bot_token и список manager_chat_ids.
+        manager_bot_token, webhook_secret и список manager_chat_ids.
         Если проект не найден, возвращает пустой словарь.
         """
         logger.info(f"Fetching project settings for project {project_id}")
         async with self.pool.acquire() as conn:
             # Получаем основные поля проекта
             row = await conn.fetchrow("""
-                SELECT system_prompt, bot_token, webhook_url, manager_bot_token
+                SELECT system_prompt, bot_token, webhook_url, manager_bot_token, webhook_secret
                 FROM projects
                 WHERE id = $1
             """, uuid.UUID(project_id))
@@ -30,6 +43,9 @@ class ProjectRepository:
                 return {}
 
             settings = dict(row)
+            # Decrypt tokens
+            settings["bot_token"] = self._decrypt_if_present(settings["bot_token"])
+            settings["manager_bot_token"] = self._decrypt_if_present(settings["manager_bot_token"])
 
             # Получаем список manager_chat_ids из таблицы project_managers
             manager_rows = await conn.fetch("""
@@ -43,28 +59,42 @@ class ProjectRepository:
 
     async def get_bot_token(self, project_id: str) -> Optional[str]:
         """
-        Возвращает только bot_token для проекта.
+        Возвращает только bot_token для проекта (расшифрованный).
         """
         logger.info(f"Fetching bot token for project {project_id}")
         async with self.pool.acquire() as conn:
-            token = await conn.fetchval("""
+            encrypted = await conn.fetchval("""
                 SELECT bot_token FROM projects WHERE id = $1
             """, uuid.UUID(project_id))
+            token = self._decrypt_if_present(encrypted)
             if token:
                 logger.info(f"Bot token found for project {project_id}")
             else:
                 logger.warning(f"No bot token found for project {project_id}")
             return token
 
+    async def set_bot_token(self, project_id: str, token: str) -> None:
+        """
+        Устанавливает bot_token для проекта (шифрует перед сохранением).
+        """
+        logger.info(f"Setting bot token for project {project_id}")
+        encrypted = self._encrypt_if_present(token)
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE projects SET bot_token = $1, updated_at = NOW()
+                WHERE id = $2
+            """, encrypted, uuid.UUID(project_id))
+
     async def get_manager_bot_token(self, project_id: str) -> Optional[str]:
         """
-        Возвращает manager_bot_token для проекта.
+        Возвращает manager_bot_token для проекта (расшифрованный).
         """
         logger.info(f"Fetching manager bot token for project {project_id}")
         async with self.pool.acquire() as conn:
-            token = await conn.fetchval("""
+            encrypted = await conn.fetchval("""
                 SELECT manager_bot_token FROM projects WHERE id = $1
             """, uuid.UUID(project_id))
+            token = self._decrypt_if_present(encrypted)
             if token:
                 logger.info(f"Manager bot token found for project {project_id}")
             else:
@@ -73,14 +103,37 @@ class ProjectRepository:
 
     async def set_manager_bot_token(self, project_id: str, token: str) -> None:
         """
-        Устанавливает manager_bot_token для проекта.
+        Устанавливает manager_bot_token для проекта (шифрует перед сохранением).
         """
         logger.info(f"Setting manager bot token for project {project_id}")
+        encrypted = self._encrypt_if_present(token)
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE projects SET manager_bot_token = $1, updated_at = NOW()
                 WHERE id = $2
-            """, token, uuid.UUID(project_id))
+            """, encrypted, uuid.UUID(project_id))
+
+    async def get_webhook_secret(self, project_id: str) -> Optional[str]:
+        """
+        Возвращает webhook_secret для проекта.
+        """
+        logger.debug(f"Fetching webhook secret for project {project_id}")
+        async with self.pool.acquire() as conn:
+            secret = await conn.fetchval("""
+                SELECT webhook_secret FROM projects WHERE id = $1
+            """, uuid.UUID(project_id))
+            return secret
+
+    async def set_webhook_secret(self, project_id: str, secret: str) -> None:
+        """
+        Устанавливает webhook_secret для проекта.
+        """
+        logger.info(f"Setting webhook secret for project {project_id}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE projects SET webhook_secret = $1, updated_at = NOW()
+                WHERE id = $2
+            """, secret, uuid.UUID(project_id))
 
     async def get_managers(self, project_id: str) -> List[str]:
         """
@@ -97,11 +150,10 @@ class ProjectRepository:
     async def add_manager(self, project_id: str, manager_chat_id: str) -> None:
         """
         Добавляет менеджера (chat_id) в список менеджеров проекта.
-        Игнорирует дубликаты (можно использовать INSERT ... ON CONFLICT).
+        Игнорирует дубликаты.
         """
         logger.info(f"Adding manager {manager_chat_id} to project {project_id}")
         async with self.pool.acquire() as conn:
-            # Предполагаем, что дубликаты не допускаются (уникальность по project_id + manager_chat_id)
             try:
                 await conn.execute("""
                     INSERT INTO project_managers (project_id, manager_chat_id)
@@ -109,7 +161,6 @@ class ProjectRepository:
                 """, uuid.UUID(project_id), manager_chat_id)
             except asyncpg.exceptions.UniqueViolationError:
                 logger.warning(f"Manager {manager_chat_id} already exists for project {project_id}")
-                # Просто игнорируем, можно также обновить updated_at, но не требуется
 
     async def remove_manager(self, project_id: str, manager_chat_id: str) -> None:
         """
