@@ -12,6 +12,8 @@ import httpx
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.database.repositories.queue_repository import QueueRepository
+from src.database.repositories.thread_repository import ThreadRepository
+from src.database.repositories.project_repository import ProjectRepository
 
 logger = get_logger(__name__)
 
@@ -27,6 +29,8 @@ async def worker_loop(pool):
     Main worker loop: continuously claim jobs from the queue and process them.
     """
     queue_repo = QueueRepository(pool)
+    thread_repo = ThreadRepository(pool)
+    project_repo = ProjectRepository(pool)
 
     while not shutdown_event.is_set():
         try:
@@ -43,11 +47,26 @@ async def worker_loop(pool):
                 chat_id = payload.get("chat_id")
                 message = payload.get("message")
 
-                # Get manager bot settings from config
-                manager_bot_token = settings.MANAGER_BOT_TOKEN
-                manager_chat_id = settings.MANAGER_CHAT_ID
-                if not manager_bot_token or not manager_chat_id:
-                    logger.error("MANAGER_BOT_TOKEN or MANAGER_CHAT_ID not set")
+                # Получаем информацию о треде (чтобы узнать project_id)
+                thread_info = await thread_repo.get_thread_with_project(thread_id)
+                if not thread_info:
+                    logger.error(f"Thread {thread_id} not found")
+                    await queue_repo.complete_job(job["id"], success=False)
+                    continue
+                project_id = thread_info["project_id"]
+
+                # Получаем настройки менеджера для этого проекта
+                project_settings = await project_repo.get_project_settings(project_id)
+                manager_bot_token = project_settings.get("manager_bot_token")
+                manager_chat_ids = project_settings.get("manager_chat_ids", [])
+
+                if not manager_bot_token:
+                    logger.error(f"Manager bot token not set for project {project_id}")
+                    await queue_repo.complete_job(job["id"], success=False)
+                    continue
+
+                if not manager_chat_ids:
+                    logger.warning(f"No managers defined for project {project_id}, skipping notification")
                     await queue_repo.complete_job(job["id"], success=False)
                     continue
 
@@ -59,22 +78,29 @@ async def worker_loop(pool):
                     }]]
                 }
 
-                # Send notification to manager
-                url = f"https://api.telegram.org/bot{manager_bot_token}/sendMessage"
-                params = {
-                    "chat_id": int(manager_chat_id),
-                    "text": f"Новое сообщение (thread {thread_id}):\n\n{message}",
-                    "reply_markup": reply_markup
-                }
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        resp = await client.post(url, json=params)
-                        resp.raise_for_status()
-                    logger.info(f"Manager notified for job {job['id']} (thread {thread_id})")
+                # Send notification to all managers
+                success_count = 0
+                for mgr_chat_id in manager_chat_ids:
+                    url = f"https://api.telegram.org/bot{manager_bot_token}/sendMessage"
+                    params = {
+                        "chat_id": int(mgr_chat_id),
+                        "text": f"Новое сообщение (thread {thread_id}):\n\n{message}",
+                        "reply_markup": reply_markup
+                    }
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            resp = await client.post(url, json=params)
+                            resp.raise_for_status()
+                        success_count += 1
+                        logger.info(f"Manager {mgr_chat_id} notified for job {job['id']} (thread {thread_id})")
+                    except Exception as e:
+                        logger.error(f"Failed to send manager notification to {mgr_chat_id}: {e}")
+
+                if success_count > 0:
                     await queue_repo.complete_job(job["id"], success=True)
-                except Exception as e:
-                    logger.error(f"Failed to send manager notification: {e}")
+                else:
                     await queue_repo.complete_job(job["id"], success=False)
+
             else:
                 logger.warning(f"Unknown task type: {job['task_type']}")
                 await queue_repo.complete_job(job["id"], success=False)

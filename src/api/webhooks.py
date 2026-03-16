@@ -4,6 +4,7 @@ Telegram webhook endpoints.
 
 import httpx
 from fastapi import APIRouter, Request, HTTPException, Depends
+import asyncpg
 
 from src.core.logging import get_logger
 from src.core.config import settings
@@ -15,7 +16,7 @@ from src.api.dependencies import (
     get_queue_repo,
     get_redis,
 )
-from src.admin_handlers import handle_admin_command
+from src.admin_handlers import handle_admin_command, handle_admin_callback
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -37,9 +38,44 @@ async def telegram_webhook(
         update = await request.json()
         logger.info(f"Received update from project {project_id}: {update}")
 
-        # Check if it's a message
+        # Get bot token for this project via repository
+        bot_token = await project_repo.get_bot_token(project_id)
+        if not bot_token:
+            logger.error(f"Bot token not found for project {project_id}")
+            raise HTTPException(status_code=404, detail="Project not found or bot token missing")
+
+        # ---- Handle callback query (admin buttons) ----
+        if "callback_query" in update:
+            cb = update["callback_query"]
+            chat_id = cb["from"]["id"]
+            # Only admin can use these buttons
+            if str(chat_id) == settings.ADMIN_CHAT_ID:
+                data = cb.get("data", "")
+                callback_id = cb["id"]
+                # Process callback via admin_handlers
+                response_text = await handle_admin_callback(data, str(chat_id), pool)
+                # Answer callback to remove loading indicator
+                answer_url = f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery"
+                payload = {
+                    "callback_query_id": callback_id,
+                    "text": response_text[:200],  # Telegram limit
+                    "show_alert": False
+                }
+                async with httpx.AsyncClient() as client:
+                    await client.post(answer_url, json=payload)
+                # Also send a follow‑up message with the full response (optional)
+                if response_text:
+                    send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                    msg_payload = {"chat_id": chat_id, "text": response_text}
+                    async with httpx.AsyncClient() as client:
+                        await client.post(send_url, json=msg_payload)
+            else:
+                logger.warning(f"Non‑admin tried to use callback: {chat_id}")
+            return {"ok": True}
+
+        # ---- Handle regular message ----
         if "message" not in update:
-            # Ignore other update types (e.g., callback_query)
+            # Ignore other update types (e.g., channel posts)
             return {"ok": True}
 
         message = update["message"]
@@ -48,12 +84,6 @@ async def telegram_webhook(
         if not text:
             # Ignore non-text messages
             return {"ok": True}
-
-        # Get bot token for this project via repository
-        bot_token = await project_repo.get_bot_token(project_id)
-        if not bot_token:
-            logger.error(f"Bot token not found for project {project_id}")
-            raise HTTPException(status_code=404, detail="Project not found or bot token missing")
 
         # Check if sender is admin and message is a command
         if str(chat_id) == settings.ADMIN_CHAT_ID and text.startswith("/"):
@@ -66,7 +96,7 @@ async def telegram_webhook(
                 await client.post(send_url, json=payload)
             return {"ok": True}
 
-        # Otherwise, continue with normal message processing
+        # Otherwise, continue with normal message processing (customer)
         response_text = await orchestrator.process_message(
             project_id=project_id,
             chat_id=chat_id,
@@ -95,16 +125,37 @@ async def telegram_webhook(
 @router.post("/manager/webhook")
 async def manager_webhook(
     request: Request,
+    pool=Depends(get_pool),
     redis=Depends(get_redis),
     orchestrator=Depends(get_orchestrator),
 ):
     """
-    Endpoint for the manager bot (the bot that sends notifications to managers).
-    Handles callback queries from inline buttons and text replies from managers.
+    Endpoint for manager bots (multiple projects). Identifies the project by the secret token
+    (which must match the manager_bot_token stored in the database). Handles callback queries
+    and text replies from managers.
     """
+    # Get the secret token from the header
+    secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    if not secret_token:
+        logger.warning("Missing secret token in manager webhook")
+        raise HTTPException(status_code=401, detail="Missing secret token")
+
+    # Find project by manager_bot_token
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, manager_bot_token FROM projects WHERE manager_bot_token = $1",
+            secret_token
+        )
+        if not row:
+            logger.warning(f"No project found for manager token {secret_token[:5]}...")
+            raise HTTPException(status_code=401, detail="Invalid secret token")
+
+    project_id = row["id"]
+    manager_bot_token = row["manager_bot_token"]  # same as secret_token
+
     try:
         update = await request.json()
-        logger.info(f"Received manager bot update: {update}")
+        logger.info(f"Received manager bot update for project {project_id}: {update}")
 
         # 1. Handle callback query (button press)
         if "callback_query" in update:
@@ -123,7 +174,7 @@ async def manager_webhook(
                 logger.info(f"Stored awaiting reply for manager {manager_chat_id}, thread {thread_id}")
 
                 # Answer the callback to remove the loading indicator
-                answer_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/answerCallbackQuery"
+                answer_url = f"https://api.telegram.org/bot{manager_bot_token}/answerCallbackQuery"
                 payload = {
                     "callback_query_id": callback_id,
                     "text": "✍️ Введите ваш ответ",
@@ -151,7 +202,7 @@ async def manager_webhook(
 
             if not thread_id:
                 # No pending reply, send instructions
-                send_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/sendMessage"
+                send_url = f"https://api.telegram.org/bot{manager_bot_token}/sendMessage"
                 payload = {
                     "chat_id": manager_chat_id,
                     "text": "Нет активного ожидания ответа. Пожалуйста, нажмите кнопку ✏️ Ответить под уведомлением."
@@ -169,7 +220,7 @@ async def manager_webhook(
                     await redis.delete(key)
 
                     # Notify manager that reply was sent
-                    send_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/sendMessage"
+                    send_url = f"https://api.telegram.org/bot{manager_bot_token}/sendMessage"
                     payload = {
                         "chat_id": manager_chat_id,
                         "text": "✅ Ответ успешно отправлен клиенту."
@@ -182,7 +233,7 @@ async def manager_webhook(
             except Exception as e:
                 logger.exception(f"Error sending manager reply for thread {thread_id}")
                 # Notify manager of error
-                send_url = f"https://api.telegram.org/bot{settings.MANAGER_BOT_TOKEN}/sendMessage"
+                send_url = f"https://api.telegram.org/bot{manager_bot_token}/sendMessage"
                 payload = {
                     "chat_id": manager_chat_id,
                     "text": f"❌ Ошибка при отправке ответа: {str(e)}"

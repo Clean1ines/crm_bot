@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy import String, Text, ForeignKey, DateTime, func, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -32,12 +32,16 @@ class Project(Base):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="Ты полезный ассистент.")
     webhook_url: Mapped[str] = mapped_column(String, nullable=True) # Куда слать лиды (Zapier, Make)
     
+    # Токен бота для уведомлений менеджеров (общий для всех менеджеров проекта)
+    manager_bot_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Связи
     clients = relationship("Client", back_populates="project", cascade="all, delete-orphan")
     knowledge_base = relationship("KnowledgeBase", back_populates="project", cascade="all, delete-orphan")
+    managers = relationship("ProjectManager", back_populates="project", cascade="all, delete-orphan")
 
 
 # 2. КЛИЕНТЫ ТЕЛЕГРАМА (Конечные пользователи, которые пишут ботам)
@@ -112,3 +116,16 @@ class KnowledgeBase(Base):
 
     # Связи
     project = relationship("Project", back_populates="knowledge_base")
+
+
+# 6. МЕНЕДЖЕРЫ ПРОЕКТА (несколько chat_id для уведомлений)
+class ProjectManager(Base):
+    __tablename__ = "project_managers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, server_default=func.gen_random_uuid())
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    manager_chat_id: Mapped[str] = mapped_column(String(50), nullable=False)  # Telegram chat_id менеджера
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # Связи
+    project = relationship("Project", back_populates="managers")
