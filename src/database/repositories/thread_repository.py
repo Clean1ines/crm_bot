@@ -91,7 +91,6 @@ class ThreadRepository:
             """, manager_chat_id)
             return [dict(row) for row in rows]
 
-    # NEW METHOD
     async def get_thread_with_project(self, thread_id: str) -> Optional[Dict]:
         """
         Возвращает информацию о треде вместе с project_id клиента.
@@ -110,3 +109,15 @@ class ThreadRepository:
             if not row:
                 return None
             return dict(row)
+
+    # NEW METHOD
+    async def update_summary(self, thread_id: str, summary: str) -> None:
+        """
+        Обновляет поле context_summary (краткое содержание диалога) для указанного треда.
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET context_summary = $1, updated_at = NOW()
+                WHERE id = $2
+            """, summary, uuid.UUID(thread_id))
