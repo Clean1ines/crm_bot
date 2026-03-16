@@ -57,7 +57,6 @@ class ThreadRepository:
             """, uuid.UUID(thread_id))
             return [dict(row) for row in rows]
 
-    # NEW: update thread status
     async def update_status(self, thread_id: str, status: ThreadStatus) -> None:
         """Обновляет статус треда."""
         async with self.pool.acquire() as conn:
@@ -66,3 +65,30 @@ class ThreadRepository:
                 SET status = $1, updated_at = NOW()
                 WHERE id = $2
             """, status.value, uuid.UUID(thread_id))
+
+    # NEW METHODS
+
+    async def update_manager_chat(self, thread_id: str, manager_chat_id: str) -> None:
+        """
+        Сохраняет идентификатор менеджера (Telegram chat_id), назначенного для ответа на этот тред.
+        Обычно вызывается при эскалации.
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET manager_chat_id = $1, updated_at = NOW()
+                WHERE id = $2
+            """, manager_chat_id, uuid.UUID(thread_id))
+
+    async def find_by_manager_chat(self, manager_chat_id: str) -> List[Dict]:
+        """
+        Возвращает список активных тредов (status = 'manual'), ожидающих ответа от указанного менеджера.
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, client_id, status, manager_chat_id, created_at, updated_at
+                FROM threads
+                WHERE manager_chat_id = $1 AND status = 'manual'
+                ORDER BY updated_at DESC
+            """, manager_chat_id)
+            return [dict(row) for row in rows]

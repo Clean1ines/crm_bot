@@ -66,6 +66,9 @@ class Thread(Base):
     # Саммари диалога для экономии контекста (LangGraph будет сюда писать)
     context_summary: Mapped[str] = mapped_column(Text, nullable=True) 
     
+    # Идентификатор менеджера (Telegram chat_id), которому назначен этот тред для ответа
+    manager_chat_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
