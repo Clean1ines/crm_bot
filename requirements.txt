@@ -79,3 +79,5 @@ xxhash==3.6.0
 zstandard==0.25.0
 pydantic-settings==2.5.0
 redis>=5.0.0
+PyPDF2
+python-multipart==0.0.9

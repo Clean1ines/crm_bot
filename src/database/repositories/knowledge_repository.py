@@ -35,3 +35,22 @@ class KnowledgeRepository:
         results = [row['content'] for row in rows]
         logger.info(f"Found {len(results)} results for project {project_id}")
         return results
+
+    async def add_knowledge_batch(self, project_id: str, chunks: List[str], embeddings: List[List[float]]) -> None:
+        """
+        Сохраняет несколько чанков с их эмбеддингами в базу знаний.
+
+        Args:
+            project_id: UUID проекта.
+            chunks: список текстовых чанков.
+            embeddings: список эмбеддингов (каждый список float).
+        """
+        logger.info(f"Adding {len(chunks)} knowledge chunks to project {project_id}")
+        async with self.conn.transaction():
+            for chunk, emb in zip(chunks, embeddings):
+                emb_str = '[' + ','.join(str(x) for x in emb) + ']'
+                await self.conn.execute("""
+                    INSERT INTO knowledge_base (project_id, content, embedding)
+                    VALUES ($1, $2, $3::vector)
+                """, uuid.UUID(project_id), chunk, emb_str)
+        logger.debug("Batch insert completed")

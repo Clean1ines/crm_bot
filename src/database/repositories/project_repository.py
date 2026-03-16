@@ -172,3 +172,12 @@ class ProjectRepository:
                 DELETE FROM project_managers
                 WHERE project_id = $1 AND manager_chat_id = $2
             """, uuid.UUID(project_id), manager_chat_id)
+
+    async def project_exists(self, project_id: str) -> bool:
+        """
+        Проверяет, существует ли проект с указанным ID.
+        """
+        logger.debug(f"Checking existence of project {project_id}")
+        async with self.pool.acquire() as conn:
+            result = await conn.fetchval("SELECT 1 FROM projects WHERE id = $1", uuid.UUID(project_id))
+            return result is not None

@@ -3,10 +3,12 @@ FastAPI dependency injection for database pool, orchestrator, and repositories.
 """
 
 import src.core.lifespan
+from fastapi import Header, HTTPException
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
 from src.services.redis_client import get_redis_client
+from src.core.config import settings
 
 def get_pool():
     """Return the global database connection pool."""
@@ -35,3 +37,14 @@ def get_queue_repo():
 async def get_redis():
     """Return the Redis client instance."""
     return await get_redis_client()
+
+async def verify_admin_token(authorization: str = Header(...)) -> None:
+    """
+    Проверяет Bearer-токен в заголовке Authorization.
+    Используется для защиты эндпоинтов, доступных только администратору.
+    """
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid token format")
+    token = authorization[7:]
+    if token != settings.ADMIN_API_TOKEN:
+        raise HTTPException(status_code=401, detail="Invalid admin token")

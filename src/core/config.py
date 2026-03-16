@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Encryption key for bot tokens (must be a valid Fernet key)
     TOKEN_ENCRYPTION_KEY: str = Field(..., description="Fernet key for encrypting bot tokens")
 
+    # API token for admin panel endpoints
+    ADMIN_API_TOKEN: str = Field(..., description="Bearer token for accessing admin API endpoints")
+
     # Other settings
     PROJECT_NAME: str = "MRAK-OS CRM Bot"
     DEBUG: bool = Field(False, description="Enable debug mode")
