@@ -56,3 +56,13 @@ class ThreadRepository:
                 WHERE thread_id = $1 ORDER BY created_at ASC
             """, uuid.UUID(thread_id))
             return [dict(row) for row in rows]
+
+    # NEW: update thread status
+    async def update_status(self, thread_id: str, status: ThreadStatus) -> None:
+        """Обновляет статус треда."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET status = $1, updated_at = NOW()
+                WHERE id = $2
+            """, status.value, uuid.UUID(thread_id))

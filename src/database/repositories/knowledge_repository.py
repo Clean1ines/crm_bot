@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional
-from services.embedding_service import embed_text
+from src.services.embedding_service import embed_text
 
 class KnowledgeRepository:
     def __init__(self, conn):

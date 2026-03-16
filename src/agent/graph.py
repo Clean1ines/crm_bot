@@ -3,7 +3,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_groq import ChatGroq  # Используем Groq
 from .state import AgentState
-from .tools import search_knowledge_base
+from .tools import search_knowledge_base, escalate_to_manager
 
 def create_agent():
     # Инициализируем модель через Groq
@@ -15,12 +15,23 @@ def create_agent():
     )
 
     # Привязываем твои инструменты
-    tools = [search_knowledge_base]
+    tools = [search_knowledge_base, escalate_to_manager]
     model_with_tools = model.bind_tools(tools)
 
     async def call_model(state: AgentState):
         response = await model_with_tools.ainvoke(state["messages"])
-        return {"messages": [response]}
+        # Проверяем, вызвал ли модель инструмент эскалации
+        escalation = False
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            for tc in response.tool_calls:
+                if tc.get("name") == "escalate_to_manager":
+                    escalation = True
+                    break
+        # Возвращаем обновлённое состояние
+        result = {"messages": [response]}
+        if escalation:
+            result["escalation_requested"] = True
+        return result
 
     # Дальше логика графа остается такой же - это и есть прелесть LangGraph
     workflow = StateGraph(AgentState)

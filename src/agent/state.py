@@ -7,3 +7,5 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     project_id: str
     thread_id: str
+    # Флаг, указывающий, что агент решил эскалировать разговор менеджеру
+    escalation_requested: bool

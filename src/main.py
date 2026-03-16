@@ -7,6 +7,7 @@ import httpx
 from src.services.orchestrator import OrchestratorService
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
+from src.database.repositories.queue_repository import QueueRepository
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
@@ -38,8 +39,14 @@ async def lifespan(app: FastAPI):
     # Создаём репозитории и оркестратор
     project_repo = ProjectRepository(pool)
     thread_repo = ThreadRepository(pool)
+    queue_repo = QueueRepository(pool)
     global orchestrator
-    orchestrator = OrchestratorService(db_conn=None, project_repo=project_repo, thread_repo=thread_repo)
+    orchestrator = OrchestratorService(
+        db_conn=None,
+        project_repo=project_repo,
+        thread_repo=thread_repo,
+        queue_repo=queue_repo
+    )
     yield
     await shutdown_db()
 
