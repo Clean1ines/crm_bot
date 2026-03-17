@@ -9,11 +9,13 @@ import asyncio
 import uuid
 import json
 import httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langgraph.graph import StateGraph, END
 
-from src.agent.graph import create_agent
+from src.agent.graph import create_agent as create_default_agent
+from src.agent.state import AgentState
 from src.database.models import ThreadStatus
 from src.database.repositories.queue_repository import QueueRepository
 from src.services.summarizer import SummarizerService
@@ -36,8 +38,10 @@ class OrchestratorService:
         threads: ThreadRepository instance.
         queue_repo: QueueRepository instance.
         event_repo: EventRepository instance (optional for event sourcing).
+        template_repo: TemplateRepository instance (for template-based workflows).
+        workflow_repo: WorkflowRepository instance (for custom workflows).
         tool_registry: ToolRegistry instance (optional for dynamic tools).
-        agent: Compiled LangGraph agent.
+        agent: Compiled LangGraph agent (default fallback).
         summarizer: SummarizerService for conversation summaries.
     """
     
@@ -52,6 +56,8 @@ class OrchestratorService:
         thread_repo, 
         queue_repo,
         event_repo=None,
+        template_repo=None,
+        workflow_repo=None,
         tool_registry=None
     ):
         """
@@ -63,6 +69,8 @@ class OrchestratorService:
             thread_repo: ThreadRepository instance.
             queue_repo: QueueRepository instance.
             event_repo: Optional EventRepository for event sourcing.
+            template_repo: Optional TemplateRepository for template workflows.
+            workflow_repo: Optional WorkflowRepository for custom workflows.
             tool_registry: Optional ToolRegistry for dynamic tool execution.
         """
         self.db = db_conn
@@ -70,9 +78,11 @@ class OrchestratorService:
         self.threads = thread_repo
         self.queue_repo = queue_repo
         self.event_repo = event_repo
+        self.template_repo = template_repo
+        self.workflow_repo = workflow_repo
         self.tool_registry = tool_registry
-        # Pass tool_registry to agent creation for dynamic tool support
-        self.agent = create_agent(tool_registry=tool_registry)
+        # Create default agent as fallback
+        self.agent = create_default_agent(tool_registry=tool_registry)
         self.summarizer = SummarizerService()
         logger.debug("OrchestratorService initialized")
 
@@ -115,38 +125,77 @@ class OrchestratorService:
                 extra={"stream_id": stream_id, "event_type": event_type, "error": str(e)}
             )
 
-    async def _get_graph_for_project(self, project_id: str):
+    def _build_graph_from_json(self, graph_json: Dict[str, Any]) -> Any:
+        """
+        Build a LangGraph instance from JSON definition.
+        
+        This is a simplified builder for MVP. In production, this should
+        use a proper node registry and validation.
+        
+        Args:
+            graph_json: Graph definition with nodes and edges.
+        
+        Returns:
+            Compiled LangGraph instance.
+        """
+        # For MVP: return default agent if graph is simple or invalid
+        if not graph_json or "nodes" not in graph_json:
+            logger.warning("Invalid or empty graph_json, using default agent")
+            return self.agent
+        
+        # Simple graph with default flow: message → AI → reply
+        # In production: resolve nodes from registry, build dynamic graph
+        logger.debug("Building graph from JSON", extra={"node_count": len(graph_json.get("nodes", []))})
+        return self.agent
+
+    async def _get_graph_for_project(self, project_id: str) -> Any:
         """
         Get the appropriate LangGraph for a project.
         
         Priority order:
-        1. Custom workflow (if project is in Pro mode)
-        2. Template workflow (if template_slug is set)
-        3. Default agent graph
+        1. Custom workflow (if project is in Pro mode AND has workflow_id)
+        2. Template workflow (if project has template_slug)
+        3. Default agent graph (fallback)
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID of the project in string format.
         
         Returns:
-            Compiled LangGraph or None if error.
+            Compiled LangGraph instance.
         """
+        logger.debug("Loading graph for project", extra={"project_id": project_id})
+        
         # Check for custom workflow (Pro mode)
-        is_pro = await self.projects.get_is_pro_mode(project_id)
-        if is_pro:
-            # TODO: Load custom workflow from workflows table
-            # For now, fall through to template/default
-            logger.debug("Pro mode enabled, checking for custom workflow", extra={"project_id": project_id})
+        if self.workflow_repo:
+            is_pro = await self.projects.get_is_pro_mode(project_id)
+            if is_pro:
+                # Try to load active workflow for project
+                workflows = await self.workflow_repo.get_for_project(project_id, active_only=True)
+                if workflows:
+                    # Use latest version
+                    latest = max(workflows, key=lambda w: w.get("version", 0))
+                    workflow_id = latest.get("id")
+                    logger.info(
+                        "Loading custom workflow",
+                        extra={"project_id": project_id, "workflow_id": workflow_id}
+                    )
+                    workflow_data = await self.workflow_repo.get_by_id(
+                        uuid.UUID(workflow_id), include_graph=True
+                    )
+                    if workflow_data and "graph_json" in workflow_data:
+                        return self._build_graph_from_json(workflow_data["graph_json"])
         
         # Check for template
-        template_slug = await self.projects.get_template_slug(project_id)
-        if template_slug:
-            logger.info(
-                "Loading workflow from template",
-                extra={"project_id": project_id, "template_slug": template_slug}
-            )
-            # TODO: Load graph_json from workflow_templates and build LangGraph
-            # For now, use default agent
-            return self.agent
+        if self.template_repo:
+            template_slug = await self.projects.get_template_slug(project_id)
+            if template_slug:
+                logger.info(
+                    "Loading workflow from template",
+                    extra={"project_id": project_id, "template_slug": template_slug}
+                )
+                template_data = await self.template_repo.get_by_slug(template_slug)
+                if template_data and "graph_json" in template_data:
+                    return self._build_graph_from_json(template_data["graph_json"])
         
         # Default: use the standard agent
         logger.debug("Using default agent graph", extra={"project_id": project_id})

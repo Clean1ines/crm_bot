@@ -133,7 +133,7 @@ async def escalate_to_manager() -> str:
 # These are used by canvas workflows via tool_registry.execute()
 # ----------------------------------------------------------------------
 
-def _get_lazy_registry():
+def _get_lazy_registry() -> Any:
     """
     Lazy import of tool_registry to avoid circular dependencies.
     

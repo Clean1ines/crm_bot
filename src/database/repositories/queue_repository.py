@@ -291,10 +291,10 @@ class QueueRepository:
         Returns:
             Список UUID заблокированных задач.
         """
-        logger.debug(
-            "Searching for stale locked jobs",
-            extra={"timeout_minutes": timeout_minutes}
-        )
+        #logger.debug(
+           # "Searching for stale locked jobs",
+            #extra={"timeout_minutes": timeout_minutes}
+        #)
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT id FROM execution_queue
@@ -303,8 +303,8 @@ class QueueRepository:
             """ % timeout_minutes)
             
             job_ids = [str(row['id']) for row in rows]
-            logger.info(
-                "Found stale locked jobs",
-                extra={"count": len(job_ids), "timeout_minutes": timeout_minutes}
-            )
+            #logger.info(
+               # "Found stale locked jobs",
+               # extra={"count": len(job_ids), "timeout_minutes": timeout_minutes}
+           # )
             return job_ids

@@ -31,7 +31,7 @@ def create_agent(tool_registry: Optional[Any] = None):
         Compiled LangGraph workflow.
     """
     model_name = getattr(settings, 'GROQ_MODEL', 'llama-3.3-70b-versatile')
-    logger.info(f"Creating agent with model {model_name}")
+    logger.info("Creating agent", extra={"model": model_name})
 
     model = ChatGroq(
         model="llama-3.1-8b-instant",
@@ -58,7 +58,7 @@ def create_agent(tool_registry: Optional[Any] = None):
 
     model_with_tools = model.bind_tools(tool_list)
 
-    async def call_model(state: AgentState):
+    async def call_model(state: AgentState) -> Dict[str, Any]:
         """
         Call the LLM model with current state and handle tool calls.
         
@@ -96,7 +96,7 @@ def create_agent(tool_registry: Optional[Any] = None):
                     )
                     break
         
-        result = {"messages": [response]}
+        result: Dict[str, Any] = {"messages": [response]}
         if escalation:
             result["escalation_requested"] = True
             

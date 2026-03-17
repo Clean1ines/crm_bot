@@ -111,6 +111,7 @@ async def lifespan(app: FastAPI):
     On startup:
     - Initialize database pool
     - Initialize ToolRegistry with built-in tools
+    - Initialize all repositories (project, thread, queue, event, template, workflow)
     - Create OrchestratorService with all dependencies
     
     On shutdown:
@@ -134,31 +135,56 @@ async def lifespan(app: FastAPI):
     from src.tools import tool_registry
     _register_builtin_tools(tool_registry, pool)
     
-    # Initialize repositories for orchestrator
+    # Initialize all repositories for orchestrator
     project_repo = ProjectRepository(pool)
     thread_repo = ThreadRepository(pool)
     queue_repo = QueueRepository(pool)
     
-    # Optional: Initialize event repository if events table exists
+    # Optional repositories (graceful degradation if migrations not applied)
     event_repo = None
     try:
         from src.database.repositories.event_repository import EventRepository
         event_repo = EventRepository(pool)
         logger.info("EventRepository initialized")
     except ImportError:
-        logger.debug("EventRepository not available (migration not applied yet)")
+        logger.debug("EventRepository not available (migration 008 not applied yet)")
     
-    # Create orchestrator with all dependencies
+    template_repo = None
+    try:
+        from src.database.repositories.template_repository import TemplateRepository
+        template_repo = TemplateRepository(pool)
+        logger.info("TemplateRepository initialized")
+    except ImportError:
+        logger.debug("TemplateRepository not available (migration 009 not applied yet)")
+    
+    workflow_repo = None
+    try:
+        from src.database.repositories.workflow_repository import WorkflowRepository
+        workflow_repo = WorkflowRepository(pool)
+        logger.info("WorkflowRepository initialized")
+    except ImportError:
+        logger.debug("WorkflowRepository not available (migration 011 not applied yet)")
+    
+    # Create orchestrator with ALL dependencies
     orchestrator = OrchestratorService(
         db_conn=pool,
         project_repo=project_repo,
         thread_repo=thread_repo,
         queue_repo=queue_repo,
         event_repo=event_repo,
+        template_repo=template_repo,
+        workflow_repo=workflow_repo,
         tool_registry=tool_registry
     )
     
-    logger.info("Application startup complete")
+    logger.info(
+        "Application startup complete",
+        extra={
+            "event_repo": event_repo is not None,
+            "template_repo": template_repo is not None,
+            "workflow_repo": workflow_repo is not None
+        }
+    )
     
     yield
     
