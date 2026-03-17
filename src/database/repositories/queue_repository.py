@@ -88,7 +88,7 @@ class QueueRepository:
         Returns:
             Dict с данными задачи или None если задач нет.
         """
-        logger.debug("Attempting to claim job", extra={"worker_id": worker_id})
+        #logger.debug("Attempting to claim job", extra={"worker_id": worker_id})
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 UPDATE execution_queue
@@ -110,7 +110,7 @@ class QueueRepository:
             """, worker_id)
             
             if not row:
-                logger.debug("No pending jobs available", extra={"worker_id": worker_id})
+                #logger.debug("No pending jobs available", extra={"worker_id": worker_id})
                 return None
             
             job = dict(row)

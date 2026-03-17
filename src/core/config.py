@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     """
     # Database
     DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
+    
+    # Database pool settings
+    DB_POOL_MIN_SIZE: int = Field(1, ge=1, le=10, description="Minimum database pool connections")
+    DB_POOL_MAX_SIZE: int = Field(10, ge=1, le=50, description="Maximum database pool connections")
+    DB_COMMAND_TIMEOUT: float = Field(60.0, gt=0, description="Database command timeout in seconds")
 
     # Admin bot
     ADMIN_CHAT_ID: str = Field(..., description="Telegram chat ID of the platform administrator")
@@ -25,6 +30,7 @@ class Settings(BaseSettings):
 
     # Groq
     GROQ_API_KEY: str = Field(..., description="API key for Groq LLM")
+    GROQ_MODEL: str = Field("llama-3.3-70b-versatile", description="Default Groq model for agent")
 
     # Optional Redis (for future use)
     REDIS_URL: str = Field("", description="Redis connection string (optional)")

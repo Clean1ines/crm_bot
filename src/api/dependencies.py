@@ -5,13 +5,14 @@ This module provides centralized dependency injection functions for:
 - Database connection pool
 - Orchestrator service
 - All repository classes
+- Tool registry
 - Redis client
 - Admin authentication
 
 All dependencies use the global pool from lifespan management.
 """
 
-from typing import Optional
+from typing import Optional, Any, Callable, Awaitable
 
 from fastapi import Header, HTTPException, Depends
 
@@ -30,7 +31,7 @@ import src.core.lifespan
 logger = get_logger(__name__)
 
 
-def get_pool():
+def get_pool() -> Any:
     """
     Return the global database connection pool.
     
@@ -46,7 +47,7 @@ def get_pool():
     return src.core.lifespan.pool
 
 
-def get_orchestrator():
+def get_orchestrator() -> Any:
     """
     Return the global orchestrator instance.
     
@@ -62,7 +63,7 @@ def get_orchestrator():
     return src.core.lifespan.orchestrator
 
 
-def get_project_repo(pool = Depends(get_pool)) -> ProjectRepository:
+def get_project_repo(pool: Any = Depends(get_pool)) -> ProjectRepository:
     """
     Return a new ProjectRepository instance.
     
@@ -75,7 +76,7 @@ def get_project_repo(pool = Depends(get_pool)) -> ProjectRepository:
     return ProjectRepository(pool)
 
 
-def get_thread_repo(pool = Depends(get_pool)) -> ThreadRepository:
+def get_thread_repo(pool: Any = Depends(get_pool)) -> ThreadRepository:
     """
     Return a new ThreadRepository instance.
     
@@ -88,7 +89,7 @@ def get_thread_repo(pool = Depends(get_pool)) -> ThreadRepository:
     return ThreadRepository(pool)
 
 
-def get_queue_repo(pool = Depends(get_pool)) -> QueueRepository:
+def get_queue_repo(pool: Any = Depends(get_pool)) -> QueueRepository:
     """
     Return a new QueueRepository instance.
     
@@ -101,7 +102,7 @@ def get_queue_repo(pool = Depends(get_pool)) -> QueueRepository:
     return QueueRepository(pool)
 
 
-def get_event_repo(pool = Depends(get_pool)) -> EventRepository:
+def get_event_repo(pool: Any = Depends(get_pool)) -> EventRepository:
     """
     Return a new EventRepository instance.
     
@@ -114,7 +115,7 @@ def get_event_repo(pool = Depends(get_pool)) -> EventRepository:
     return EventRepository(pool)
 
 
-def get_template_repo(pool = Depends(get_pool)) -> TemplateRepository:
+def get_template_repo(pool: Any = Depends(get_pool)) -> TemplateRepository:
     """
     Return a new TemplateRepository instance.
     
@@ -127,7 +128,7 @@ def get_template_repo(pool = Depends(get_pool)) -> TemplateRepository:
     return TemplateRepository(pool)
 
 
-def get_workflow_repo(pool = Depends(get_pool)) -> WorkflowRepository:
+def get_workflow_repo(pool: Any = Depends(get_pool)) -> WorkflowRepository:
     """
     Return a new WorkflowRepository instance.
     
@@ -140,7 +141,30 @@ def get_workflow_repo(pool = Depends(get_pool)) -> WorkflowRepository:
     return WorkflowRepository(pool)
 
 
-async def get_redis():
+def get_tool_registry() -> Any:
+    """
+    Return the global ToolRegistry singleton instance.
+    
+    This dependency provides access to the ToolRegistry for dynamic
+    tool execution from canvas workflows and API endpoints.
+    
+    Returns:
+        ToolRegistry: The global tool registry singleton.
+    
+    Raises:
+        RuntimeError: If tool_registry is not initialized.
+    """
+    # Lazy import to avoid circular dependencies
+    from src.tools import tool_registry
+    
+    if tool_registry is None:
+        logger.error("ToolRegistry requested before initialization")
+        raise RuntimeError("ToolRegistry not initialized")
+    
+    return tool_registry
+
+
+async def get_redis() -> Any:
     """
     Return the Redis client instance.
     
@@ -150,7 +174,7 @@ async def get_redis():
     return await get_redis_client()
 
 
-async def verify_admin_token(authorization: str = Header(...)) -> None:
+async def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> None:
     """
     Проверяет Bearer-токен в заголовке Authorization.
     Используется для защиты эндпоинтов, доступных только администратору.
@@ -166,7 +190,10 @@ async def verify_admin_token(authorization: str = Header(...)) -> None:
         raise HTTPException(status_code=401, detail="Authorization header required")
     
     if not authorization.startswith("Bearer "):
-        logger.warning("Invalid token format", extra={"prefix": authorization[:10] if authorization else None})
+        logger.warning(
+            "Invalid token format",
+            extra={"prefix": authorization[:10] if authorization else None}
+        )
         raise HTTPException(status_code=401, detail="Invalid token format. Use 'Bearer <token>'")
     
     token = authorization[7:]
@@ -178,7 +205,9 @@ async def verify_admin_token(authorization: str = Header(...)) -> None:
     logger.debug("Admin token verified successfully")
 
 
-def verify_pro_mode_access(project_repo: ProjectRepository = Depends(get_project_repo)):
+def verify_pro_mode_access(
+    project_repo: ProjectRepository = Depends(get_project_repo)
+) -> Callable[[str], Awaitable[bool]]:
     """
     Dependency factory for checking Pro mode access.
     

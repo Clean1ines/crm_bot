@@ -10,6 +10,7 @@ import uuid
 import json
 import httpx
 from typing import Optional, Dict, Any
+
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 from src.agent.graph import create_agent
@@ -35,6 +36,7 @@ class OrchestratorService:
         threads: ThreadRepository instance.
         queue_repo: QueueRepository instance.
         event_repo: EventRepository instance (optional for event sourcing).
+        tool_registry: ToolRegistry instance (optional for dynamic tools).
         agent: Compiled LangGraph agent.
         summarizer: SummarizerService for conversation summaries.
     """
@@ -49,7 +51,8 @@ class OrchestratorService:
         project_repo, 
         thread_repo, 
         queue_repo,
-        event_repo=None
+        event_repo=None,
+        tool_registry=None
     ):
         """
         Initialize the OrchestratorService with required dependencies.
@@ -60,13 +63,16 @@ class OrchestratorService:
             thread_repo: ThreadRepository instance.
             queue_repo: QueueRepository instance.
             event_repo: Optional EventRepository for event sourcing.
+            tool_registry: Optional ToolRegistry for dynamic tool execution.
         """
         self.db = db_conn
         self.projects = project_repo
         self.threads = thread_repo
         self.queue_repo = queue_repo
         self.event_repo = event_repo
-        self.agent = create_agent()
+        self.tool_registry = tool_registry
+        # Pass tool_registry to agent creation for dynamic tool support
+        self.agent = create_agent(tool_registry=tool_registry)
         self.summarizer = SummarizerService()
         logger.debug("OrchestratorService initialized")
 

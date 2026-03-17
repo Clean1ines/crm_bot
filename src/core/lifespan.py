@@ -1,10 +1,14 @@
 """
-Application lifespan management: database pool, orchestrator, and dependencies.
+Application lifespan management: database pool initialization and cleanup,
+and global orchestrator/tool registry setup.
+
+This module handles startup and shutdown events for the FastAPI application,
+ensuring resources are properly initialized and released.
 """
 
+import asyncio
 import asyncpg
-import httpx
-from typing import Optional
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -14,94 +18,151 @@ from src.services.orchestrator import OrchestratorService
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
-from src.database.repositories.event_repository import EventRepository
 
 logger = get_logger(__name__)
 
-pool: Optional[asyncpg.Pool] = None
-orchestrator: Optional[OrchestratorService] = None
+# Global instances (initialized in lifespan)
+pool: asyncpg.Pool | None = None
+orchestrator: OrchestratorService | None = None
 
 
-async def init_db():
-    """Initialize database connection pool."""
-    global pool
-    db_url = settings.DATABASE_URL
-    if not db_url:
-        raise RuntimeError("DATABASE_URL is not set")
+async def init_db() -> asyncpg.Pool:
+    """
+    Initialize the database connection pool.
     
-    pool = await asyncpg.create_pool(db_url, min_size=1, max_size=10, command_timeout=60)
-    logger.info("Database pool initialized")
+    Returns:
+        asyncpg.Pool: Initialized connection pool.
+    """
+    if not settings.DATABASE_URL:
+        raise RuntimeError("DATABASE_URL not configured")
+    
+    logger.info("Initializing database connection pool", extra={"url": settings.DATABASE_URL[:20] + "..."})
+    
+    pool = await asyncpg.create_pool(
+        settings.DATABASE_URL,
+        min_size=settings.DB_POOL_MIN_SIZE,
+        max_size=settings.DB_POOL_MAX_SIZE,
+        command_timeout=settings.DB_COMMAND_TIMEOUT
+    )
+    
+    logger.info("Database pool initialized", extra={"min_size": settings.DB_POOL_MIN_SIZE, "max_size": settings.DB_POOL_MAX_SIZE})
+    return pool
 
 
-async def shutdown_db():
-    """Close database connection pool."""
+async def shutdown_db() -> None:
+    """
+    Close the database connection pool gracefully.
+    """
     global pool
-    if pool:
+    if pool is not None:
+        logger.info("Closing database connection pool")
         await pool.close()
         pool = None
         logger.info("Database pool closed")
 
 
-async def _bootstrap_admin_project():
-    """Create initial admin project if none exist (idempotent)."""
-    if not settings.ADMIN_BOT_TOKEN or not pool:
-        return
+def _register_builtin_tools(tool_registry, pool: asyncpg.Pool) -> None:
+    """
+    Register built-in tools in the ToolRegistry.
     
-    async with pool.acquire() as conn:
-        count = await conn.fetchval("SELECT COUNT(*) FROM projects")
-        if count > 0:
-            return
-        
-        project_id = await conn.fetchval("""
-            INSERT INTO projects (id, name, owner_id, bot_token, system_prompt, template_slug, is_pro_mode)
-            VALUES (gen_random_uuid(), 'Admin Project', '00000000-0000-0000-0000-000000000001', $1, 'Ты — полезный AI-ассистент.', 'support', true)
-            RETURNING id
-        """, settings.ADMIN_BOT_TOKEN)
-        
-        base_url = settings.RENDER_EXTERNAL_URL or settings.PUBLIC_URL
-        if base_url:
-            webhook_url = f"{base_url.rstrip('/')}/webhook/{project_id}"
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                try:
-                    resp = await client.post(
-                        f"https://api.telegram.org/bot{settings.ADMIN_BOT_TOKEN}/setWebhook",
-                        json={"url": webhook_url, "secret_token": settings.ADMIN_API_TOKEN[:32] if settings.ADMIN_API_TOKEN else None}
-                    )
-                    if resp.status_code == 200 and resp.json().get("ok"):
-                        logger.info(f"Admin webhook set: {webhook_url}")
-                except Exception as e:
-                    logger.error(f"Failed to set admin webhook: {e}")
+    This function should be called during application startup
+    after repositories are initialized.
+    
+    Args:
+        tool_registry: ToolRegistry instance to register tools in.
+        pool: Database connection pool for repository initialization.
+    """
+    from src.tools.builtins import SearchKnowledgeTool, EscalateTool
+    from src.database.repositories.knowledge_repository import KnowledgeRepository
+    
+    # Initialize repositories for tool wrappers
+    knowledge_repo = KnowledgeRepository(pool)
+    thread_repo = ThreadRepository(pool)
+    queue_repo = QueueRepository(pool)
+    project_repo = ProjectRepository(pool)
+    
+    # Register built-in tools
+    tool_registry.register(SearchKnowledgeTool(knowledge_repo))
+    logger.info("Registered SearchKnowledgeTool")
+    
+    tool_registry.register(EscalateTool(
+        thread_repository=thread_repo,
+        queue_repository=queue_repo,
+        project_repository=project_repo
+    ))
+    logger.info("Registered EscalateTool")
+    
+    # Register extension tools (always available)
+    from src.tools.http_tool import HTTPTool
+    from src.tools.n8n_tool import N8NTool
+    
+    tool_registry.register(HTTPTool())
+    logger.info("Registered HTTPTool")
+    
+    tool_registry.register(N8NTool())
+    logger.info("Registered N8NTool")
 
 
-async def init_orchestrator():
-    """Initialize OrchestratorService with all repository dependencies."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Manage application lifespan: startup and shutdown.
+    
+    On startup:
+    - Initialize database pool
+    - Initialize ToolRegistry with built-in tools
+    - Create OrchestratorService with all dependencies
+    
+    On shutdown:
+    - Close database pool
+    
+    Args:
+        app: FastAPI application instance.
+    
+    Yields:
+        None: Application runs during yield.
+    """
     global pool, orchestrator
-    if not pool:
-        raise RuntimeError("Database pool not initialized")
     
+    # Startup
+    logger.info("Application startup initiated")
+    
+    # Initialize database pool
+    pool = await init_db()
+    
+    # Initialize ToolRegistry with built-in tools
+    from src.tools import tool_registry
+    _register_builtin_tools(tool_registry, pool)
+    
+    # Initialize repositories for orchestrator
     project_repo = ProjectRepository(pool)
     thread_repo = ThreadRepository(pool)
     queue_repo = QueueRepository(pool)
-    event_repo = EventRepository(pool)  # NEW: event-sourced runtime
     
+    # Optional: Initialize event repository if events table exists
+    event_repo = None
+    try:
+        from src.database.repositories.event_repository import EventRepository
+        event_repo = EventRepository(pool)
+        logger.info("EventRepository initialized")
+    except ImportError:
+        logger.debug("EventRepository not available (migration not applied yet)")
+    
+    # Create orchestrator with all dependencies
     orchestrator = OrchestratorService(
         db_conn=pool,
         project_repo=project_repo,
         thread_repo=thread_repo,
         queue_repo=queue_repo,
-        event_repo=event_repo
+        event_repo=event_repo,
+        tool_registry=tool_registry
     )
-    logger.info("Orchestrator initialized with EventRepository")
-
-
-async def lifespan(app: FastAPI):
-    """FastAPI lifespan context manager: startup and shutdown."""
-    global pool, orchestrator
     
-    await init_db()
-    await init_orchestrator()
-    await _bootstrap_admin_project()
+    logger.info("Application startup complete")
     
     yield
     
+    # Shutdown
+    logger.info("Application shutdown initiated")
     await shutdown_db()
+    logger.info("Application shutdown complete")
