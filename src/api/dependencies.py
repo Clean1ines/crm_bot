@@ -1,50 +1,218 @@
 """
 FastAPI dependency injection for database pool, orchestrator, and repositories.
+
+This module provides centralized dependency injection functions for:
+- Database connection pool
+- Orchestrator service
+- All repository classes
+- Redis client
+- Admin authentication
+
+All dependencies use the global pool from lifespan management.
 """
 
-import src.core.lifespan
-from fastapi import Header, HTTPException
+from typing import Optional
+
+from fastapi import Header, HTTPException, Depends
+
+from src.core.logging import get_logger
+from src.core.config import settings
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
+from src.database.repositories.event_repository import EventRepository
+from src.database.repositories.template_repository import TemplateRepository
+from src.database.repositories.workflow_repository import WorkflowRepository
 from src.services.redis_client import get_redis_client
-from src.core.config import settings
+
+import src.core.lifespan
+
+logger = get_logger(__name__)
+
 
 def get_pool():
-    """Return the global database connection pool."""
+    """
+    Return the global database connection pool.
+    
+    Raises:
+        RuntimeError: If pool is not initialized (called before lifespan startup).
+    
+    Returns:
+        asyncpg.Pool: The global database connection pool.
+    """
     if src.core.lifespan.pool is None:
+        logger.error("Database pool requested before initialization")
         raise RuntimeError("Database pool not initialized")
     return src.core.lifespan.pool
 
+
 def get_orchestrator():
-    """Return the global orchestrator instance."""
+    """
+    Return the global orchestrator instance.
+    
+    Raises:
+        RuntimeError: If orchestrator is not initialized.
+    
+    Returns:
+        OrchestratorService: The global orchestrator instance.
+    """
     if src.core.lifespan.orchestrator is None:
+        logger.error("Orchestrator requested before initialization")
         raise RuntimeError("Orchestrator not initialized")
     return src.core.lifespan.orchestrator
 
-def get_project_repo():
-    """Return a new ProjectRepository instance (uses the global pool)."""
-    return ProjectRepository(get_pool())
 
-def get_thread_repo():
-    """Return a new ThreadRepository instance (uses the global pool)."""
-    return ThreadRepository(get_pool())
+def get_project_repo(pool = Depends(get_pool)) -> ProjectRepository:
+    """
+    Return a new ProjectRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        ProjectRepository: Repository for project-level data access.
+    """
+    return ProjectRepository(pool)
 
-def get_queue_repo():
-    """Return a new QueueRepository instance (uses the global pool)."""
-    return QueueRepository(get_pool())
+
+def get_thread_repo(pool = Depends(get_pool)) -> ThreadRepository:
+    """
+    Return a new ThreadRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        ThreadRepository: Repository for thread/conversation data access.
+    """
+    return ThreadRepository(pool)
+
+
+def get_queue_repo(pool = Depends(get_pool)) -> QueueRepository:
+    """
+    Return a new QueueRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        QueueRepository: Repository for background job queue operations.
+    """
+    return QueueRepository(pool)
+
+
+def get_event_repo(pool = Depends(get_pool)) -> EventRepository:
+    """
+    Return a new EventRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        EventRepository: Repository for event-sourced data access.
+    """
+    return EventRepository(pool)
+
+
+def get_template_repo(pool = Depends(get_pool)) -> TemplateRepository:
+    """
+    Return a new TemplateRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        TemplateRepository: Repository for workflow template operations.
+    """
+    return TemplateRepository(pool)
+
+
+def get_workflow_repo(pool = Depends(get_pool)) -> WorkflowRepository:
+    """
+    Return a new WorkflowRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        WorkflowRepository: Repository for custom workflow operations.
+    """
+    return WorkflowRepository(pool)
+
 
 async def get_redis():
-    """Return the Redis client instance."""
+    """
+    Return the Redis client instance.
+    
+    Returns:
+        aioredis.Redis: Async Redis client for temporary state storage.
+    """
     return await get_redis_client()
+
 
 async def verify_admin_token(authorization: str = Header(...)) -> None:
     """
     Проверяет Bearer-токен в заголовке Authorization.
     Используется для защиты эндпоинтов, доступных только администратору.
+    
+    Args:
+        authorization: Value of Authorization header from request.
+    
+    Raises:
+        HTTPException: If token is missing, malformed, or invalid.
     """
+    if not authorization:
+        logger.warning("Authorization header missing")
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Invalid token format")
+        logger.warning("Invalid token format", extra={"prefix": authorization[:10] if authorization else None})
+        raise HTTPException(status_code=401, detail="Invalid token format. Use 'Bearer <token>'")
+    
     token = authorization[7:]
-    if token != settings.ADMIN_API_TOKEN:
+    
+    if not token or token != settings.ADMIN_API_TOKEN:
+        logger.warning("Invalid admin token attempt")
         raise HTTPException(status_code=401, detail="Invalid admin token")
+    
+    logger.debug("Admin token verified successfully")
+
+
+def verify_pro_mode_access(project_repo: ProjectRepository = Depends(get_project_repo)):
+    """
+    Dependency factory for checking Pro mode access.
+    
+    Returns a dependency function that checks if a project has Pro mode enabled.
+    
+    Args:
+        project_repo: ProjectRepository instance (injected).
+    
+    Returns:
+        Callable: Dependency function that takes project_id and checks is_pro_mode.
+    """
+    async def check_pro_mode(project_id: str) -> bool:
+        """
+        Check if project has Pro mode enabled.
+        
+        Args:
+            project_id: UUID of the project to check.
+        
+        Returns:
+            bool: True if Pro mode is enabled.
+        
+        Raises:
+            HTTPException: If project not found or Pro mode not enabled.
+        """
+        is_pro = await project_repo.get_is_pro_mode(project_id)
+        if not is_pro:
+            logger.warning(
+                "Pro mode access denied",
+                extra={"project_id": project_id}
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Pro mode required. Upgrade your plan to access this feature."
+            )
+        return True
+    
+    return check_pro_mode
