@@ -2,7 +2,7 @@
 Configuration management for the application.
 Uses Pydantic Settings to load and validate environment variables.
 """
-
+from typing import Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 import uuid
@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     # Other settings
     PROJECT_NAME: str = "MRAK-OS CRM Bot"
     DEBUG: bool = Field(False, description="Enable debug mode")
+        # Новые поля из .env
+    CANVAS_ENABLED: bool = False
+    EVENT_STORE_ENABLED: bool = False
+    EVENT_TTL_DAYS: int = 90
+    PRO_MODE_ENABLED: bool = False
+    RATE_LIMIT_BURST: int = 10
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
+    TOOL_HTTP_ALLOWED_DOMAINS: Optional[str] = None
+    TOOL_N8N_ALLOWED_WEBHOOKS: Optional[str] = None
 
     @field_validator("ADMIN_CHAT_ID")
     def validate_chat_id(cls, v: str) -> str:

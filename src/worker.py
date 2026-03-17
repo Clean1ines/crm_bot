@@ -1,8 +1,7 @@
 """
 Worker process for handling background tasks from the execution queue.
-
-Supports reliable task processing with retry logic, timeout handling,
-and exponential backoff for transient failures.
+Currently supports:
+- notify_manager: sends an inline keyboard notification to the manager.
 """
 
 import asyncio
@@ -10,7 +9,8 @@ import signal
 import asyncpg
 import httpx
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
+import uuid
 
 from src.core.config import settings
 from src.core.logging import get_logger
@@ -162,7 +162,7 @@ async def _recover_stale_jobs(queue_repo: QueueRepository, timeout_minutes: int 
 
 
 async def _handle_notify_manager(
-    job: dict,
+    job: Dict[str, Any],
     thread_repo: ThreadRepository,
     project_repo: ProjectRepository,
     queue_repo: QueueRepository,
@@ -184,19 +184,24 @@ async def _handle_notify_manager(
         True if notification sent successfully to at least one manager.
     """
     payload = job.get("payload") or {}
-    thread_id = payload.get("thread_id")
+    # Ensure thread_id is string
+    thread_id = str(payload.get("thread_id"))
     chat_id = payload.get("chat_id")
     message = payload.get("message")
 
-    # Получаем информацию о треде (чтобы узнать project_id)
+    # Get thread info to find project_id
+    # FIX: thread_repo returns project_id as UUID object, no need to wrap it again
     thread_info = await thread_repo.get_thread_with_project(thread_id)
     if not thread_info:
         logger.error("Thread not found", extra={"thread_id": thread_id, "job_id": job["id"]})
         return False
+    
+    # FIX: project_id is already a UUID object from asyncpg
     project_id = thread_info["project_id"]
 
-    # Получаем настройки менеджера для этого проекта
-    project_settings = await project_repo.get_project_settings(project_id)
+    # Get manager settings for this project
+    # FIX: Pass UUID object directly, repository handles it
+    project_settings = await project_repo.get_project_settings(str(project_id))
     manager_bot_token = project_settings.get("manager_bot_token")
     manager_chat_ids = project_settings.get("manager_chat_ids", [])
 

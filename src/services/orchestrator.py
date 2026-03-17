@@ -9,7 +9,7 @@ import asyncio
 import uuid
 import json
 import httpx
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
@@ -125,27 +125,36 @@ class OrchestratorService:
                 extra={"stream_id": stream_id, "event_type": event_type, "error": str(e)}
             )
 
-    def _build_graph_from_json(self, graph_json: Dict[str, Any]) -> Any:
+    def _build_graph_from_json(self, graph_json: Union[str, Dict[str, Any]]) -> Any:
         """
         Build a LangGraph instance from JSON definition.
         
-        This is a simplified builder for MVP. In production, this should
-        use a proper node registry and validation.
+        FIXED: Handles both string (from DB) and dict inputs.
         
         Args:
-            graph_json: Graph definition with nodes and edges.
+            graph_json: Graph definition with nodes and edges (can be JSON string or dict).
         
         Returns:
             Compiled LangGraph instance.
         """
+        # FIX: Parse JSON string if necessary
+        if isinstance(graph_json, str):
+            try:
+                graph_dict = json.loads(graph_json)
+            except json.JSONDecodeError as e:
+                logger.error("Invalid JSON in graph definition", extra={"error": str(e)})
+                return self.agent
+        else:
+            graph_dict = graph_json
+        
         # For MVP: return default agent if graph is simple or invalid
-        if not graph_json or "nodes" not in graph_json:
+        if not graph_dict or "nodes" not in graph_dict:
             logger.warning("Invalid or empty graph_json, using default agent")
             return self.agent
         
         # Simple graph with default flow: message → AI → reply
         # In production: resolve nodes from registry, build dynamic graph
-        logger.debug("Building graph from JSON", extra={"node_count": len(graph_json.get("nodes", []))})
+        logger.debug("Building graph from JSON", extra={"node_count": len(graph_dict.get("nodes", []))})
         return self.agent
 
     async def _get_graph_for_project(self, project_id: str) -> Any:
