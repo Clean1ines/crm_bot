@@ -2,9 +2,9 @@
 Rules-based routing node for LangGraph pipeline.
 
 Applies cheap rules (no LLM) to determine the initial decision:
+- If client profile missing → COLLECT_PROFILE
 - If anger or refund keywords detected → ESCALATE
 - If simple FAQ patterns matched → RESPOND with template answer
-- If client profile missing → COLLECT_PROFILE
 - Otherwise → PROCEED_TO_LLM (go to router)
 """
 
@@ -23,11 +23,13 @@ ANGER_KEYWORDS = [
     "невероятно дорого", "сжигаю контракт", "удалить аккаунт"
 ]
 
+# FAQ_PATTERNS - временно оставим только точные совпадения, чтобы не мешать KB
+# Убраны общие паттерны, которые давали неверные ответы
 FAQ_PATTERNS = [
-    (re.compile(r"доставк|delivery", re.IGNORECASE), "Доставка осуществляется в течение 1-3 рабочих дней."),
-    (re.compile(r"цена|стоимост|price|cost", re.IGNORECASE), "Стоимость зависит от тарифа. Базовый пакет — 5000₽, поддержка от 1500₽/мес."),
-    (re.compile(r"возврат|refund", re.IGNORECASE), "Возврат возможен в течение 14 дней при отсутствии выполненных работ. Обратитесь к менеджеру."),
-    (re.compile(r"интеграц|integrat|crm|api", re.IGNORECASE), "Мы поддерживаем интеграцию через API, CSV и webhook. Для сложных случаев требуется участие менеджера.")
+    # (re.compile(r"доставк|delivery", re.IGNORECASE), "Доставка осуществляется в течение 1-3 рабочих дней."),
+    # (re.compile(r"цена|стоимост|price|cost", re.IGNORECASE), "Стоимость зависит от тарифа. Базовый пакет — 5000₽, поддержка от 1500₽/мес."),
+    # (re.compile(r"возврат|refund", re.IGNORECASE), "Возврат возможен в течение 14 дней при отсутствии выполненных работ. Обратитесь к менеджеру."),
+    # (re.compile(r"интеграц|integrat|crm|api", re.IGNORECASE), "Мы поддерживаем интеграцию через API, CSV и webhook. Для сложных случаев требуется участие менеджера.")
 ]
 
 # Threshold for detecting anger via caps proportion
@@ -66,9 +68,9 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
     Apply cheap routing rules to the incoming state.
 
     Rules (executed in order):
-      1. If anger detected -> decision = "ESCALATE", requires_human = True
-      2. If FAQ pattern matched -> decision = "RESPOND", response_text = template answer
-      3. If client_profile is None -> decision = "COLLECT_PROFILE"
+      
+      2. If anger detected -> decision = "ESCALATE", requires_human = True
+      3. If FAQ pattern matched -> decision = "RESPOND", response_text = template answer
       4. Otherwise -> decision = "PROCEED_TO_LLM"
 
     Returns a dictionary with updates to the state (decision, response_text, requires_human).
@@ -86,7 +88,7 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
         logger.warning("rules_node called with empty user_input")
         return {"decision": "PROCEED_TO_LLM"}
 
-    # Rule 1: anger detection
+    # Rule 2: anger detection
     if _detect_anger(user_input):
         logger.info("Rule triggered: anger detected -> ESCALATE")
         return {
@@ -95,7 +97,7 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
             "response_text": "Извините за неудобства. Я передал ваш запрос менеджеру, он свяжется с вами в ближайшее время."
         }
 
-    # Rule 2: FAQ match
+    # Rule 3: FAQ match (temporarily disabled to let KB handle)
     matched, answer = _match_faq(user_input)
     if matched:
         logger.debug("Rule triggered: FAQ match -> RESPOND")
@@ -104,11 +106,6 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
             "response_text": answer,
             "requires_human": False
         }
-
-    # Rule 3: missing client profile
-    if client_profile is None:
-        logger.debug("Rule triggered: missing client profile -> COLLECT_PROFILE")
-        return {"decision": "COLLECT_PROFILE"}
 
     # Default: proceed to LLM router
     logger.debug("No rule triggered, proceeding to LLM")

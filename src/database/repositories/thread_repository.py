@@ -28,23 +28,26 @@ class ThreadRepository:
             return client_id
 
     async def get_active_thread(self, client_id: str) -> Optional[str]:
-        """Ищет последний активный тред клиента."""
-        logger.debug(f"Looking for active thread for client {client_id}")
+        """
+        Ищет последний тред клиента (независимо от статуса), чтобы не создавать новый при наличии ручного.
+        Возвращает ID последнего треда по updated_at.
+        """
+        logger.debug(f"Looking for thread for client {client_id}")
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id FROM threads 
-                WHERE client_id = $1 AND status = $2 
+                WHERE client_id = $1
                 ORDER BY updated_at DESC LIMIT 1
-            """, uuid.UUID(client_id), ThreadStatus.ACTIVE.value)
+            """, uuid.UUID(client_id))
             if row:
                 thread_id = str(row['id'])
-                logger.debug(f"Active thread found: {thread_id}")
+                logger.debug(f"Thread found: {thread_id}")
                 return thread_id
-            logger.debug("No active thread found")
+            logger.debug("No thread found")
             return None
 
     async def create_thread(self, client_id: str) -> str:
-        """Создает новый тред."""
+        """Создает новый тред со статусом ACTIVE."""
         logger.info(f"Creating new thread for client {client_id}")
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
@@ -164,7 +167,6 @@ class ThreadRepository:
                 SELECT state_json FROM threads WHERE id = $1
             """, uuid.UUID(thread_id))
             if row and row["state_json"] is not None:
-                # asyncpg возвращает JSONB как dict
                 state = row["state_json"]
                 logger.debug(f"State_json retrieved for thread {thread_id}")
                 return state
@@ -178,10 +180,9 @@ class ThreadRepository:
         """
         logger.info(f"Saving state_json for thread {thread_id}")
         async with self.pool.acquire() as conn:
-            # Serialize dict to JSON string to avoid asyncpg encoding issues
             await conn.execute("""
                 UPDATE threads
                 SET state_json = $1, updated_at = NOW()
                 WHERE id = $2
-            """, json.dumps(state), uuid.UUID(thread_id))
+            """, json.dumps(state, ensure_ascii=False), uuid.UUID(thread_id))
             logger.debug("State_json saved")

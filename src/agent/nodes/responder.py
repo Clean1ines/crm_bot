@@ -65,14 +65,13 @@ def create_responder_node(tool_registry: ToolRegistry):
                             "thread_id": state.get("thread_id"),
                             "response_preview": response_text[:50]})
 
-        # Call telegram.send_message tool
+        # Call telegram.send_message tool without parse_mode to avoid formatting errors
         try:
             result = await tool_registry.execute(
                 "telegram.send_message",
                 {
                     "chat_id": chat_id,
-                    "text": response_text,
-                    "parse_mode": "Markdown"  # optional, could be configurable
+                    "text": response_text
                 },
                 context={
                     "project_id": state.get("project_id"),

@@ -9,6 +9,7 @@ import asyncio
 import uuid
 import json
 import httpx
+import re
 from typing import Optional, Dict, Any, List, Union
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
@@ -24,6 +25,18 @@ from src.core.config import settings
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def split_questions(text: str) -> List[str]:
+    """
+    Разбивает текст на отдельные вопросы по разделителям: . ? ! и переносам строк.
+    Возвращает список непустых строк.
+    """
+    # Разделяем по границам предложений (точка, вопросительный, восклицательный знак, перевод строки)
+    parts = re.split(r'[.?!\n]+', text)
+    # Убираем пустые и обрезаем пробелы
+    questions = [p.strip() for p in parts if p.strip()]
+    return questions
 
 
 class OrchestratorService:
@@ -196,7 +209,7 @@ class OrchestratorService:
                         extra={"project_id": project_id, "workflow_id": workflow_id}
                     )
                     workflow_data = await self.workflow_repo.get_by_id(
-                        workflow_id, include_graph=True
+                        uuid.UUID(workflow_id), include_graph=True
                     )
                     if workflow_data and "graph_json" in workflow_data:
                         return self._build_graph_from_json(workflow_data["graph_json"])
@@ -226,12 +239,10 @@ class OrchestratorService:
           1. Register client/thread.
           2. Save user message and emit message_received event.
           3. Acquire thread lock to prevent concurrent processing.
-          4. Build initial AgentState with all context.
-          5. Retrieve appropriate graph for project.
-          6. Invoke graph with state.
-          7. If graph sent the message (message_sent=True), return empty string.
-          8. Otherwise, return the response_text for the router to send.
-          9. Release lock.
+          4. Split message into individual questions (if multiple).
+          5. For each question, build initial AgentState and invoke graph.
+          6. Collect responses and combine them.
+          7. Release lock.
         
         Args:
             project_id: UUID проекта в строковом формате.
@@ -258,83 +269,95 @@ class OrchestratorService:
             return "⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите."
 
         try:
-            # Check if thread is already in manual mode (manager handling)
-            thread_info = await self.threads.get_thread_with_project(thread_id_str)
-            if thread_info and thread_info["status"] == "manual":
-                logger.debug("Thread is manual, skipping agent", extra={"thread_id": thread_id_str})
-                return "⏳ Сейчас с вами общается менеджер. Пожалуйста, ожидайте ответа."
-
-            # 3. Save user message
-            await self.threads.add_message(thread_id, role="user", content=text)
-
-            # 4. Emit message_received event
-            await self._emit_event(
-                stream_id=thread_id_str,
-                project_id=project_id,
-                event_type="message_received",
-                payload={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "timestamp": asyncio.get_event_loop().time()
-                }
-            )
-
-            # 5. Load context for state
-            recent_messages = await self.threads.get_messages_for_langgraph(thread_id)
-            if len(recent_messages) > self.RECENT_MESSAGES_LIMIT:
-                recent_messages = recent_messages[-self.RECENT_MESSAGES_LIMIT:]
+            # 3. Split message into questions
+            questions = split_questions(text)
+            if not questions:
+                questions = [text]  # fallback to whole text
             
-            conversation_summary = None
-            if hasattr(self.threads, 'get_summary'):
-                conversation_summary = await self.threads.get_summary(thread_id)
+            logger.debug(f"Split message into {len(questions)} questions", extra={"thread_id": thread_id_str})
             
-            saved_state = await self.threads.get_state_json(thread_id_str)
+            # 4. For each question, call graph and collect responses
+            responses = []
+            for q in questions:
+                # Save user message (each question as separate message)
+                await self.threads.add_message(thread_id, role="user", content=q)
+                
+                # Emit message_received event
+                await self._emit_event(
+                    stream_id=thread_id_str,
+                    project_id=project_id,
+                    event_type="message_received",
+                    payload={
+                        "chat_id": chat_id,
+                        "text": q,
+                        "timestamp": asyncio.get_event_loop().time()
+                    }
+                )
 
-            # 6. Build initial AgentState
-            state = AgentState(
-                messages=[],
-                project_id=project_id,
-                thread_id=thread_id_str,
-                escalation_requested=False,
-                tool_calls=None,
-                user_input=text,
-                client_profile=None,
-                conversation_summary=conversation_summary,
-                history=recent_messages,
-                knowledge_chunks=None,
-                decision=None,
-                tool_name=None,
-                tool_args=None,
-                tool_result=None,
-                response_text=None,
-                requires_human=False,
-                confidence=None,
-                chat_id=chat_id
-            )
+                # Load context for state
+                recent_messages = await self.threads.get_messages_for_langgraph(thread_id)
+                if len(recent_messages) > self.RECENT_MESSAGES_LIMIT:
+                    recent_messages = recent_messages[-self.RECENT_MESSAGES_LIMIT:]
+                
+                conversation_summary = None
+                if hasattr(self.threads, 'get_summary'):
+                    conversation_summary = await self.threads.get_summary(thread_id)
+                
+                saved_state = await self.threads.get_state_json(thread_id_str)
 
-            # 7. Get graph for project
-            graph = await self._get_graph_for_project(project_id)
-            if graph is None:
-                logger.error("Failed to load graph for project", extra={"project_id": project_id})
-                return "Произошла ошибка обработки запроса."
+                # Build initial AgentState
+                state = AgentState(
+                    messages=[],
+                    project_id=project_id,
+                    thread_id=thread_id_str,
+                    escalation_requested=False,
+                    tool_calls=None,
+                    user_input=q,
+                    client_profile=None,
+                    conversation_summary=conversation_summary,
+                    history=recent_messages,
+                    knowledge_chunks=None,
+                    decision=None,
+                    tool_name=None,
+                    tool_args=None,
+                    tool_result=None,
+                    response_text=None,
+                    requires_human=False,
+                    confidence=None,
+                    chat_id=chat_id
+                )
 
-            # 8. Execute graph
-            result_state = await graph.ainvoke(state)
+                # Get graph for project
+                graph = await self._get_graph_for_project(project_id)
+                if graph is None:
+                    logger.error("Failed to load graph for project", extra={"project_id": project_id})
+                    responses.append("Произошла ошибка обработки запроса.")
+                    continue
 
-            # 9. Determine if message was already sent by the graph
-            if result_state.get("message_sent"):
-                logger.debug("Message already sent by graph, returning empty", extra={"thread_id": thread_id_str})
+                # Execute graph
+                result_state = await graph.ainvoke(state)
+
+                # Determine if message was already sent by the graph
+                if result_state.get("message_sent"):
+                    logger.debug(f"Message sent for question: {q[:30]}...", extra={"thread_id": thread_id_str})
+                    continue
+
+                # Otherwise, get response_text
+                response_text = result_state.get("response_text")
+                if response_text:
+                    responses.append(response_text)
+                else:
+                    logger.warning(f"Graph did not produce response_text for question: {q[:30]}...",
+                                   extra={"thread_id": thread_id_str})
+                    responses.append("Извините, не удалось сформировать ответ.")
+
+            # 5. Combine responses
+            if not responses:
                 return ""
-
-            # 10. Otherwise, return response_text for router to send
-            response_text = result_state.get("response_text")
-            if not response_text:
-                logger.warning("Graph did not produce response_text, using fallback",
-                               extra={"thread_id": thread_id_str})
-                response_text = "Извините, не удалось сформировать ответ."
-
-            logger.info("Message processed successfully", extra={"thread_id": thread_id_str})
-            return response_text
+            
+            combined_response = "\n\n".join(responses)
+            logger.info("All questions processed", extra={"thread_id": thread_id_str, "response_count": len(responses)})
+            return combined_response
 
         finally:
             # Always release lock
@@ -413,7 +436,7 @@ class OrchestratorService:
 
         # Emit event: manager_replied
         await self._emit_event(
-            stream_id=str(thread_id),
+            stream_id=thread_id,
             project_id=project_id,
             event_type="manager_replied",
             payload={

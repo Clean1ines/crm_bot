@@ -80,14 +80,19 @@ def create_agent(
     workflow.add_edge("load_state", "rules_check")
 
     # Conditional edges from rules_check
+    def route_from_rules(state: AgentState) -> str:
+        decision = state.get("decision", "PROCEED_TO_LLM")
+        logger.info(f"Rules check decision: {decision}")
+        return decision
+
     workflow.add_conditional_edges(
         "rules_check",
-        lambda state: state.get("decision", "PROCEED_TO_LLM"),
+        route_from_rules,
         {
             "RESPOND": "responder",
             "ESCALATE": "escalate",
-            "COLLECT_PROFILE": "router_llm",   # go to LLM to decide how to collect
-            "PROCEED_TO_LLM": "kb_search",     # need KB before router
+            "COLLECT_PROFILE": "router_llm",
+            "PROCEED_TO_LLM": "kb_search",
         }
     )
 
@@ -95,15 +100,21 @@ def create_agent(
     workflow.add_edge("kb_search", "router_llm")
 
     # Conditional edges from router_llm
+    def route_from_router(state: AgentState) -> str:
+        decision = state.get("decision", "LLM_GENERATE")
+        logger.info(f"Router decision: {decision}")
+        return decision
+
     workflow.add_conditional_edges(
         "router_llm",
-        lambda state: state.get("decision", "LLM_GENERATE"),
+        route_from_router,
         {
             "RESPOND_KB": "responder",
             "RESPOND_TEMPLATE": "responder",
             "LLM_GENERATE": "responder",
             "CALL_TOOL": "tool_executor",
             "ESCALATE_TO_HUMAN": "escalate",
+            "ESCALATE": "escalate",  # fallback for any other escalation
         }
     )
 

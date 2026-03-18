@@ -101,7 +101,8 @@ class SearchKnowledgeTool(Tool):
         project_id = self._require_context_field(context, "project_id")
         query = args.get("query", "").strip()
         limit = min(args.get("limit", 5), 10)  # Cap at 10 for safety
-        category = args.get("category")
+        # category is currently not used by repository; ignore it
+        # category = args.get("category")
         
         if not query:
             raise ToolExecutionError(
@@ -116,17 +117,16 @@ class SearchKnowledgeTool(Tool):
                 "project_id": project_id,
                 "query_preview": query[:50],
                 "limit": limit,
-                "category": category
             }
         )
         
         try:
-            # Call the underlying repository search
+            # Call the underlying repository search (without category)
             results = await self._repo.search(
                 project_id=str(project_id),
                 query=query,
                 limit=limit,
-                category=category
+                # category removed because repository doesn't support it
             )
             
             # Format results for canvas/agent consumption
@@ -664,7 +664,7 @@ class TelegramSendMessageTool(Tool):
         
         chat_id = args["chat_id"]
         text = args["text"]
-        parse_mode = args.get("parse_mode", "Markdown")
+        parse_mode = args.get("parse_mode")  # default None, we handle manually
         
         # Fetch bot token
         bot_token = await self._project_repo.get_bot_token(project_id)
@@ -675,8 +675,9 @@ class TelegramSendMessageTool(Tool):
         payload = {
             "chat_id": chat_id,
             "text": text,
-            "parse_mode": parse_mode
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, json=payload, timeout=10)

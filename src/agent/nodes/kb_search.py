@@ -1,7 +1,7 @@
 """
 Knowledge base search node for LangGraph pipeline.
 
-Performs semantic search using the kb.search tool and stores results in state.
+Performs semantic search using the search_knowledge tool and stores results in state.
 """
 
 from typing import Dict, Any
@@ -18,7 +18,7 @@ def create_kb_search_node(tool_registry: ToolRegistry):
     Factory function that creates a kb_search node with injected ToolRegistry.
 
     Args:
-        tool_registry: ToolRegistry instance for executing kb.search.
+        tool_registry: ToolRegistry instance for executing search_knowledge.
 
     Returns:
         An async function that takes an AgentState dict and returns a dict
@@ -43,26 +43,29 @@ def create_kb_search_node(tool_registry: ToolRegistry):
             logger.warning("kb_search_node called without project_id or query")
             return {"knowledge_chunks": []}
 
-        logger.debug("Searching knowledge base", extra={"project_id": project_id, "query": query[:50]})
+        logger.info("KB search started", extra={"project_id": project_id, "query": query[:100]})
 
         try:
+            # project_id передаётся через context, не в args
             result = await tool_registry.execute(
-                "kb.search",
+                "search_knowledge",
                 {
-                    "project_id": project_id,
                     "query": query,
-                    "top_k": 5
+                    "limit": 10  # increased from 5 to improve recall
                 },
                 context={"project_id": project_id}
             )
             # result is expected to be {"results": [...]}
             chunks = result.get("results", [])
-            logger.info("KB search returned %d chunks", len(chunks), extra={"project_id": project_id, "query": query[:50]})
+            logger.info("KB search returned %d chunks", len(chunks), extra={"project_id": project_id})
             if chunks:
-                logger.debug("First result score: %f, answer: %s", chunks[0].get("score", 0), chunks[0].get("answer", "")[:50])
+                for i, chunk in enumerate(chunks):
+                    logger.debug("Result %d: score=%.3f, answer=%s", i+1, chunk.get("score", 0), chunk.get("answer", "")[:50])
+            else:
+                logger.warning("KB search returned no results", extra={"project_id": project_id, "query": query[:100]})
             return {"knowledge_chunks": chunks}
         except Exception as e:
-            logger.exception("KB search failed", extra={"project_id": project_id})
+            logger.exception("KB search failed", extra={"project_id": project_id, "error": str(e)})
             return {"knowledge_chunks": []}
 
     return kb_search_node
