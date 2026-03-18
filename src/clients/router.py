@@ -22,15 +22,18 @@ async def process_client_update(
 ) -> Dict[str, bool]:
     """
     Process incoming message from a client (end-user).
-    Extracts text and chat_id, calls Orchestrator, and sends response.
+    Extracts text and chat_id, calls Orchestrator, and sends response if needed.
     
     Implements idempotency via Redis: stores processed update_id to avoid duplicates.
+    
+    The orchestrator may already have sent the response via the graph;
+    in that case it returns an empty string, and we skip sending.
     
     Args:
         update: Telegram Update object.
         project_id: UUID of the project.
         orchestrator: OrchestratorService instance.
-        bot_token: Bot token for sending responses.
+        bot_token: Bot token for sending responses (only used for error messages).
     
     Returns:
         Dict {"ok": True} on success.
@@ -67,27 +70,29 @@ async def process_client_update(
     logger.debug("Client message received", extra={"project_id": project_id, "chat_id": chat_id, "text_preview": text[:50]})
     
     try:
-        # Call Orchestrator (RAG + Agent)
+        # Call Orchestrator (RAG + Agent) – it may send the response itself
         response_text = await orchestrator.process_message(
             project_id=project_id,
             chat_id=chat_id,
             text=text
         )
         
-        # Send response
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": response_text,
-                    "parse_mode": "Markdown"
-                }
-            )
+        # If orchestrator returned a non-empty string, we need to send it
+        # (e.g., when graph failed to send or escalation message)
+        if response_text:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": response_text,
+                        "parse_mode": "Markdown"
+                    }
+                )
             
     except Exception as e:
         logger.exception("Error processing client message", extra={"project_id": project_id, "chat_id": chat_id})
-        # Optionally send error message to user
+        # Send error message to user
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"https://api.telegram.org/bot{bot_token}/sendMessage",

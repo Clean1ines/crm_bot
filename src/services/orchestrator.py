@@ -82,8 +82,14 @@ class OrchestratorService:
         self.template_repo = template_repo
         self.workflow_repo = workflow_repo
         self.tool_registry = tool_registry
-        # Create default agent as fallback
-        self.agent = create_default_agent(tool_registry=tool_registry)
+        # Create default agent (now the new state machine graph)
+        self.agent = create_default_agent(
+            tool_registry=tool_registry,
+            thread_repo=thread_repo,
+            queue_repo=queue_repo,
+            event_repo=event_repo,
+            project_repo=project_repo
+        )
         self.summarizer = SummarizerService()
         logger.debug("OrchestratorService initialized")
 
@@ -215,14 +221,17 @@ class OrchestratorService:
         """
         Process an incoming message from a client.
         
-        This is the main entry point for conversation handling:
-        1. Load project settings
-        2. Register client/thread
-        3. Save incoming message
-        4. Emit message_received event
-        5. Execute agent workflow
-        6. Handle escalation or return AI response
-        7. Emit ai_replied or ticket_created event
+        This is the main entry point for conversation handling.
+        Steps:
+          1. Register client/thread.
+          2. Save user message and emit message_received event.
+          3. Acquire thread lock to prevent concurrent processing.
+          4. Build initial AgentState with all context.
+          5. Retrieve appropriate graph for project.
+          6. Invoke graph with state.
+          7. If graph sent the message (message_sent=True), return empty string.
+          8. Otherwise, return the response_text for the router to send.
+          9. Release lock.
         
         Args:
             project_id: UUID проекта в строковом формате.
@@ -230,31 +239,29 @@ class OrchestratorService:
             text: Текст сообщения.
         
         Returns:
-            Response text to send back to the client.
+            Response text to send back to the client, or empty string if already sent.
         """
         logger.info(
             "Processing message",
             extra={"project_id": project_id, "chat_id": chat_id, "text_preview": text[:50]}
         )
         
-        # 0. Ensure we have a thread ID before locking (need client/thread)
-        # 1. Register client/thread (outside lock? but lock is per thread, so we need thread_id)
+        # 1. Register client and thread
         client_id = await self.threads.get_or_create_client(project_id, chat_id)
         thread_id = await self.threads.get_active_thread(client_id) or await self.threads.create_thread(client_id)
         thread_id_str = str(thread_id)
         
-        # 2. Acquire Redis lock for this thread to prevent concurrent processing
+        # 2. Acquire Redis lock for this thread
         lock_acquired = await acquire_thread_lock(thread_id_str)
         if not lock_acquired:
-            logger.warning("Could not acquire lock for thread, returning retry later message", extra={"thread_id": thread_id_str})
-            # Could also wait and retry, but for simplicity return a message
+            logger.warning("Could not acquire lock for thread", extra={"thread_id": thread_id_str})
             return "⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите."
 
         try:
             # 3. Save user message
             await self.threads.add_message(thread_id, role="user", content=text)
 
-            # 4. Emit event: message_received
+            # 4. Emit message_received event
             await self._emit_event(
                 stream_id=thread_id_str,
                 project_id=project_id,
@@ -266,125 +273,62 @@ class OrchestratorService:
                 }
             )
 
-            # 5. Load state for the new pipeline
-            #    - client profile (from users table, if any)
-            #    - recent messages
-            #    - conversation summary
-            #    - saved state_json
-            client_profile = None  # TODO: load from users table when CRM tools are ready
+            # 5. Load context for state
             recent_messages = await self.threads.get_messages_for_langgraph(thread_id)
-            # Limit recent messages for context
             if len(recent_messages) > self.RECENT_MESSAGES_LIMIT:
                 recent_messages = recent_messages[-self.RECENT_MESSAGES_LIMIT:]
-            conversation_summary = await self.threads.get_summary(thread_id) if hasattr(self.threads, 'get_summary') else None
+            
+            conversation_summary = None
+            if hasattr(self.threads, 'get_summary'):
+                conversation_summary = await self.threads.get_summary(thread_id)
+            
             saved_state = await self.threads.get_state_json(thread_id_str)
 
-            # 6. Build initial AgentState (extended version)
+            # 6. Build initial AgentState
             state = AgentState(
-                messages=[],  # will be filled by graph
+                messages=[],
                 project_id=project_id,
                 thread_id=thread_id_str,
                 escalation_requested=False,
                 tool_calls=None,
-                # new fields
                 user_input=text,
-                client_profile=client_profile,
+                client_profile=None,
                 conversation_summary=conversation_summary,
                 history=recent_messages,
-                knowledge_chunks=None,  # will be filled by nodes
+                knowledge_chunks=None,
                 decision=None,
                 tool_name=None,
                 tool_args=None,
                 tool_result=None,
                 response_text=None,
                 requires_human=False,
-                confidence=None
+                confidence=None,
+                chat_id=chat_id
             )
 
-            # 7. Get appropriate graph for this project
+            # 7. Get graph for project
             graph = await self._get_graph_for_project(project_id)
             if graph is None:
                 logger.error("Failed to load graph for project", extra={"project_id": project_id})
                 return "Произошла ошибка обработки запроса."
 
-            # 8. Run the graph
-            # TODO: Replace with new graph when ready; currently still using old graph
-            # For now, we call old graph with minimal state (as before) but also pass the full state
-            # The old graph expects "messages" list; we build it from system prompt + summary + recent
-            # We'll keep the old logic for compatibility until new graph is integrated.
-            project_settings = await self.projects.get_project_settings(project_id)
-            sys_prompt = project_settings.get('system_prompt', "Ты помощник.")
-            messages = [SystemMessage(content=sys_prompt)]
-            if conversation_summary:
-                messages.append(SystemMessage(content=f"Краткое содержание предыдущего диалога:\n{conversation_summary}"))
-            for m in recent_messages:
-                if m['role'] == 'user':
-                    messages.append(HumanMessage(content=m['content']))
-                elif m['role'] == 'assistant':
-                    messages.append(AIMessage(content=m['content']))
-            # Add current user message (already saved, but include in messages for graph)
-            # Actually the current message is in recent_messages? recent_messages includes all messages including the just saved user?
-            # recent_messages includes all, so it already contains the current user message. Good.
-            
-            result = await graph.ainvoke({
-                "messages": messages,
-                "project_id": project_id,
-                "thread_id": thread_id_str,
-                "escalation_requested": False
-            })
+            # 8. Execute graph
+            result_state = await graph.ainvoke(state)
 
-            # 9. Handle escalation
-            if result.get("escalation_requested"):
-                await self.threads.update_status(thread_id, ThreadStatus.MANUAL)
-                await self.queue_repo.enqueue(
-                    task_type="notify_manager",
-                    payload={
-                        "thread_id": thread_id_str,
-                        "chat_id": chat_id,
-                        "message": text
-                    }
-                )
-                await self._emit_event(
-                    stream_id=thread_id_str,
-                    project_id=project_id,
-                    event_type="ticket_created",
-                    payload={
-                        "reason": "User requested human help or AI could not answer",
-                        "manager_notified": True
-                    }
-                )
-                response = "Ваш вопрос передан менеджеру, ожидайте ответа."
-                await self.threads.add_message(thread_id, role="assistant", content=response)
-                # Also save final state? Not needed for escalation.
-                return response
+            # 9. Determine if message was already sent by the graph
+            if result_state.get("message_sent"):
+                logger.debug("Message already sent by graph, returning empty", extra={"thread_id": thread_id_str})
+                return ""
 
-            # 10. Extract AI response
-            ai_text = result["messages"][-1].content
-            await self.threads.add_message(thread_id, role="assistant", content=ai_text)
-
-            # 11. Emit ai_replied event
-            await self._emit_event(
-                stream_id=thread_id_str,
-                project_id=project_id,
-                event_type="ai_replied",
-                payload={
-                    "text": ai_text,
-                    "model": settings.GROQ_MODEL if hasattr(settings, 'GROQ_MODEL') else 'unknown'
-                }
-            )
-
-            # 12. Optionally trigger summarization if message count exceeds threshold
-            if len(recent_messages) > self.SUMMARY_THRESHOLD:
-                asyncio.create_task(self._summarize_history(thread_id_str))
-                logger.debug("Scheduled background summarization", extra={"thread_id": thread_id_str})
-
-            # 13. Save final state (if needed for future)
-            # We could save the state after graph execution, but current graph doesn't produce full state.
-            # We'll skip for now; when new graph is integrated, we'll save state_json.
-            # await self.threads.save_state_json(thread_id_str, state_dict)
+            # 10. Otherwise, return response_text for router to send
+            response_text = result_state.get("response_text")
+            if not response_text:
+                logger.warning("Graph did not produce response_text, using fallback",
+                               extra={"thread_id": thread_id_str})
+                response_text = "Извините, не удалось сформировать ответ."
 
             logger.info("Message processed successfully", extra={"thread_id": thread_id_str})
-            return ai_text
+            return response_text
 
         finally:
             # Always release lock

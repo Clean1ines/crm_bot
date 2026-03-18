@@ -37,8 +37,8 @@ def create_responder_node(tool_registry: ToolRegistry):
           - thread_id: str (for logging)
 
         Returns a dict with updates to the state:
-          - empty dict on success
-          - if sending fails: {"requires_human": True, "response_text": fallback}
+          - on success: {"message_sent": True, "response_text": None} (clears response_text)
+          - if sending fails: {"requires_human": True, "response_text": fallback message}
         """
         chat_id = state.get("chat_id")
         if not chat_id:
@@ -81,7 +81,8 @@ def create_responder_node(tool_registry: ToolRegistry):
             )
             if result.get("ok"):
                 logger.info("Message sent successfully", extra={"chat_id": chat_id})
-                return {}  # no state changes needed
+                # Message sent, clear response_text to avoid double-send
+                return {"message_sent": True, "response_text": None}
             else:
                 logger.error("Telegram send failed", extra={"chat_id": chat_id, "result": result})
                 return {
