@@ -9,6 +9,7 @@ import httpx
 
 from src.core.logging import get_logger
 from src.services.orchestrator import OrchestratorService
+from src.services.redis_client import get_redis_client
 
 logger = get_logger(__name__)
 
@@ -23,6 +24,8 @@ async def process_client_update(
     Process incoming message from a client (end-user).
     Extracts text and chat_id, calls Orchestrator, and sends response.
     
+    Implements idempotency via Redis: stores processed update_id to avoid duplicates.
+    
     Args:
         update: Telegram Update object.
         project_id: UUID of the project.
@@ -32,6 +35,23 @@ async def process_client_update(
     Returns:
         Dict {"ok": True} on success.
     """
+    # Extract update_id for idempotency check
+    update_id = update.get("update_id")
+    if update_id is not None:
+        try:
+            redis = await get_redis_client()
+            key = f"processed_update:{update_id}"
+            # Check if already processed
+            exists = await redis.exists(key)
+            if exists:
+                logger.debug("Duplicate update ignored", extra={"update_id": update_id})
+                return {"ok": True}
+            # Mark as processed with TTL (1 hour = 3600 seconds)
+            await redis.setex(key, 3600, "1")
+        except Exception as e:
+            # Redis unavailable – log warning and continue (risk of duplicate)
+            logger.warning("Redis unavailable for idempotency check", extra={"error": str(e)})
+
     if "message" not in update:
         # Ignore non-message updates (edits, channel posts) for clients
         return {"ok": True}
