@@ -10,6 +10,7 @@ These tools wrap existing repository functions while conforming to the
 Tool interface for dynamic execution from canvas workflows.
 """
 
+import httpx
 from typing import Any, Dict, Optional
 
 from src.core.logging import get_logger
@@ -345,3 +346,345 @@ class EscalateTool(Tool):
                 f"Escalation failed: {str(e)}",
                 {"project_id": project_id, "thread_id": thread_id}
             )
+
+
+class CRMGetUserTool(Tool):
+    """
+    Tool to retrieve user information from the CRM (users table) by telegram_id or email.
+    
+    Usage:
+    {
+        "tool": "crm.get_user",
+        "args": {"telegram_id": 123456789}
+    }
+    or
+    {
+        "tool": "crm.get_user",
+        "args": {"email": "user@example.com"}
+    }
+    
+    Context required:
+    - project_id: UUID of the project.
+    
+    Returns:
+    {
+        "found": true,
+        "user": {
+            "id": "uuid",
+            "telegram_id": 123456789,
+            "username": "john_doe",
+            "full_name": "John Doe",
+            "email": "john@example.com",
+            "company": "Acme Inc",
+            "phone": "+1234567890",
+            "metadata": {}
+        }
+    }
+    or {"found": false, "user": null}
+    """
+    
+    name = "crm.get_user"
+    description = "Retrieve user information from CRM by telegram_id or email."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "telegram_id": {"type": "integer", "description": "Telegram chat ID"},
+            "email": {"type": "string", "format": "email", "description": "Email address"}
+        },
+        "oneOf": [
+            {"required": ["telegram_id"]},
+            {"required": ["email"]}
+        ],
+        "additionalProperties": False
+    }
+    
+    def __init__(self, pool):
+        self._pool = pool
+        logger.debug("CRMGetUserTool initialized")
+    
+    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        project_id = self._require_context_field(context, "project_id")
+        
+        telegram_id = args.get("telegram_id")
+        email = args.get("email")
+        
+        async with self._pool.acquire() as conn:
+            if telegram_id:
+                row = await conn.fetchrow(
+                    "SELECT id, telegram_id, username, full_name, email, company, phone, metadata "
+                    "FROM users WHERE project_id = $1 AND telegram_id = $2",
+                    project_id, telegram_id
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT id, telegram_id, username, full_name, email, company, phone, metadata "
+                    "FROM users WHERE project_id = $1 AND email = $2",
+                    project_id, email
+                )
+        
+        if not row:
+            return {"found": False, "user": None}
+        
+        user = dict(row)
+        user["id"] = str(user["id"])  # UUID to string
+        return {"found": True, "user": user}
+
+
+class CRMCreateUserTool(Tool):
+    """
+    Tool to create a new user record in the CRM (users table).
+    
+    Usage:
+    {
+        "tool": "crm.create_user",
+        "args": {
+            "telegram_id": 123456789,
+            "username": "john_doe",
+            "first_name": "John",
+            "last_name": "Doe",
+            "email": "john@example.com",
+            "company": "Acme Inc",
+            "phone": "+1234567890",
+            "metadata": {"industry": "ecommerce"}
+        }
+    }
+    
+    Context required:
+    - project_id: UUID of the project.
+    
+    Returns:
+    {
+        "success": true,
+        "user_id": "uuid"
+    }
+    """
+    
+    name = "crm.create_user"
+    description = "Create a new user/lead in the CRM."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "telegram_id": {"type": "integer", "description": "Telegram chat ID"},
+            "username": {"type": "string", "description": "Telegram username"},
+            "first_name": {"type": "string", "description": "First name"},
+            "last_name": {"type": "string", "description": "Last name"},
+            "email": {"type": "string", "format": "email", "description": "Email address"},
+            "company": {"type": "string", "description": "Company name"},
+            "phone": {"type": "string", "description": "Phone number"},
+            "metadata": {"type": "object", "description": "Additional metadata"}
+        },
+        "required": ["telegram_id"],
+        "additionalProperties": False
+    }
+    
+    def __init__(self, pool):
+        self._pool = pool
+        logger.debug("CRMCreateUserTool initialized")
+    
+    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        project_id = self._require_context_field(context, "project_id")
+        
+        telegram_id = args["telegram_id"]
+        username = args.get("username")
+        first_name = args.get("first_name", "")
+        last_name = args.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip() if first_name or last_name else None
+        email = args.get("email")
+        company = args.get("company")
+        phone = args.get("phone")
+        metadata = args.get("metadata", {})
+        
+        async with self._pool.acquire() as conn:
+            # Check if user already exists
+            existing = await conn.fetchval(
+                "SELECT id FROM users WHERE project_id = $1 AND telegram_id = $2",
+                project_id, telegram_id
+            )
+            if existing:
+                return {"success": False, "error": "User already exists", "user_id": str(existing)}
+            
+            # Insert new user
+            user_id = await conn.fetchval("""
+                INSERT INTO users (project_id, telegram_id, username, full_name, email, company, phone, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id
+            """, project_id, telegram_id, username, full_name, email, company, phone, metadata)
+            
+            return {"success": True, "user_id": str(user_id)}
+
+
+class CRMCollectProfileTool(Tool):
+    """
+    Tool that returns a list of fields to collect during onboarding.
+    Does not write to database; used for orchestration.
+    
+    Usage:
+    {
+        "tool": "crm.collect_profile",
+        "args": {"stage": "onboarding_step_1"}
+    }
+    
+    Returns:
+    {
+        "asking_fields": ["company_name", "industry", "monthly_orders", "crm_used", "api_keys_needed"]
+    }
+    """
+    
+    name = "crm.collect_profile"
+    description = "Return list of profile fields to collect from user."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "stage": {"type": "string", "description": "Onboarding stage"}
+        },
+        "additionalProperties": False
+    }
+    
+    def __init__(self):
+        logger.debug("CRMCollectProfileTool initialized")
+    
+    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        # For now, return static list
+        return {
+            "asking_fields": [
+                "company_name",
+                "industry",
+                "monthly_orders",
+                "crm_used",
+                "api_keys_needed"
+            ]
+        }
+
+
+class TicketCreateTool(Tool):
+    """
+    Tool to create a support ticket/task in the tasks table.
+    
+    Usage:
+    {
+        "tool": "ticket.create",
+        "args": {
+            "title": "Request: custom integration",
+            "description": "User requests Postgres + OAuth",
+            "priority": "high"
+        }
+    }
+    
+    Context required:
+    - project_id: UUID
+    - thread_id: UUID (optional but recommended)
+    - user_id: UUID (client id from threads)
+    
+    Returns:
+    {
+        "ticket_id": "uuid",
+        "status": "open"
+    }
+    """
+    
+    name = "ticket.create"
+    description = "Create a support ticket/task for managers."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Short title", "maxLength": 255},
+            "description": {"type": "string", "description": "Detailed description"},
+            "priority": {"type": "string", "enum": ["low", "medium", "high"], "default": "medium"}
+        },
+        "required": ["title"],
+        "additionalProperties": False
+    }
+    
+    def __init__(self, pool):
+        self._pool = pool
+        logger.debug("TicketCreateTool initialized")
+    
+    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        project_id = self._require_context_field(context, "project_id")
+        thread_id = context.get("thread_id")
+        user_id = context.get("user_id")  # client UUID
+        
+        title = args["title"]
+        description = args.get("description", "")
+        priority = args.get("priority", "medium")
+        
+        async with self._pool.acquire() as conn:
+            ticket_id = await conn.fetchval("""
+                INSERT INTO tasks (project_id, thread_id, client_id, title, description, priority, status)
+                VALUES ($1, $2, $3, $4, $5, $6, 'open')
+                RETURNING id
+            """, project_id, thread_id, user_id, title, description, priority)
+            
+            return {"ticket_id": str(ticket_id), "status": "open"}
+
+
+class TelegramSendMessageTool(Tool):
+    """
+    Tool to send a message via the project's bot using Telegram API.
+    
+    Usage:
+    {
+        "tool": "telegram.send_message",
+        "args": {
+            "chat_id": 123456789,
+            "text": "Hello, world!",
+            "parse_mode": "Markdown"
+        }
+    }
+    
+    Context required:
+    - project_id: UUID (to fetch bot token)
+    
+    Returns:
+    {
+        "ok": true,
+        "message_id": 12345
+    }
+    """
+    
+    name = "telegram.send_message"
+    description = "Send a message to a Telegram user via the project's bot."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "chat_id": {"type": "integer", "description": "Telegram chat ID"},
+            "text": {"type": "string", "description": "Message text"},
+            "parse_mode": {"type": "string", "enum": ["Markdown", "HTML"], "default": "Markdown"}
+        },
+        "required": ["chat_id", "text"],
+        "additionalProperties": False
+    }
+    
+    def __init__(self, project_repo):
+        self._project_repo = project_repo
+        logger.debug("TelegramSendMessageTool initialized")
+    
+    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        project_id = self._require_context_field(context, "project_id")
+        
+        chat_id = args["chat_id"]
+        text = args["text"]
+        parse_mode = args.get("parse_mode", "Markdown")
+        
+        # Fetch bot token
+        bot_token = await self._project_repo.get_bot_token(project_id)
+        if not bot_token:
+            raise ToolExecutionError(self.name, "No bot token configured for project")
+        
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": parse_mode
+        }
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=10)
+            if resp.status_code != 200:
+                error_data = resp.json()
+                raise ToolExecutionError(
+                    self.name,
+                    f"Telegram API error: {error_data.get('description', 'Unknown error')}"
+                )
+            result = resp.json()
+            return {"ok": result.get("ok", False), "message_id": result.get("result", {}).get("message_id")}

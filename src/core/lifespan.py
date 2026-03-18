@@ -112,6 +112,7 @@ async def lifespan(app: FastAPI):
     - Initialize database pool
     - Initialize ToolRegistry with built-in tools
     - Initialize all repositories (project, thread, queue, event, template, workflow)
+    - Register additional tools (CRM, ticket, telegram)
     - Create OrchestratorService with all dependencies
     
     On shutdown:
@@ -164,6 +165,30 @@ async def lifespan(app: FastAPI):
         logger.info("WorkflowRepository initialized")
     except ImportError:
         logger.debug("WorkflowRepository not available (migration 011 not applied yet)")
+    
+    # Register new CRM and ticket tools
+    from src.tools.builtins import (
+        CRMGetUserTool, CRMCreateUserTool, CRMCollectProfileTool,
+        TicketCreateTool, TelegramSendMessageTool
+    )
+    
+    # Note: CRMCollectProfileTool does not need db pool
+    tool_registry.register(CRMCollectProfileTool())
+    logger.info("Registered CRMCollectProfileTool")
+    
+    # Tools requiring pool
+    tool_registry.register(CRMGetUserTool(pool))
+    logger.info("Registered CRMGetUserTool")
+    
+    tool_registry.register(CRMCreateUserTool(pool))
+    logger.info("Registered CRMCreateUserTool")
+    
+    tool_registry.register(TicketCreateTool(pool))
+    logger.info("Registered TicketCreateTool")
+    
+    # TelegramSendMessageTool needs project_repo
+    tool_registry.register(TelegramSendMessageTool(project_repo))
+    logger.info("Registered TelegramSendMessageTool")
     
     # Create orchestrator with ALL dependencies
     orchestrator = OrchestratorService(
