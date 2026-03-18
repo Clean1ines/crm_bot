@@ -7,12 +7,21 @@ including bot tokens, manager settings, and workflow template tracking.
 
 import uuid
 import asyncpg
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 from src.core.logging import get_logger
 from src.utils.encryption import encrypt_token, decrypt_token
 
 logger = get_logger(__name__)
+
+
+def _ensure_uuid(project_id: Union[str, uuid.UUID]) -> uuid.UUID:
+    """
+    Convert project_id to UUID object if it's a string, return as is if already UUID.
+    """
+    if isinstance(project_id, uuid.UUID):
+        return project_id
+    return uuid.UUID(project_id)
 
 
 class ProjectRepository:
@@ -66,19 +75,19 @@ class ProjectRepository:
     # ------------------------------------------------------------------
     # Public methods - Core project settings
     # ------------------------------------------------------------------
-    async def get_project_settings(self, project_id: str) -> Dict[str, Any]:
+    async def get_project_settings(self, project_id: Union[str, uuid.UUID]) -> Dict[str, Any]:
         """
         Возвращает настройки проекта: system_prompt, bot_token, webhook_url,
         manager_bot_token, webhook_secret и список manager_chat_ids.
         Если проект не найден, возвращает пустой словарь.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             Dict с настройками проекта или пустой dict если проект не найден.
         """
-        logger.info("Fetching project settings", extra={"project_id": project_id})
+        logger.info("Fetching project settings", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             # Получаем основные поля проекта
             row = await conn.fetchrow("""
@@ -86,9 +95,9 @@ class ProjectRepository:
                        webhook_secret, template_slug, is_pro_mode
                 FROM projects
                 WHERE id = $1
-            """, uuid.UUID(project_id))
+            """, _ensure_uuid(project_id))
             if not row:
-                logger.warning("Project not found", extra={"project_id": project_id})
+                logger.warning("Project not found", extra={"project_id": str(project_id)})
                 return {}
 
             settings = dict(row)
@@ -100,182 +109,182 @@ class ProjectRepository:
             manager_rows = await conn.fetch("""
                 SELECT manager_chat_id FROM project_managers
                 WHERE project_id = $1
-            """, uuid.UUID(project_id))
+            """, _ensure_uuid(project_id))
             settings["manager_chat_ids"] = [r["manager_chat_id"] for r in manager_rows]
 
-            logger.info("Project settings retrieved", extra={"project_id": project_id})
+            logger.info("Project settings retrieved", extra={"project_id": str(project_id)})
             return settings
 
-    async def get_bot_token(self, project_id: str) -> Optional[str]:
+    async def get_bot_token(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
         """
         Возвращает только bot_token для проекта (расшифрованный).
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             Расшифрованный токен бота или None.
         """
-        logger.info("Fetching bot token", extra={"project_id": project_id})
+        logger.info("Fetching bot token", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             encrypted = await conn.fetchval("""
                 SELECT bot_token FROM projects WHERE id = $1
-            """, uuid.UUID(project_id))
+            """, _ensure_uuid(project_id))
             token = self._decrypt_if_present(encrypted)
             if token:
-                logger.info("Bot token found", extra={"project_id": project_id})
+                logger.info("Bot token found", extra={"project_id": str(project_id)})
             else:
-                logger.warning("No bot token found", extra={"project_id": project_id})
+                logger.warning("No bot token found", extra={"project_id": str(project_id)})
             return token
 
-    async def set_bot_token(self, project_id: str, token: str) -> None:
+    async def set_bot_token(self, project_id: Union[str, uuid.UUID], token: str) -> None:
         """
         Устанавливает bot_token для проекта (шифрует перед сохранением).
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             token: Токен бота для шифрования и сохранения.
         """
-        logger.info("Setting bot token", extra={"project_id": project_id})
+        logger.info("Setting bot token", extra={"project_id": str(project_id)})
         encrypted = self._encrypt_if_present(token)
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE projects SET bot_token = $1, updated_at = NOW()
                 WHERE id = $2
-            """, encrypted, uuid.UUID(project_id))
+            """, encrypted, _ensure_uuid(project_id))
 
-    async def get_manager_bot_token(self, project_id: str) -> Optional[str]:
+    async def get_manager_bot_token(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
         """
         Возвращает manager_bot_token для проекта (расшифрованный).
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             Расшифрованный токен менеджерского бота или None.
         """
-        logger.info("Fetching manager bot token", extra={"project_id": project_id})
+        logger.info("Fetching manager bot token", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             encrypted = await conn.fetchval("""
                 SELECT manager_bot_token FROM projects WHERE id = $1
-            """, uuid.UUID(project_id))
+            """, _ensure_uuid(project_id))
             token = self._decrypt_if_present(encrypted)
             if token:
-                logger.info("Manager bot token found", extra={"project_id": project_id})
+                logger.info("Manager bot token found", extra={"project_id": str(project_id)})
             else:
-                logger.warning("No manager bot token found", extra={"project_id": project_id})
+                logger.warning("No manager bot token found", extra={"project_id": str(project_id)})
             return token
 
-    async def set_manager_bot_token(self, project_id: str, token: str) -> None:
+    async def set_manager_bot_token(self, project_id: Union[str, uuid.UUID], token: str) -> None:
         """
         Устанавливает manager_bot_token для проекта (шифрует перед сохранением).
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             token: Токен менеджерского бота для шифрования и сохранения.
         """
-        logger.info("Setting manager bot token", extra={"project_id": project_id})
+        logger.info("Setting manager bot token", extra={"project_id": str(project_id)})
         encrypted = self._encrypt_if_present(token)
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE projects SET manager_bot_token = $1, updated_at = NOW()
                 WHERE id = $2
-            """, encrypted, uuid.UUID(project_id))
+            """, encrypted, _ensure_uuid(project_id))
 
-    async def get_webhook_secret(self, project_id: str) -> Optional[str]:
+    async def get_webhook_secret(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
         """
         Возвращает webhook_secret для проекта.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             Webhook secret или None.
         """
-        logger.debug("Fetching webhook secret", extra={"project_id": project_id})
+        logger.debug("Fetching webhook secret", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             secret = await conn.fetchval("""
                 SELECT webhook_secret FROM projects WHERE id = $1
-            """, uuid.UUID(project_id))
+            """, _ensure_uuid(project_id))
             return secret
 
-    async def set_webhook_secret(self, project_id: str, secret: str) -> None:
+    async def set_webhook_secret(self, project_id: Union[str, uuid.UUID], secret: str) -> None:
         """
         Устанавливает webhook_secret для проекта.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             secret: Webhook secret для сохранения.
         """
-        logger.info("Setting webhook secret", extra={"project_id": project_id})
+        logger.info("Setting webhook secret", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE projects SET webhook_secret = $1, updated_at = NOW()
                 WHERE id = $2
-            """, secret, uuid.UUID(project_id))
+            """, secret, _ensure_uuid(project_id))
 
     # ------------------------------------------------------------------
     # Manager management
     # ------------------------------------------------------------------
-    async def get_managers(self, project_id: str) -> List[str]:
+    async def get_managers(self, project_id: Union[str, uuid.UUID]) -> List[str]:
         """
         Возвращает список manager_chat_id для проекта.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             Список chat_id менеджеров.
         """
-        logger.debug("Fetching managers", extra={"project_id": project_id})
+        logger.debug("Fetching managers", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT manager_chat_id FROM project_managers
                 WHERE project_id = $1
-            """, uuid.UUID(project_id))
+            """, _ensure_uuid(project_id))
             return [r["manager_chat_id"] for r in rows]
 
-    async def add_manager(self, project_id: str, manager_chat_id: str) -> None:
+    async def add_manager(self, project_id: Union[str, uuid.UUID], manager_chat_id: str) -> None:
         """
         Добавляет менеджера (chat_id) в список менеджеров проекта.
         Игнорирует дубликаты.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             manager_chat_id: Telegram chat_id менеджера.
         """
-        logger.info("Adding manager", extra={"project_id": project_id, "manager_chat_id": manager_chat_id})
+        logger.info("Adding manager", extra={"project_id": str(project_id), "manager_chat_id": manager_chat_id})
         async with self.pool.acquire() as conn:
             try:
                 await conn.execute("""
                     INSERT INTO project_managers (project_id, manager_chat_id)
                     VALUES ($1, $2)
-                """, uuid.UUID(project_id), manager_chat_id)
+                """, _ensure_uuid(project_id), manager_chat_id)
             except asyncpg.exceptions.UniqueViolationError:
                 logger.warning(
                     "Manager already exists",
-                    extra={"project_id": project_id, "manager_chat_id": manager_chat_id}
+                    extra={"project_id": str(project_id), "manager_chat_id": manager_chat_id}
                 )
 
-    async def remove_manager(self, project_id: str, manager_chat_id: str) -> None:
+    async def remove_manager(self, project_id: Union[str, uuid.UUID], manager_chat_id: str) -> None:
         """
         Удаляет менеджера (chat_id) из списка менеджеров проекта.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             manager_chat_id: Telegram chat_id менеджера для удаления.
         """
-        logger.info("Removing manager", extra={"project_id": project_id, "manager_chat_id": manager_chat_id})
+        logger.info("Removing manager", extra={"project_id": str(project_id), "manager_chat_id": manager_chat_id})
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 DELETE FROM project_managers
                 WHERE project_id = $1 AND manager_chat_id = $2
-            """, uuid.UUID(project_id), manager_chat_id)
+            """, _ensure_uuid(project_id), manager_chat_id)
 
     # ------------------------------------------------------------------
     # Template & Pro mode management
     # ------------------------------------------------------------------
-    async def apply_template(self, project_id: str, template_slug: str) -> bool:
+    async def apply_template(self, project_id: Union[str, uuid.UUID], template_slug: str) -> bool:
         """
         Применяет шаблон воркфлоу к проекту.
         
@@ -283,7 +292,7 @@ class ProjectRepository:
         использовать предопределённый граф из workflow_templates.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             template_slug: Уникальный slug шаблона (например, 'support', 'leads').
         
         Returns:
@@ -291,7 +300,7 @@ class ProjectRepository:
         """
         logger.info(
             "Applying template to project",
-            extra={"project_id": project_id, "template_slug": template_slug}
+            extra={"project_id": str(project_id), "template_slug": template_slug}
         )
         
         # Проверяем существование шаблона
@@ -303,7 +312,7 @@ class ProjectRepository:
             if not template_exists:
                 logger.warning(
                     "Template not found",
-                    extra={"project_id": project_id, "template_slug": template_slug}
+                    extra={"project_id": str(project_id), "template_slug": template_slug}
                 )
                 return False
             
@@ -312,68 +321,68 @@ class ProjectRepository:
                 UPDATE projects 
                 SET template_slug = $1, updated_at = NOW()
                 WHERE id = $2
-            """, template_slug, uuid.UUID(project_id))
+            """, template_slug, _ensure_uuid(project_id))
             
             logger.info(
                 "Template applied successfully",
-                extra={"project_id": project_id, "template_slug": template_slug}
+                extra={"project_id": str(project_id), "template_slug": template_slug}
             )
             return True
 
-    async def set_pro_mode(self, project_id: str, enabled: bool) -> None:
+    async def set_pro_mode(self, project_id: Union[str, uuid.UUID], enabled: bool) -> None:
         """
         Включает или отключает Pro mode для проекта.
         
         Pro mode даёт доступ к custom workflow canvas и расширенным функциям.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
             enabled: True для включения Pro mode, False для отключения.
         """
         logger.info(
             "Setting pro mode",
-            extra={"project_id": project_id, "enabled": enabled}
+            extra={"project_id": str(project_id), "enabled": enabled}
         )
         async with self.pool.acquire() as conn:
             await conn.execute("""
                 UPDATE projects 
                 SET is_pro_mode = $1, updated_at = NOW()
                 WHERE id = $2
-            """, enabled, uuid.UUID(project_id))
+            """, enabled, _ensure_uuid(project_id))
 
-    async def get_template_slug(self, project_id: str) -> Optional[str]:
+    async def get_template_slug(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
         """
         Возвращает slug применённого шаблона для проекта.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             Slug шаблона или None если шаблон не применён.
         """
-        logger.debug("Getting template slug", extra={"project_id": project_id})
+        logger.debug("Getting template slug", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             slug = await conn.fetchval(
                 "SELECT template_slug FROM projects WHERE id = $1",
-                uuid.UUID(project_id)
+                _ensure_uuid(project_id)
             )
             return slug
 
-    async def get_is_pro_mode(self, project_id: str) -> bool:
+    async def get_is_pro_mode(self, project_id: Union[str, uuid.UUID]) -> bool:
         """
         Проверяет, включён ли Pro mode для проекта.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             True если Pro mode включён, False иначе.
         """
-        logger.debug("Checking pro mode", extra={"project_id": project_id})
+        logger.debug("Checking pro mode", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             result = await conn.fetchval(
                 "SELECT is_pro_mode FROM projects WHERE id = $1",
-                uuid.UUID(project_id)
+                _ensure_uuid(project_id)
             )
             return bool(result)
 
@@ -407,22 +416,79 @@ class ProjectRepository:
         return None
 
     # ------------------------------------------------------------------
+    # Manager webhook secret
+    # ------------------------------------------------------------------
+    async def get_manager_webhook_secret(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
+        """
+        Возвращает manager_webhook_secret для проекта.
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+        
+        Returns:
+            Секретный токен или None.
+        """
+        logger.debug("Fetching manager webhook secret", extra={"project_id": str(project_id)})
+        async with self.pool.acquire() as conn:
+            secret = await conn.fetchval("""
+                SELECT manager_webhook_secret FROM projects WHERE id = $1
+            """, _ensure_uuid(project_id))
+            return secret
+
+    async def set_manager_webhook_secret(self, project_id: Union[str, uuid.UUID], secret: str) -> None:
+        """
+        Устанавливает manager_webhook_secret для проекта.
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+            secret: Секретный токен для сохранения.
+        """
+        logger.info("Setting manager webhook secret", extra={"project_id": str(project_id)})
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE projects SET manager_webhook_secret = $1, updated_at = NOW()
+                WHERE id = $2
+            """, secret, _ensure_uuid(project_id))
+
+    async def find_project_by_manager_webhook_secret(self, secret: str) -> Optional[str]:
+        """
+        Находит проект по manager_webhook_secret.
+        
+        Args:
+            secret: Секретный токен.
+        
+        Returns:
+            project_id в виде строки или None, если не найдено.
+        """
+        logger.info("Searching project by manager webhook secret")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id FROM projects WHERE manager_webhook_secret = $1
+            """, secret)
+            if row:
+                project_id = str(row["id"])
+                logger.info("Project found by manager webhook secret", extra={"project_id": project_id})
+                return project_id
+            logger.info("No project found with given manager webhook secret")
+            return None
+
+    # ------------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------------
-    async def project_exists(self, project_id: str) -> bool:
+    async def project_exists(self, project_id: Union[str, uuid.UUID]) -> bool:
         """
         Проверяет, существует ли проект с указанным ID.
         
         Args:
-            project_id: UUID проекта в строковом формате.
+            project_id: UUID проекта в строковом формате или объект UUID.
         
         Returns:
             True если проект существует, False иначе.
         """
-        logger.debug("Checking project existence", extra={"project_id": project_id})
+        logger.debug("Checking project existence", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
             result = await conn.fetchval(
                 "SELECT 1 FROM projects WHERE id = $1", 
-                uuid.UUID(project_id)
+                _ensure_uuid(project_id)
             )
             return result is not None

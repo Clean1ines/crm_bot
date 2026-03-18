@@ -509,12 +509,16 @@ async def _set_manager_token(project_id: str, token: str, admin_chat_id: str, po
     await project_repo.set_manager_bot_token(project_id, token)
     await project_repo.add_manager(project_id, admin_chat_id)
 
+    # Generate and set manager webhook secret
+    manager_secret = uuid.uuid4().hex
+    await project_repo.set_manager_webhook_secret(project_id, manager_secret)
+
     base_url = settings.RENDER_EXTERNAL_URL or settings.PUBLIC_URL
     webhook_url = f"{base_url.rstrip('/')}/manager/webhook"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"https://api.telegram.org/bot{token}/setWebhook",
-            json={"url": webhook_url}
+            json={"url": webhook_url, "secret_token": manager_secret}
         )
         if resp.status_code != 200 or not resp.json().get("ok"):
             raise Exception(f"Manager webhook setup failed: {resp.text}")

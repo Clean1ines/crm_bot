@@ -196,7 +196,7 @@ class OrchestratorService:
                         extra={"project_id": project_id, "workflow_id": workflow_id}
                     )
                     workflow_data = await self.workflow_repo.get_by_id(
-                        uuid.UUID(workflow_id), include_graph=True
+                        workflow_id, include_graph=True
                     )
                     if workflow_data and "graph_json" in workflow_data:
                         return self._build_graph_from_json(workflow_data["graph_json"])
@@ -384,7 +384,7 @@ class OrchestratorService:
 
         # Получаем chat_id клиента
         client = await self.threads.pool.fetchrow(
-            "SELECT chat_id FROM clients WHERE id = $1", uuid.UUID(thread["client_id"])
+            "SELECT chat_id FROM clients WHERE id = $1", thread["client_id"]
         )
         if not client:
             raise RuntimeError(f"Client not found for thread {thread_id}")

@@ -89,18 +89,11 @@ async def manager_webhook(
     if not secret_token:
         raise HTTPException(status_code=401, detail="Missing secret token")
 
-    # Find project by manager_bot_token (secret_token is the token itself, unencrypted)
-    # Note: manager_bot_token is stored encrypted, but we compare with the raw token from Telegram.
-    # We need to decrypt all manager tokens and compare.
-    # Simpler: we fetch all projects and decrypt tokens in memory (but could be heavy).
-    # Alternative: use a separate secret for manager webhooks. But spec uses the token itself.
-    # We'll use a repository method to find project by manager token (decrypting in SQL).
-    # For now, we'll use raw SQL with decryption (assuming pgcrypto or similar).
-    # Since we don't have that, we'll iterate in Python (acceptable for small number of projects).
-
+    # Find project by manager_webhook_secret
     project_repo = ProjectRepository(pool)
-    project_id = await project_repo.find_project_by_manager_token(secret_token)
+    project_id = await project_repo.find_project_by_manager_webhook_secret(secret_token)
     if not project_id:
+        logger.warning("Invalid manager webhook secret")
         raise HTTPException(status_code=401, detail="Invalid secret token")
 
     # Get decrypted manager token for sending messages
