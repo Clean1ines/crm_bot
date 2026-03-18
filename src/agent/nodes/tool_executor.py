@@ -1,5 +1,5 @@
 """
-Tool executor node for LangGraph pipeline.
+Tool executor node for LangGraph pipeline
 
 Executes a tool using the ToolRegistry and stores the result in the state.
 Handles errors by setting requires_human=True and providing fallback response.
