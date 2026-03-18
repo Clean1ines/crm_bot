@@ -10,6 +10,7 @@ import httpx
 from src.core.logging import get_logger
 from src.services.orchestrator import OrchestratorService
 from src.services.redis_client import get_redis_client
+from src.database.models import ThreadStatus
 
 logger = get_logger(__name__)
 
@@ -53,6 +54,28 @@ async def process_manager_update(
                     f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
                     json={"callback_query_id": callback_id, "text": "✍️ Введите ваш ответ", "show_alert": False}
                 )
+            return {"ok": True}
+        
+        elif data.startswith("close:"):
+            thread_id = data.split(":", 1)[1]
+            # Update thread status to active
+            try:
+                await orchestrator.threads.update_status(thread_id, ThreadStatus.ACTIVE)
+                # Delete awaiting_reply key if exists
+                await redis.delete(f"awaiting_reply:{manager_chat_id}")
+                # Answer callback
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+                        json={"callback_query_id": callback_id, "text": "✅ Тикет закрыт", "show_alert": False}
+                    )
+            except Exception as e:
+                logger.exception("Error closing ticket", extra={"thread_id": thread_id})
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+                        json={"callback_query_id": callback_id, "text": f"❌ Ошибка: {str(e)}", "show_alert": True}
+                    )
             return {"ok": True}
         
         return {"ok": True}

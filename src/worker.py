@@ -216,12 +216,12 @@ async def _handle_notify_manager(
         )
         return False
 
-    # Build inline keyboard markup
+    # Build inline keyboard markup with two buttons: reply and close
     reply_markup = {
-        "inline_keyboard": [[{
-            "text": "✏️ Ответить",
-            "callback_data": f"reply:{thread_id}"
-        }]]
+        "inline_keyboard": [
+            [{"text": "✏️ Ответить", "callback_data": f"reply:{thread_id}"}],
+            [{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}]
+        ]
     }
 
     # Send notification to all managers

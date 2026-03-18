@@ -2,9 +2,9 @@
 Rules-based routing node for LangGraph pipeline.
 
 Applies cheap rules (no LLM) to determine the initial decision:
-- If client profile missing → COLLECT_PROFILE
 - If anger or refund keywords detected → ESCALATE
 - If simple FAQ patterns matched → RESPOND with template answer
+- If client profile missing → COLLECT_PROFILE
 - Otherwise → PROCEED_TO_LLM (go to router)
 """
 
@@ -66,9 +66,9 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
     Apply cheap routing rules to the incoming state.
 
     Rules (executed in order):
-      1. If client_profile is None -> decision = "COLLECT_PROFILE"
-      2. If anger detected -> decision = "ESCALATE", requires_human = True
-      3. If FAQ pattern matched -> decision = "RESPOND", response_text = template answer
+      1. If anger detected -> decision = "ESCALATE", requires_human = True
+      2. If FAQ pattern matched -> decision = "RESPOND", response_text = template answer
+      3. If client_profile is None -> decision = "COLLECT_PROFILE"
       4. Otherwise -> decision = "PROCEED_TO_LLM"
 
     Returns a dictionary with updates to the state (decision, response_text, requires_human).
@@ -86,12 +86,7 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
         logger.warning("rules_node called with empty user_input")
         return {"decision": "PROCEED_TO_LLM"}
 
-    # Rule 1: missing client profile
-    if client_profile is None:
-        logger.debug("Rule triggered: missing client profile -> COLLECT_PROFILE")
-        return {"decision": "COLLECT_PROFILE"}
-
-    # Rule 2: anger detection
+    # Rule 1: anger detection
     if _detect_anger(user_input):
         logger.info("Rule triggered: anger detected -> ESCALATE")
         return {
@@ -100,7 +95,7 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
             "response_text": "Извините за неудобства. Я передал ваш запрос менеджеру, он свяжется с вами в ближайшее время."
         }
 
-    # Rule 3: FAQ match
+    # Rule 2: FAQ match
     matched, answer = _match_faq(user_input)
     if matched:
         logger.debug("Rule triggered: FAQ match -> RESPOND")
@@ -109,6 +104,11 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
             "response_text": answer,
             "requires_human": False
         }
+
+    # Rule 3: missing client profile
+    if client_profile is None:
+        logger.debug("Rule triggered: missing client profile -> COLLECT_PROFILE")
+        return {"decision": "COLLECT_PROFILE"}
 
     # Default: proceed to LLM router
     logger.debug("No rule triggered, proceeding to LLM")

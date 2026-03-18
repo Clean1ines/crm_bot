@@ -258,6 +258,12 @@ class OrchestratorService:
             return "⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите."
 
         try:
+            # Check if thread is already in manual mode (manager handling)
+            thread_info = await self.threads.get_thread_with_project(thread_id_str)
+            if thread_info and thread_info["status"] == "manual":
+                logger.debug("Thread is manual, skipping agent", extra={"thread_id": thread_id_str})
+                return "⏳ Сейчас с вами общается менеджер. Пожалуйста, ожидайте ответа."
+
             # 3. Save user message
             await self.threads.add_message(thread_id, role="user", content=text)
 
@@ -407,7 +413,7 @@ class OrchestratorService:
 
         # Emit event: manager_replied
         await self._emit_event(
-            stream_id=thread_id,
+            stream_id=str(thread_id),
             project_id=project_id,
             event_type="manager_replied",
             payload={
