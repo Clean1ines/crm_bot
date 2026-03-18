@@ -1,7 +1,7 @@
 """
 LangGraph agent definition for the CRM bot.
 
-Builds a state machine graph with nodes for load_state, rules_check, router_llm,
+Builds a state machine graph with nodes for load_state, rules_check, kb_search, router_llm,
 tool_executor, escalate, responder, and persist. Uses the extended AgentState.
 """
 
@@ -15,6 +15,7 @@ from src.core.logging import get_logger
 from .state import AgentState
 from .nodes.load_state import create_load_state_node
 from .nodes.rules import rules_node
+from .nodes.kb_search import create_kb_search_node
 from .nodes.router import create_router_node
 from .nodes.tool_executor import create_tool_executor_node
 from .nodes.escalate import create_escalate_node
@@ -52,6 +53,7 @@ def create_agent(
     # Instantiate nodes with injected dependencies
     load_state_node = create_load_state_node(thread_repo, project_repo)
     # rules_node is a pure function, no factory needed
+    kb_search_node = create_kb_search_node(tool_registry)
     router_node = create_router_node()  # uses default LLM from settings
     tool_executor_node = create_tool_executor_node(tool_registry)
     escalate_node = create_escalate_node(thread_repo, queue_repo)
@@ -64,6 +66,7 @@ def create_agent(
     # Add all nodes
     workflow.add_node("load_state", load_state_node)
     workflow.add_node("rules_check", rules_node)
+    workflow.add_node("kb_search", kb_search_node)
     workflow.add_node("router_llm", router_node)
     workflow.add_node("tool_executor", tool_executor_node)
     workflow.add_node("escalate", escalate_node)
@@ -84,9 +87,12 @@ def create_agent(
             "RESPOND": "responder",
             "ESCALATE": "escalate",
             "COLLECT_PROFILE": "router_llm",   # go to LLM to decide how to collect
-            "PROCEED_TO_LLM": "router_llm",
+            "PROCEED_TO_LLM": "kb_search",     # need KB before router
         }
     )
+
+    # After KB search, go to router
+    workflow.add_edge("kb_search", "router_llm")
 
     # Conditional edges from router_llm
     workflow.add_conditional_edges(
