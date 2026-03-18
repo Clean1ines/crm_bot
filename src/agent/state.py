@@ -60,3 +60,4 @@ class AgentState(TypedDict):
     response_text: Optional[str]
     requires_human: bool  # default False, so we keep it non-optional but with default? TypedDict doesn't support defaults. We'll keep as bool and require explicit False.
     confidence: Optional[float]
+    chat_id: Optional[int]  # Telegram chat ID of the user, needed for responder
