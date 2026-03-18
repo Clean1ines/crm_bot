@@ -1,130 +1,125 @@
 """
 LangGraph agent definition for the CRM bot.
 
-Builds a state graph with agent and tool nodes.
-Supports both legacy direct tool calls and ToolRegistry-based dynamic execution.
+Builds a state machine graph with nodes for load_state, rules_check, router_llm,
+tool_executor, escalate, responder, and persist. Uses the extended AgentState.
 """
 
 from typing import Any, Dict, Optional
 
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
 from langchain_groq import ChatGroq
 
 from src.core.config import settings
 from src.core.logging import get_logger
 from .state import AgentState
-from . import tools  # импортируем модуль целиком для установки контекста
+from .nodes.load_state import create_load_state_node
+from .nodes.rules import rules_node
+from .nodes.router import create_router_node
+from .nodes.tool_executor import create_tool_executor_node
+from .nodes.escalate import create_escalate_node
+from .nodes.responder import create_responder_node
+from .nodes.persist import create_persist_node
 
 logger = get_logger(__name__)
 
 
-def create_agent(tool_registry: Optional[Any] = None):
+def create_agent(
+    tool_registry: Optional[Any] = None,
+    thread_repo=None,
+    queue_repo=None,
+    event_repo=None,
+    project_repo=None,
+    knowledge_repo=None
+):
     """
-    Create and compile the LangGraph agent.
-    
+    Create and compile the LangGraph agent (state machine version).
+
     Args:
-        tool_registry: Optional ToolRegistry instance for dynamic tool resolution.
-                      If None, uses legacy direct tool calls.
-    
+        tool_registry: ToolRegistry instance for dynamic tool execution.
+        thread_repo: ThreadRepository instance.
+        queue_repo: QueueRepository instance.
+        event_repo: Optional EventRepository for event sourcing.
+        project_repo: Optional ProjectRepository (may be used by some nodes).
+        knowledge_repo: Optional KnowledgeRepository (may be used by kb_search node,
+                       but we use tool_registry for that).
+
     Returns:
         Compiled LangGraph workflow.
     """
-    model_name = getattr(settings, 'GROQ_MODEL', 'llama-3.3-70b-versatile')
-    logger.info("Creating agent", extra={"model": model_name})
+    logger.info("Creating state machine agent")
 
-    model = ChatGroq(
-        model="llama-3.1-8b-instant",
-        temperature=0.6,
-        api_key=settings.GROQ_API_KEY,
+    # Instantiate nodes with injected dependencies
+    load_state_node = create_load_state_node(thread_repo, project_repo)
+    # rules_node is a pure function, no factory needed
+    router_node = create_router_node()  # uses default LLM from settings
+    tool_executor_node = create_tool_executor_node(tool_registry)
+    escalate_node = create_escalate_node(thread_repo, queue_repo)
+    responder_node = create_responder_node(tool_registry)
+    persist_node = create_persist_node(thread_repo, event_repo)
+
+    # Build graph
+    workflow = StateGraph(AgentState)
+
+    # Add all nodes
+    workflow.add_node("load_state", load_state_node)
+    workflow.add_node("rules_check", rules_node)
+    workflow.add_node("router_llm", router_node)
+    workflow.add_node("tool_executor", tool_executor_node)
+    workflow.add_node("escalate", escalate_node)
+    workflow.add_node("responder", responder_node)
+    workflow.add_node("persist", persist_node)
+
+    # Set entry point
+    workflow.set_entry_point("load_state")
+
+    # Edges
+    workflow.add_edge("load_state", "rules_check")
+
+    # Conditional edges from rules_check
+    workflow.add_conditional_edges(
+        "rules_check",
+        lambda state: state.get("decision", "PROCEED_TO_LLM"),
+        {
+            "RESPOND": "responder",
+            "ESCALATE": "escalate",
+            "COLLECT_PROFILE": "router_llm",   # go to LLM to decide how to collect
+            "PROCEED_TO_LLM": "router_llm",
+        }
     )
 
-    # Determine which tools to use based on registry availability
-    if tool_registry is not None:
-        # Use registry-based tools for dynamic execution
-        logger.debug("Using ToolRegistry for dynamic tool resolution")
-        tool_list = [
-            tools.search_knowledge_base,
-            tools.escalate_to_manager,
-        ]
-        # Note: In future, tools from registry can be dynamically added here
-    else:
-        # Use legacy direct tool calls
-        logger.debug("Using legacy direct tool calls")
-        tool_list = [
-            tools.search_knowledge_base,
-            tools.escalate_to_manager,
-        ]
+    # Conditional edges from router_llm
+    workflow.add_conditional_edges(
+        "router_llm",
+        lambda state: state.get("decision", "LLM_GENERATE"),
+        {
+            "RESPOND_KB": "responder",
+            "RESPOND_TEMPLATE": "responder",
+            "LLM_GENERATE": "responder",
+            "CALL_TOOL": "tool_executor",
+            "ESCALATE_TO_HUMAN": "escalate",
+        }
+    )
 
-    model_with_tools = model.bind_tools(tool_list)
+    # Edges from tool_executor
+    workflow.add_conditional_edges(
+        "tool_executor",
+        lambda state: "responder" if not state.get("requires_human") else "escalate",
+        {
+            "responder": "responder",
+            "escalate": "escalate",
+        }
+    )
 
-    async def call_model(state: AgentState) -> Dict[str, Any]:
-        """
-        Call the LLM model with current state and handle tool calls.
-        
-        Args:
-            state: Current AgentState with messages and context.
-        
-        Returns:
-            Dict with updated messages and optional escalation flag.
-        """
-        logger.debug(
-            "Agent invoked",
-            extra={
-                "project_id": state.get("project_id"),
-                "thread_id": state.get("thread_id"),
-                "message_count": len(state["messages"])
-            }
-        )
-        
-        # Устанавливаем контекст для инструментов перед вызовом (legacy support)
-        tools.set_current_context(state["project_id"], state["thread_id"])
-        
-        response = await model_with_tools.ainvoke(state["messages"])
+    # Edges from escalate
+    workflow.add_edge("escalate", "responder")
 
-        escalation = False
-        if hasattr(response, "tool_calls") and response.tool_calls:
-            for tc in response.tool_calls:
-                if tc.get("name") == "escalate_to_manager":
-                    escalation = True
-                    logger.info(
-                        "Escalation detected in tool call",
-                        extra={
-                            "project_id": state.get("project_id"),
-                            "thread_id": state.get("thread_id")
-                        }
-                    )
-                    break
-        
-        result: Dict[str, Any] = {"messages": [response]}
-        if escalation:
-            result["escalation_requested"] = True
-            
-        return result
+    # Edge from responder to persist
+    workflow.add_edge("responder", "persist")
 
-    workflow = StateGraph(AgentState)
-    workflow.add_node("agent", call_model)
-    workflow.add_node("tools", ToolNode(tool_list))
-    workflow.set_entry_point("agent")
-
-    def should_continue(state: AgentState) -> str:
-        """
-        Determine next node based on last message.
-        
-        Args:
-            state: Current AgentState.
-        
-        Returns:
-            "tools" if tool calls pending, else END.
-        """
-        last_message = state["messages"][-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            return "tools"
-        return END
-
-    workflow.add_conditional_edges("agent", should_continue)
-    workflow.add_edge("tools", "agent")
+    # Edge from persist to END
+    workflow.add_edge("persist", END)
 
     compiled = workflow.compile()
-    logger.info("Agent compiled successfully")
+    logger.info("State machine agent compiled successfully")
     return compiled
