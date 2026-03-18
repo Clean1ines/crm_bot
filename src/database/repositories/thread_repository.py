@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from ..models import ThreadStatus
 from src.core.logging import get_logger
 
@@ -151,3 +151,35 @@ class ThreadRepository:
                 WHERE id = $2
             """, summary, uuid.UUID(thread_id))
             logger.debug("Summary updated")
+
+    async def get_state_json(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Возвращает сохранённое состояние графа (state_json) для указанного треда.
+        Если состояние отсутствует, возвращает None.
+        """
+        logger.debug(f"Fetching state_json for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT state_json FROM threads WHERE id = $1
+            """, uuid.UUID(thread_id))
+            if row and row["state_json"] is not None:
+                # asyncpg возвращает JSONB как dict
+                state = row["state_json"]
+                logger.debug(f"State_json retrieved for thread {thread_id}")
+                return state
+            logger.debug(f"No state_json found for thread {thread_id}")
+            return None
+
+    async def save_state_json(self, thread_id: str, state: Dict[str, Any]) -> None:
+        """
+        Сохраняет состояние графа (state_json) для указанного треда.
+        Перезаписывает существующее состояние.
+        """
+        logger.info(f"Saving state_json for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET state_json = $1, updated_at = NOW()
+                WHERE id = $2
+            """, state, uuid.UUID(thread_id))
+            logger.debug("State_json saved")
