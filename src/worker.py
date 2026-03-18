@@ -190,17 +190,14 @@ async def _handle_notify_manager(
     message = payload.get("message")
 
     # Get thread info to find project_id
-    # FIX: thread_repo returns project_id as UUID object, no need to wrap it again
     thread_info = await thread_repo.get_thread_with_project(thread_id)
     if not thread_info:
         logger.error("Thread not found", extra={"thread_id": thread_id, "job_id": job["id"]})
         return False
     
-    # FIX: project_id is already a UUID object from asyncpg
     project_id = thread_info["project_id"]
 
     # Get manager settings for this project
-    # FIX: Pass UUID object directly, repository handles it
     project_settings = await project_repo.get_project_settings(str(project_id))
     manager_bot_token = project_settings.get("manager_bot_token")
     manager_chat_ids = project_settings.get("manager_chat_ids", [])
