@@ -57,7 +57,9 @@ def create_kb_search_node(tool_registry: ToolRegistry):
             )
             # result is expected to be {"results": [...]}
             chunks = result.get("results", [])
-            logger.debug("KB search returned %d chunks", len(chunks))
+            logger.info("KB search returned %d chunks", len(chunks), extra={"project_id": project_id, "query": query[:50]})
+            if chunks:
+                logger.debug("First result score: %f, answer: %s", chunks[0].get("score", 0), chunks[0].get("answer", "")[:50])
             return {"knowledge_chunks": chunks}
         except Exception as e:
             logger.exception("KB search failed", extra={"project_id": project_id})

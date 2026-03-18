@@ -58,7 +58,7 @@ def create_escalate_node(
                 "response_text": "Ошибка эскалации: отсутствует идентификатор диалога. Пожалуйста, обратитесь к поддержке."
             }
 
-        logger.info("Escalating thread", extra={"thread_id": thread_id, "project_id": project_id})
+        logger.info("Escalating thread", extra={"thread_id": thread_id, "project_id": project_id, "user_input": user_input[:50]})
 
         # 1. Update thread status to MANUAL
         try:
@@ -75,7 +75,7 @@ def create_escalate_node(
                 payload={
                     "thread_id": thread_id,
                     "project_id": project_id,
-                    "user_input": user_input[:200]  # limit size
+                    "message": user_input[:200]  # rename user_input to message for worker
                 }
             )
             logger.debug("Manager notification enqueued", extra={"thread_id": thread_id})
