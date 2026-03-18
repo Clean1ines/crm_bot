@@ -25,12 +25,38 @@ class AgentState(TypedDict):
         thread_id: UUID of the conversation thread (string format) for event streaming.
         escalation_requested: Boolean flag indicating if human escalation is needed.
         tool_calls: Optional list of tool call records for audit and replay.
+        
+        # New fields for enhanced pipeline
+        user_input: The original user message text.
+        client_profile: Dictionary containing client CRM data (from users table).
+        conversation_summary: Condensed summary of conversation history.
+        history: List of recent messages (as dicts) for context.
+        knowledge_chunks: Results from knowledge base search (list of chunks with scores).
+        decision: Decision made by router ("RESPOND", "TOOL", "ESCALATE", "COLLECT").
+        tool_name: Name of the tool to execute (if decision is TOOL).
+        tool_args: Arguments for the tool.
+        tool_result: Result returned by tool execution.
+        response_text: Final text response to send to user.
+        requires_human: Whether human intervention is needed.
+        confidence: Confidence score of the decision (0-1).
     """
-    # add_messages means new messages are appended to the list, not replacing it
+    # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
     project_id: str
     thread_id: str
-    # Flag indicating the agent decided to escalate the conversation to a manager
     escalation_requested: bool
-    # Optional list of tool call records for event-sourced replay and debugging
     tool_calls: Optional[List[Dict[str, Any]]]
+
+    # New pipeline fields (all optional for backward compatibility)
+    user_input: Optional[str]
+    client_profile: Optional[Dict[str, Any]]
+    conversation_summary: Optional[str]
+    history: Optional[List[Dict[str, Any]]]
+    knowledge_chunks: Optional[List[Dict[str, Any]]]
+    decision: Optional[str]  # e.g., "RESPOND", "TOOL", "ESCALATE", "COLLECT"
+    tool_name: Optional[str]
+    tool_args: Optional[Dict[str, Any]]
+    tool_result: Optional[Any]
+    response_text: Optional[str]
+    requires_human: bool  # default False, so we keep it non-optional but with default? TypedDict doesn't support defaults. We'll keep as bool and require explicit False.
+    confidence: Optional[float]
