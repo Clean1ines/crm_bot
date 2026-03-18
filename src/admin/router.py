@@ -80,12 +80,17 @@ async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Di
         
         logger.debug("Admin message received", extra={"chat_id": chat_id, "text_preview": text[:50]})
 
+        response: Optional[AdminResponse] = None
         if text.startswith("/"):
             # Command
-            response: AdminResponse = await handle_admin_command(text, pool)
+            response = await handle_admin_command(text, pool)
+            if response:
+                response_text, keyboard = response
+                if keyboard:
+                    keyboard_dict = keyboard.to_dict()
         else:
             # Step in wizard
-            response: AdminResponse = await handle_admin_step(str(chat_id), text, pool)
+            response = await handle_admin_step(str(chat_id), text, pool)
             
             # If no active step (returned None), show main menu
             if response is None:

@@ -1,6 +1,6 @@
 """
 Admin command handlers for managing projects via Telegram.
-FIXED: Delete flow with confirmation buttons, Manager creation flow if empty.
+Implements the new UI flow with main menu, project listing, and dynamic menus.
 """
 
 import uuid
@@ -8,21 +8,23 @@ import httpx
 import asyncpg
 import json
 import re
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.template_repository import TemplateRepository
+from src.database.repositories.knowledge_repository import KnowledgeRepository
 from src.core.logging import get_logger
 from src.core.config import settings
 from src.services.redis_client import get_redis_client
 from src.admin.keyboards import (
     make_main_menu_keyboard,
-    make_project_keyboard,
+    make_projects_list_keyboard,
+    make_project_dynamic_keyboard,
     make_template_keyboard,
+    make_back_keyboard,
     make_token_help_keyboard,
-    make_token_input_hint,
 )
 
 logger = get_logger(__name__)
@@ -39,20 +41,14 @@ STATE_PREFIX = "admin_state:"
 DATA_PREFIX = "admin_data:"
 
 STATE_IDLE = "idle"
-STATE_NEWPROJECT_AWAIT_NAME = "newproject:await_name"
-STATE_NEWPROJECT_AWAIT_TEMPLATE = "newproject:await_template"
-STATE_SETTOKEN_AWAIT_PROJECT = "settoken:await_project"
-STATE_SETTOKEN_AWAIT_TOKEN = "settoken:await_token"
-STATE_SETMANAGER_AWAIT_PROJECT = "setmanager:await_project"
-STATE_SETMANAGER_AWAIT_TOKEN = "setmanager:await_token"
-STATE_SETMANAGER_AWAIT_CHAT_ID = "setmanager:await_chat_id"
-STATE_LISTMANAGERS_AWAIT_PROJECT = "listmanagers:await_project"
-STATE_PROMODE_AWAIT_PROJECT = "promode:await_project"
-STATE_PROMODE_AWAIT_ENABLED = "promode:await_enabled"
-
-# NEW STATES FOR FIXES
+STATE_AWAIT_PROJECT_NAME = "await_project_name"
+STATE_AWAIT_CLIENT_TOKEN = "await_client_token"
+STATE_AWAIT_CLIENT_TEMPLATE = "await_client_template"
+STATE_AWAIT_MANAGER_TOKEN = "await_manager_token"
+STATE_AWAIT_ADD_MANAGER = "await_add_manager"
 STATE_DELETE_AWAIT_CONFIRM = "delete:await_confirm"
-STATE_CREATE_MANAGER_AWAIT_TOKEN = "create_manager:await_token"
+STATE_AWAIT_DETACH_CHOICE = "await_detach_choice"
+STATE_AWAIT_KNOWLEDGE_FILE = "await_knowledge_file"
 
 # =============================================================================
 # REDIS HELPERS
@@ -99,24 +95,15 @@ async def handle_admin_command(text: str, pool) -> AdminResponse:
     logger.info("Admin command received", extra={"cmd": cmd, "args": parts[1:]})
 
     if cmd == "/start":
-        return await _cmd_start(), None
+        return await _cmd_start()
     elif cmd == "/help":
         return _cmd_help(), None
-    # Остальные команды обрабатываются как шаги, если нужно, но пока оставим явными
+    # All other commands are handled as steps if in a state
     return await _process_admin_step(text, None, pool, None, None)
 
 async def _cmd_start() -> AdminResponse:
-    text = (
-        "👋 **Админ-панель фабрики ботов**\n\n"
-        "Я помогу создать и настроить вашего AI-ассистента.\n\n"
-        "🔹 **Быстрый старт**:\n"
-        "1. Нажмите «🚀 Создать бота»\n"
-        "2. Введите название проекта\n"
-        "3. Выберите шаблон (или пропустите)\n"
-        "4. Вставьте токен из @BotFather\n"
-        "5. Готово! 🎉\n\n"
-        "📌 Токен и настройки шифруются."
-    )
+    """Return main menu with two buttons."""
+    text = "👋 Добро пожаловать в админ-панель фабрики ботов!"
     return text, make_main_menu_keyboard()
 
 def _cmd_help() -> str:
@@ -137,10 +124,10 @@ async def handle_admin_step(chat_id: str, text: str, pool) -> Optional[AdminResp
     return await _process_admin_step(text, data, pool, chat_id, state)
 
 async def _process_admin_step(
-    text: str, 
-    data: Dict[str, Any], 
-    pool, 
-    chat_id: Optional[str] = None, 
+    text: str,
+    data: Dict[str, Any],
+    pool,
+    chat_id: Optional[str] = None,
     state: Optional[str] = None
 ) -> AdminResponse:
     if chat_id is None or state is None:
@@ -152,33 +139,22 @@ async def _process_admin_step(
         await _clear_state(chat_id)
         return await _cmd_start()
 
-    # Existing states
-    if state == STATE_NEWPROJECT_AWAIT_NAME:
-        return await _step_newproject_name(chat_id, text, pool)
-    elif state == STATE_NEWPROJECT_AWAIT_TEMPLATE:
-        return await _handle_template_selection(chat_id, text, pool)
-    elif state == STATE_SETTOKEN_AWAIT_PROJECT:
-        return await _step_settoken_project(chat_id, text, pool)
-    elif state == STATE_SETTOKEN_AWAIT_TOKEN:
-        return await _step_settoken_token(chat_id, text, pool)
-    elif state == STATE_SETMANAGER_AWAIT_PROJECT:
-        return await _step_setmanager_project(chat_id, text, pool)
-    elif state == STATE_SETMANAGER_AWAIT_TOKEN:
-        return await _step_setmanager_token(chat_id, text, pool)
-    elif state == STATE_SETMANAGER_AWAIT_CHAT_ID:
-        return await _step_setmanager_chat_id(chat_id, text, pool)
-    elif state == STATE_LISTMANAGERS_AWAIT_PROJECT:
-        return await _step_listmanagers_project(chat_id, text, pool), None
-    elif state == STATE_PROMODE_AWAIT_PROJECT:
-        return await _step_promode_project(chat_id, text, pool)
-    elif state == STATE_PROMODE_AWAIT_ENABLED:
-        return await _step_promode_enabled(chat_id, text, pool), None
-    
-    # NEW STATES
+    if state == STATE_AWAIT_PROJECT_NAME:
+        return await _step_await_project_name(chat_id, text, pool)
+    elif state == STATE_AWAIT_CLIENT_TOKEN:
+        return await _step_await_client_token(chat_id, text, pool)
+    elif state == STATE_AWAIT_CLIENT_TEMPLATE:
+        return await _step_await_client_template(chat_id, text, pool)
+    elif state == STATE_AWAIT_MANAGER_TOKEN:
+        return await _step_await_manager_token(chat_id, text, pool)
+    elif state == STATE_AWAIT_ADD_MANAGER:
+        return await _step_await_add_manager(chat_id, text, pool)
     elif state == STATE_DELETE_AWAIT_CONFIRM:
         return await _step_delete_confirm(chat_id, text, pool)
-    elif state == STATE_CREATE_MANAGER_AWAIT_TOKEN:
-        return await _step_create_manager_token(chat_id, text, pool)
+    elif state == STATE_AWAIT_DETACH_CHOICE:
+        return await _step_detach_choice(chat_id, text, pool)
+    elif state == STATE_AWAIT_KNOWLEDGE_FILE:
+        return await _step_await_knowledge_file(chat_id, text, pool)
 
     await _clear_state(chat_id)
     return "❌ Диалог сброшен. Напишите /start.", None
@@ -186,179 +162,126 @@ async def _process_admin_step(
 # =============================================================================
 # STEP IMPLEMENTATIONS
 # =============================================================================
-async def _step_newproject_start(chat_id: str) -> AdminResponse:
-    await _set_state(chat_id, STATE_NEWPROJECT_AWAIT_NAME)
-    return "✍️ **Введите название нового проекта**:", None
-
-async def _step_newproject_name(chat_id: str, name: str, pool) -> AdminResponse:
-    project_id = await _create_project_raw(name, pool)
-    await _set_data(chat_id, {"project_id": project_id})
-    await _set_state(chat_id, STATE_NEWPROJECT_AWAIT_TEMPLATE)
-    
-    text = (
-        f"✅ Проект **«{name}»** создан!\nID: `{project_id}`\n\n"
-        f"🎯 **Выберите шаблон**:\n"
-        f"• 💬 `support`\n• 🎯 `leads`\n• 🛒 `orders`\n• ⚙️ `custom` (Pro)"
-    )
-    return text, make_template_keyboard()
-
-async def _handle_template_selection(chat_id: str, input_text: str, pool) -> AdminResponse:
-    data = await _get_data(chat_id)
-    project_id = data.get("project_id")
-    
-    if not project_id:
-        await _clear_state(chat_id)
-        return "❌ Ошибка: проект не найден. Начните с /start.", None
-
-    if re.match(r'^\d+:[a-zA-Z0-9_-]+$', input_text.strip()):
-        return await _step_settoken_token(chat_id, input_text.strip(), pool)
-
-    template_slug = input_text.strip()
-    if template_slug.startswith("tpl:"):
-        template_slug = template_slug.replace("tpl:", "")
-        
-        if template_slug.lower() in ("skip", "custom"):
-            await _clear_state(chat_id)
-            await _set_data(chat_id, {"project_id": project_id})
-            await _set_state(chat_id, STATE_SETTOKEN_AWAIT_TOKEN)
-            text = (
-                f"✅ Шаблон не выбран (режим Custom).\n\n"
-                f"🔑 **Отправьте токен бота** следующим сообщением:"
-            )
-            return text, make_token_help_keyboard()
-
-        template_repo = TemplateRepository(pool)
-        template = await template_repo.get_by_slug(template_slug)
-        
-        if not template:
-            return "❌ Шаблон не найден. Выберите кнопку или напишите `skip`.", make_template_keyboard()
-        
-        project_repo = ProjectRepository(pool)
-        success = await project_repo.apply_template(project_id, template_slug)
-        
-        if not success:
-            await _clear_state(chat_id)
-            return "❌ Ошибка применения шаблона.", None
-        
-        await _clear_state(chat_id)
-        await _set_data(chat_id, {"project_id": project_id})
-        await _set_state(chat_id, STATE_SETTOKEN_AWAIT_TOKEN)
-        
-        text = (
-            f"✅ Шаблон **«{template['name']}»** применён!\n\n"
-            f"🔑 **Теперь отправьте токен бота**:"
+async def _step_await_project_name(chat_id: str, name: str, pool) -> AdminResponse:
+    """Create a new project with unique name for this owner."""
+    owner_id = chat_id
+    async with pool.acquire() as conn:
+        # Check uniqueness for this owner with explicit type cast
+        existing = await conn.fetchval(
+            "SELECT 1 FROM projects WHERE name = $1 AND owner_id = $2::text AND id != $3",
+            name, owner_id, settings.ADMIN_PROJECT_ID
         )
-        return text, make_token_help_keyboard()
+        if existing:
+            return "❌ У вас уже есть проект с таким именем. Придумайте другое.", None
 
-    if template_slug.lower() in ("skip", "custom", "пропустить"):
-         await _clear_state(chat_id)
-         await _set_data(chat_id, {"project_id": project_id})
-         await _set_state(chat_id, STATE_SETTOKEN_AWAIT_TOKEN)
-         text = (
-            f"✅ Пропущено.\n\n"
-            f"🔑 **Отправьте токен бота** следующим сообщением:"
-        )
-         return text, make_token_help_keyboard()
-
-    return "❌ Неверный формат. Выберите кнопку или отправьте токен.", make_template_keyboard()
-
-async def _step_settoken_start(chat_id: str) -> AdminResponse:
-    await _set_state(chat_id, STATE_SETTOKEN_AWAIT_PROJECT)
-    return "🆔 **Введите ID проекта**:", None
-
-async def _step_settoken_project(chat_id: str, project_id: str, pool) -> AdminResponse:
-    try:
-        async with pool.acquire() as conn:
-            exists = await conn.fetchval("SELECT 1 FROM projects WHERE id = $1", uuid.UUID(project_id))
-            if not exists:
-                return f"❌ Проект `{project_id}` не найден.", None
-    except Exception:
-        return "❌ Неверный формат ID.", None
-    
-    await _set_data(chat_id, {"project_id": project_id})
-    await _set_state(chat_id, STATE_SETTOKEN_AWAIT_TOKEN)
-    return make_token_input_hint(), None
-
-async def _step_settoken_token(chat_id: str, token: str, pool) -> AdminResponse:
-    data = await _get_data(chat_id)
-    project_id = data.get("project_id")
-    
-    if not project_id:
-        await _clear_state(chat_id)
-        return "❌ Контекст проекта утерян. Начните заново через /start.", None
-
-    logger.info("Setting token for project", extra={"project_id": project_id})
-    
-    result = await cmd_settoken(project_id, token, pool)
+    # Create project with owner_id = chat_id
+    project_id = await _create_project_raw(name, owner_id, pool)
     await _clear_state(chat_id)
-    
-    keyboard = make_project_keyboard(project_id)
-    return result, keyboard
+    # Show project menu
+    return await _show_project_menu(chat_id, project_id, pool)
 
-# --- MANAGER STEPS ---
-async def _step_setmanager_start(chat_id: str) -> AdminResponse:
-    await _set_state(chat_id, STATE_SETMANAGER_AWAIT_PROJECT)
-    return "🆔 **Введите ID проекта**:", None
-
-async def _step_setmanager_project(chat_id: str, project_id: str, pool) -> AdminResponse:
-    try:
-        async with pool.acquire() as conn:
-            exists = await conn.fetchval("SELECT 1 FROM projects WHERE id = $1", uuid.UUID(project_id))
-            if not exists:
-                return f"❌ Проект `{project_id}` не найден.", None
-    except Exception:
-        return "❌ Неверный ID.", None
-        
-    await _set_data(chat_id, {"project_id": project_id})
-    await _set_state(chat_id, STATE_SETMANAGER_AWAIT_TOKEN)
-    return "🔑 **Введите токен менеджерского бота**:", None
-
-async def _step_setmanager_token(chat_id: str, manager_token: str, pool) -> AdminResponse:
+async def _step_await_client_token(chat_id: str, token: str, pool) -> AdminResponse:
+    """Handle token input for client bot."""
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
     if not project_id:
         await _clear_state(chat_id)
         return "❌ Ошибка: проект не указан.", None
-    await _set_data(chat_id, {"project_id": project_id, "manager_token": manager_token})
-    await _set_state(chat_id, STATE_SETMANAGER_AWAIT_CHAT_ID)
-    return "👤 **Введите chat_id менеджера**:", None
 
-async def _step_setmanager_chat_id(chat_id: str, manager_chat_id: str, pool) -> AdminResponse:
+    username = await _verify_token(token)
+    if not username:
+        return "❌ Неверный токен. Попробуйте еще раз.", make_token_help_keyboard()
+
+    data["client_token"] = token
+    data["client_username"] = username
+    await _set_data(chat_id, data)
+    await _set_state(chat_id, STATE_AWAIT_CLIENT_TEMPLATE)
+    return "🎯 Выберите шаблон:", make_template_keyboard()
+
+async def _step_await_client_template(chat_id: str, choice: str, pool) -> AdminResponse:
+    """Handle template selection for client bot."""
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
-    manager_token = data.get("manager_token")
-    if not project_id or not manager_token:
+    client_token = data.get("client_token")
+    if not project_id or not client_token:
         await _clear_state(chat_id)
-        return "❌ Данные утеряны.", None
-    result = await cmd_setmanager(project_id, manager_token, manager_chat_id, pool)
-    await _clear_state(chat_id)
-    return result, make_project_keyboard(project_id)
+        return "❌ Данные утеряны. Начните заново.", None
 
-# --- NEW: CREATE MANAGER FLOW (if empty) ---
-async def _step_create_manager_token(chat_id: str, manager_token: str, pool) -> AdminResponse:
+    # Extract slug if it's a callback
+    if choice.startswith("tpl:"):
+        template_slug = choice.replace("tpl:", "")
+    else:
+        template_slug = choice
+
+    # Handle custom/skip
+    if template_slug.lower() in ("custom", "skip"):
+        await _set_project_token(project_id, client_token, pool)
+        await _clear_state(chat_id)
+        return await _show_project_menu(chat_id, project_id, pool)
+
+    # Apply template
+    template_repo = TemplateRepository(pool)
+    template = await template_repo.get_by_slug(template_slug)
+    if not template:
+        return "❌ Шаблон не найден. Выберите кнопку.", make_template_keyboard()
+
+    await _set_project_token(project_id, client_token, pool)
+    await ProjectRepository(pool).apply_template(project_id, template_slug)
+    await _clear_state(chat_id)
+    return await _show_project_menu(chat_id, project_id, pool)
+
+async def _step_await_manager_token(chat_id: str, token: str, pool) -> AdminResponse:
+    """Handle token input for manager bot."""
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
     if not project_id:
         await _clear_state(chat_id)
         return "❌ Ошибка: проект не указан.", None
-    
-    # Сразу переходим к запросу chat_id, так как токен уже есть
-    await _set_data(chat_id, {"project_id": project_id, "manager_token": manager_token})
-    await _set_state(chat_id, STATE_SETMANAGER_AWAIT_CHAT_ID)
-    return "👤 **Токен принят! Теперь введите chat_id менеджера**:\n(получите через @echoManagersBot)", None
 
-# --- DELETE STEPS ---
+    username = await _verify_token(token)
+    if not username:
+        return "❌ Неверный токен. Попробуйте еще раз.", make_token_help_keyboard()
+
+    # Set manager token and add current user as first manager
+    await _set_manager_token(project_id, token, chat_id, pool)
+    await _clear_state(chat_id)
+
+    text = f"✅ Менеджерский бот создан! Ссылка: @{username}\n\nЧтобы добавить других менеджеров, нажмите кнопку 'Менеджеры'."
+    keyboard = await _get_project_menu_keyboard(project_id, pool)
+    return text, keyboard
+
+async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminResponse:
+    """Add a new manager to the project."""
+    data = await _get_data(chat_id)
+    project_id = data.get("project_id")
+    if not project_id:
+        await _clear_state(chat_id)
+        return "❌ Ошибка: проект не указан.", None
+
+    # Validate numeric (Telegram chat IDs can be negative for groups, but we accept any integer)
+    if not manager_id.strip().lstrip('-').isdigit():
+        return "❌ ChatID должен быть числом. Попробуйте еще раз.", None
+
+    try:
+        await ProjectRepository(pool).add_manager(project_id, manager_id.strip())
+    except Exception as e:
+        logger.exception("Failed to add manager", extra={"error": str(e)})
+        return f"❌ Ошибка: {str(e)}", None
+
+    await _clear_state(chat_id)
+    return f"✅ Менеджер {manager_id} зарегистрирован!", await _get_project_menu_keyboard(project_id, pool)
+
 async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
+    """Confirm project deletion."""
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
     project_name = data.get("project_name")
-    
+
     if not project_id:
         await _clear_state(chat_id)
         return "❌ Ошибка: проект не найден.", None
-    
+
     if text.strip().lower() == "да":
-        # Удаляем проект
         try:
             async with pool.acquire() as conn:
                 await conn.execute("DELETE FROM projects WHERE id = $1", uuid.UUID(project_id))
@@ -373,38 +296,41 @@ async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
         await _clear_state(chat_id)
         return "❌ Удаление отменено.", None
 
-async def _step_listmanagers_project(chat_id: str, project_id: str, pool) -> str:
-    result = await cmd_listmanagers(project_id, pool)
-    await _clear_state(chat_id)
-    return result
-
-async def _step_promode_start(chat_id: str) -> AdminResponse:
-    await _set_state(chat_id, STATE_PROMODE_AWAIT_PROJECT)
-    return "🆔 **ID проекта**:", None
-
-async def _step_promode_project(chat_id: str, project_id: str, pool) -> AdminResponse:
-    try:
-        async with pool.acquire() as conn:
-            exists = await conn.fetchval("SELECT 1 FROM projects WHERE id = $1", uuid.UUID(project_id))
-            if not exists:
-                return f"❌ Проект не найден.", None
-    except Exception:
-        return "❌ Неверный ID.", None
-        
-    await _set_data(chat_id, {"project_id": project_id})
-    await _set_state(chat_id, STATE_PROMODE_AWAIT_ENABLED)
-    return "⚙️ Введите `on` или `off`:", None
-
-async def _step_promode_enabled(chat_id: str, value: str, pool) -> AdminResponse:
+async def _step_detach_choice(chat_id: str, choice: str, pool) -> AdminResponse:
+    """Handle detach bot choice."""
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
     if not project_id:
         await _clear_state(chat_id)
-        return "❌ Ошибка.", None
-    enabled = value.lower() in ("on", "true", "1", "yes")
-    result = await cmd_set_pro_mode(project_id, enabled, pool)
+        return "❌ Ошибка: проект не указан.", None
+
+    if choice == "client":
+        await ProjectRepository(pool).set_bot_token(project_id, None)
+        await _clear_state(chat_id)
+        return "✅ Клиентский бот откреплён.", await _get_project_menu_keyboard(project_id, pool)
+    elif choice == "manager":
+        await ProjectRepository(pool).set_manager_bot_token(project_id, None)
+        await _clear_state(chat_id)
+        return "✅ Менеджерский бот откреплён.", await _get_project_menu_keyboard(project_id, pool)
+    else:
+        await _clear_state(chat_id)
+        return "❌ Отмена.", await _get_project_menu_keyboard(project_id, pool)
+
+async def _step_await_knowledge_file(chat_id: str, text: str, pool) -> AdminResponse:
+    """
+    Handle knowledge file upload. This is a placeholder – actual file handling
+    would be done via document message, not text. But for simplicity, we just
+    inform that file upload is not implemented yet.
+    """
+    data = await _get_data(chat_id)
+    project_id = data.get("project_id")
+    if not project_id:
+        await _clear_state(chat_id)
+        return "❌ Ошибка: проект не указан.", None
+
     await _clear_state(chat_id)
-    return result, make_project_keyboard(project_id)
+    # TODO: Implement actual file processing and storage in knowledge_base
+    return "📚 Загрузка знаний временно недоступна. Функция в разработке.", await _get_project_menu_keyboard(project_id, pool)
 
 # =============================================================================
 # CALLBACK HANDLER
@@ -413,224 +339,286 @@ async def handle_admin_callback(callback_data: str, chat_id: str, pool) -> Admin
     logger.info("Callback", extra={"data": callback_data, "chat_id": chat_id})
 
     if callback_data == "newproject":
-        return await _step_newproject_start(chat_id)
-    
+        await _set_state(chat_id, STATE_AWAIT_PROJECT_NAME)
+        return "✍️ **Введите название нового проекта** (например: Идея на миллион):", make_back_keyboard()
+
     elif callback_data == "listprojects":
-        return await cmd_listprojects(pool), None
-    
-    elif callback_data == "help":
-        return _cmd_help(), None
-    
-    elif callback_data == "settings":
-        return "⚙️ Настройки в разработке.", None
-    
-    elif callback_data == "help_token":
-        return make_token_input_hint(), None
-    
-    elif callback_data.startswith("settoken:"):
-        pid = callback_data.split(":")[1]
-        await _set_data(chat_id, {"project_id": pid})
-        await _set_state(chat_id, STATE_SETTOKEN_AWAIT_TOKEN)
-        return make_token_input_hint(), None
-    
-    elif callback_data.startswith("managers:"):
-        pid = callback_data.split(":")[1]
-        # FIX: Check if managers exist
-        managers = await ProjectRepository(pool).get_managers(pid)
-        if not managers:
-            # No managers -> Offer to create
-            await _set_data(chat_id, {"project_id": pid})
-            await _set_state(chat_id, STATE_CREATE_MANAGER_AWAIT_TOKEN)
-            text = (
-                f"📭 Для проекта `{pid}` нет менеджеров.\n\n"
-                f"🔑 **Давайте настроим менеджерского бота**:\n"
-                f"1. Создайте бота в @BotFather (/newbot).\n"
-                f"2. Скопируйте токен.\n"
-                f"3. Отправьте его мне следующим сообщением."
-            )
-            return text, make_token_help_keyboard()
-        else:
-            # Managers exist -> List them
-            lines = [f"👥 **Менеджеры проекта** `{pid}`:"]
-            for i, cid in enumerate(managers, 1):
-                lines.append(f"{i}. `{cid}`")
-            text = "\n".join(lines)
-            return text, make_project_keyboard(pid)
-    
+        return await _show_projects_list(chat_id, pool)
+
+    elif callback_data.startswith("project:"):
+        project_id = callback_data.split(":", 1)[1]
+        return await _show_project_menu(chat_id, project_id, pool)
+
+    elif callback_data.startswith("create_client_bot:"):
+        project_id = callback_data.split(":", 1)[1]
+        await _set_data(chat_id, {"project_id": project_id})
+        await _set_state(chat_id, STATE_AWAIT_CLIENT_TOKEN)
+        return (
+            "🔑 **Отправьте токен клиентского бота** следующим сообщением.\n\n"
+            "Как получить токен: @BotFather → /newbot",
+            make_token_help_keyboard()
+        )
+
+    elif callback_data.startswith("create_manager_bot:"):
+        project_id = callback_data.split(":", 1)[1]
+        await _set_data(chat_id, {"project_id": project_id})
+        await _set_state(chat_id, STATE_AWAIT_MANAGER_TOKEN)
+        return (
+            "🔑 **Отправьте токен менеджерского бота** следующим сообщением.\n\n"
+            "Как получить токен: @BotFather → /newbot",
+            make_token_help_keyboard()
+        )
+
     elif callback_data.startswith("knowledge:"):
-        pid = callback_data.split(":")[1]
-        return f"📚 Загрузка знаний для `{pid}`. Отправьте файл.", None
-    
-    elif callback_data.startswith("promode:"):
-        pid = callback_data.split(":")[1]
-        await _set_data(chat_id, {"project_id": pid})
-        await _set_state(chat_id, STATE_PROMODE_AWAIT_ENABLED)
-        return "⚙️ Введите `on` или `off`:", None
-    
+        project_id = callback_data.split(":", 1)[1]
+        await _set_data(chat_id, {"project_id": project_id})
+        await _set_state(chat_id, STATE_AWAIT_KNOWLEDGE_FILE)
+        return (
+            "📚 **Отправьте файл с документами** (PDF, DOCX, TXT).\n"
+            "Я обработаю его и добавлю в базу знаний проекта.",
+            make_back_keyboard(f"project:{project_id}")
+        )
+
+    elif callback_data.startswith("managers:"):
+        project_id = callback_data.split(":", 1)[1]
+        # List existing managers
+        managers = await ProjectRepository(pool).get_managers(project_id)
+        if managers:
+            lines = ["👥 **Менеджеры проекта**:"] + [f"• `{m}`" for m in managers]
+            text = "\n".join(lines) + "\n\n📝 Введите ChatID нового менеджера (число):"
+        else:
+            text = "📭 В проекте пока нет менеджеров.\n\n📝 Введите ChatID первого менеджера (число):"
+
+        await _set_data(chat_id, {"project_id": project_id})
+        await _set_state(chat_id, STATE_AWAIT_ADD_MANAGER)
+        return text, make_back_keyboard(f"project:{project_id}")
+
+    elif callback_data.startswith("detach_bot:"):
+        project_id = callback_data.split(":", 1)[1]
+        # Show options to detach client or manager
+        text = "🔗 Какого бота открепить?"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🤖 Клиентского", callback_data=f"detach_client:{project_id}")],
+            [InlineKeyboardButton("👥 Менеджерского", callback_data=f"detach_manager:{project_id}")],
+            [InlineKeyboardButton("🔙 Назад", callback_data=f"project:{project_id}")],
+        ])
+        return text, keyboard
+
+    elif callback_data.startswith("detach_client:"):
+        project_id = callback_data.split(":", 1)[1]
+        await ProjectRepository(pool).set_bot_token(project_id, None)
+        return "✅ Клиентский бот откреплён.", await _get_project_menu_keyboard(project_id, pool)
+
+    elif callback_data.startswith("detach_manager:"):
+        project_id = callback_data.split(":", 1)[1]
+        await ProjectRepository(pool).set_manager_bot_token(project_id, None)
+        return "✅ Менеджерский бот откреплён.", await _get_project_menu_keyboard(project_id, pool)
+
     elif callback_data.startswith("delete:"):
-        pid = callback_data.split(":")[1]
-        # FIX: Get project name and ask for confirmation
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", uuid.UUID(pid))
-                if not row:
-                    return "❌ Проект не найден.", None
-                pname = row["name"]
-        except Exception:
-            return "❌ Ошибка получения данных проекта.", None
-            
-        await _set_data(chat_id, {"project_id": pid, "project_name": pname})
+        project_id = callback_data.split(":", 1)[1]
+        # Fetch project name
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", uuid.UUID(project_id))
+            if not row:
+                return "❌ Проект не найден.", None
+            pname = row["name"]
+
+        await _set_data(chat_id, {"project_id": project_id, "project_name": pname})
         await _set_state(chat_id, STATE_DELETE_AWAIT_CONFIRM)
-        
         text = (
             f"🗑️ **Вы уверены, что хотите удалить проект?**\n\n"
             f"Название: **{pname}**\n"
-            f"ID: `{pid}`\n\n"
+            f"ID: `{project_id}`\n\n"
             f"⚠️ Это действие НЕОБРАТИМО! Все данные будут удалены.\n\n"
             f"Для подтверждения введите слово **да** (без кавычек)."
         )
-        return text, None
-    
+        return text, make_back_keyboard(f"project:{project_id}")
+
     elif callback_data.startswith("tpl:"):
-        return await _handle_template_selection(chat_id, callback_data, pool)
-    
+        # If we are in template selection state, handle via step
+        state = await _get_state(chat_id)
+        if state == STATE_AWAIT_CLIENT_TEMPLATE:
+            return await _process_admin_step(callback_data, await _get_data(chat_id), pool, chat_id, state)
+        else:
+            return "❌ Неверный контекст.", None
+
+    elif callback_data == "back_to_main":
+        await _clear_state(chat_id)
+        return await _cmd_start()
+
+    elif callback_data.startswith("back_to_project:"):
+        project_id = callback_data.split(":", 1)[1]
+        await _clear_state(chat_id)
+        return await _show_project_menu(chat_id, project_id, pool)
+
     return "❌ Неизвестная кнопка.", None
 
 # =============================================================================
-# CORE LOGIC
+# HELPERS
 # =============================================================================
-async def _create_project_raw(name: str, pool) -> str:
-    logger.info("Creating project", extra={"name": name})
-    temp_owner_id = str(uuid.uuid4())
-    
+async def _verify_token(token: str) -> Optional[str]:
+    """Verify token with Telegram and return bot username if valid."""
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
+            if resp.status_code == 200 and resp.json().get("ok"):
+                return resp.json()["result"]["username"]
+        except Exception:
+            pass
+    return None
+
+async def _create_project_raw(name: str, owner_id: str, pool) -> str:
+    """
+    Insert a new project with given owner_id (Telegram chat_id).
+    Returns the new project's UUID as string.
+    Uses explicit type cast to text for owner_id.
+    """
+    logger.info("Creating project", extra={"name": name, "owner_id": owner_id})
     async with pool.acquire() as conn:
         project_id = await conn.fetchval("""
             INSERT INTO projects (id, name, owner_id, bot_token, system_prompt)
-            VALUES (gen_random_uuid(), $1, $2, '', 'Ты — полезный AI-ассистент.')
+            VALUES (gen_random_uuid(), $1, $2::text, '', 'Ты — полезный AI-ассистент.')
             RETURNING id
-        """, name, temp_owner_id)
-    
+        """, name, owner_id)
     logger.info("Project created", extra={"project_id": project_id})
     return str(project_id)
 
-async def cmd_newproject(name: str, pool) -> str:
-    pid = await _create_project_raw(name, pool)
-    return f"✅ Проект «{name}» создан.\nID: `{pid}`\n\n🔑 Далее: `/settoken {pid} <токен>`"
-
-async def cmd_settoken(project_id: str, token: str, pool) -> str:
+async def _set_project_token(project_id: str, token: str, pool) -> None:
+    """Set bot token and configure webhook."""
     secret_token = uuid.uuid4().hex
     project_repo = ProjectRepository(pool)
-    try:
-        await project_repo.set_bot_token(project_id, token)
-        await project_repo.set_webhook_secret(project_id, secret_token)
-    except Exception as e:
-        logger.exception("Token error", extra={"error": str(e)})
-        return f"❌ Ошибка: {str(e)}"
-    
+    await project_repo.set_bot_token(project_id, token)
+    await project_repo.set_webhook_secret(project_id, secret_token)
+
     base_url = settings.RENDER_EXTERNAL_URL or settings.PUBLIC_URL
     if not base_url:
-        return "❌ PUBLIC_URL не задан."
-    
-    webhook_url = f"{base_url.rstrip('/')}/webhook/{project_id}"
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.post(
-                f"https://api.telegram.org/bot{token}/setWebhook",
-                json={"url": webhook_url, "secret_token": secret_token}
-            )
-            if resp.status_code != 200:
-                err = resp.json().get("description", f"HTTP {resp.status_code}")
-                return f"❌ Вебхук не установлен: {err}"
-            if not resp.json().get("ok"):
-                return f"❌ Telegram: {resp.json().get('description')}"
-        except Exception as e:
-            return f"❌ Ошибка сети: {str(e)}"
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-            username = r.json()["result"]["username"] if r.json().get("ok") else None
-    except:
-        username = None
-    
-    link = f"https://t.me/{username}" if username else f"https://t.me/{project_id}"
-    return (
-        f"✅ Токен установлен!\nВебхук: `{webhook_url}`\n\n"
-        f"🤖 **Ваш бот**: {link}\n🔐 Секрет сохранён."
-    )
+        raise ValueError("PUBLIC_URL not set")
 
-async def cmd_setmanager(project_id: str, manager_token: str, manager_chat_id: Optional[str], pool) -> str:
+    webhook_url = f"{base_url.rstrip('/')}/webhook/{project_id}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json={"url": webhook_url, "secret_token": secret_token}
+        )
+        if resp.status_code != 200 or not resp.json().get("ok"):
+            raise Exception(f"Webhook setup failed: {resp.text}")
+
+async def _set_manager_token(project_id: str, token: str, admin_chat_id: str, pool) -> None:
+    """Set manager bot token, add admin as manager, and set webhook."""
     project_repo = ProjectRepository(pool)
-    try:
-        await project_repo.set_manager_bot_token(project_id, manager_token)
-        if manager_chat_id:
-            await project_repo.add_manager(project_id, manager_chat_id)
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
-    
+    await project_repo.set_manager_bot_token(project_id, token)
+    await project_repo.add_manager(project_id, admin_chat_id)
+
     base_url = settings.RENDER_EXTERNAL_URL or settings.PUBLIC_URL
     webhook_url = f"{base_url.rstrip('/')}/manager/webhook"
-    
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"https://api.telegram.org/bot{token}/setWebhook",
+            json={"url": webhook_url}
+        )
+        if resp.status_code != 200 or not resp.json().get("ok"):
+            raise Exception(f"Manager webhook setup failed: {resp.text}")
+
+async def _get_bot_username(token: str) -> Optional[str]:
+    """Fetch bot username using getMe."""
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(
-                f"https://api.telegram.org/bot{manager_token}/setWebhook",
-                json={"url": webhook_url}
-            )
-            if not resp.json().get("ok"):
-                return f"❌ Telegram: {resp.json().get('description')}"
-        except Exception as e:
-            return f"❌ Ошибка: {str(e)}"
-    
-    msg = f"✅ Менеджерский бот настроен!"
-    if manager_chat_id:
-        msg += f"\n👤 Менеджер `{manager_chat_id}` добавлен."
-    return msg
+            resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
+            if resp.status_code == 200 and resp.json().get("ok"):
+                return resp.json()["result"]["username"]
+        except:
+            pass
+    return None
 
-async def cmd_listmanagers(project_id: str, pool) -> str:
-    managers = await ProjectRepository(pool).get_managers(project_id)
-    if not managers:
-        return f"📭 Для проекта `{project_id}` нет менеджеров."
-    lines = [f"👥 **Менеджеры проекта** `{project_id}`:"]
-    for i, cid in enumerate(managers, 1):
-        lines.append(f"{i}. `{cid}`")
-    return "\n".join(lines)
-
-async def cmd_removemanager(project_id: str, manager_chat_id: str, pool) -> str:
-    try:
-        await ProjectRepository(pool).remove_manager(project_id, manager_chat_id)
-        return f"✅ Менеджер `{manager_chat_id}` удалён."
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
-
-async def cmd_listprojects(pool) -> str:
+async def _show_projects_list(chat_id: str, pool) -> AdminResponse:
+    """Show list of projects belonging to this owner (excluding admin project) as buttons."""
+    owner_id = chat_id
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT id, name, bot_token, manager_bot_token, template_slug, is_pro_mode, created_at
-            FROM projects ORDER BY created_at DESC
-        """)
+            SELECT id, name FROM projects
+            WHERE owner_id = $1::text AND id != $2
+            ORDER BY created_at DESC
+        """, owner_id, settings.ADMIN_PROJECT_ID)
+
     if not rows:
-        return "📭 Проектов нет."
-    lines = ["📦 **Ваши проекты**:"]
-    for r in rows:
-        st = []
-        if r['bot_token']: st.append("🔑")
-        if r['manager_bot_token']: st.append("👥")
-        if r['template_slug']: st.append(f"📦{r['template_slug']}")
-        if r['is_pro_mode']: st.append("⭐Pro")
-        dt = r['created_at'].strftime("%d.%m") if r['created_at'] else "?"
-        lines.append(f"• `{r['id']}` — {r['name']} {' '.join(st)} | {dt}")
-    
-    # Add a hint about deletion
-    lines.append("\n💡 Нажмите на проект в списке (если бы это были кнопки) или используйте команду /delete.")
-    return "\n".join(lines)
+        text = "📭 У вас пока нет проектов. Создайте первый!"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("➕ Новый проект", callback_data="newproject")
+        ]])
+        return text, keyboard
+
+    projects = [(str(r["id"]), r["name"]) for r in rows]
+    return "📦 **Ваши проекты**:", make_projects_list_keyboard(projects)
+
+async def _show_project_menu(chat_id: str, project_id: str, pool) -> AdminResponse:
+    """Display project context menu with dynamic buttons."""
+    project_repo = ProjectRepository(pool)
+
+    # Get project name
+    async with pool.acquire() as conn:
+        name_row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", uuid.UUID(project_id))
+        if not name_row:
+            return "❌ Проект не найден.", None
+        project_name = name_row["name"]
+
+    # Get project settings (contains tokens, etc.)
+    settings_dict = await project_repo.get_project_settings(project_id)
+    if not settings_dict:
+        return "❌ Не удалось получить настройки проекта.", None
+
+    has_client = bool(settings_dict.get("bot_token"))
+    has_manager = bool(settings_dict.get("manager_bot_token"))
+
+    # Build message
+    lines = [f"📁 **Проект: {project_name}**"]
+    if has_client and has_manager:
+        lines.append("✅ Проект настроен полностью.")
+        client_username = await _get_bot_username(settings_dict["bot_token"])
+        manager_username = await _get_bot_username(settings_dict["manager_bot_token"])
+        if client_username:
+            lines.append(f"🤖 Клиентский бот: @{client_username}")
+        if manager_username:
+            lines.append(f"👥 Менеджерский бот: @{manager_username}")
+    else:
+        lines.append("⚠️ Проект не настроен полностью.")
+        if has_client:
+            client_username = await _get_bot_username(settings_dict["bot_token"])
+            lines.append(f"🤖 Клиентский бот: @{client_username}" if client_username else "🤖 Клиентский бот: токен установлен")
+        if has_manager:
+            manager_username = await _get_bot_username(settings_dict["manager_bot_token"])
+            lines.append(f"👥 Менеджерский бот: @{manager_username}" if manager_username else "👥 Менеджерский бот: токен установлен")
+
+    text = "\n".join(lines)
+    keyboard = make_project_dynamic_keyboard(project_id, has_client, has_manager)
+    return text, keyboard
+
+async def _get_project_menu_keyboard(project_id: str, pool) -> InlineKeyboardMarkup:
+    """Helper to get project keyboard without message."""
+    project_repo = ProjectRepository(pool)
+    settings_dict = await project_repo.get_project_settings(project_id)
+    has_client = bool(settings_dict.get("bot_token")) if settings_dict else False
+    has_manager = bool(settings_dict.get("manager_bot_token")) if settings_dict else False
+    return make_project_dynamic_keyboard(project_id, has_client, has_manager)
+
+# =============================================================================
+# LEGACY COMMANDS (kept for compatibility, but not used in new UI)
+# =============================================================================
+async def cmd_listprojects(pool) -> str:
+    """Legacy command - not used in new flow."""
+    return "Используйте кнопку 'Мои проекты' в меню."
+
+async def cmd_settoken(project_id: str, token: str, pool) -> str:
+    """Legacy command - not used in new flow."""
+    return "Используйте создание клиентского бота через меню проекта."
+
+async def cmd_setmanager(project_id: str, manager_token: str, manager_chat_id: Optional[str], pool) -> str:
+    """Legacy command - not used in new flow."""
+    return "Используйте создание менеджерского бота через меню проекта."
+
+async def cmd_listmanagers(project_id: str, pool) -> str:
+    """Legacy command - not used in new flow."""
+    return "Используйте кнопку 'Менеджеры' в меню проекта."
 
 async def cmd_set_pro_mode(project_id: str, enabled: bool, pool) -> str:
-    try:
-        await ProjectRepository(pool).set_pro_mode(project_id, enabled)
-        status = "✅ включён" if enabled else "❌ отключён"
-        extra = "🎨 Канвас доступен!" if enabled else "⚙️ Шаблоны."
-        return f"✅ Pro-режим для `{project_id}` {status}.\n{extra}"
-    except Exception as e:
-        return f"❌ Ошибка: {str(e)}"
+    """Legacy command - not used in new flow."""
+    return "Pro-режим настраивается в конструкторе."

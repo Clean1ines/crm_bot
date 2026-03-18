@@ -1,83 +1,109 @@
 """
 Inline keyboard factories for the Admin Bot.
-Provides reusable UI components for wizard steps and menus.
+Provides reusable UI components for the new flow.
 """
 
+from typing import List, Tuple
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def make_main_menu_keyboard() -> InlineKeyboardMarkup:
     """
-    Create the main menu inline keyboard for /start command.
-    
-    Returns:
-        InlineKeyboardMarkup with buttons: Create Bot, My Projects, Settings, Help.
+    Create the main menu keyboard with two buttons.
     """
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Создать бота", callback_data="newproject")],
+        [InlineKeyboardButton("📁 Создать проект", callback_data="newproject")],
         [InlineKeyboardButton("📦 Мои проекты", callback_data="listprojects")],
-        [InlineKeyboardButton("⚙️ Настройки", callback_data="settings")],
-        [InlineKeyboardButton("❓ Помощь", callback_data="help")],
     ])
 
 
-def make_project_keyboard(project_id: str) -> InlineKeyboardMarkup:
+def make_projects_list_keyboard(projects: List[Tuple[str, str]]) -> InlineKeyboardMarkup:
     """
-    Create project management keyboard for a specific project.
-    
+    Create a keyboard with project buttons and a back button.
+
+    Args:
+        projects: List of (project_id, project_name)
+    """
+    buttons = []
+    for pid, name in projects:
+        buttons.append([InlineKeyboardButton(name, callback_data=f"project:{pid}")])
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def make_project_dynamic_keyboard(
+    project_id: str,
+    has_client_bot: bool,
+    has_manager_bot: bool
+) -> InlineKeyboardMarkup:
+    """
+    Create project management keyboard based on current bot configuration.
+
     Args:
         project_id: UUID of the project.
-    
-    Returns:
-        InlineKeyboardMarkup with project-specific actions.
+        has_client_bot: Whether client bot token is set.
+        has_manager_bot: Whether manager bot token is set.
     """
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔑 Установить токен", callback_data=f"settoken:{project_id}")],
-        [InlineKeyboardButton("👥 Менеджеры", callback_data=f"managers:{project_id}")],
-        [InlineKeyboardButton("📚 Загрузить знания", callback_data=f"knowledge:{project_id}")],
-        [InlineKeyboardButton("🎨 Конструктор (Pro)", callback_data=f"promode:{project_id}")],
-        [InlineKeyboardButton("🗑️ Удалить проект", callback_data=f"delete:{project_id}")],
-    ])
+    buttons = []
+
+    # Create bot buttons if missing
+    if not has_client_bot:
+        buttons.append([InlineKeyboardButton("🤖 Создать клиентского бота", callback_data=f"create_client_bot:{project_id}")])
+    if not has_manager_bot:
+        buttons.append([InlineKeyboardButton("👥 Создать менеджерского бота", callback_data=f"create_manager_bot:{project_id}")])
+
+    # Always show knowledge base upload button
+    buttons.append([InlineKeyboardButton("📚 Загрузить знания", callback_data=f"knowledge:{project_id}")])
+
+    # Managers and detach are shown if at least one bot exists
+    if has_client_bot or has_manager_bot:
+        buttons.append([InlineKeyboardButton("👥 Менеджеры", callback_data=f"managers:{project_id}")])
+        buttons.append([InlineKeyboardButton("🔗 Открепить бота", callback_data=f"detach_bot:{project_id}")])
+
+    # Always show delete and back
+    buttons.append([InlineKeyboardButton("🗑️ Удалить проект", callback_data=f"delete:{project_id}")])
+    buttons.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")])
+
+    return InlineKeyboardMarkup(buttons)
 
 
 def make_template_keyboard() -> InlineKeyboardMarkup:
     """
-    Create template selection keyboard for new project flow.
-    
-    Returns:
-        InlineKeyboardMarkup with template options + skip button.
+    Create template selection keyboard.
     """
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Поддержка", callback_data="tpl:support")],
-        [InlineKeyboardButton("🎯 Лиды", callback_data="tpl:leads")],
-        [InlineKeyboardButton("🛒 Заказы", callback_data="tpl:orders")],
-        [InlineKeyboardButton("⚙️ Свой (Pro)", callback_data="tpl:custom")],
-        [InlineKeyboardButton("⏭️ Пропустить", callback_data="tpl:skip")],
+        [InlineKeyboardButton("💬 Support", callback_data="tpl:support")],
+        [InlineKeyboardButton("🎯 Leads", callback_data="tpl:leads")],
+        [InlineKeyboardButton("🛒 Orders", callback_data="tpl:orders")],
+        [InlineKeyboardButton("⚙️ Custom", callback_data="tpl:custom")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_project")],  # will be overridden with actual project in handler
     ])
 
 
 def make_token_help_keyboard() -> InlineKeyboardMarkup:
     """
-    Create helper keyboard with token instructions link.
-    
-    Returns:
-        InlineKeyboardMarkup with single help button.
+    Keyboard with help button for token input.
     """
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("📋 Как получить токен?", callback_data="help_token")
     ]])
 
 
-def make_token_input_hint() -> str:
+def make_back_keyboard(target_callback: str = "back_to_main") -> InlineKeyboardMarkup:
     """
-    Return formatted hint text for token input step.
-    
-    Returns:
-        Markdown-formatted instruction text.
+    Simple back button keyboard.
     """
-    return (
-        "📌 **Как получить токен бота?**\n"
-        "1. Напишите @BotFather → /newbot\n"
-        "2. Скопируйте токен (вида `123456:ABCdef...`)\n"
-        "3. Отправьте его мне следующим сообщением"
-    )
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔙 Назад", callback_data=target_callback)
+    ]])
+
+
+def make_detach_choice_keyboard(project_id: str) -> InlineKeyboardMarkup:
+    """
+    Keyboard for choosing which bot to detach.
+    """
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🤖 Клиентского", callback_data=f"detach_client:{project_id}")],
+        [InlineKeyboardButton("👥 Менеджерского", callback_data=f"detach_manager:{project_id}")],
+        [InlineKeyboardButton("🔙 Назад", callback_data=f"project:{project_id}")],
+    ])

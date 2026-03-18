@@ -24,4 +24,6 @@ tree_output.txt
 db_diagnostic.sh
 *.log
 
+schema.sql
+db_schema.txt
 scripts/

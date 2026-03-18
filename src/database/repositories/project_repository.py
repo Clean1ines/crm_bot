@@ -273,7 +273,7 @@ class ProjectRepository:
             """, uuid.UUID(project_id), manager_chat_id)
 
     # ------------------------------------------------------------------
-    # Template & Pro mode management (NEW)
+    # Template & Pro mode management
     # ------------------------------------------------------------------
     async def apply_template(self, project_id: str, template_slug: str) -> bool:
         """
@@ -376,6 +376,35 @@ class ProjectRepository:
                 uuid.UUID(project_id)
             )
             return bool(result)
+
+    # ------------------------------------------------------------------
+    # Find project by manager token (for webhook routing)
+    # ------------------------------------------------------------------
+    async def find_project_by_manager_token(self, raw_token: str) -> Optional[str]:
+        """
+        Находит проект по raw токену менеджерского бота.
+        Перебирает все проекты, расшифровывает manager_bot_token и сравнивает с raw_token.
+        
+        Args:
+            raw_token: Токен менеджерского бота (нешифрованный).
+        
+        Returns:
+            project_id в виде строки или None, если не найдено.
+        """
+        logger.info("Searching project by manager token")
+        async with self.pool.acquire() as conn:
+            # Получаем все id и зашифрованные manager_bot_token
+            rows = await conn.fetch("SELECT id, manager_bot_token FROM projects WHERE manager_bot_token IS NOT NULL")
+            for row in rows:
+                encrypted = row["manager_bot_token"]
+                if not encrypted:
+                    continue
+                decrypted = decrypt_token(encrypted)
+                if decrypted == raw_token:
+                    logger.info("Project found by manager token", extra={"project_id": str(row["id"])})
+                    return str(row["id"])
+        logger.info("No project found with given manager token")
+        return None
 
     # ------------------------------------------------------------------
     # Utility

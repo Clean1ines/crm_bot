@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Admin bot
     ADMIN_CHAT_ID: str = Field(..., description="Telegram chat ID of the platform administrator")
     ADMIN_BOT_TOKEN: str = Field("", description="Token of the admin bot (used for first project creation)")
+    ADMIN_PROJECT_ID: Optional[str] = Field(None, description="ID of the admin project (excluded from user lists)")
 
     # External URLs
     RENDER_EXTERNAL_URL: str = Field("", description="Public URL of the service (set by Render)")

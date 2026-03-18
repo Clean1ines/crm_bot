@@ -1,12 +1,10 @@
 """
-Telegram Webhook Gateway.
+Telegram Webhook Gateway with manager access control.
 
-CRITICAL RULE:
-- Routing is based SOLELY on bot_token comparison.
-- Admin Bot (ADMIN_BOT_TOKEN) -> src.admin.router
-- Client Bot (Project Token) -> src.clients.router
-- Manager Bot (Manager Token) -> src.managers.router
-- NO chat_id checks here. Isolation is by token.
+CRITICAL RULES:
+- Admin bot (ADMIN_BOT_TOKEN) -> admin handlers.
+- Client bots (any other token in projects) -> client handlers.
+- Manager bots -> manager handlers, but only if sender chat_id is in project managers list.
 """
 
 import httpx
@@ -24,6 +22,7 @@ from src.api.dependencies import (
 from src.admin.router import process_admin_update
 from src.clients.router import process_client_update
 from src.managers.router import process_manager_update
+from src.database.repositories.project_repository import ProjectRepository
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -38,8 +37,8 @@ async def telegram_webhook(
     project_repo=Depends(get_project_repo),
 ):
     """
-    Smart Gateway for Client and Admin bots.
-    Routes updates based on token comparison.
+    Gateway for Client and Admin bots.
+    Routes based on token comparison with ADMIN_BOT_TOKEN.
     """
     try:
         # 1. Verify Secret Token
@@ -58,21 +57,16 @@ async def telegram_webhook(
 
         # 3. Parse Update
         update = await request.json()
-        # Inject bot_token into update context for routers to use
-        update["_bot_token"] = bot_token 
-        
+        update["_bot_token"] = bot_token
+
         logger.debug("Received update", extra={"project_id": project_id})
 
-        # 4. ROUTING DECISION (The Core Fix)
-        # Compare decrypted token from DB with ADMIN_BOT_TOKEN from ENV
+        # 4. Routing Decision
         if bot_token.strip() == settings.ADMIN_BOT_TOKEN.strip():
-            # ROUTE TO ADMIN MODULE
-            logger.info("Routing to Admin Bot handler", extra={"project_id": project_id})
+            logger.info("Routing to Admin Bot handler")
             return await process_admin_update(update, pool)
-        
         else:
-            # ROUTE TO CLIENT MODULE
-            logger.info("Routing to Client Bot handler", extra={"project_id": project_id})
+            logger.info("Routing to Client Bot handler")
             return await process_client_update(update, project_id, orchestrator, bot_token)
 
     except HTTPException:
@@ -89,45 +83,59 @@ async def manager_webhook(
     orchestrator=Depends(get_orchestrator),
 ):
     """
-    Gateway for Manager Bots.
-    Identifies project by matching secret_token against manager_bot_token in DB.
+    Gateway for Manager Bots with access control.
     """
     secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if not secret_token:
         raise HTTPException(status_code=401, detail="Missing secret token")
 
-    # Find project by manager_bot_token
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, manager_bot_token FROM projects WHERE manager_bot_token = $1",
-            secret_token
-        )
-        if not row:
-            raise HTTPException(status_code=401, detail="Invalid secret token")
+    # Find project by manager_bot_token (secret_token is the token itself, unencrypted)
+    # Note: manager_bot_token is stored encrypted, but we compare with the raw token from Telegram.
+    # We need to decrypt all manager tokens and compare.
+    # Simpler: we fetch all projects and decrypt tokens in memory (but could be heavy).
+    # Alternative: use a separate secret for manager webhooks. But spec uses the token itself.
+    # We'll use a repository method to find project by manager token (decrypting in SQL).
+    # For now, we'll use raw SQL with decryption (assuming pgcrypto or similar).
+    # Since we don't have that, we'll iterate in Python (acceptable for small number of projects).
 
-    project_id = str(row["id"])
-    manager_bot_token = row["manager_bot_token"]
-    
-    # Decrypt token if needed (repo does this, but raw SQL returns encrypted)
-    # Assuming row['manager_bot_token'] is already decrypted if fetched via repo, 
-    # but here we used raw SQL. Let's rely on the fact that we compared secret_token directly.
-    # We need the DECRYPTED token to send messages.
-    from src.database.repositories.project_repository import ProjectRepository
-    proj_repo = ProjectRepository(pool)
-    decrypted_token = await proj_repo.get_manager_bot_token(project_id)
-    
-    if not decrypted_token:
-         logger.error("Manager token not found or decrypt failed", extra={"project_id": project_id})
-         raise HTTPException(status_code=500, detail="Manager token error")
+    project_repo = ProjectRepository(pool)
+    project_id = await project_repo.find_project_by_manager_token(secret_token)
+    if not project_id:
+        raise HTTPException(status_code=401, detail="Invalid secret token")
 
-    try:
-        update = await request.json()
-        update["_bot_token"] = decrypted_token
-        
-        logger.debug("Received manager update", extra={"project_id": project_id})
-        
-        return await process_manager_update(update, project_id, orchestrator, decrypted_token)
-        
-    except Exception as e:
-        logger.exception("Error in manager webhook")
-        return {"ok": True} # Return OK to Telegram to avoid retries on logic errors
+    # Get decrypted manager token for sending messages
+    manager_bot_token = await project_repo.get_manager_bot_token(project_id)
+    if not manager_bot_token:
+        logger.error("Manager token not found after project match", extra={"project_id": project_id})
+        raise HTTPException(status_code=500, detail="Manager token error")
+
+    # Parse update
+    update = await request.json()
+    # Extract sender chat_id
+    chat_id = None
+    if "message" in update:
+        chat_id = update["message"].get("from", {}).get("id")
+    elif "callback_query" in update:
+        chat_id = update["callback_query"].get("from", {}).get("id")
+
+    if not chat_id:
+        logger.warning("No chat_id in update", extra={"update": update})
+        # Still pass to handler? Probably not, but we'll return 200 to avoid retries.
+        return {"ok": True}
+
+    # Check if chat_id is in project managers
+    managers = await project_repo.get_managers(project_id)
+    if str(chat_id) not in [str(m) for m in managers]:
+        logger.info("Unauthorized access attempt", extra={"chat_id": chat_id, "project_id": project_id})
+        # Send access denied message
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"https://api.telegram.org/bot{manager_bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": "⛔ Доступ запрещён. Вы не являетесь менеджером этого проекта."}
+            )
+        return {"ok": True}
+
+    # Authorized - proceed
+    update["_bot_token"] = manager_bot_token
+    logger.debug("Authorized manager update", extra={"project_id": project_id, "chat_id": chat_id})
+    return await process_manager_update(update, project_id, orchestrator, manager_bot_token)
