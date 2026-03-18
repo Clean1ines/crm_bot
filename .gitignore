@@ -27,3 +27,5 @@ db_diagnostic.sh
 schema.sql
 db_schema.txt
 scripts/
+kb_demo_30.json
+test_kb_fixed.py

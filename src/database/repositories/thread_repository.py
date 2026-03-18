@@ -1,4 +1,5 @@
 import uuid
+import json
 from typing import List, Optional, Dict, Any
 from ..models import ThreadStatus
 from src.core.logging import get_logger
@@ -177,9 +178,10 @@ class ThreadRepository:
         """
         logger.info(f"Saving state_json for thread {thread_id}")
         async with self.pool.acquire() as conn:
+            # Serialize dict to JSON string to avoid asyncpg encoding issues
             await conn.execute("""
                 UPDATE threads
                 SET state_json = $1, updated_at = NOW()
                 WHERE id = $2
-            """, state, uuid.UUID(thread_id))
+            """, json.dumps(state), uuid.UUID(thread_id))
             logger.debug("State_json saved")

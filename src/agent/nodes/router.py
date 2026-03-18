@@ -9,10 +9,12 @@ import json
 from typing import Dict, Any, Optional
 
 from langchain_groq import ChatGroq
+from pydantic import ValidationError
 
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.agent.state import AgentState
+from src.agent.schemas import RouterOutput
 
 logger = get_logger(__name__)
 
@@ -141,10 +143,12 @@ def create_router_node(llm: Optional[ChatGroq] = None):
                 content = content[:-3]
             content = content.strip()
 
+            # Parse and validate with Pydantic
             data = json.loads(content)
-            logger.debug("Router LLM response parsed", extra={"decision": data.get("decision")})
-        except Exception as e:
-            logger.error("Failed to parse router LLM response", extra={"error": str(e), "raw": content if 'content' in locals() else 'N/A'})
+            router_output = RouterOutput.parse_obj(data)
+            logger.debug("Router LLM response validated", extra={"decision": router_output.decision})
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error("Failed to parse or validate router LLM response", extra={"error": str(e), "raw": content if 'content' in locals() else 'N/A'})
             # Fallback: escalate to human
             return {
                 "decision": "ESCALATE",
@@ -153,20 +157,9 @@ def create_router_node(llm: Optional[ChatGroq] = None):
                 "confidence": 0.0
             }
 
-        # Validate required fields
-        required_keys = {"decision", "response", "tool", "tool_args", "requires_human", "confidence"}
-        if not all(k in data for k in required_keys):
-            logger.warning("Router LLM response missing required keys", extra={"keys": data.keys()})
-            return {
-                "decision": "ESCALATE",
-                "requires_human": True,
-                "response_text": "Ошибка в формате ответа. Передано менеджеру.",
-                "confidence": 0.0
-            }
-
         # Map decision to expected values in state (RESPOND_KB, RESPOND_TEMPLATE, LLM_GENERATE, CALL_TOOL, ESCALATE_TO_HUMAN)
         # We'll keep as is, but convert ESCALATE_TO_HUMAN to ESCALATE for consistency with graph.
-        decision = data["decision"]
+        decision = router_output.decision
         if decision == "ESCALATE_TO_HUMAN":
             decision = "ESCALATE"
         elif decision == "CALL_TOOL":
@@ -174,12 +167,12 @@ def create_router_node(llm: Optional[ChatGroq] = None):
         # For now we return original decision, and the graph will map using conditional edges.
 
         result = {
-            "decision": data["decision"],
-            "response_text": data.get("response", ""),
-            "tool_name": data.get("tool"),
-            "tool_args": data.get("tool_args", {}),
-            "requires_human": data.get("requires_human", False),
-            "confidence": data.get("confidence", 0.0)
+            "decision": router_output.decision,
+            "response_text": router_output.response,
+            "tool_name": router_output.tool,
+            "tool_args": router_output.tool_args,
+            "requires_human": router_output.requires_human,
+            "confidence": router_output.confidence
         }
 
         logger.info("Router decision", extra={
