@@ -5,9 +5,10 @@ Executes a tool using the ToolRegistry and stores the result in the state.
 Handles errors by setting requires_human=True and providing fallback response.
 """
 
+import json
 from typing import Dict, Any, Optional
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 from src.tools.registry import ToolRegistry
 
@@ -26,7 +27,7 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
         with the result of tool execution (tool_result) and possibly updated
         requires_human flag.
     """
-    async def tool_executor_node(state: AgentState) -> Dict[str, Any]:
+    async def _tool_executor_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Execute the tool specified in the state.
 
@@ -79,5 +80,23 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
                 "response_text": f"Произошла ошибка при выполнении запроса. Передано менеджеру.",
                 "tool_result": None
             }
+
+    def _get_tool_executor_input_size(state: AgentState) -> int:
+        # approximate input size by JSON string length of tool_args
+        args = state.get("tool_args", {})
+        return len(json.dumps(args))
+
+    def _get_tool_executor_output_size(result: Dict[str, Any]) -> int:
+        # approximate output size
+        return len(json.dumps(result.get("tool_result", ""))) if result.get("tool_result") else 0
+
+    async def tool_executor_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "tool_executor",
+            _tool_executor_node_impl,
+            state,
+            get_input_size=_get_tool_executor_input_size,
+            get_output_size=_get_tool_executor_output_size
+        )
 
     return tool_executor_node

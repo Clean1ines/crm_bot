@@ -6,7 +6,7 @@ Performs semantic search using the search_knowledge tool and stores results in s
 
 from typing import Dict, Any
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 from src.tools.registry import ToolRegistry
 
@@ -24,7 +24,7 @@ def create_kb_search_node(tool_registry: ToolRegistry):
         An async function that takes an AgentState dict and returns a dict
         with updated knowledge_chunks.
     """
-    async def kb_search_node(state: AgentState) -> Dict[str, Any]:
+    async def _kb_search_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Execute knowledge base search and store results in state.
 
@@ -67,5 +67,20 @@ def create_kb_search_node(tool_registry: ToolRegistry):
         except Exception as e:
             logger.exception("KB search failed", extra={"project_id": project_id, "error": str(e)})
             return {"knowledge_chunks": []}
+
+    def _get_kb_search_input_size(state: AgentState) -> int:
+        return len(state.get("user_input", ""))
+
+    def _get_kb_search_output_size(result: Dict[str, Any]) -> int:
+        return len(result.get("knowledge_chunks", []))
+
+    async def kb_search_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "kb_search",
+            _kb_search_node_impl,
+            state,
+            get_input_size=_get_kb_search_input_size,
+            get_output_size=_get_kb_search_output_size
+        )
 
     return kb_search_node

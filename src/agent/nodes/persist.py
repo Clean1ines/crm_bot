@@ -7,7 +7,7 @@ for auditing and analytics.
 
 from typing import Dict, Any, Optional
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.event_repository import EventRepository
@@ -32,7 +32,7 @@ def create_persist_node(
         An async function that takes an AgentState dict and returns a dict
         (usually empty on success).
     """
-    async def persist_node(state: AgentState) -> Dict[str, Any]:
+    async def _persist_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Persist conversation data and emit events.
 
@@ -142,5 +142,20 @@ def create_persist_node(
         #     asyncio.create_task(summarizer.summarize_and_save(thread_id))
 
         return {}  # no state changes
+
+    def _get_persist_input_size(state: AgentState) -> int:
+        return 0  # no meaningful input size
+
+    def _get_persist_output_size(result: Dict[str, Any]) -> int:
+        return 0  # output is empty dict
+
+    async def persist_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "persist",
+            _persist_node_impl,
+            state,
+            get_input_size=_get_persist_input_size,
+            get_output_size=_get_persist_output_size
+        )
 
     return persist_node

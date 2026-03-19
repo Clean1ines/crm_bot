@@ -11,7 +11,7 @@ Applies cheap rules (no LLM) to determine the initial decision:
 import re
 from typing import Dict, Any
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 
 logger = get_logger(__name__)
@@ -23,8 +23,7 @@ ANGER_KEYWORDS = [
     "невероятно дорого", "сжигаю контракт", "удалить аккаунт"
 ]
 
-# FAQ_PATTERNS - временно оставим только точные совпадения, чтобы не мешать KB
-# Убраны общие паттерны, которые давали неверные ответы
+# FAQ_PATTERNS - temporarily left empty to let KB handle most cases
 FAQ_PATTERNS = [
     # (re.compile(r"доставк|delivery", re.IGNORECASE), "Доставка осуществляется в течение 1-3 рабочих дней."),
     # (re.compile(r"цена|стоимост|price|cost", re.IGNORECASE), "Стоимость зависит от тарифа. Базовый пакет — 5000₽, поддержка от 1500₽/мес."),
@@ -63,7 +62,7 @@ def _match_faq(text: str) -> tuple[bool, str]:
     return False, ""
 
 
-async def rules_node(state: AgentState) -> Dict[str, Any]:
+async def _rules_node_impl(state: AgentState) -> Dict[str, Any]:
     """
     Apply cheap routing rules to the incoming state.
 
@@ -110,3 +109,20 @@ async def rules_node(state: AgentState) -> Dict[str, Any]:
     # Default: proceed to LLM router
     logger.debug("No rule triggered, proceeding to LLM")
     return {"decision": "PROCEED_TO_LLM"}
+
+
+def _get_rules_input_size(state: AgentState) -> int:
+    return len(state.get("user_input", ""))
+
+def _get_rules_output_size(result: Dict[str, Any]) -> int:
+    # output is a small decision dict, we can return 1 as approximation
+    return 1
+
+async def rules_node(state: AgentState) -> Dict[str, Any]:
+    return await log_node_execution(
+        "rules",
+        _rules_node_impl,
+        state,
+        get_input_size=_get_rules_input_size,
+        get_output_size=_get_rules_output_size
+    )

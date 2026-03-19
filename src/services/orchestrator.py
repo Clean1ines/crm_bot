@@ -317,6 +317,9 @@ class OrchestratorService:
                 
                 saved_state = await self.threads.get_state_json(thread_id_str)
 
+                # Generate trace_id for this graph execution
+                trace_id = uuid.uuid4().hex
+
                 # Build initial AgentState
                 state = AgentState(
                     messages=[],
@@ -336,7 +339,8 @@ class OrchestratorService:
                     response_text=None,
                     requires_human=False,
                     confidence=None,
-                    chat_id=chat_id
+                    chat_id=chat_id,
+                    trace_id=trace_id,
                 )
 
                 # Get graph for project

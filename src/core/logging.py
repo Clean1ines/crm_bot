@@ -6,9 +6,15 @@ Provides a middleware for FastAPI to inject correlation IDs.
 import structlog
 import logging
 import uuid
+import time
+import asyncio
+from functools import wraps
+from typing import Callable, Optional, Any, Dict
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 import sys
+
+from src.agent.state import AgentState
 
 def configure_logging():
     """Configure structlog for JSON output with timestamps and levels."""
@@ -57,3 +63,64 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
     """Return a structlog logger bound with the module name."""
     return structlog.get_logger(module_name)
+
+
+# Node execution tracing utility
+async def log_node_execution(
+    node_name: str,
+    func: Callable[[AgentState], Any],
+    state: AgentState,
+    *,
+    get_input_size: Optional[Callable[[AgentState], int]] = None,
+    get_output_size: Optional[Callable[[Any], int]] = None
+) -> Any:
+    """
+    Execute an agent node with timing and observability logging.
+
+    This wrapper measures execution time, computes input/output sizes (if provided),
+    and logs structured information on success or failure. Exceptions are re-raised.
+
+    Args:
+        node_name: Name of the node (e.g., "kb_search").
+        func: Async function implementing the node. It must accept `state` as its only argument.
+        state: The current AgentState.
+        get_input_size: Optional function to compute input size from state.
+        get_output_size: Optional function to compute output size from the result.
+
+    Returns:
+        The result of `func(state)`.
+
+    Raises:
+        Any exception raised by `func`.
+    """
+    trace_id = state.get("trace_id")
+    logger = get_logger("node_tracing")
+    input_size = get_input_size(state) if get_input_size else 0
+    start = time.monotonic()
+    error = None
+    result = None
+
+    try:
+        result = await func(state)
+        return result
+    except Exception as e:
+        error = e
+        raise
+    finally:
+        latency_ms = (time.monotonic() - start) * 1000
+        extra: Dict[str, Any] = {
+            "trace_id": trace_id,
+            "node": node_name,
+            "latency_ms": round(latency_ms, 2),
+            "input_size": input_size,
+        }
+        if error is None:
+            # Success
+            if get_output_size:
+                extra["output_size"] = get_output_size(result)
+            logger.info("Node execution completed", **extra)
+        else:
+            # Failure
+            extra["error"] = True
+            extra["error_msg"] = str(error)[:200]
+            logger.error("Node execution failed", **extra, exc_info=error)

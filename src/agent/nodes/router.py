@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from src.agent.state import AgentState
 from src.agent.schemas import RouterOutput
 from src.core.config import settings
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.core.model_registry import ModelRegistry
 from src.services.model_selector import ModelSelector
 from src.services.rate_limit_tracker import RateLimitTracker
@@ -127,7 +127,7 @@ def create_router_node(
     trk = tracker if tracker is not None else _get_tracker()
     sel = selector if selector is not None else ModelSelector(reg, trk)
 
-    async def router_node(state: AgentState) -> Dict[str, Any]:
+    async def _router_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Analyze the current state and decide the next action with a Groq model.
 
@@ -470,5 +470,20 @@ def create_router_node(
             routing_mode=routing_mode,
         )
         return result
+
+    def _get_router_input_size(state: AgentState) -> int:
+        return len(state.get("user_input", "")) + len(state.get("knowledge_chunks", []))
+
+    def _get_router_output_size(result: Dict[str, Any]) -> int:
+        return len(result.get("response_text", ""))
+
+    async def router_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "router",
+            _router_node_impl,
+            state,
+            get_input_size=_get_router_input_size,
+            get_output_size=_get_router_output_size
+        )
 
     return router_node

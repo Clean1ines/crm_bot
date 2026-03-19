@@ -7,7 +7,7 @@ and populates the AgentState with this data.
 
 from typing import Dict, Any, Optional
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 
 logger = get_logger(__name__)
@@ -26,8 +26,7 @@ def create_load_state_node(thread_repo, project_repo):
         An async function that takes an AgentState dict and returns a dict with
         loaded fields (client_profile, conversation_summary, history).
     """
-
-    async def load_state_node(state: AgentState) -> Dict[str, Any]:
+    async def _load_state_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Load conversation data from the database into the state.
 
@@ -90,5 +89,20 @@ def create_load_state_node(thread_repo, project_repo):
 
         logger.debug("State loaded", extra={"thread_id": thread_id, "message_count": len(recent_messages)})
         return result
+
+    def _get_load_state_input_size(state: AgentState) -> int:
+        return 0  # no meaningful input size
+
+    def _get_load_state_output_size(result: Dict[str, Any]) -> int:
+        return len(result.get("history", []))
+
+    async def load_state_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "load_state",
+            _load_state_node_impl,
+            state,
+            get_input_size=_get_load_state_input_size,
+            get_output_size=_get_load_state_output_size
+        )
 
     return load_state_node

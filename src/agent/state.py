@@ -39,6 +39,7 @@ class AgentState(TypedDict):
         response_text: Final text response to send to user.
         requires_human: Whether human intervention is needed.
         confidence: Confidence score of the decision (0-1).
+        trace_id: Unique identifier for tracing the entire graph execution.
     """
     # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -58,7 +59,8 @@ class AgentState(TypedDict):
     tool_args: Optional[Dict[str, Any]]
     tool_result: Optional[Any]
     response_text: Optional[str]
-    requires_human: bool  # default False, so we keep it non-optional but with default? TypedDict doesn't support defaults. We'll keep as bool and require explicit False.
+    requires_human: bool
     confidence: Optional[float]
     chat_id: Optional[int]  # Telegram chat ID of the user, needed for responder
     message_sent: Optional[bool]  # Flag indicating that the message was already sent by the graph
+    trace_id: Optional[str]  # Unique trace identifier for observability

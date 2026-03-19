@@ -7,7 +7,7 @@ Prioritizes tool_result over response_text, falls back to a default message.
 
 from typing import Dict, Any
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 from src.tools.registry import ToolRegistry
 
@@ -25,7 +25,7 @@ def create_responder_node(tool_registry: ToolRegistry):
         An async function that takes an AgentState dict and returns a dict
         (usually empty on success, or with requires_human=True on failure).
     """
-    async def responder_node(state: AgentState) -> Dict[str, Any]:
+    async def _responder_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Send the final response to the user.
 
@@ -94,5 +94,20 @@ def create_responder_node(tool_registry: ToolRegistry):
                 "requires_human": True,
                 "response_text": "Произошла техническая ошибка при отправке ответа. Мы уже работаем над её устранением."
             }
+
+    def _get_responder_input_size(state: AgentState) -> int:
+        return len(state.get("response_text", "")) + (len(state.get("tool_result", {})) if state.get("tool_result") else 0)
+
+    def _get_responder_output_size(result: Dict[str, Any]) -> int:
+        return 1  # success/failure flag
+
+    async def responder_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "responder",
+            _responder_node_impl,
+            state,
+            get_input_size=_get_responder_input_size,
+            get_output_size=_get_responder_output_size
+        )
 
     return responder_node

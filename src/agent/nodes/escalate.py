@@ -7,7 +7,7 @@ and updates the state to indicate human escalation.
 
 from typing import Dict, Any
 
-from src.core.logging import get_logger
+from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 from src.database.models import ThreadStatus
 from src.database.repositories.thread_repository import ThreadRepository
@@ -31,7 +31,7 @@ def create_escalate_node(
         An async function that takes an AgentState dict and returns a dict
         with updates to the state (requires_human=True, response_text).
     """
-    async def escalate_node(state: AgentState) -> Dict[str, Any]:
+    async def _escalate_node_impl(state: AgentState) -> Dict[str, Any]:
         """
         Escalate the conversation to a human manager.
 
@@ -88,5 +88,20 @@ def create_escalate_node(
             "response_text": "Ваш вопрос передан менеджеру. Ожидайте ответа в ближайшее время.",
             "tool_result": None  # ensure no leftover tool result
         }
+
+    def _get_escalate_input_size(state: AgentState) -> int:
+        return len(state.get("user_input", ""))
+
+    def _get_escalate_output_size(result: Dict[str, Any]) -> int:
+        return len(result.get("response_text", ""))
+
+    async def escalate_node(state: AgentState) -> Dict[str, Any]:
+        return await log_node_execution(
+            "escalate",
+            _escalate_node_impl,
+            state,
+            get_input_size=_get_escalate_input_size,
+            get_output_size=_get_escalate_output_size
+        )
 
     return escalate_node
