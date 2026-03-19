@@ -16,20 +16,40 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
-from textwrap import dedent
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Optional
 
 from langchain_groq import ChatGroq
 from pydantic import ValidationError
 
-from src.agent.schemas import RouterOutput
 from src.agent.state import AgentState
+from src.agent.schemas import RouterOutput
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.core.model_registry import ModelRegistry
 from src.services.model_selector import ModelSelector
 from src.services.rate_limit_tracker import RateLimitTracker
+
+from src.agent.router.utils import (
+    truncate_text,
+    safe_json_dumps,
+    count_question_signals,
+    has_sensitive_or_urgent_intent,
+    has_complex_intent,
+    extract_model_id,
+)
+from src.agent.router.prompt_builder import (
+    format_kb_results,
+    format_history,
+    infer_routing_mode,
+    build_router_prompt,
+    DEFAULT_KB_THRESHOLD,
+    DEFAULT_LLM_THRESHOLD,
+    DEFAULT_KB_LIMIT,
+)
+from src.agent.router.output_parser import (
+    parse_router_output,
+    build_fallback_response_from_kb,
+)
 
 logger = get_logger(__name__)
 
@@ -38,63 +58,13 @@ _registry: Optional[ModelRegistry] = None
 _tracker: Optional[RateLimitTracker] = None
 _selector: Optional[ModelSelector] = None
 
-# Central thresholds with safe fallbacks to configuration values.
-DEFAULT_KB_THRESHOLD = float(
-    getattr(settings, "ROUTER_KB_THRESHOLD", getattr(settings, "KB_THRESHOLD", 0.78))
-)
-DEFAULT_LLM_THRESHOLD = float(
-    getattr(settings, "ROUTER_LLM_THRESHOLD", getattr(settings, "LLM_THRESHOLD", 0.70))
-)
-DEFAULT_ROUTER_TIMEOUT_SECONDS = float(
-    getattr(settings, "ROUTER_TIMEOUT_SECONDS", 30.0)
-)
-DEFAULT_ROUTER_MAX_ATTEMPTS = int(
-    getattr(settings, "ROUTER_MAX_ATTEMPTS", 3)
-)
-DEFAULT_KB_LIMIT = int(
-    getattr(settings, "ROUTER_KB_LIMIT", 5)
-)
-
-SENSITIVE_KEYWORDS = (
-    "refund",
-    "chargeback",
-    "возврат",
-    "верните деньги",
-    "деньги",
-    "жалоб",
-    "мошен",
-    "обман",
-    "угрож",
-    "публичн",
-    "удалить аккаунт",
-    "отключить",
-)
-
-COMPLEXITY_KEYWORDS = (
-    "интеграц",
-    "подключ",
-    "api",
-    "postgres",
-    "crm",
-    "webhook",
-    "n8n",
-    "google sheets",
-    "автоматизац",
-    "oauth",
-    "база данных",
-    "бд",
-    "сложн",
-    "кастом",
-)
+# Timeout and retry settings from config
+ROUTER_TIMEOUT_SECONDS = float(getattr(settings, "ROUTER_TIMEOUT_SECONDS", 30.0))
+ROUTER_MAX_ATTEMPTS = int(getattr(settings, "ROUTER_MAX_ATTEMPTS", 3))
 
 
 def _get_registry() -> ModelRegistry:
-    """
-    Return the lazily initialized global ModelRegistry.
-
-    Returns:
-        ModelRegistry singleton.
-    """
+    """Return the lazily initialized global ModelRegistry."""
     global _registry
     if _registry is None:
         _registry = ModelRegistry()
@@ -102,12 +72,7 @@ def _get_registry() -> ModelRegistry:
 
 
 def _get_tracker() -> RateLimitTracker:
-    """
-    Return the lazily initialized global RateLimitTracker.
-
-    Returns:
-        RateLimitTracker singleton.
-    """
+    """Return the lazily initialized global RateLimitTracker."""
     global _tracker
     if _tracker is None:
         _tracker = RateLimitTracker()
@@ -115,503 +80,17 @@ def _get_tracker() -> RateLimitTracker:
 
 
 def _get_selector() -> ModelSelector:
-    """
-    Return the lazily initialized global ModelSelector.
-
-    Returns:
-        ModelSelector singleton.
-    """
+    """Return the lazily initialized global ModelSelector."""
     global _selector
     if _selector is None:
         _selector = ModelSelector(_get_registry(), _get_tracker())
     return _selector
 
 
-def _compact_whitespace(text: str) -> str:
-    """
-    Normalize whitespace so prompt contexts stay compact and cheap.
-
-    Args:
-        text: Arbitrary text.
-
-    Returns:
-        Text with consecutive whitespace collapsed into single spaces.
-    """
-    return re.sub(r"\s+", " ", text or "").strip()
-
-
-def _truncate_text(text: str, max_length: int = 280) -> str:
-    """
-    Truncate text to a safe prompt size while keeping it readable.
-
-    Args:
-        text: Input text.
-        max_length: Maximum allowed length.
-
-    Returns:
-        Truncated text with ellipsis if needed.
-    """
-    normalized = _compact_whitespace(text)
-    if len(normalized) <= max_length:
-        return normalized
-    return normalized[: max_length - 1].rstrip() + "…"
-
-
-def _safe_json_dumps(value: Any, *, indent: int = 2) -> str:
-    """
-    Serialize values to JSON safely for prompt/debug usage.
-
-    Args:
-        value: Any serializable value.
-        indent: Indentation level.
-
-    Returns:
-        JSON string or a safe string fallback.
-    """
-    try:
-        return json.dumps(value, ensure_ascii=False, indent=indent, default=str)
-    except (TypeError, ValueError):
-        return json.dumps(str(value), ensure_ascii=False, indent=indent)
-
-
-def _extract_kb_text(item: Any) -> str:
-    """
-    Extract a human-readable knowledge snippet from KB result items.
-
-    Supports multiple schemas:
-    - {"answer": "..."}
-    - {"content": "..."}
-    - {"text": "..."}
-    - raw strings
-
-    Args:
-        item: KB result item.
-
-    Returns:
-        Normalized text snippet or an empty string.
-    """
-    if isinstance(item, str):
-        return _compact_whitespace(item)
-
-    if isinstance(item, dict):
-        for key in ("answer", "content", "text", "snippet", "reply"):
-            value = item.get(key)
-            if value:
-                return _compact_whitespace(str(value))
-    return ""
-
-
-def _format_kb_results(
-    kb_results: Sequence[Any],
-    limit: int = DEFAULT_KB_LIMIT,
-) -> Tuple[str, float, int]:
-    """
-    Format KB search results into a compact prompt-friendly evidence block.
-
-    Args:
-        kb_results: Sequence of KB results, usually dicts with score/content.
-        limit: Maximum number of results to include.
-
-    Returns:
-        A tuple of:
-        - compact textual evidence block
-        - top score
-        - number of included items
-    """
-    if not kb_results:
-        return "[]", 0.0, 0
-
-    lines: List[str] = []
-    top_score = 0.0
-
-    for index, item in enumerate(kb_results[:limit], start=1):
-        score = 0.0
-        text = ""
-        question = ""
-        method = ""
-
-        if isinstance(item, dict):
-            raw_score = item.get("score", 0.0)
-            try:
-                score = float(raw_score or 0.0)
-            except (TypeError, ValueError):
-                score = 0.0
-
-            text = _extract_kb_text(item)
-            question = _truncate_text(str(item.get("question", "")), 120)
-            method = _compact_whitespace(str(item.get("method", "")))
-
-        else:
-            text = _extract_kb_text(item)
-
-        top_score = max(top_score, score)
-
-        parts: List[str] = [f"{index}. score={score:.3f}"]
-        if question:
-            parts.append(f"question={question}")
-        if method:
-            parts.append(f"method={method}")
-        if text:
-            parts.append(f"text={_truncate_text(text, 420)}")
-
-        lines.append(" | ".join(parts))
-
-    return "\n".join(lines), top_score, len(lines)
-
-
-def _format_history(history: Sequence[Any], limit: int = 5) -> str:
-    """
-    Format recent message history into a compact prompt-friendly trace.
-
-    Args:
-        history: Sequence of history items (dicts or strings).
-        limit: Maximum number of entries to include.
-
-    Returns:
-        Compact textual history representation.
-    """
-    if not history:
-        return "[]"
-
-    lines: List[str] = []
-    for item in history[-limit:]:
-        if isinstance(item, dict):
-            role = _compact_whitespace(str(item.get("role", "message")))
-            content = _truncate_text(str(item.get("content", "")), 220)
-            if content:
-                lines.append(f"- {role}: {content}")
-        else:
-            content = _truncate_text(str(item), 220)
-            if content:
-                lines.append(f"- {content}")
-
-    return "\n".join(lines) if lines else "[]"
-
-
-def _count_question_signals(text: str) -> int:
-    """
-    Estimate how many sub-questions are embedded in a user message.
-
-    This is used for routing and model-selection heuristics only.
-
-    Args:
-        text: User message.
-
-    Returns:
-        Estimated number of question signals.
-    """
-    if not text:
-        return 0
-
-    lowered = text.lower()
-    question_marks = text.count("?")
-    interrogatives = len(
-        re.findall(
-            r"\b(что|как|сколько|почему|когда|где|зачем|какой|какая|какие|можно ли|есть ли)\b",
-            lowered,
-        )
-    )
-
-    # Blend punctuation and interrogative markers.
-    return max(question_marks, interrogatives)
-
-
-def _has_sensitive_or_urgent_intent(text: str) -> bool:
-    """
-    Detect sensitive or urgent intent that should bias toward a stronger model.
-
-    Args:
-        text: User message.
-
-    Returns:
-        True if the message contains sensitive or urgent intent.
-    """
-    lowered = (text or "").lower()
-    return any(keyword in lowered for keyword in SENSITIVE_KEYWORDS)
-
-
-def _has_complex_intent(text: str) -> bool:
-    """
-    Detect requests that typically benefit from a larger model.
-
-    Args:
-        text: User message.
-
-    Returns:
-        True if the message likely needs stronger reasoning.
-    """
-    lowered = (text or "").lower()
-    return any(keyword in lowered for keyword in COMPLEXITY_KEYWORDS)
-
-
-def _infer_routing_mode(
-    kb_count: int,
-    top_score: float,
-    question_count: int,
-    kb_threshold: float,
-) -> str:
-    """
-    Infer a high-level routing mode for prompt steering and model selection.
-
-    Args:
-        kb_count: Number of KB results available.
-        top_score: Best KB score.
-        question_count: Estimated number of question signals.
-        kb_threshold: Threshold for high-confidence KB usage.
-
-    Returns:
-        One of:
-        - DIRECT_KB
-        - HYBRID_SYNTHESIS
-        - KB_AUGMENTED_LLM
-        - LLM_ONLY
-    """
-    if kb_count <= 0:
-        return "LLM_ONLY"
-
-    if top_score >= kb_threshold and question_count <= 1:
-        return "DIRECT_KB"
-
-    if question_count >= 2 or kb_count >= 2:
-        return "HYBRID_SYNTHESIS"
-
-    return "KB_AUGMENTED_LLM"
-
-
-def _build_router_prompt(
-    *,
-    user_input: str,
-    client_profile: str,
-    conversation_summary: str,
-    recent_history: str,
-    kb_context: str,
-    kb_top_score: float,
-    kb_count: int,
-    question_count: int,
-    routing_mode: str,
-    kb_threshold: float,
-    llm_threshold: float,
-) -> str:
-    """
-    Build the router prompt used by the Groq model.
-
-    The prompt is intentionally synthesis-first:
-    - KB results are evidence, not raw copy-paste.
-    - Multiple questions must be answered point-by-point.
-    - Missing profile data should not block an answer unless required.
-
-    Args:
-        user_input: Current user message.
-        client_profile: Serialized client profile.
-        conversation_summary: Serialized conversation summary.
-        recent_history: Serialized recent history.
-        kb_context: Serialized KB evidence block.
-        kb_top_score: Best KB score.
-        kb_count: Number of KB results.
-        question_count: Estimated number of question signals.
-        routing_mode: Derived routing mode.
-        kb_threshold: KB confidence threshold.
-        llm_threshold: LLM confidence threshold.
-
-    Returns:
-        Fully rendered prompt string.
-    """
-    return dedent(
-        f"""
-        Ты — routing LLM и синтезатор ответа для клиентского бота MRAK-OS.
-
-        Твоя задача:
-        1) выбрать один из режимов: RESPOND_KB, RESPOND_TEMPLATE, LLM_GENERATE, CALL_TOOL, ESCALATE_TO_HUMAN;
-        2) использовать KB как факты, а не как сырой копипаст;
-        3) если в сообщении несколько вопросов — ответить на каждый по пунктам;
-        4) если KB покрывает только часть запроса — ответить на то, что известно, и кратко обозначить неизвестное;
-        5) не блокировать ответ только потому, что client_profile пустой;
-        6) эскалировать только когда это действительно нужно.
-
-        Текущий режим маршрутизации: {routing_mode}
-        Количество вопросительных сигналов: {question_count}
-
-        Входные данные:
-        - user_input: {user_input}
-        - client_profile: {client_profile}
-        - conversation_summary: {conversation_summary}
-        - recent_history: {recent_history}
-        - kb_context:
-        {kb_context}
-        - kb_top_score: {kb_top_score:.3f}
-        - kb_count: {kb_count}
-        - kb_threshold: {kb_threshold:.3f}
-        - llm_threshold: {llm_threshold:.3f}
-
-        Правила:
-        1) Если запрос злой, содержит жалобу, возврат денег, chargeback, публичный негатив, угрозу или явный запрос человека — ESCALATE_TO_HUMAN.
-        2) Если ответ можно уверенно собрать из KB, выбери RESPOND_KB и синтезируй связный ответ своими словами.
-        3) Если есть несколько релевантных KB-фрагментов или несколько вопросов — ответь по пунктам и не потеряй ни один вопрос.
-        4) RESPOND_TEMPLATE используй только для действительно шаблонных сценариев.
-        5) LLM_GENERATE используй, когда KB не покрывает вопрос полностью или нужна дополнительная логика.
-        6) Если client_profile отсутствует, не делай из этого блокер; запроси данные только если без них нельзя продолжить.
-        7) Не копируй KB дословно, если можешь ответить лучше, короче и понятнее.
-        8) Ответ пиши по-русски, вежливо и по делу, без лишней воды.
-
-        Формат ответа (только JSON):
-        {{
-          "decision": "RESPOND_KB | RESPOND_TEMPLATE | LLM_GENERATE | CALL_TOOL | ESCALATE_TO_HUMAN",
-          "response": "string",
-          "tool": "string|null",
-          "tool_args": {{}},
-          "requires_human": true|false,
-          "confidence": 0.0
-        }}
-
-        Примеры:
-
-        Input: "Сколько стоит доставка? И какие сроки?"
-        kb_context:
-        1. score=0.920 | answer: Доставка стоит 300 рублей.
-        2. score=0.840 | answer: Обычно доставка занимает 1-3 рабочих дня.
-        → Output: {{"decision":"RESPOND_KB","response":"Доставка стоит 300 рублей. Обычно доставка занимает 1-3 рабочих дня.","tool":null,"tool_args":{{}},"requires_human":false,"confidence":0.92}}
-
-        Input: "Хочу подключить нашу Postgres базу и OAuth"
-        → Output: {{"decision":"ESCALATE_TO_HUMAN","response":"Это уже настройка интеграции. Я передал запрос менеджеру.","tool":"ticket.create","tool_args":{{"priority":"high"}},"requires_human":true,"confidence":0.95}}
-
-        Возвращай ТОЛЬКО JSON, без пояснений.
-        """
-    ).strip()
-
-
-def _clean_response_content(content: str) -> str:
-    """
-    Clean model response from markdown code fences or wrapper text.
-
-    Args:
-        content: Raw model output.
-
-    Returns:
-        Clean JSON string candidate.
-    """
-    cleaned = (content or "").strip()
-
-    fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.DOTALL | re.IGNORECASE)
-    if fenced:
-        cleaned = fenced.group(1).strip()
-    else:
-        object_match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-        if object_match:
-            cleaned = object_match.group(0).strip()
-
-    return cleaned
-
-
-def _validate_router_output(data: Dict[str, Any]) -> RouterOutput:
-    """
-    Validate parsed router JSON with the project's RouterOutput schema.
-
-    Args:
-        data: Parsed JSON dictionary.
-
-    Returns:
-        Validated RouterOutput object.
-    """
-    if hasattr(RouterOutput, "model_validate"):
-        return RouterOutput.model_validate(data)  # type: ignore[attr-defined]
-    return RouterOutput.parse_obj(data)  # type: ignore[attr-defined]
-
-
-def _parse_router_output(content: str) -> RouterOutput:
-    """
-    Parse and validate router output from the model.
-
-    Args:
-        content: Raw model text output.
-
-    Returns:
-        Validated RouterOutput object.
-
-    Raises:
-        JSONDecodeError: If the content is not valid JSON.
-        ValidationError: If the JSON does not match RouterOutput schema.
-    """
-    cleaned = _clean_response_content(content)
-    data = json.loads(cleaned)
-    return _validate_router_output(data)
-
-
-def _build_fallback_response_from_kb(
-    *,
-    kb_results: Sequence[Any],
-    user_input: str,
-) -> str:
-    """
-    Build a deterministic fallback answer from KB evidence.
-
-    Used only when the model output cannot be parsed or the generation fails.
-
-    Args:
-        kb_results: KB evidence.
-        user_input: Original user message.
-
-    Returns:
-        Human-readable fallback answer.
-    """
-    items: List[str] = []
-
-    for item in kb_results[:3]:
-        text = _extract_kb_text(item)
-        if text:
-            items.append(f"- {_truncate_text(text, 320)}")
-
-    if not items:
-        return (
-            "Сейчас я не смог сформировать корректный ответ. "
-            "Я передал запрос менеджеру."
-        )
-
-    intro = "Нашёл релевантные сведения:\n"
-    outro = (
-        "\n\nЕсли хочешь, я могу уточнить вопрос и сузить ответ под твой кейс."
-    )
-
-    # If the user asked multiple questions, keep the fallback point-by-point.
-    if _count_question_signals(user_input) >= 2:
-        intro = "Нашёл несколько релевантных фрагментов и собрал краткий ответ:\n"
-
-    return intro + "\n".join(items) + outro
-
-
-def _extract_model_id(candidate: Any) -> str:
-    """
-    Extract a model identifier from a registry item.
-
-    Args:
-        candidate: Registry entry returned by ModelRegistry.
-
-    Returns:
-        Model ID string.
-    """
-    if isinstance(candidate, dict):
-        return str(
-            candidate.get("id")
-            or candidate.get("model")
-            or candidate.get("name")
-            or ""
-        )
-    return str(candidate or "")
-
-
 def _build_llm_client(model_id: str, override_llm: Optional[ChatGroq] = None) -> ChatGroq:
-    """
-    Build a ChatGroq client for the selected model.
-
-    Args:
-        model_id: Groq model identifier.
-        override_llm: Optional injected LLM instance.
-
-    Returns:
-        ChatGroq instance.
-    """
+    """Build a ChatGroq client for the selected model."""
     if override_llm is not None:
         return override_llm
-
     return ChatGroq(
         model=model_id,
         temperature=0.0,
@@ -668,7 +147,7 @@ def create_router_node(
         user_input = (state.get("user_input") or "").strip()
         project_id = state.get("project_id")
         thread_id = state.get("thread_id")
-        conversation_summary = _truncate_text(
+        conversation_summary = truncate_text(
             str(state.get("conversation_summary") or "Нет краткого содержания."),
             600,
         )
@@ -691,9 +170,9 @@ def create_router_node(
                 "tool_args": {},
             }
 
-        kb_context, top_score, kb_count = _format_kb_results(raw_kb_results)
-        question_count = _count_question_signals(user_input)
-        routing_mode = _infer_routing_mode(
+        kb_context, top_score, kb_count = format_kb_results(raw_kb_results)
+        question_count = count_question_signals(user_input)
+        routing_mode = infer_routing_mode(
             kb_count=kb_count,
             top_score=top_score,
             question_count=question_count,
@@ -703,8 +182,8 @@ def create_router_node(
         complex_needed = (
             routing_mode in {"HYBRID_SYNTHESIS", "KB_AUGMENTED_LLM", "LLM_ONLY"}
             or len(user_input) > 120
-            or _has_complex_intent(user_input)
-            or _has_sensitive_or_urgent_intent(user_input)
+            or has_complex_intent(user_input)
+            or has_sensitive_or_urgent_intent(user_input)
         )
 
         model_id = await sel.get_best_model(complex_needed=complex_needed)
@@ -719,11 +198,11 @@ def create_router_node(
             top_score=round(top_score, 3),
         )
 
-        prompt = _build_router_prompt(
+        prompt = build_router_prompt(
             user_input=user_input,
-            client_profile=_safe_json_dumps(client_profile if client_profile is not None else None),
+            client_profile=safe_json_dumps(client_profile if client_profile is not None else None),
             conversation_summary=conversation_summary,
-            recent_history=_format_history(history, limit=5),
+            recent_history=format_history(history, limit=5),
             kb_context=kb_context,
             kb_top_score=top_score,
             kb_count=kb_count,
@@ -737,7 +216,7 @@ def create_router_node(
             "Router context prepared",
             project_id=project_id,
             thread_id=thread_id,
-            user_input_preview=_truncate_text(user_input, 120),
+            user_input_preview=truncate_text(user_input, 120),
             kb_count=kb_count,
             question_count=question_count,
             routing_mode=routing_mode,
@@ -755,7 +234,7 @@ def create_router_node(
         response = None
         last_error: Optional[Exception] = None
 
-        for attempt in range(DEFAULT_ROUTER_MAX_ATTEMPTS):
+        for attempt in range(ROUTER_MAX_ATTEMPTS):
             try:
                 logger.debug(
                     "Calling router LLM",
@@ -766,7 +245,7 @@ def create_router_node(
                 )
                 response = await asyncio.wait_for(
                     current_llm.ainvoke(prompt),
-                    timeout=DEFAULT_ROUTER_TIMEOUT_SECONDS,
+                    timeout=ROUTER_TIMEOUT_SECONDS,
                 )
                 last_error = None
                 break
@@ -776,7 +255,7 @@ def create_router_node(
                     "Router LLM timed out",
                     attempt=attempt + 1,
                     model=model_id,
-                    timeout_seconds=DEFAULT_ROUTER_TIMEOUT_SECONDS,
+                    timeout_seconds=ROUTER_TIMEOUT_SECONDS,
                     project_id=project_id,
                     thread_id=thread_id,
                 )
@@ -793,12 +272,12 @@ def create_router_node(
                         thread_id=thread_id,
                     )
 
-                    if attempt < DEFAULT_ROUTER_MAX_ATTEMPTS - 1:
+                    if attempt < ROUTER_MAX_ATTEMPTS - 1:
                         candidate_models = reg.get_models_sorted_by_priority(complex_needed)
                         switched = False
 
                         for candidate in candidate_models:
-                            candidate_model_id = _extract_model_id(candidate)
+                            candidate_model_id = extract_model_id(candidate)
                             if candidate_model_id and candidate_model_id not in used_models:
                                 model_id = candidate_model_id
                                 used_models.add(candidate_model_id)
@@ -851,7 +330,7 @@ def create_router_node(
                 raise
 
         if response is None:
-            fallback_text = _build_fallback_response_from_kb(
+            fallback_text = build_fallback_response_from_kb(
                 kb_results=raw_kb_results,
                 user_input=user_input,
             )
@@ -888,7 +367,7 @@ def create_router_node(
 
         raw_content = getattr(response, "content", "") or ""
         try:
-            router_output = _parse_router_output(raw_content)
+            router_output = parse_router_output(raw_content)
             logger.debug(
                 "Router output validated",
                 decision=router_output.decision,
@@ -899,12 +378,12 @@ def create_router_node(
             logger.error(
                 "Failed to parse or validate router output",
                 error=str(exc),
-                raw_preview=_truncate_text(raw_content, 500),
+                raw_preview=truncate_text(raw_content, 500),
                 project_id=project_id,
                 thread_id=thread_id,
             )
 
-            fallback_text = _build_fallback_response_from_kb(
+            fallback_text = build_fallback_response_from_kb(
                 kb_results=raw_kb_results,
                 user_input=user_input,
             )
@@ -955,7 +434,7 @@ def create_router_node(
             }
 
         if not response_text and raw_kb_results:
-            response_text = _build_fallback_response_from_kb(
+            response_text = build_fallback_response_from_kb(
                 kb_results=raw_kb_results,
                 user_input=user_input,
             )
