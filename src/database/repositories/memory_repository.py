@@ -1,0 +1,173 @@
+"""
+Memory repository for long-term user memory.
+
+Stores facts, preferences, and issues per user for cross-conversation recall.
+"""
+
+from typing import List, Dict, Any, Optional
+import uuid
+import asyncpg
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class MemoryRepository:
+    """
+    Repository for managing user memory (long-term facts).
+    
+    Each memory entry has a key (e.g., "preferred_discount"), value (JSON),
+    and a type for filtering.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the MemoryRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool.
+        """
+        self.pool = pool
+        logger.debug("MemoryRepository initialized")
+
+    async def get_for_user(
+        self,
+        project_id: str,
+        client_id: str,
+        *,
+        limit: int = 50,
+        types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve memory entries for a specific user.
+
+        Args:
+            project_id: UUID of the project (string).
+            client_id: UUID of the client (string).
+            limit: Maximum number of entries to return.
+            types: Optional list of types to filter (e.g., ['preference', 'fact']).
+
+        Returns:
+            List of dicts with keys: id, key, value, type, created_at, updated_at.
+        """
+        project_uuid = uuid.UUID(project_id)
+        client_uuid = uuid.UUID(client_id)
+
+        query = """
+            SELECT id, key, value, type, created_at, updated_at
+            FROM user_memory
+            WHERE project_id = $1 AND client_id = $2
+        """
+        params = [project_uuid, client_uuid]
+
+        if types:
+            placeholders = [f"${i+3}" for i in range(len(types))]
+            query += f" AND type IN ({','.join(placeholders)})"
+            params.extend(types)
+
+        query += " ORDER BY updated_at DESC LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        memories = [
+            {
+                "id": str(r["id"]),
+                "key": r["key"],
+                "value": r["value"],
+                "type": r["type"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"]
+            }
+            for r in rows
+        ]
+        logger.debug(
+            "Loaded %d memory entries for user",
+            len(memories),
+            extra={"project_id": project_id, "client_id": client_id}
+        )
+        return memories
+
+    async def set(
+        self,
+        project_id: str,
+        client_id: str,
+        key: str,
+        value: Any,
+        type_: str
+    ) -> None:
+        """
+        Insert or update a memory entry for a user.
+
+        Uses UPSERT: if a memory with same project_id, client_id, key exists,
+        it updates the value and updated_at; otherwise inserts.
+
+        Args:
+            project_id: UUID of the project.
+            client_id: UUID of the client.
+            key: Memory key (e.g., "preferred_contact").
+            value: Any JSON-serializable value.
+            type_: Type of memory (e.g., "preference", "fact").
+        """
+        project_uuid = uuid.UUID(project_id)
+        client_uuid = uuid.UUID(client_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO user_memory (project_id, client_id, key, value, type, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (project_id, client_id, key) DO UPDATE
+                SET value = EXCLUDED.value,
+                    type = EXCLUDED.type,
+                    updated_at = NOW()
+            """, project_uuid, client_uuid, key, value, type_)
+
+        logger.debug(
+            "Memory set",
+            extra={"project_id": project_id, "client_id": client_id, "key": key, "type": type_}
+        )
+
+    async def delete(self, project_id: str, client_id: str, key: str) -> bool:
+        """
+        Delete a specific memory entry.
+
+        Args:
+            project_id: UUID of the project.
+            client_id: UUID of the client.
+            key: Memory key to delete.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        project_uuid = uuid.UUID(project_id)
+        client_uuid = uuid.UUID(client_id)
+
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM user_memory
+                WHERE project_id = $1 AND client_id = $2 AND key = $3
+            """, project_uuid, client_uuid, key)
+            deleted = result == "DELETE 1"
+            if deleted:
+                logger.debug("Memory deleted", extra={"project_id": project_id, "client_id": client_id, "key": key})
+            return deleted
+
+    async def clear_for_user(self, project_id: str, client_id: str) -> None:
+        """
+        Delete all memory for a user (e.g., if user requests data deletion).
+
+        Args:
+            project_id: UUID of the project.
+            client_id: UUID of the client.
+        """
+        project_uuid = uuid.UUID(project_id)
+        client_uuid = uuid.UUID(client_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                DELETE FROM user_memory
+                WHERE project_id = $1 AND client_id = $2
+            """, project_uuid, client_uuid)
+        logger.info("All memory cleared for user", extra={"project_id": project_id, "client_id": client_id})
