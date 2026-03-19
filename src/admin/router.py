@@ -13,16 +13,21 @@ from src.admin.handlers import (
     handle_admin_step,
     handle_admin_callback,
     AdminResponse,
+    _get_state,
 )
+from src.admin.handlers.knowledge_upload import handle_knowledge_upload
 from src.admin.keyboards import make_main_menu_keyboard
 
 logger = get_logger(__name__)
+
+# State constants (copied from handlers for consistency)
+STATE_AWAIT_KNOWLEDGE_FILE = "await_knowledge_file"
 
 
 async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Dict[str, bool]:
     """
     Main entry point for Admin Bot updates.
-    Inspects the update dict and delegates to command, step, or callback handlers.
+    Inspects the update dict and delegates to command, step, callback, or document handlers.
     
     Args:
         update: Telegram Update object (dict).
@@ -73,34 +78,47 @@ async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Di
         msg = update["message"]
         chat_id = msg["chat"]["id"]
         text = msg.get("text")
+        document = msg.get("document")
         
-        if not text:
-            # Ignore non-text messages (photos, etc.) in admin bot for now
-            return {"ok": True}
-        
-        logger.debug("Admin message received", extra={"chat_id": chat_id, "text_preview": text[:50]})
-
-        response: Optional[AdminResponse] = None
-        if text.startswith("/"):
-            # Command
-            response = await handle_admin_command(text, pool)
-            if response:
-                response_text, keyboard = response
+        # 2a. Document upload (knowledge base)
+        if document:
+            state = await _get_state(str(chat_id))
+            if state == STATE_AWAIT_KNOWLEDGE_FILE:
+                response_text, keyboard = await handle_knowledge_upload(str(chat_id), msg, pool)
                 if keyboard:
                     keyboard_dict = keyboard.to_dict()
-        else:
-            # Step in wizard
-            response = await handle_admin_step(str(chat_id), text, pool)
-            
-            # If no active step (returned None), show main menu
-            if response is None:
-                response_text = "❓ Неизвестная команда. Используйте /start."
-                keyboard_dict = make_main_menu_keyboard().to_dict()
             else:
-                resp_text, keyboard = response
-                response_text = resp_text
-                if keyboard:
-                    keyboard_dict = keyboard.to_dict()
+                response_text = "❌ Не ожидал файл. Пожалуйста, используйте меню."
+                keyboard_dict = make_main_menu_keyboard().to_dict()
+        
+        # 2b. Text message
+        elif text:
+            logger.debug("Admin message received", extra={"chat_id": chat_id, "text_preview": text[:50]})
+
+            response: Optional[AdminResponse] = None
+            if text.startswith("/"):
+                # Command
+                response = await handle_admin_command(text, pool)
+                if response:
+                    response_text, keyboard = response
+                    if keyboard:
+                        keyboard_dict = keyboard.to_dict()
+            else:
+                # Step in wizard
+                response = await handle_admin_step(str(chat_id), text, pool)
+                
+                # If no active step (returned None), show main menu
+                if response is None:
+                    response_text = "❓ Неизвестная команда. Используйте /start."
+                    keyboard_dict = make_main_menu_keyboard().to_dict()
+                else:
+                    resp_text, keyboard = response
+                    response_text = resp_text
+                    if keyboard:
+                        keyboard_dict = keyboard.to_dict()
+        else:
+            # Ignore other non-text, non-document messages
+            return {"ok": True}
 
     # Send response if we have text
     if response_text and chat_id:

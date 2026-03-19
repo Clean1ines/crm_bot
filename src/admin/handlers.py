@@ -316,22 +316,6 @@ async def _step_detach_choice(chat_id: str, choice: str, pool) -> AdminResponse:
         await _clear_state(chat_id)
         return "❌ Отмена.", await _get_project_menu_keyboard(project_id, pool)
 
-async def _step_await_knowledge_file(chat_id: str, text: str, pool) -> AdminResponse:
-    """
-    Handle knowledge file upload. This is a placeholder – actual file handling
-    would be done via document message, not text. But for simplicity, we just
-    inform that file upload is not implemented yet.
-    """
-    data = await _get_data(chat_id)
-    project_id = data.get("project_id")
-    if not project_id:
-        await _clear_state(chat_id)
-        return "❌ Ошибка: проект не указан.", None
-
-    await _clear_state(chat_id)
-    # TODO: Implement actual file processing and storage in knowledge_base
-    return "📚 Загрузка знаний временно недоступна. Функция в разработке.", await _get_project_menu_keyboard(project_id, pool)
-
 # =============================================================================
 # CALLBACK HANDLER
 # =============================================================================
