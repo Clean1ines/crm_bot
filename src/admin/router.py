@@ -15,7 +15,7 @@ from src.admin.handlers import (
     AdminResponse,
     _get_state,
 )
-from src.admin.handlers.knowledge_upload import handle_knowledge_upload
+from src.admin.knowledge_upload import handle_knowledge_upload
 from src.admin.keyboards import make_main_menu_keyboard
 
 logger = get_logger(__name__)
