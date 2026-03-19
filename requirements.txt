@@ -83,3 +83,4 @@ PyPDF2
 python-multipart==0.0.9
 jsonschema>=4.20.0
 python-telegram-bot>=20.0
+aiohttp
