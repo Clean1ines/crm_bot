@@ -588,25 +588,3 @@ async def _get_project_menu_keyboard(project_id: str, pool) -> InlineKeyboardMar
     has_manager = bool(settings_dict.get("manager_bot_token")) if settings_dict else False
     return make_project_dynamic_keyboard(project_id, has_client, has_manager)
 
-# =============================================================================
-# LEGACY COMMANDS (kept for compatibility, but not used in new UI)
-# =============================================================================
-async def cmd_listprojects(pool) -> str:
-    """Legacy command - not used in new flow."""
-    return "Используйте кнопку 'Мои проекты' в меню."
-
-async def cmd_settoken(project_id: str, token: str, pool) -> str:
-    """Legacy command - not used in new flow."""
-    return "Используйте создание клиентского бота через меню проекта."
-
-async def cmd_setmanager(project_id: str, manager_token: str, manager_chat_id: Optional[str], pool) -> str:
-    """Legacy command - not used in new flow."""
-    return "Используйте создание менеджерского бота через меню проекта."
-
-async def cmd_listmanagers(project_id: str, pool) -> str:
-    """Legacy command - not used in new flow."""
-    return "Используйте кнопку 'Менеджеры' в меню проекта."
-
-async def cmd_set_pro_mode(project_id: str, enabled: bool, pool) -> str:
-    """Legacy command - not used in new flow."""
-    return "Pro-режим настраивается в конструкторе."

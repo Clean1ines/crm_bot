@@ -4,6 +4,7 @@ model ID extraction, etc.
 """
 
 import re
+import json
 from typing import Any, Optional, Sequence
 
 from src.core.config import settings

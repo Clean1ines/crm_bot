@@ -239,10 +239,11 @@ class OrchestratorService:
           1. Register client/thread.
           2. Save user message and emit message_received event.
           3. Acquire thread lock to prevent concurrent processing.
-          4. Split message into individual questions (if multiple).
-          5. For each question, build initial AgentState and invoke graph.
-          6. Collect responses and combine them.
-          7. Release lock.
+          4. Check thread status – if MANUAL, enqueue manager notification and return.
+          5. Split message into individual questions (if multiple).
+          6. For each question, build initial AgentState and invoke graph.
+          7. Collect responses and combine them.
+          8. Release lock.
         
         Args:
             project_id: UUID проекта в строковом формате.
@@ -269,31 +270,42 @@ class OrchestratorService:
             return "⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите."
 
         try:
-            # 3. Split message into questions
+            # 3. Check thread status – if manual, redirect to manager
+            thread_info = await self.threads.get_thread_with_project(thread_id_str)
+            if thread_info and thread_info.get("status") == ThreadStatus.MANUAL.value:
+                # Thread is escalated – notify manager and return standard message
+                await self.queue_repo.enqueue(
+                    task_type="notify_manager",
+                    payload={"thread_id": thread_id_str, "project_id": project_id, "message": text}
+                )
+                logger.info("Message redirected to manager (thread in MANUAL state)", extra={"thread_id": thread_id_str})
+                return "Ваш вопрос передан менеджеру. Ожидайте ответа."
+
+            # 4. Save user message (whole text, will be split later)
+            await self.threads.add_message(thread_id, role="user", content=text)
+            
+            # Emit message_received event
+            await self._emit_event(
+                stream_id=thread_id_str,
+                project_id=project_id,
+                event_type="message_received",
+                payload={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "timestamp": asyncio.get_event_loop().time()
+                }
+            )
+
+            # 5. Split message into questions
             questions = split_questions(text)
             if not questions:
                 questions = [text]  # fallback to whole text
             
             logger.debug(f"Split message into {len(questions)} questions", extra={"thread_id": thread_id_str})
             
-            # 4. For each question, call graph and collect responses
+            # 6. For each question, call graph and collect responses
             responses = []
             for q in questions:
-                # Save user message (each question as separate message)
-                await self.threads.add_message(thread_id, role="user", content=q)
-                
-                # Emit message_received event
-                await self._emit_event(
-                    stream_id=thread_id_str,
-                    project_id=project_id,
-                    event_type="message_received",
-                    payload={
-                        "chat_id": chat_id,
-                        "text": q,
-                        "timestamp": asyncio.get_event_loop().time()
-                    }
-                )
-
                 # Load context for state
                 recent_messages = await self.threads.get_messages_for_langgraph(thread_id)
                 if len(recent_messages) > self.RECENT_MESSAGES_LIMIT:
@@ -351,7 +363,7 @@ class OrchestratorService:
                                    extra={"thread_id": thread_id_str})
                     responses.append("Извините, не удалось сформировать ответ.")
 
-            # 5. Combine responses
+            # 7. Combine responses
             if not responses:
                 return ""
             
@@ -434,9 +446,9 @@ class OrchestratorService:
                 )
                 raise RuntimeError(f"Telegram API error: {resp.status_code}")
 
-        # Emit event: manager_replied
+        # Emit event: manager_replied – convert thread_id to string to avoid UUID issues
         await self._emit_event(
-            stream_id=thread_id,
+            stream_id=str(thread_id),
             project_id=project_id,
             event_type="manager_replied",
             payload={
