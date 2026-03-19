@@ -21,6 +21,9 @@ from .nodes.tool_executor import create_tool_executor_node
 from .nodes.escalate import create_escalate_node
 from .nodes.responder import create_responder_node
 from .nodes.persist import create_persist_node
+from src.core.model_registry import ModelRegistry
+from src.services.rate_limit_tracker import RateLimitTracker
+from src.services.model_selector import ModelSelector
 
 logger = get_logger(__name__)
 
@@ -54,7 +57,19 @@ def create_agent(
     load_state_node = create_load_state_node(thread_repo, project_repo)
     # rules_node is a pure function, no factory needed
     kb_search_node = create_kb_search_node(tool_registry)
-    router_node = create_router_node()  # uses default LLM from settings
+
+    # Create model selection dependencies
+    registry = ModelRegistry()
+    tracker = RateLimitTracker()
+    selector = ModelSelector(registry, tracker)
+
+    router_node = create_router_node(
+        llm=None,
+        registry=registry,
+        tracker=tracker,
+        selector=selector
+    )  # uses default LLM from settings
+
     tool_executor_node = create_tool_executor_node(tool_registry)
     escalate_node = create_escalate_node(thread_repo, queue_repo)
     responder_node = create_responder_node(tool_registry)

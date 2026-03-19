@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     TOOL_HTTP_ALLOWED_DOMAINS: Optional[str] = None
     TOOL_N8N_ALLOWED_WEBHOOKS: Optional[str] = None
 
+    # Model and rate limit configuration
+    GROQ_MODEL: str = Field("llama-3.3-70b-versatile", description="Default Groq model")
+    MODEL_CONFIG_PATH: str = Field("models.yaml", description="Path to YAML file with model definitions")
+    DEFAULT_MODEL: str = Field("llama-3.1-8b-instant", description="Fallback model when preferred ones are rate-limited")
+    MODEL_SELECTION_STRATEGY: str = Field("priority", description="Strategy for model selection: priority, round-robin, etc.")
+    RATE_LIMIT_REDIS_PREFIX: str = Field("ratelimit:", description="Redis key prefix for rate limit tracking")
+
     @field_validator("ADMIN_CHAT_ID")
     def validate_chat_id(cls, v: str) -> str:
         """Ensure chat ID is a valid integer string."""
