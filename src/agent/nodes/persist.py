@@ -48,6 +48,7 @@ def create_persist_node(
           - tool_args: optional
           - requires_human: bool, if escalation happened
           - client_id: optional, for memory storage
+          - intent, lifecycle, cta, decision: optional for analytics
 
         Actions:
           1. Save assistant message to messages table.
@@ -57,7 +58,8 @@ def create_persist_node(
              - tool_called (if tool was used)
              - ticket_created (if escalation happened)
           4. Extract user memory from user_input and store (if memory_repo).
-          5. Trigger background summarization if needed (placeholder).
+          5. Update analytics fields in threads table using thread_repo.update_analytics.
+          6. Trigger background summarization if needed (placeholder).
 
         Returns:
             Empty dict on success, or {"error": ...} on failure.
@@ -214,7 +216,20 @@ def create_persist_node(
             except Exception as e:
                 logger.exception("Failed to store user memory", extra={"client_id": client_id})
 
-        # 5. Trigger summarization (placeholder)
+        # 5. Update analytics fields in threads table
+        try:
+            await thread_repo.update_analytics(
+                thread_id=thread_id,
+                intent=state.get("intent"),
+                lifecycle=state.get("lifecycle"),
+                cta=state.get("cta"),
+                decision=state.get("decision")
+            )
+            logger.debug("Analytics updated", extra={"thread_id": thread_id})
+        except Exception as e:
+            logger.warning("Failed to update analytics", extra={"thread_id": thread_id, "error": str(e)})
+
+        # 6. Trigger summarization (placeholder)
         # if summarizer and condition_met:
         #     asyncio.create_task(summarizer.summarize_and_save(thread_id))
 

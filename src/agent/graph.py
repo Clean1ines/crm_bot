@@ -1,14 +1,14 @@
 """
 LangGraph agent definition for the CRM bot.
 
-Builds a state machine graph with nodes for load_state, rules_check, kb_search, router_llm,
-tool_executor, escalate, responder, and persist. Uses the extended AgentState.
+Builds a state machine graph with nodes for load_state, rules_check, kb_search,
+intent_extractor, policy_engine, tool_executor, escalate, response_generator,
+responder, and persist. Uses the extended AgentState.
 """
 
 from typing import Any, Dict, Optional
 
 from langgraph.graph import StateGraph, END
-from langchain_groq import ChatGroq
 
 from src.core.config import settings
 from src.core.logging import get_logger
@@ -16,14 +16,13 @@ from .state import AgentState
 from .nodes.load_state import create_load_state_node
 from .nodes.rules import rules_node
 from .nodes.kb_search import create_kb_search_node
-from .nodes.router import create_router_node
+from .nodes.intent_extractor import create_intent_extractor_node
+from .nodes.policy_engine import create_policy_engine_node
+from .nodes.response_generator import create_response_generator_node
 from .nodes.tool_executor import create_tool_executor_node
 from .nodes.escalate import create_escalate_node
 from .nodes.responder import create_responder_node
 from .nodes.persist import create_persist_node
-from src.core.model_registry import ModelRegistry
-from src.services.rate_limit_tracker import RateLimitTracker
-from src.services.model_selector import ModelSelector
 from src.tools.builtins import TicketCreateTool
 
 logger = get_logger(__name__)
@@ -60,26 +59,14 @@ def create_agent(
     load_state_node = create_load_state_node(thread_repo, project_repo, memory_repo)
     # rules_node is a pure function, no factory needed
     kb_search_node = create_kb_search_node(tool_registry)
-
-    # Create model selection dependencies
-    registry = ModelRegistry()
-    tracker = RateLimitTracker()
-    selector = ModelSelector(registry, tracker)
-
-    router_node = create_router_node(
-        llm=None,
-        registry=registry,
-        tracker=tracker,
-        selector=selector
-    )  # uses default LLM from settings
-
+    intent_extractor_node = create_intent_extractor_node()  # uses lightweight LLM
+    policy_engine_node = create_policy_engine_node()
+    response_generator_node = create_response_generator_node()  # uses main LLM
     tool_executor_node = create_tool_executor_node(tool_registry)
 
     # Get TicketCreateTool from registry (or create if not found)
     ticket_create_tool = tool_registry.get_tool("ticket.create")
     if ticket_create_tool is None:
-        # Fallback: create directly (requires pool)
-        # Note: we need pool – but it's not available here. We'll rely on it being in registry.
         logger.warning("TicketCreateTool not found in registry, escalation will not create ticket")
         ticket_create_tool = None
 
@@ -94,9 +81,11 @@ def create_agent(
     workflow.add_node("load_state", load_state_node)
     workflow.add_node("rules_check", rules_node)
     workflow.add_node("kb_search", kb_search_node)
-    workflow.add_node("router_llm", router_node)
+    workflow.add_node("intent_extractor", intent_extractor_node)
+    workflow.add_node("policy_engine", policy_engine_node)
     workflow.add_node("tool_executor", tool_executor_node)
     workflow.add_node("escalate", escalate_node)
+    workflow.add_node("response_generator", response_generator_node)
     workflow.add_node("responder", responder_node)
     workflow.add_node("persist", persist_node)
 
@@ -116,47 +105,50 @@ def create_agent(
         "rules_check",
         route_from_rules,
         {
-            "RESPOND": "responder",
+            "RESPOND": "responder",            # fallback if rules returned RESPOND (though rules now only PROCEED or ESCALATE)
             "ESCALATE": "escalate",
-            "COLLECT_PROFILE": "router_llm",
             "PROCEED_TO_LLM": "kb_search",
         }
     )
 
-    # After KB search, go to router
-    workflow.add_edge("kb_search", "router_llm")
+    # After KB search, go to intent extractor
+    workflow.add_edge("kb_search", "intent_extractor")
 
-    # Conditional edges from router_llm
-    def route_from_router(state: AgentState) -> str:
+    # After intent extraction, go to policy engine
+    workflow.add_edge("intent_extractor", "policy_engine")
+
+    # Conditional edges from policy_engine
+    def route_from_policy(state: AgentState) -> str:
         decision = state.get("decision", "LLM_GENERATE")
-        logger.info(f"Router decision: {decision}")
+        logger.info(f"Policy engine decision: {decision}")
         return decision
 
     workflow.add_conditional_edges(
-        "router_llm",
-        route_from_router,
+        "policy_engine",
+        route_from_policy,
         {
-            "RESPOND_KB": "responder",
-            "RESPOND_TEMPLATE": "responder",
-            "LLM_GENERATE": "responder",
-            "CALL_TOOL": "tool_executor",
+            "LLM_GENERATE": "response_generator",
             "ESCALATE_TO_HUMAN": "escalate",
-            "ESCALATE": "escalate",  # fallback for any other escalation
+            "CALL_TOOL": "tool_executor",
+            "ESCALATE": "escalate",  # fallback
         }
     )
 
     # Edges from tool_executor
     workflow.add_conditional_edges(
         "tool_executor",
-        lambda state: "responder" if not state.get("requires_human") else "escalate",
+        lambda state: "response_generator" if not state.get("requires_human") else "escalate",
         {
-            "responder": "responder",
+            "response_generator": "response_generator",
             "escalate": "escalate",
         }
     )
 
     # Edges from escalate
     workflow.add_edge("escalate", "responder")
+
+    # After response generation, go to responder
+    workflow.add_edge("response_generator", "responder")
 
     # Edge from responder to persist
     workflow.add_edge("responder", "persist")

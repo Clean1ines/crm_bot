@@ -37,3 +37,26 @@ class RouterOutput(BaseModel):
     tool_args: Dict[str, Any] = Field(default_factory=dict, description="Arguments for the tool")
     requires_human: bool = Field(False, description="Whether human intervention is needed")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in the decision")
+
+
+class IntentOutput(BaseModel):
+    """
+    Structured output from the intent extraction LLM node.
+
+    Extracts intent, call-to-action, and feature mentions from user message.
+
+    Attributes:
+        intent: Primary user intent (e.g., "pricing", "support", "sales").
+        cta: Suggested call-to-action (e.g., "request_demo", "call_manager").
+        features: Dictionary of mentioned features with interest level (0-1).
+    """
+    intent: Literal[
+        "pricing", "support", "sales", "feedback", "other"
+    ] = Field(..., description="Primary intent of the user message")
+    cta: Literal[
+        "request_demo", "call_manager", "book_consultation", "none"
+    ] = Field(..., description="Suggested call-to-action")
+    features: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Features mentioned with interest score (0-1)"
+    )

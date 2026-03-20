@@ -40,6 +40,8 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
           - Client profile (if available in users table)
           - Previously saved state_json (if any)
           - Long-term user memory (if memory_repo provided)
+          - Analytics fields from thread (intent, lifecycle, cta, decision)
+          - Lifecycle from user memory (if not present in thread)
 
         Args:
             state: Current AgentState (may already contain some fields).
@@ -68,10 +70,14 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
 
         client_id = thread_data.get("client_id")
         if client_id and isinstance(client_id, str):
-            # client_id is UUID from DB, convert to string for repository
             client_id_str = str(client_id)
         else:
             client_id_str = None
+
+        # Load analytics fields from thread
+        analytics = await thread_repo.get_analytics(thread_id) if hasattr(thread_repo, "get_analytics") else None
+        if analytics:
+            logger.debug("Loaded analytics", extra={"thread_id": thread_id, "analytics": analytics})
 
         # Load recent messages (full history, but we'll keep a reasonable limit)
         recent_messages = await thread_repo.get_messages_for_langgraph(thread_id)
@@ -90,8 +96,19 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
             "conversation_summary": thread_data.get("context_summary"),
             "history": recent_messages,
             "knowledge_chunks": None,  # will be filled by kb_search node
-            "client_id": client_id_str,  # add client_id to state
+            "client_id": client_id_str,
         }
+
+        # Add analytics if present
+        if analytics:
+            if analytics.get("intent") is not None:
+                result["intent"] = analytics["intent"]
+            if analytics.get("lifecycle") is not None:
+                result["lifecycle"] = analytics["lifecycle"]
+            if analytics.get("cta") is not None:
+                result["cta"] = analytics["cta"]
+            if analytics.get("decision") is not None:
+                result["decision"] = analytics["decision"]
 
         # Load long-term memory if available
         if memory_repo and client_id_str:
@@ -112,6 +129,14 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
                     })
                 result["user_memory"] = memory_by_type
                 logger.debug("Loaded user memory", extra={"client_id": client_id_str, "memory_count": len(memories)})
+
+                # Also load lifecycle from memory if not already set from thread
+                if "lifecycle" not in result:
+                    lifecycle = await memory_repo.get_lifecycle(project_id, client_id_str)
+                    if lifecycle:
+                        result["lifecycle"] = lifecycle
+                        logger.debug("Loaded lifecycle from memory", extra={"lifecycle": lifecycle})
+
             except Exception as e:
                 logger.exception("Failed to load user memory", extra={"client_id": client_id_str})
                 result["user_memory"] = {}
