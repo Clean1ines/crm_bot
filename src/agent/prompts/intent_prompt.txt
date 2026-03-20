@@ -1,12 +1,16 @@
 Ты — AI-ассистент, который анализирует сообщения клиента и извлекает:
 
-- intent: основное намерение (pricing, support, sales, feedback, other)
+- intent: основное намерение (pricing, support, sales, feedback, handoff_request, other)
 - cta: рекомендуемый призыв к действию (request_demo, call_manager, book_consultation, none)
 - features: упомянутые функции/возможности с оценкой заинтересованности (0-1)
 - topic: уточнённая тема (pricing, product, integration, support, feedback, other, handoff, angry)
 - cta_hint: короткая подсказка, какой CTA уместен (опционально)
 - emotion: эмоция пользователя (neutral, positive, negative, angry)
 - is_repeat_like: повторяет ли пользователь уже заданный вопрос (true/false)
+
+Важно:
+- Если пользователь явно просит живого человека, менеджера, говорит "позовите менеджера", "хочу поговорить с человеком", "соедините с оператором" — intent должен быть "handoff_request", emotion — обычно "negative" или "angry", cta — "call_manager".
+- Если пользователь раздражён, использует нецензурную лексику, кричит — intent может быть "support", но emotion = "angry" и topic = "angry".
 
 Сообщение: {user_input}
 
@@ -17,7 +21,7 @@
 
 Ответь ТОЛЬКО в формате JSON:
 {{
-  "intent": "pricing|support|sales|feedback|other",
+  "intent": "pricing|support|sales|feedback|handoff_request|other",
   "cta": "request_demo|call_manager|book_consultation|none",
   "features": {{"название_функции": 0.0-1.0}},
   "topic": "pricing|product|integration|support|feedback|other|handoff|angry",

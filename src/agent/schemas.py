@@ -46,7 +46,7 @@ class IntentOutput(BaseModel):
     Extracts intent, call-to-action, topic, emotion, and repeat flag.
 
     Attributes:
-        intent: Primary user intent (pricing, support, sales, feedback, other).
+        intent: Primary user intent (pricing, support, sales, feedback, handoff_request, other).
         cta: Suggested call-to-action (request_demo, call_manager, book_consultation, none).
         features: Dictionary of mentioned features with interest level (0-1).
         topic: Refined business topic (pricing, product, integration, support, feedback, other, handoff, angry).
@@ -55,7 +55,7 @@ class IntentOutput(BaseModel):
         is_repeat_like: Whether the user is repeating themselves.
     """
     intent: Literal[
-        "pricing", "support", "sales", "feedback", "other"
+        "pricing", "support", "sales", "feedback", "handoff_request", "other"
     ] = Field(..., description="Primary intent of the user message")
     cta: Literal[
         "request_demo", "call_manager", "book_consultation", "none"

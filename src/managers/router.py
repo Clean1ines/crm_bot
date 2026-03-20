@@ -14,6 +14,16 @@ from src.database.models import ThreadStatus
 
 logger = get_logger(__name__)
 
+# Default dialog state to reset after ticket closure
+DEFAULT_DIALOG_STATE = {
+    "last_intent": None,
+    "last_cta": None,
+    "last_topic": None,
+    "repeat_count": 0,
+    "lead_status": "active_client",
+    "lifecycle": "active_client",
+}
+
 
 async def process_manager_update(
     update: Dict[str, Any], 
@@ -87,6 +97,37 @@ async def process_manager_update(
             
             # Update thread status to ACTIVE
             await orchestrator.threads.update_status(thread_id, ThreadStatus.ACTIVE)
+            
+            # Reset analytics in threads table to prevent stale lifecycle
+            try:
+                await orchestrator.threads.update_analytics(
+                    thread_id=thread_id,
+                    lifecycle="active_client",
+                    decision=None,
+                    intent=None,
+                    cta=None
+                )
+                logger.info("Thread analytics reset after ticket closure", extra={"thread_id": thread_id})
+            except Exception as e:
+                logger.warning("Failed to reset thread analytics", extra={"error": str(e)})
+            
+            # Reset user memory (lifecycle and dialog_state) to prevent immediate re-escalation
+            try:
+                # Get thread details to fetch client_id
+                thread = await orchestrator.threads.get_thread_with_project(thread_id)
+                if thread and orchestrator.memory_repo:
+                    client_id = str(thread.get("client_id")) if thread.get("client_id") else None
+                    proj_id = str(thread.get("project_id")) if thread.get("project_id") else None
+                    if client_id and proj_id:
+                        # Reset lifecycle to active_client
+                        await orchestrator.memory_repo.set_lifecycle(proj_id, client_id, "active_client")
+                        # Reset dialog_state to fresh state
+                        await orchestrator.memory_repo.set(
+                            proj_id, client_id, "dialog_state", DEFAULT_DIALOG_STATE, "dialog_state"
+                        )
+                        logger.info("User memory reset after ticket closure", extra={"client_id": client_id})
+            except Exception as e:
+                logger.warning("Failed to reset user memory after ticket closure", extra={"error": str(e)})
             
             # Answer callback
             async with httpx.AsyncClient() as client:

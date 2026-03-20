@@ -134,6 +134,9 @@ class OrchestratorService:
         if self.event_repo is None:
             return
         
+        # Ensure stream_id is string
+        stream_id = str(stream_id)
+        
         try:
             await self.event_repo.append(
                 stream_id=uuid.UUID(stream_id),
@@ -280,6 +283,15 @@ class OrchestratorService:
             redis = await get_redis_client()
             awaiting_reply_key = f"awaiting_reply_thread:{thread_id_str}"
             manager_chat_id = await redis.get(awaiting_reply_key)
+            
+            if manager_chat_id:
+                # Also check thread status – if ACTIVE, ignore the key
+                thread_data = await self.threads.get_thread_with_project(thread_id_str)
+                if thread_data and thread_data.get("status") == ThreadStatus.ACTIVE.value:
+                    # Key is stale, delete it and continue
+                    await redis.delete(awaiting_reply_key)
+                    logger.info("Stale awaiting_reply key deleted for thread", extra={"thread_id": thread_id_str})
+                    manager_chat_id = None
             
             if manager_chat_id:
                 # Manager has claimed the ticket – redirect all future messages to manager
