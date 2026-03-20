@@ -35,7 +35,8 @@ def create_agent(
     queue_repo=None,
     event_repo=None,
     project_repo=None,
-    knowledge_repo=None
+    knowledge_repo=None,
+    memory_repo=None
 ):
     """
     Create and compile the LangGraph agent (state machine version).
@@ -48,6 +49,7 @@ def create_agent(
         project_repo: Optional ProjectRepository (may be used by some nodes).
         knowledge_repo: Optional KnowledgeRepository (may be used by kb_search node,
                        but we use tool_registry for that).
+        memory_repo: Optional MemoryRepository for long-term memory.
 
     Returns:
         Compiled LangGraph workflow.
@@ -55,7 +57,7 @@ def create_agent(
     logger.info("Creating state machine agent")
 
     # Instantiate nodes with injected dependencies
-    load_state_node = create_load_state_node(thread_repo, project_repo)
+    load_state_node = create_load_state_node(thread_repo, project_repo, memory_repo)
     # rules_node is a pure function, no factory needed
     kb_search_node = create_kb_search_node(tool_registry)
 
@@ -83,7 +85,7 @@ def create_agent(
 
     escalate_node = create_escalate_node(thread_repo, queue_repo, ticket_create_tool)
     responder_node = create_responder_node(tool_registry)
-    persist_node = create_persist_node(thread_repo, event_repo)
+    persist_node = create_persist_node(thread_repo, event_repo, memory_repo)
 
     # Build graph
     workflow = StateGraph(AgentState)

@@ -40,6 +40,7 @@ class AgentState(TypedDict):
         requires_human: Whether human intervention is needed.
         confidence: Confidence score of the decision (0-1).
         trace_id: Unique identifier for tracing the entire graph execution.
+        client_id: UUID of the client (string format) for user memory.
     """
     # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -64,3 +65,4 @@ class AgentState(TypedDict):
     chat_id: Optional[int]  # Telegram chat ID of the user, needed for responder
     message_sent: Optional[bool]  # Flag indicating that the message was already sent by the graph
     trace_id: Optional[str]  # Unique trace identifier for observability
+    client_id: Optional[str]  # UUID of the client for memory storage

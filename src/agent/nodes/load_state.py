@@ -90,6 +90,7 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
             "conversation_summary": thread_data.get("context_summary"),
             "history": recent_messages,
             "knowledge_chunks": None,  # will be filled by kb_search node
+            "client_id": client_id_str,  # add client_id to state
         }
 
         # Load long-term memory if available

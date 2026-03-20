@@ -161,14 +161,14 @@ async def _recover_stale_jobs(queue_repo: QueueRepository, timeout_minutes: int 
         logger.error("Failed to recover stale jobs", extra={"error": str(e)})
 
 
-async def _get_client_name(project_id: str, client_id: str, pool: asyncpg.Pool) -> str:
+async def _get_client_name(project_id: uuid.UUID, client_id: uuid.UUID, pool: asyncpg.Pool) -> str:
     """
     Get client's username or full name from clients table.
     """
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT username, full_name FROM clients WHERE id = $1 AND project_id = $2",
-            uuid.UUID(client_id), uuid.UUID(project_id)
+            client_id, project_id
         )
         if row:
             if row["full_name"]:
@@ -213,13 +213,12 @@ async def _handle_notify_manager(
         logger.error("Thread not found", extra={"thread_id": thread_id, "job_id": job["id"]})
         return False
     
-    project_id = thread_info["project_id"]
-    client_id = thread_info.get("client_id")
+    project_id = thread_info["project_id"]  # this is already a UUID object
+    client_id = thread_info.get("client_id")  # also a UUID object or None
     
     # Get client name for better identification
     client_name = "Клиент"
     if client_id:
-        # We need a pool to query clients – use thread_repo's pool
         client_name = await _get_client_name(project_id, client_id, thread_repo.pool)
     
     # Get manager settings for this project
@@ -230,7 +229,7 @@ async def _handle_notify_manager(
     if not manager_bot_token:
         logger.error(
             "Manager bot token not set",
-            extra={"project_id": project_id, "job_id": job["id"]}
+            extra={"project_id": str(project_id), "job_id": job["id"]}
         )
         return False
 
@@ -244,7 +243,7 @@ async def _handle_notify_manager(
     if not manager_chat_ids:
         logger.warning(
             "No managers defined for project",
-            extra={"project_id": project_id, "job_id": job["id"]}
+            extra={"project_id": str(project_id), "job_id": job["id"]}
         )
         return False
 

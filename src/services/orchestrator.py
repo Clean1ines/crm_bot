@@ -56,6 +56,7 @@ class OrchestratorService:
         template_repo: TemplateRepository instance (for template-based workflows).
         workflow_repo: WorkflowRepository instance (for custom workflows).
         tool_registry: ToolRegistry instance (optional for dynamic tools).
+        memory_repo: MemoryRepository instance (optional for long-term memory).
         agent: Compiled LangGraph agent (default fallback).
         summarizer: SummarizerService for conversation summaries.
     """
@@ -73,7 +74,8 @@ class OrchestratorService:
         event_repo=None,
         template_repo=None,
         workflow_repo=None,
-        tool_registry=None
+        tool_registry=None,
+        memory_repo=None
     ):
         """
         Initialize the OrchestratorService with required dependencies.
@@ -87,6 +89,7 @@ class OrchestratorService:
             template_repo: Optional TemplateRepository for template workflows.
             workflow_repo: Optional WorkflowRepository for custom workflows.
             tool_registry: Optional ToolRegistry for dynamic tool execution.
+            memory_repo: Optional MemoryRepository for long-term memory.
         """
         self.db = db_conn
         self.projects = project_repo
@@ -96,13 +99,15 @@ class OrchestratorService:
         self.template_repo = template_repo
         self.workflow_repo = workflow_repo
         self.tool_registry = tool_registry
+        self.memory_repo = memory_repo
         # Create default agent (now the new state machine graph)
         self.agent = create_default_agent(
             tool_registry=tool_registry,
             thread_repo=thread_repo,
             queue_repo=queue_repo,
             event_repo=event_repo,
-            project_repo=project_repo
+            project_repo=project_repo,
+            memory_repo=memory_repo
         )
         self.summarizer = SummarizerService()
         logger.debug("OrchestratorService initialized")

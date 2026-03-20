@@ -18,6 +18,7 @@ from src.services.orchestrator import OrchestratorService
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
+from src.database.repositories.memory_repository import MemoryRepository
 
 logger = get_logger(__name__)
 
@@ -111,7 +112,7 @@ async def lifespan(app: FastAPI):
     On startup:
     - Initialize database pool
     - Initialize ToolRegistry with built-in tools
-    - Initialize all repositories (project, thread, queue, event, template, workflow)
+    - Initialize all repositories (project, thread, queue, event, template, workflow, memory)
     - Register additional tools (CRM, ticket, telegram)
     - Create OrchestratorService with all dependencies
     
@@ -166,6 +167,10 @@ async def lifespan(app: FastAPI):
     except ImportError:
         logger.debug("WorkflowRepository not available (migration 011 not applied yet)")
     
+    # Memory repository (always available after migration 027)
+    memory_repo = MemoryRepository(pool)
+    logger.info("MemoryRepository initialized")
+    
     # Register new CRM and ticket tools
     from src.tools.builtins import (
         CRMGetUserTool, CRMCreateUserTool, CRMCollectProfileTool,
@@ -199,7 +204,8 @@ async def lifespan(app: FastAPI):
         event_repo=event_repo,
         template_repo=template_repo,
         workflow_repo=workflow_repo,
-        tool_registry=tool_registry
+        tool_registry=tool_registry,
+        memory_repo=memory_repo
     )
     
     logger.info(
@@ -207,7 +213,8 @@ async def lifespan(app: FastAPI):
         extra={
             "event_repo": event_repo is not None,
             "template_repo": template_repo is not None,
-            "workflow_repo": workflow_repo is not None
+            "workflow_repo": workflow_repo is not None,
+            "memory_repo": memory_repo is not None
         }
     )
     
