@@ -171,3 +171,48 @@ class MemoryRepository:
                 WHERE project_id = $1 AND client_id = $2
             """, project_uuid, client_uuid)
         logger.info("All memory cleared for user", extra={"project_id": project_id, "client_id": client_id})
+
+    async def get_lifecycle(self, project_id: str, client_id: str) -> Optional[str]:
+        """
+        Retrieve the current lifecycle stage for a user from long-term memory.
+
+        Args:
+            project_id: UUID of the project.
+            client_id: UUID of the client.
+
+        Returns:
+            Lifecycle stage string (e.g., "cold", "warm", "hot") or None if not set.
+        """
+        project_uuid = uuid.UUID(project_id)
+        client_uuid = uuid.UUID(client_id)
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT value
+                FROM user_memory
+                WHERE project_id = $1 AND client_id = $2 AND type = 'lifecycle' AND key = 'stage'
+                ORDER BY updated_at DESC
+                LIMIT 1
+            """, project_uuid, client_uuid)
+
+        if row:
+            # value is JSON, we store as {"stage": "warm"}
+            stage = row["value"].get("stage") if isinstance(row["value"], dict) else row["value"]
+            if isinstance(stage, str):
+                logger.debug("Retrieved lifecycle", extra={"project_id": project_id, "client_id": client_id, "lifecycle": stage})
+                return stage
+        logger.debug("No lifecycle found", extra={"project_id": project_id, "client_id": client_id})
+        return None
+
+    async def set_lifecycle(self, project_id: str, client_id: str, lifecycle: str) -> None:
+        """
+        Store the lifecycle stage for a user in long-term memory.
+
+        Args:
+            project_id: UUID of the project.
+            client_id: UUID of the client.
+            lifecycle: Lifecycle stage (e.g., "cold", "warm", "hot").
+        """
+        # Store as a dict under key 'stage'
+        await self.set(project_id, client_id, "stage", {"stage": lifecycle}, "lifecycle")
+        logger.info("Lifecycle stored", extra={"project_id": project_id, "client_id": client_id, "lifecycle": lifecycle})

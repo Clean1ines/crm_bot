@@ -186,3 +186,93 @@ class ThreadRepository:
                 WHERE id = $2
             """, json.dumps(state, ensure_ascii=False), uuid.UUID(thread_id))
             logger.debug("State_json saved")
+
+    async def update_analytics(
+        self,
+        thread_id: str,
+        intent: Optional[str] = None,
+        lifecycle: Optional[str] = None,
+        cta: Optional[str] = None,
+        decision: Optional[str] = None
+    ) -> None:
+        """
+        Обновляет аналитические поля треда: intent, lifecycle, cta, decision.
+
+        Args:
+            thread_id: UUID треда.
+            intent: Распознанное намерение (например, "pricing", "support").
+            lifecycle: Стадия жизненного цикла (например, "cold", "warm", "hot").
+            cta: Тип призыва к действию (например, "request_demo").
+            decision: Решение роутера (например, "RESPOND_KB").
+        """
+        thread_uuid = uuid.UUID(thread_id)
+
+        # Build SET clause dynamically
+        updates = []
+        params = []
+        if intent is not None:
+            updates.append("intent = $%d" % (len(params) + 1))
+            params.append(intent)
+        if lifecycle is not None:
+            updates.append("lifecycle = $%d" % (len(params) + 1))
+            params.append(lifecycle)
+        if cta is not None:
+            updates.append("cta = $%d" % (len(params) + 1))
+            params.append(cta)
+        if decision is not None:
+            updates.append("decision = $%d" % (len(params) + 1))
+            params.append(decision)
+
+        if not updates:
+            logger.debug("No analytics fields to update", extra={"thread_id": thread_id})
+            return
+
+        query = f"""
+            UPDATE threads
+            SET {", ".join(updates)}, updated_at = NOW()
+            WHERE id = ${len(params) + 1}
+        """
+        params.append(thread_uuid)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, *params)
+
+        logger.info(
+            "Analytics updated",
+            extra={
+                "thread_id": thread_id,
+                "intent": intent,
+                "lifecycle": lifecycle,
+                "cta": cta,
+                "decision": decision
+            }
+        )
+
+    async def get_analytics(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Возвращает аналитические поля треда: intent, lifecycle, cta, decision.
+
+        Args:
+            thread_id: UUID треда.
+
+        Returns:
+            Словарь с ключами intent, lifecycle, cta, decision или None, если тред не найден.
+        """
+        logger.debug(f"Fetching analytics for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT intent, lifecycle, cta, decision
+                FROM threads
+                WHERE id = $1
+            """, uuid.UUID(thread_id))
+            if not row:
+                logger.warning(f"Thread {thread_id} not found for analytics fetch")
+                return None
+            analytics = {
+                "intent": row["intent"],
+                "lifecycle": row["lifecycle"],
+                "cta": row["cta"],
+                "decision": row["decision"]
+            }
+            logger.debug(f"Analytics retrieved for thread {thread_id}")
+            return analytics
