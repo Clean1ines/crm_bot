@@ -1,9 +1,9 @@
 """
-Functions for building the router prompt from agent state and KB results.
+Functions for building prompts for various nodes.
 """
 
 import json
-from textwrap import dedent
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.core.config import settings
@@ -21,6 +21,24 @@ logger = get_logger(__name__)
 DEFAULT_KB_THRESHOLD = float(getattr(settings, "ROUTER_KB_THRESHOLD", getattr(settings, "KB_THRESHOLD", 0.78)))
 DEFAULT_LLM_THRESHOLD = float(getattr(settings, "ROUTER_LLM_THRESHOLD", getattr(settings, "LLM_THRESHOLD", 0.70)))
 DEFAULT_KB_LIMIT = int(getattr(settings, "ROUTER_KB_LIMIT", 5))
+
+# Path to prompts directory
+PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
+
+# Cache for prompt templates
+_intent_prompt_template = None
+_response_prompt_template = None
+_interpretation_block = None
+
+
+def _load_prompt_template(filename: str) -> str:
+    """Load prompt template from file."""
+    filepath = PROMPTS_DIR / filename
+    try:
+        return filepath.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.error("Failed to load prompt template", extra={"file": filename, "error": str(e)})
+        return ""
 
 
 def format_kb_results(
@@ -171,216 +189,100 @@ def _format_memory(memory_by_type: Dict[str, List[Dict]]) -> str:
     return "\n".join(lines)
 
 
-def build_router_prompt(
-    *,
+def _format_features(features: Optional[Dict[str, float]]) -> str:
+    """Format features dict into readable string."""
+    if not features:
+        return "нет упоминаний"
+    items = []
+    for name, score in features.items():
+        items.append(f"{name} (интерес: {score:.1f})")
+    return ", ".join(items)
+
+
+def build_intent_prompt(
     user_input: str,
-    client_profile: str,
-    conversation_summary: str,
-    recent_history: str,
-    kb_context: str,
-    kb_top_score: float,
-    kb_count: int,
-    question_count: int,
-    routing_mode: str,
-    kb_threshold: float,
-    llm_threshold: float,
+    conversation_summary: Optional[str] = None,
+    history: Optional[List[Dict]] = None,
     user_memory: Optional[Dict[str, List[Dict]]] = None,
 ) -> str:
     """
-    Build the router prompt used by the Groq model.
-
-    The prompt is intentionally synthesis-first:
-    - KB results are evidence, not raw copy-paste.
-    - Multiple questions must be answered point-by-point.
-    - Missing profile data should not block an answer unless required.
-    - Long-term user memory is included if available.
+    Build prompt for intent extraction.
 
     Args:
         user_input: Current user message.
-        client_profile: Serialized client profile.
-        conversation_summary: Serialized conversation summary.
-        recent_history: Serialized recent history.
-        kb_context: Serialized KB evidence block.
-        kb_top_score: Best KB score.
-        kb_count: Number of KB results.
-        question_count: Estimated number of question signals.
-        routing_mode: Derived routing mode.
-        kb_threshold: KB confidence threshold.
-        llm_threshold: LLM confidence threshold.
-        user_memory: Optional dictionary of user memory by type.
+        conversation_summary: Optional summary of previous conversation.
+        history: Optional list of recent messages.
+        user_memory: Optional user memory.
 
     Returns:
-        Fully rendered prompt string.
+        Formatted prompt string.
     """
-    memory_block = ""
-    if user_memory:
-        mem_str = _format_memory(user_memory)
-        if mem_str:
-            memory_block = f"Память о пользователе:\n{mem_str}\n"
+    global _intent_prompt_template
+    if _intent_prompt_template is None:
+        _intent_prompt_template = _load_prompt_template("intent_prompt.txt")
 
-    interpretation_block = """
-ИНТЕРПРЕТАЦИЯ ПАМЯТИ (используй как правила поведения):
+    # Format history if provided
+    hist_str = format_history(history, limit=5) if history else "[]"
+    # Format memory if provided
+    mem_str = _format_memory(user_memory) if user_memory else ""
 
-1. lifecycle (стадия клиента):
-   - cold → объясняй ценность, не продавай сразу
-   - interested → усиливайте интерес, отвечай на вопросы
-   - warm → веди к действию (например, предлагай менеджера)
-   - handoff_to_manager → не продавай, передавай менеджеру
-   - active_client → помогай, не продавай
-   - angry → будь аккуратен, не дави, сначала извинись
+    return _intent_prompt_template.format(
+        user_input=user_input,
+        conversation_summary=conversation_summary or "нет",
+        history=hist_str,
+        user_memory=mem_str or "нет"
+    )
 
-2. agreements (договорённости):
-   - считай их актуальными, можешь ссылаться: «как договаривались ранее»
 
-3. preferences (предпочтения):
-   - подстраивайся под формат общения, используй предпочитаемый канал
-
-4. rejections (отказы):
-   - НИКОГДА не предлагай то, что было отвергнуто
-
-5. behavior:
-   - price_sensitivity=high → упор на простоту и доступность
-   - slow_decision → не дави, давай время
-   - fast_decision → веди к действию быстрее
-
-6. issues (жалобы):
-   - не продавай агрессивно, сначала восстанови доверие
-
-Если память противоречит текущему сообщению → приоритет у последнего сообщения пользователя.
-"""
-
-    return dedent(
-        f"""
-    Ты — AI-менеджер по продажам, который общается с клиентом в Telegram.
-
-    Твоя задача:
-    1) выбрать действие:
-    RESPOND_KB | RESPOND_TEMPLATE | LLM_GENERATE | CALL_TOOL | ESCALATE_TO_HUMAN
-    2) дать ответ клиенту
-    3) довести его до следующего шага:
-    - заявка
-    - демо
-    - подключение
-    - передача менеджеру
-
-    ---
-
-    ТЫ НЕ ТЕХНИЧЕСКИЙ БОТ:
-
-    - не используешь слова: API, webhook, RAG, LLM, routing и т.д.
-    - не объясняешь систему
-    - не звучишь как инженер
-    - не пишешь длинно
-    - не копируешь KB дословно
-
-    Ты продаёшь результат.
-
-    ---
-
-    КАК ТЫ ОТВЕЧАЕШЬ:
-
-    - коротко
-    - по делу
-    - по-человечески
-    - 1 мысль = 1–3 предложения
-
-    ---
-
-    КАК ТЫ ИСПОЛЬЗУЕШЬ KB:
-
-    - KB = источник фактов (цены, условия, правила)
-    - НЕ игнорируй KB, если там есть ответ
-    - НЕ придумывай, если KB уже содержит информацию
-    - если KB покрывает вопрос → RESPOND_KB
-    - если частично → дополни и объясни просто
-    - если KB нет → LLM_GENERATE
-
-    ---
-
-    ЛОГИКА ПРОДАЖ:
-
-    1) понять бизнес
-    2) понять есть ли заявки
-    3) показать выгоду (не терять клиентов, экономия времени)
-    4) дать цену (если спрашивают)
-    5) снять сомнение
-    6) предложить следующий шаг
-
-    ---
-
-    ПРАВИЛА:
-
-    - если вопрос про цену → отвечай сразу
-    - если несколько вопросов → ответь по пунктам
-    - если клиент сомневается → упростить
-    - если клиент готов → веди к действию
-    - если злится / требует человека → ESCALATE_TO_HUMAN
-
-    ---
-
-    СТРУКТУРА ОТВЕТА:
-
-    ВСЕГДА:
-    - короткий ответ
-    - 1 фраза пользы
-    - 1 следующий шаг (CTA)
-
-    ---
-
-    КОНТЕКСТ:
-
-    user_input: {user_input}
-
-    client_profile: {client_profile}
-
-    conversation_summary: {conversation_summary}
-
-    recent_history: {recent_history}
-
-    kb_context:
-    {kb_context}
-
-    kb_top_score: {kb_top_score:.3f}
-    kb_count: {kb_count}
-
-    ---
-
-    {interpretation_block}
-
-    {memory_block}
-
-    ФОРМАТ ОТВЕТА (JSON):
-
-    {{
-    "decision": "RESPOND_KB | RESPOND_TEMPLATE | LLM_GENERATE | CALL_TOOL | ESCALATE_TO_HUMAN",
-    "response": "string",
-    "tool": "string|null",
-    "tool_args": {{}},
-    "requires_human": true|false,
-    "confidence": 0.0
-    }}
-
-    ---
-
-    ПРИМЕР:
-
-    Вопрос: "Сколько стоит?"
-
-    Если в KB есть цена:
-    → RESPOND_KB + короткий ответ с CTA
-
-    Ответ:
-    {{
-    "decision": "RESPOND_KB",
-    "response": "Подключение стоит 5000 ₽ разово. Это закрывает первые диалоги с клиентами и не даёт терять заявки. Хочешь — покажу, как это будет работать у тебя.",
-    "tool": null,
-    "tool_args": {{}},
-    "requires_human": false,
-    "confidence": 0.9
-    }}
-
-    ---
-
-    Возвращай только JSON.
+def build_response_prompt(
+    decision: str,
+    features: Optional[Dict[str, float]] = None,
+    user_input: str = "",
+    conversation_summary: Optional[str] = None,
+    history: Optional[List[Dict]] = None,
+    user_memory: Optional[Dict[str, List[Dict]]] = None,
+    knowledge_chunks: Optional[Sequence[Any]] = None,
+) -> str:
     """
-    ).strip()
+    Build prompt for response generation.
+
+    Args:
+        decision: Decision from policy engine (e.g., "LLM_GENERATE").
+        features: Extracted features with interest scores.
+        user_input: Current user message.
+        conversation_summary: Optional summary of previous conversation.
+        history: Optional list of recent messages.
+        user_memory: Optional user memory.
+        knowledge_chunks: Optional KB search results.
+
+    Returns:
+        Formatted prompt string.
+    """
+    global _response_prompt_template, _interpretation_block
+    if _response_prompt_template is None:
+        _response_prompt_template = _load_prompt_template("response_prompt.txt")
+    if _interpretation_block is None:
+        _interpretation_block = _load_prompt_template("interpretation_block.txt")
+
+    # Format knowledge block
+    kb_str = "нет"
+    if knowledge_chunks:
+        kb_str, _, _ = format_kb_results(knowledge_chunks, limit=3)
+
+    # Format history
+    hist_str = format_history(history, limit=5) if history else "[]"
+    # Format memory
+    mem_str = _format_memory(user_memory) if user_memory else ""
+    # Format features
+    feat_str = _format_features(features)
+
+    return _response_prompt_template.format(
+        decision=decision,
+        features=feat_str,
+        user_input=user_input,
+        conversation_summary=conversation_summary or "нет",
+        history=hist_str,
+        user_memory=mem_str or "нет",
+        knowledge_block=kb_str,
+        interpretation_block=_interpretation_block
+    )

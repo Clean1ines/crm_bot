@@ -150,7 +150,8 @@ def create_policy_engine_node():
         return result
 
     def _get_policy_input_size(state: AgentState) -> int:
-        return len(str(state.get("features", {}))) + len(str(state.get("intent", "")))
+        # Safely compute length of features and intent
+        return len(str(state.get("features") or "")) + len(str(state.get("intent") or ""))
 
     def _get_policy_output_size(result: Dict[str, Any]) -> int:
         return 1  # decision is the main output

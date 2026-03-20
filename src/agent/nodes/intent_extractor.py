@@ -110,7 +110,13 @@ def create_intent_extractor_node(
             return {}  # fallback, no updates
 
     def _get_intent_input_size(state: AgentState) -> int:
-        return len(state.get("user_input", ""))
+        # Safely compute lengths, treating None as empty string
+        return (
+            len(state.get("user_input") or "") +
+            len(state.get("conversation_summary") or "") +
+            len(str(state.get("history") or [])) +
+            len(str(state.get("user_memory") or {}))
+        )
 
     def _get_intent_output_size(result: Dict[str, Any]) -> int:
         return len(str(result))

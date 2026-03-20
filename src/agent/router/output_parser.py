@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from pydantic import ValidationError
 
-from src.agent.schemas import RouterOutput
+from src.agent.schemas import RouterOutput, IntentOutput
 from src.core.logging import get_logger
 from src.agent.router.utils import truncate_text, extract_kb_text, count_question_signals
 
@@ -71,6 +71,40 @@ def parse_router_output(content: str) -> RouterOutput:
     cleaned = clean_response_content(content)
     data = json.loads(cleaned)
     return validate_router_output(data)
+
+
+def validate_intent_output(data: Dict[str, Any]) -> IntentOutput:
+    """
+    Validate parsed intent JSON with the project's IntentOutput schema.
+
+    Args:
+        data: Parsed JSON dictionary.
+
+    Returns:
+        Validated IntentOutput object.
+    """
+    if hasattr(IntentOutput, "model_validate"):
+        return IntentOutput.model_validate(data)  # type: ignore[attr-defined]
+    return IntentOutput.parse_obj(data)  # type: ignore[attr-defined]
+
+
+def parse_intent_output(content: str) -> IntentOutput:
+    """
+    Parse and validate intent output from the model.
+
+    Args:
+        content: Raw model text output.
+
+    Returns:
+        Validated IntentOutput object.
+
+    Raises:
+        JSONDecodeError: If the content is not valid JSON.
+        ValidationError: If the JSON does not match IntentOutput schema.
+    """
+    cleaned = clean_response_content(content)
+    data = json.loads(cleaned)
+    return validate_intent_output(data)
 
 
 def build_fallback_response_from_kb(

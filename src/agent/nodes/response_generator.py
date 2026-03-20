@@ -71,13 +71,13 @@ def create_response_generator_node(
 
         # Build prompt
         prompt = build_response_prompt(
+            decision=decision,
             user_input=state.get("user_input", ""),
             conversation_summary=state.get("conversation_summary"),
             history=state.get("history"),
             knowledge_chunks=state.get("knowledge_chunks"),
             user_memory=state.get("user_memory"),
-            features=state.get("features"),
-            cta=state.get("cta")
+            features=state.get("features")
         )
 
         try:
@@ -100,12 +100,13 @@ def create_response_generator_node(
             }
 
     def _get_response_input_size(state: AgentState) -> int:
+        # Safely compute lengths, treating None as empty string
         return (
-            len(state.get("user_input", "")) +
-            len(state.get("conversation_summary", "")) +
-            len(str(state.get("history", []))) +
-            len(str(state.get("knowledge_chunks", []))) +
-            len(str(state.get("user_memory", {})))
+            len(state.get("user_input") or "") +
+            len(state.get("conversation_summary") or "") +
+            len(str(state.get("history") or [])) +
+            len(str(state.get("knowledge_chunks") or [])) +
+            len(str(state.get("user_memory") or {}))
         )
 
     def _get_response_output_size(result: Dict[str, Any]) -> int:
