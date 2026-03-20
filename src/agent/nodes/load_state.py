@@ -42,6 +42,7 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
           - Long-term user memory (if memory_repo provided)
           - Analytics fields from thread (intent, lifecycle, cta, decision)
           - Lifecycle from user memory (if not present in thread)
+          - Dialog state fields (dialog_state, topic, lead_status, repeat_count) from memory
 
         Args:
             state: Current AgentState (may already contain some fields).
@@ -117,7 +118,7 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
                 memories = await memory_repo.get_for_user(
                     project_id=project_id,
                     client_id=client_id_str,
-                    limit=20
+                    limit=50
                 )
                 # Group by type for easier use in prompt
                 memory_by_type: Dict[str, list] = {}
@@ -136,6 +137,25 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: Optional[Memo
                     if lifecycle:
                         result["lifecycle"] = lifecycle
                         logger.debug("Loaded lifecycle from memory", extra={"lifecycle": lifecycle})
+
+                # Extract dialog state fields (type='system')
+                for mem in memories:
+                    if mem["type"] == "system":
+                        key = mem["key"]
+                        value = mem["value"]
+                        if key == "dialog_state":
+                            result["dialog_state"] = value
+                        elif key == "topic":
+                            result["topic"] = value
+                        elif key == "lead_status":
+                            result["lead_status"] = value
+                        elif key == "repeat_count":
+                            # Ensure it's an integer
+                            try:
+                                result["repeat_count"] = int(value) if value is not None else 0
+                            except (TypeError, ValueError):
+                                result["repeat_count"] = 0
+                        # Add other system keys as needed
 
             except Exception as e:
                 logger.exception("Failed to load user memory", extra={"client_id": client_id_str})

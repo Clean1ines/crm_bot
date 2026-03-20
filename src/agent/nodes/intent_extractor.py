@@ -31,7 +31,7 @@ def create_intent_extractor_node(
 
     Returns:
         An async function that takes an AgentState dict and returns a dict
-        with updates to the state (intent, cta, features).
+        with updates to the state (intent, cta, features, topic, emotion, is_repeat_like).
     """
     if llm is None:
         llm = ChatGroq(
@@ -55,10 +55,10 @@ def create_intent_extractor_node(
           1. Build prompt using build_intent_prompt.
           2. Call lightweight LLM.
           3. Parse JSON response into IntentOutput.
-          4. Return intent, cta, features.
+          4. Return intent, cta, features, topic, emotion, is_repeat_like.
 
         Returns:
-            Dict with intent, cta, features.
+            Dict with intent, cta, features, topic, cta_hint, emotion, is_repeat_like.
         """
         user_input = state.get("user_input", "")
         if not user_input:
@@ -78,7 +78,6 @@ def create_intent_extractor_node(
             content = response.content.strip()
 
             # Parse JSON
-            # Sometimes LLM wraps JSON in ```json ... ```
             if content.startswith("```"):
                 content = content.split("```")[1]
                 if content.startswith("json"):
@@ -93,13 +92,20 @@ def create_intent_extractor_node(
                 extra={
                     "intent": intent_data.intent,
                     "cta": intent_data.cta,
+                    "topic": intent_data.topic,
+                    "emotion": intent_data.emotion,
+                    "is_repeat_like": intent_data.is_repeat_like,
                     "features": intent_data.features
                 }
             )
             return {
                 "intent": intent_data.intent,
                 "cta": intent_data.cta,
-                "features": intent_data.features
+                "features": intent_data.features,
+                "topic": intent_data.topic,
+                "cta_hint": intent_data.cta_hint,
+                "emotion": intent_data.emotion,
+                "is_repeat_like": intent_data.is_repeat_like
             }
 
         except Exception as e:

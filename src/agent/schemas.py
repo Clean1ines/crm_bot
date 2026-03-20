@@ -43,12 +43,16 @@ class IntentOutput(BaseModel):
     """
     Structured output from the intent extraction LLM node.
 
-    Extracts intent, call-to-action, and feature mentions from user message.
+    Extracts intent, call-to-action, topic, emotion, and repeat flag.
 
     Attributes:
-        intent: Primary user intent (e.g., "pricing", "support", "sales").
-        cta: Suggested call-to-action (e.g., "request_demo", "call_manager").
+        intent: Primary user intent (pricing, support, sales, feedback, other).
+        cta: Suggested call-to-action (request_demo, call_manager, book_consultation, none).
         features: Dictionary of mentioned features with interest level (0-1).
+        topic: Refined business topic (pricing, product, integration, support, feedback, other, handoff, angry).
+        cta_hint: Free-text hint about what CTA to use (optional).
+        emotion: Detected user emotion (neutral, positive, negative, angry).
+        is_repeat_like: Whether the user is repeating themselves.
     """
     intent: Literal[
         "pricing", "support", "sales", "feedback", "other"
@@ -59,4 +63,14 @@ class IntentOutput(BaseModel):
     features: Dict[str, float] = Field(
         default_factory=dict,
         description="Features mentioned with interest score (0-1)"
+    )
+    topic: Literal[
+        "pricing", "product", "integration", "support", "feedback", "other", "handoff", "angry"
+    ] = Field(default="other", description="Refined business topic")
+    cta_hint: Optional[str] = Field(None, description="Free-text hint about CTA")
+    emotion: Literal["neutral", "positive", "negative", "angry"] = Field(
+        default="neutral", description="Detected user emotion"
+    )
+    is_repeat_like: bool = Field(
+        default=False, description="Whether the user is repeating themselves"
     )

@@ -1,12 +1,11 @@
 """
 Persist node for LangGraph pipeline.
 
-Saves assistant message and state to the database, and emits events
-for auditing and analytics. Also extracts and stores user memory
-based on simple keyword rules.
+Saves assistant message and state to the database, emits events for auditing,
+stores dialog_state in long-term memory, and updates analytics columns.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
@@ -17,11 +16,106 @@ from src.database.repositories.memory_repository import MemoryRepository
 logger = get_logger(__name__)
 
 
+def _coerce_int(value: Any, default: int = 0) -> int:
+    """
+    Convert a value to int with a safe fallback.
+
+    Args:
+        value: Any value that may represent an integer.
+        default: Fallback value if conversion fails.
+
+    Returns:
+        Integer value or default.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _infer_topic_from_intent(intent: Optional[str]) -> Optional[str]:
+    """
+    Infer a stable topic from the current intent.
+
+    Args:
+        intent: Current intent label.
+
+    Returns:
+        Canonical topic or None.
+    """
+    value = (intent or "").strip().lower()
+    mapping = {
+        "ask_price": "pricing",
+        "ask_features": "product",
+        "ask_integration": "integration",
+        "pricing": "pricing",
+        "sales": "product",
+        "support": "support",
+        "feedback": "feedback",
+        "handoff_request": "handoff",
+        "angry": "angry",
+    }
+    return mapping.get(value)
+
+
+def _normalize_dialog_state(state: AgentState) -> Dict[str, Any]:
+    """
+    Build a dialog_state snapshot from the current agent state.
+
+    Args:
+        state: Current agent state.
+
+    Returns:
+        Normalized dialog_state dictionary.
+    """
+    existing = state.get("dialog_state")
+    if not isinstance(existing, dict):
+        existing = {}
+
+    dialog_state = {
+        "last_intent": existing.get("last_intent") or state.get("intent"),
+        "last_cta": existing.get("last_cta") or state.get("cta"),
+        "last_topic": existing.get("last_topic") or state.get("topic") or _infer_topic_from_intent(state.get("intent")),
+        "repeat_count": _coerce_int(existing.get("repeat_count"), 0),
+        "lead_status": existing.get("lead_status") or state.get("lead_status") or state.get("lifecycle") or "cold",
+        "lifecycle": state.get("lifecycle") or existing.get("lifecycle") or state.get("lead_status") or "cold",
+    }
+
+    if dialog_state["repeat_count"] <= 0 and dialog_state["last_intent"]:
+        dialog_state["repeat_count"] = 1
+
+    return dialog_state
+
+
+def _extract_dialog_state_from_memory(state: AgentState) -> Dict[str, Any]:
+    """
+    Extract dialog_state from user_memory if it already exists there.
+
+    Args:
+        state: Current agent state.
+
+    Returns:
+        Dialog state dictionary or an empty dict.
+    """
+    user_memory = state.get("user_memory") or {}
+    items = user_memory.get("dialog_state") or []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        value = item.get("value")
+        if isinstance(value, dict):
+            return value
+
+    return {}
+
+
 def create_persist_node(
     thread_repo: ThreadRepository,
     event_repo: Optional[EventRepository] = None,
     memory_repo: Optional[MemoryRepository] = None,
-    summarizer: Optional[Any] = None  # placeholder for summarizer service
+    summarizer: Optional[Any] = None,
 ):
     """
     Factory function that creates a persist node with injected dependencies.
@@ -43,23 +137,13 @@ def create_persist_node(
         Expected state fields:
           - thread_id: str
           - project_id: str
-          - response_text: str (final answer)
-          - tool_name: optional, if tool was called
+          - response_text: str
+          - tool_name: optional
           - tool_args: optional
-          - requires_human: bool, if escalation happened
-          - client_id: optional, for memory storage
+          - requires_human: bool
+          - client_id: optional
           - intent, lifecycle, cta, decision: optional for analytics
-
-        Actions:
-          1. Save assistant message to messages table.
-          2. Save state_json to threads table.
-          3. Emit events:
-             - ai_response (always)
-             - tool_called (if tool was used)
-             - ticket_created (if escalation happened)
-          4. Extract user memory from user_input and store (if memory_repo).
-          5. Update analytics fields in threads table using thread_repo.update_analytics.
-          6. Trigger background summarization if needed (placeholder).
+          - dialog_state: optional for long-term dialog memory
 
         Returns:
             Empty dict on success, or {"error": ...} on failure.
@@ -67,36 +151,40 @@ def create_persist_node(
         thread_id = state.get("thread_id")
         project_id = state.get("project_id")
         response_text = state.get("response_text")
-        user_input = state.get("user_input", "").lower()
+        user_input = (state.get("user_input") or "").lower()
         client_id = state.get("client_id")
 
         if not thread_id or not project_id:
-            logger.error("persist_node called without thread_id or project_id")
+            logger.error("persist_node missing required identifiers")
             return {"error": "Missing thread_id or project_id"}
 
-        # 1. Save assistant message
+        # 1. Save assistant message.
         if response_text:
             try:
-                await thread_repo.add_message(thread_id, role="assistant", content=response_text)
+                await thread_repo.add_message(
+                    thread_id,
+                    role="assistant",
+                    content=response_text,
+                )
                 logger.debug("Assistant message saved", extra={"thread_id": thread_id})
-            except Exception as e:
+            except Exception:
                 logger.exception("Failed to save assistant message", extra={"thread_id": thread_id})
-                # Continue to save state anyway
+                # Continue to save state anyway.
 
-        # 2. Save state_json (filter out large fields if desired)
-        state_to_save = dict(state)
-        state_to_save.pop("messages", None)
-        state_to_save.pop("history", None)
-        state_to_save.pop("knowledge_chunks", None)
+        # 2. Save state snapshot.
         try:
-            await thread_repo.save_state_json(thread_id, state_to_save)
+            state_copy = dict(state)
+            state_copy.pop("messages", None)
+            state_copy.pop("history", None)
+            state_copy.pop("knowledge_chunks", None)
+
+            await thread_repo.save_state_json(thread_id, state_copy)
             logger.debug("State JSON saved", extra={"thread_id": thread_id})
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to save state_json", extra={"thread_id": thread_id})
 
-        # 3. Emit events
+        # 3. Emit events.
         if event_repo:
-            # ai_response
             try:
                 await event_repo.append(
                     stream_id=thread_id,
@@ -105,13 +193,15 @@ def create_persist_node(
                     payload={
                         "text": response_text,
                         "confidence": state.get("confidence"),
-                        "requires_human": state.get("requires_human", False)
-                    }
+                        "requires_human": state.get("requires_human", False),
+                    },
                 )
-            except Exception as e:
-                logger.warning("Failed to emit ai_response event", extra={"thread_id": thread_id, "error": str(e)})
+            except Exception as exc:
+                logger.warning(
+                    "Failed to emit ai_response event",
+                    extra={"thread_id": thread_id, "error": str(exc)},
+                )
 
-            # tool_called (if any)
             tool_name = state.get("tool_name")
             if tool_name:
                 try:
@@ -122,13 +212,15 @@ def create_persist_node(
                         payload={
                             "tool": tool_name,
                             "args": state.get("tool_args"),
-                            "result": state.get("tool_result")
-                        }
+                            "result": state.get("tool_result"),
+                        },
                     )
-                except Exception as e:
-                    logger.warning("Failed to emit tool_called event", extra={"thread_id": thread_id, "error": str(e)})
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to emit tool_called event",
+                        extra={"thread_id": thread_id, "error": str(exc)},
+                    )
 
-            # ticket_created (if escalation happened)
             if state.get("requires_human"):
                 try:
                     await event_repo.append(
@@ -137,117 +229,173 @@ def create_persist_node(
                         event_type="ticket_created",
                         payload={
                             "reason": "Human escalation requested",
-                            "manager_notified": True
-                        }
+                            "manager_notified": True,
+                        },
                     )
-                except Exception as e:
-                    logger.warning("Failed to emit ticket_created event", extra={"thread_id": thread_id, "error": str(e)})
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to emit ticket_created event",
+                        extra={"thread_id": thread_id, "error": str(exc)},
+                    )
 
-        # 4. Store user memory (simple keyword rules)
-        if memory_repo and client_id and user_input:
+        # 4. Store memory.
+        if memory_repo and client_id:
             try:
-                # Lifecycle detection
-                lifecycle_keywords = {
-                    "хочу": "warm", "давайте": "warm", "подключить": "warm", "начнем": "warm",
-                    "как оплатить": "hot", "куда платить": "hot"
-                }
-                for kw, stage in lifecycle_keywords.items():
-                    if kw in user_input:
+                # Preserve and refresh dialog_state in long-term memory.
+                dialog_state = _normalize_dialog_state(state)
+                memory_dialog_state = _extract_dialog_state_from_memory(state)
+                if memory_dialog_state:
+                    # Merge any previously stored values with the current snapshot.
+                    merged_dialog_state = dict(memory_dialog_state)
+                    merged_dialog_state.update(dialog_state)
+                    dialog_state = merged_dialog_state
+
+                await memory_repo.set(
+                    project_id=project_id,
+                    client_id=client_id,
+                    key="dialog_state",
+                    value=dialog_state,
+                    type_="dialog_state",
+                )
+                logger.debug(
+                    "Dialog state stored",
+                    extra={
+                        "project_id": project_id,
+                        "client_id": client_id,
+                        "repeat_count": dialog_state.get("repeat_count"),
+                        "lead_status": dialog_state.get("lead_status"),
+                    },
+                )
+
+                lifecycle_stage = dialog_state.get("lifecycle") or dialog_state.get("lead_status")
+                if lifecycle_stage:
+                    await memory_repo.set(
+                        project_id=project_id,
+                        client_id=client_id,
+                        key="stage",
+                        value={"stage": lifecycle_stage},
+                        type_="lifecycle",
+                    )
+                    logger.debug(
+                        "Lifecycle stored",
+                        extra={
+                            "project_id": project_id,
+                            "client_id": client_id,
+                            "lifecycle": lifecycle_stage,
+                        },
+                    )
+
+                # Lightweight backward-compatible signals.
+                if user_input:
+                    if "не хочу звонок" in user_input:
                         await memory_repo.set(
                             project_id=project_id,
                             client_id=client_id,
-                            key="lifecycle",
-                            value={"stage": stage},
-                            type_="lifecycle"
+                            key="calls",
+                            value=False,
+                            type_="rejection",
                         )
-                        logger.debug("Stored lifecycle memory", extra={"stage": stage, "client_id": client_id})
-                        break
+                        logger.debug("Stored rejection memory: no calls")
 
-                # Rejection (no calls)
-                if "не хочу звонок" in user_input:
-                    await memory_repo.set(
-                        project_id=project_id,
-                        client_id=client_id,
-                        key="calls",
-                        value=False,
-                        type_="rejection"
-                    )
-                    logger.debug("Stored rejection memory: no calls")
-
-                # Behavior (price sensitivity)
-                if any(phrase in user_input for phrase in ["дорого", "слишком дорого"]):
-                    await memory_repo.set(
-                        project_id=project_id,
-                        client_id=client_id,
-                        key="price_sensitivity",
-                        value="high",
-                        type_="behavior"
-                    )
-                    logger.debug("Stored price sensitivity memory")
-
-                # Business context extraction (simple)
-                business_phrases = ["у меня салон", "мой бизнес", "я из"]
-                for phrase in business_phrases:
-                    if phrase in user_input:
-                        # Try to extract business type after the phrase
-                        # For simplicity, set a default or keep as is
+                    if any(phrase in user_input for phrase in ["дорого", "слишком дорого"]):
                         await memory_repo.set(
                             project_id=project_id,
                             client_id=client_id,
-                            key="business_type",
-                            value="salon",  # placeholder, could be smarter
-                            type_="context"
+                            key="price_sensitivity",
+                            value="high",
+                            type_="behavior",
                         )
-                        logger.debug("Stored business context")
-                        break
+                        logger.debug("Stored price sensitivity memory")
 
-                # Issues
-                issue_keywords = ["не работает", "бесит", "ошибка", "жалоба"]
-                if any(kw in user_input for kw in issue_keywords):
-                    await memory_repo.set(
-                        project_id=project_id,
-                        client_id=client_id,
-                        key="last_issue",
-                        value=user_input[:200],
-                        type_="issues"
-                    )
-                    logger.debug("Stored issue memory")
+                    business_phrases = ["у меня салон", "мой бизнес", "я из"]
+                    for phrase in business_phrases:
+                        if phrase in user_input:
+                            await memory_repo.set(
+                                project_id=project_id,
+                                client_id=client_id,
+                                key="business_type",
+                                value="salon",
+                                type_="context",
+                            )
+                            logger.debug("Stored business context")
+                            break
 
-            except Exception as e:
+                    issue_keywords = ["не работает", "бесит", "ошибка", "жалоба"]
+                    if any(kw in user_input for kw in issue_keywords):
+                        await memory_repo.set(
+                            project_id=project_id,
+                            client_id=client_id,
+                            key="last_issue",
+                            value=user_input[:200],
+                            type_="issues",
+                        )
+                        logger.debug("Stored issue memory")
+
+            except Exception:
                 logger.exception("Failed to store user memory", extra={"client_id": client_id})
 
-        # 5. Update analytics fields in threads table
+        # 5. Update analytics fields in threads table.
         try:
             await thread_repo.update_analytics(
                 thread_id=thread_id,
                 intent=state.get("intent"),
                 lifecycle=state.get("lifecycle"),
                 cta=state.get("cta"),
-                decision=state.get("decision")
+                decision=state.get("decision"),
             )
             logger.debug("Analytics updated", extra={"thread_id": thread_id})
-        except Exception as e:
-            logger.warning("Failed to update analytics", extra={"thread_id": thread_id, "error": str(e)})
+        except Exception as exc:
+            logger.warning(
+                "Failed to update analytics",
+                extra={"thread_id": thread_id, "error": str(exc)},
+            )
 
-        # 6. Trigger summarization (placeholder)
+        # 6. Trigger summarization (placeholder).
         # if summarizer and condition_met:
         #     asyncio.create_task(summarizer.summarize_and_save(thread_id))
 
-        return {}  # no state changes
+        return {}
 
     def _get_persist_input_size(state: AgentState) -> int:
-        return 0  # no meaningful input size
+        """
+        Estimate persist node input size.
+
+        Args:
+            state: Current agent state.
+
+        Returns:
+            Zero, because this is a side-effect node.
+        """
+        return 0
 
     def _get_persist_output_size(result: Dict[str, Any]) -> int:
-        return 0  # output is empty dict
+        """
+        Estimate persist node output size.
+
+        Args:
+            result: Node result.
+
+        Returns:
+            Zero, because this node returns no meaningful payload.
+        """
+        return 0
 
     async def persist_node(state: AgentState) -> Dict[str, Any]:
+        """
+        Execute persist node with execution tracing.
+
+        Args:
+            state: Current agent state.
+
+        Returns:
+            Dictionary of state updates.
+        """
         return await log_node_execution(
             "persist",
             _persist_node_impl,
             state,
             get_input_size=_get_persist_input_size,
-            get_output_size=_get_persist_output_size
+            get_output_size=_get_persist_output_size,
         )
 
     return persist_node

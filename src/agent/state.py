@@ -47,6 +47,12 @@ class AgentState(TypedDict):
         cta: Optional[str]     # Call-to-action type (e.g., "request_demo", "call_manager")
         lifecycle: Optional[str]  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
         features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
+        
+        # Runtime dialog state fields (loaded from user memory)
+        dialog_state: Optional[str]  # Current dialog state (e.g., "collecting_info", "answering")
+        topic: Optional[str]         # Current conversation topic
+        lead_status: Optional[str]   # Lead status (e.g., "new", "qualified", "lost")
+        repeat_count: Optional[int]  # Number of times user repeated a question
     """
     # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -78,3 +84,9 @@ class AgentState(TypedDict):
     cta: Optional[str]     # Call-to-action type (e.g., "request_demo", "call_manager")
     lifecycle: Optional[str]  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
     features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
+    
+    # Runtime dialog state fields (loaded from user memory)
+    dialog_state: Optional[str]  # Current dialog state (e.g., "collecting_info", "answering")
+    topic: Optional[str]         # Current conversation topic
+    lead_status: Optional[str]   # Lead status (e.g., "new", "qualified", "lost")
+    repeat_count: Optional[int]  # Number of times user repeated a question
