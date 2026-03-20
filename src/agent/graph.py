@@ -24,6 +24,7 @@ from .nodes.persist import create_persist_node
 from src.core.model_registry import ModelRegistry
 from src.services.rate_limit_tracker import RateLimitTracker
 from src.services.model_selector import ModelSelector
+from src.tools.builtins import TicketCreateTool
 
 logger = get_logger(__name__)
 
@@ -71,7 +72,16 @@ def create_agent(
     )  # uses default LLM from settings
 
     tool_executor_node = create_tool_executor_node(tool_registry)
-    escalate_node = create_escalate_node(thread_repo, queue_repo)
+
+    # Get TicketCreateTool from registry (or create if not found)
+    ticket_create_tool = tool_registry.get_tool("ticket.create")
+    if ticket_create_tool is None:
+        # Fallback: create directly (requires pool)
+        # Note: we need pool – but it's not available here. We'll rely on it being in registry.
+        logger.warning("TicketCreateTool not found in registry, escalation will not create ticket")
+        ticket_create_tool = None
+
+    escalate_node = create_escalate_node(thread_repo, queue_repo, ticket_create_tool)
     responder_node = create_responder_node(tool_registry)
     persist_node = create_persist_node(thread_repo, event_repo)
 

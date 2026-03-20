@@ -1,7 +1,7 @@
 """
 Escalation node for LangGraph pipeline.
 
-Marks a thread as requiring human intervention, creates a task in the queue,
+Creates a ticket in the tasks table, enqueues manager notification,
 and updates the state to indicate human escalation.
 """
 
@@ -12,13 +12,15 @@ from src.agent.state import AgentState
 from src.database.models import ThreadStatus
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
+from src.tools.builtins import TicketCreateTool
 
 logger = get_logger(__name__)
 
 
 def create_escalate_node(
     thread_repo: ThreadRepository,
-    queue_repo: QueueRepository
+    queue_repo: QueueRepository,
+    ticket_create_tool: TicketCreateTool
 ):
     """
     Factory function that creates an escalate node with injected repository dependencies.
@@ -26,6 +28,7 @@ def create_escalate_node(
     Args:
         thread_repo: ThreadRepository instance for updating thread status.
         queue_repo: QueueRepository instance for enqueueing manager notification.
+        ticket_create_tool: TicketCreateTool instance for creating ticket record.
 
     Returns:
         An async function that takes an AgentState dict and returns a dict
@@ -39,9 +42,10 @@ def create_escalate_node(
           - thread_id: str
           - project_id: str (optional, used for logging)
           - user_input: str (optional, used for notification)
+          - client_profile: optional (used for ticket creation)
 
         Actions:
-          1. Update thread status to MANUAL.
+          1. Create a ticket in the tasks table.
           2. Enqueue a 'notify_manager' task with relevant payload.
           3. Set requires_human=True and a standard response text in the state.
 
@@ -50,6 +54,9 @@ def create_escalate_node(
         thread_id = state.get("thread_id")
         project_id = state.get("project_id")
         user_input = state.get("user_input", "")
+        client_id = None
+        if state.get("client_profile") and isinstance(state.get("client_profile"), dict):
+            client_id = state["client_profile"].get("id")
 
         if not thread_id:
             logger.error("escalate_node called with no thread_id")
@@ -60,12 +67,25 @@ def create_escalate_node(
 
         logger.info("Escalating thread", extra={"thread_id": thread_id, "project_id": project_id, "user_input": user_input[:50]})
 
-        # 1. Update thread status to MANUAL
+        # 1. Create ticket record
         try:
-            await thread_repo.update_status(thread_id, ThreadStatus.MANUAL)
-            logger.debug("Thread status updated to MANUAL", extra={"thread_id": thread_id})
+            # Build title and description
+            title = "Escalation: user requested human help"
+            description = f"User message: {user_input[:500]}"
+            priority = "normal"
+            # Use TicketCreateTool to insert into tasks table
+            result = await ticket_create_tool.run(
+                args={"title": title, "description": description, "priority": priority},
+                context={
+                    "project_id": project_id,
+                    "thread_id": thread_id,
+                    "user_id": client_id
+                }
+            )
+            ticket_id = result.get("ticket_id")
+            logger.info("Ticket created", extra={"ticket_id": ticket_id, "thread_id": thread_id})
         except Exception as e:
-            logger.exception("Failed to update thread status", extra={"thread_id": thread_id})
+            logger.exception("Failed to create ticket", extra={"thread_id": thread_id})
             # Continue anyway, but log error
 
         # 2. Enqueue manager notification task

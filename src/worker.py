@@ -161,6 +161,23 @@ async def _recover_stale_jobs(queue_repo: QueueRepository, timeout_minutes: int 
         logger.error("Failed to recover stale jobs", extra={"error": str(e)})
 
 
+async def _get_client_name(project_id: str, client_id: str, pool: asyncpg.Pool) -> str:
+    """
+    Get client's username or full name from clients table.
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT username, full_name FROM clients WHERE id = $1 AND project_id = $2",
+            uuid.UUID(client_id), uuid.UUID(project_id)
+        )
+        if row:
+            if row["full_name"]:
+                return row["full_name"]
+            if row["username"]:
+                return row["username"]
+    return "Клиент"
+
+
 async def _handle_notify_manager(
     job: Dict[str, Any],
     thread_repo: ThreadRepository,
@@ -186,17 +203,25 @@ async def _handle_notify_manager(
     payload = job.get("payload") or {}
     # Ensure thread_id is string
     thread_id = str(payload.get("thread_id"))
-    chat_id = payload.get("chat_id")
-    message = payload.get("message")
+    message = payload.get("message", "")
+    # If the job came from a manager reply session, it may contain manager_chat_id
+    target_manager = payload.get("manager_chat_id")  # can be None
 
-    # Get thread info to find project_id
+    # Get thread info to find project_id and client_id
     thread_info = await thread_repo.get_thread_with_project(thread_id)
     if not thread_info:
         logger.error("Thread not found", extra={"thread_id": thread_id, "job_id": job["id"]})
         return False
     
     project_id = thread_info["project_id"]
-
+    client_id = thread_info.get("client_id")
+    
+    # Get client name for better identification
+    client_name = "Клиент"
+    if client_id:
+        # We need a pool to query clients – use thread_repo's pool
+        client_name = await _get_client_name(project_id, client_id, thread_repo.pool)
+    
     # Get manager settings for this project
     project_settings = await project_repo.get_project_settings(str(project_id))
     manager_bot_token = project_settings.get("manager_bot_token")
@@ -209,6 +234,13 @@ async def _handle_notify_manager(
         )
         return False
 
+    # If target_manager is specified (message from ongoing session), send only to that manager
+    if target_manager:
+        manager_chat_ids = [target_manager]
+        if target_manager not in manager_chat_ids:
+            logger.warning("Target manager not in project managers list", extra={"manager": target_manager})
+            return False
+
     if not manager_chat_ids:
         logger.warning(
             "No managers defined for project",
@@ -216,7 +248,7 @@ async def _handle_notify_manager(
         )
         return False
 
-    # Build inline keyboard markup with two buttons: reply and close
+    # Build inline keyboard markup: both Reply and Close buttons
     reply_markup = {
         "inline_keyboard": [
             [{"text": "✏️ Ответить", "callback_data": f"reply:{thread_id}"}],
@@ -230,7 +262,7 @@ async def _handle_notify_manager(
         url = f"https://api.telegram.org/bot{manager_bot_token}/sendMessage"
         params = {
             "chat_id": int(mgr_chat_id),
-            "text": f"Новое сообщение (thread {thread_id}):\n\n{message}",
+            "text": f"Новое сообщение от {client_name} (thread {thread_id}):\n\n{message}",
             "reply_markup": reply_markup
         }
         try:

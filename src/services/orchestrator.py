@@ -21,6 +21,7 @@ from src.database.models import ThreadStatus
 from src.database.repositories.queue_repository import QueueRepository
 from src.services.summarizer import SummarizerService
 from src.services.lock import acquire_thread_lock, release_thread_lock
+from src.services.redis_client import get_redis_client
 from src.core.config import settings
 from src.core.logging import get_logger
 
@@ -239,9 +240,9 @@ class OrchestratorService:
           1. Register client/thread.
           2. Save user message and emit message_received event.
           3. Acquire thread lock to prevent concurrent processing.
-          4. Check thread status – if MANUAL, enqueue manager notification and return.
-          5. Split message into individual questions (if multiple).
-          6. For each question, build initial AgentState and invoke graph.
+          4. Check if manager is currently in a reply session for this thread.
+          5. If yes, redirect the message to the manager (enqueue notification).
+          6. Otherwise, split message into questions and invoke graph.
           7. Collect responses and combine them.
           8. Release lock.
         
@@ -270,15 +271,23 @@ class OrchestratorService:
             return "⏳ Ваш запрос уже обрабатывается, пожалуйста, подождите."
 
         try:
-            # 3. Check thread status – if manual, redirect to manager
-            thread_info = await self.threads.get_thread_with_project(thread_id_str)
-            if thread_info and thread_info.get("status") == ThreadStatus.MANUAL.value:
-                # Thread is escalated – notify manager and return standard message
+            # 3. Check if manager is in reply session for this thread
+            redis = await get_redis_client()
+            awaiting_reply_key = f"awaiting_reply_thread:{thread_id_str}"
+            manager_chat_id = await redis.get(awaiting_reply_key)
+            
+            if manager_chat_id:
+                # Manager has claimed the ticket – redirect all future messages to manager
+                logger.info("Message redirected to manager (thread in reply session)", extra={"thread_id": thread_id_str})
                 await self.queue_repo.enqueue(
                     task_type="notify_manager",
-                    payload={"thread_id": thread_id_str, "project_id": project_id, "message": text}
+                    payload={
+                        "thread_id": thread_id_str,
+                        "project_id": project_id,
+                        "message": text,
+                        "manager_chat_id": manager_chat_id.decode() if isinstance(manager_chat_id, bytes) else manager_chat_id
+                    }
                 )
-                logger.info("Message redirected to manager (thread in MANUAL state)", extra={"thread_id": thread_id_str})
                 return "Ваш вопрос передан менеджеру. Ожидайте ответа."
 
             # 4. Save user message (whole text, will be split later)
@@ -379,13 +388,14 @@ class OrchestratorService:
             # Always release lock
             await release_thread_lock(thread_id_str)
 
-    async def manager_reply(self, thread_id: str, manager_text: str) -> bool:
+    async def manager_reply(self, thread_id: str, manager_text: str, manager_chat_id: str) -> bool:
         """
         Отправляет ответ менеджера клиенту по указанному треду.
         
         Args:
             thread_id: UUID треда в строковом формате.
             manager_text: Текст ответа менеджера.
+            manager_chat_id: Telegram chat_id менеджера (для идентификации).
         
         Returns:
             True если ответ успешно отправлен.
@@ -394,33 +404,56 @@ class OrchestratorService:
             ValueError: If thread not found or status is not MANUAL.
             RuntimeError: If project has no bot token or Telegram API fails.
         """
-        logger.info("Sending manager reply", extra={"thread_id": thread_id})
+        logger.info("Sending manager reply", extra={"thread_id": thread_id, "manager_chat_id": manager_chat_id})
         
         # Получаем тред с project_id
         thread = await self.threads.get_thread_with_project(thread_id)
         if not thread:
             raise ValueError(f"Thread {thread_id} not found")
 
+        # Check that thread is in MANUAL state (manager has taken the ticket)
         if thread["status"] != ThreadStatus.MANUAL.value:
             raise ValueError(f"Thread {thread_id} status is {thread['status']}, expected MANUAL")
 
         project_id = thread["project_id"]
 
+        # Get manager info (username) from Telegram
+        manager_name = None
+        try:
+            # Get manager bot token
+            project_settings = await self.projects.get_project_settings(project_id)
+            manager_bot_token = project_settings.get("manager_bot_token")
+            if manager_bot_token:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(
+                        f"https://api.telegram.org/bot{manager_bot_token}/getChat",
+                        params={"chat_id": manager_chat_id}
+                    )
+                    if resp.status_code == 200 and resp.json().get("ok"):
+                        chat_data = resp.json()["result"]
+                        manager_name = chat_data.get("first_name") or chat_data.get("username") or "Менеджер"
+        except Exception as e:
+            logger.warning("Failed to fetch manager name", extra={"error": str(e)})
+            manager_name = "Менеджер"
+
+        # Prepend manager indicator to the text
+        prefixed_text = f"[{manager_name}]: {manager_text}"
+
         # Транзакция: используем пул напрямую для атомарности
         async with self.threads.pool.acquire() as conn:
             async with conn.transaction():
-                # Обновляем статус (оставляем MANUAL или меняем – оставим MANUAL для ясности)
+                # Обновляем статус (оставляем MANUAL)
                 await conn.execute("""
                     UPDATE threads
                     SET updated_at = NOW()
                     WHERE id = $1
                 """, uuid.UUID(thread_id))
 
-                # Сохраняем сообщение менеджера как assistant
+                # Сохраняем сообщение менеджера как assistant с префиксом
                 await conn.execute("""
                     INSERT INTO messages (thread_id, role, content)
                     VALUES ($1, $2, $3)
-                """, uuid.UUID(thread_id), "assistant", manager_text)
+                """, uuid.UUID(thread_id), "assistant", prefixed_text)
 
         # Получаем токен бота для этого проекта
         bot_token = await self.projects.get_bot_token(project_id)
@@ -439,7 +472,7 @@ class OrchestratorService:
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = {
             "chat_id": chat_id,
-            "text": manager_text
+            "text": prefixed_text
         }
         async with httpx.AsyncClient() as client_http:
             resp = await client_http.post(url, json=payload)
@@ -457,7 +490,7 @@ class OrchestratorService:
             event_type="manager_replied",
             payload={
                 "text": manager_text,
-                "manager_chat_id": thread.get("manager_chat_id")
+                "manager_chat_id": manager_chat_id
             }
         )
 

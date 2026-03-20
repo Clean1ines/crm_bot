@@ -23,7 +23,7 @@ async def process_manager_update(
 ) -> Dict[str, bool]:
     """
     Process incoming update from a manager.
-    Handles callback queries (claim ticket) and text replies.
+    Handles callback queries (claim ticket, close ticket) and text replies.
     
     Args:
         update: Telegram Update object.
@@ -36,7 +36,7 @@ async def process_manager_update(
     """
     redis = await get_redis_client()
     
-    # 1. Handle Callback Query (Claim Ticket)
+    # 1. Handle Callback Query (Claim/Close Ticket)
     if "callback_query" in update:
         cb = update["callback_query"]
         callback_id = cb["id"]
@@ -45,37 +45,55 @@ async def process_manager_update(
         
         if data.startswith("reply:"):
             thread_id = data.split(":", 1)[1]
-            key = f"awaiting_reply:{manager_chat_id}"
-            await redis.setex(key, 600, thread_id)
+            # Mark that manager is now in a reply session for this thread
+            key_thread = f"awaiting_reply_thread:{thread_id}"
+            key_manager = f"awaiting_reply:{manager_chat_id}"
+            await redis.setex(key_thread, 600, manager_chat_id)
+            await redis.setex(key_manager, 600, thread_id)
             
-            # Answer callback
+            # Update thread status to MANUAL
+            await orchestrator.threads.update_status(thread_id, ThreadStatus.MANUAL)
+            
+            # Answer the callback
             async with httpx.AsyncClient() as client:
                 await client.post(
                     f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
-                    json={"callback_query_id": callback_id, "text": "✍️ Введите ваш ответ", "show_alert": False}
+                    json={"callback_query_id": callback_id, "text": "Тикет взят в работу. Теперь все сообщения клиента будут направлены вам.", "show_alert": False}
+                )
+            
+            # Send a confirmation message with a close button
+            close_markup = {
+                "inline_keyboard": [[{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}]]
+            }
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={
+                        "chat_id": manager_chat_id,
+                        "text": f"Тикет {thread_id} взят в работу. Чтобы вернуть диалог AI, нажмите «Закрыть тикет».",
+                        "reply_markup": close_markup
+                    }
                 )
             return {"ok": True}
         
         elif data.startswith("close:"):
             thread_id = data.split(":", 1)[1]
-            # Update thread status to active
-            try:
-                await orchestrator.threads.update_status(thread_id, ThreadStatus.ACTIVE)
-                # Delete awaiting_reply key if exists
-                await redis.delete(f"awaiting_reply:{manager_chat_id}")
-                # Answer callback
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
-                        json={"callback_query_id": callback_id, "text": "✅ Тикет закрыт", "show_alert": False}
-                    )
-            except Exception as e:
-                logger.exception("Error closing ticket", extra={"thread_id": thread_id})
-                async with httpx.AsyncClient() as client:
-                    await client.post(
-                        f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
-                        json={"callback_query_id": callback_id, "text": f"❌ Ошибка: {str(e)}", "show_alert": True}
-                    )
+            key_thread = f"awaiting_reply_thread:{thread_id}"
+            key_manager = f"awaiting_reply:{manager_chat_id}"
+            
+            # Clear Redis keys
+            await redis.delete(key_thread)
+            await redis.delete(key_manager)
+            
+            # Update thread status to ACTIVE
+            await orchestrator.threads.update_status(thread_id, ThreadStatus.ACTIVE)
+            
+            # Answer callback
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+                    json={"callback_query_id": callback_id, "text": "Тикет закрыт. AI снова будет отвечать клиенту.", "show_alert": False}
+                )
             return {"ok": True}
         
         return {"ok": True}
@@ -104,12 +122,15 @@ async def process_manager_update(
                 )
             return {"ok": True}
         
+        # Convert thread_id from bytes to string if needed
+        if isinstance(thread_id, bytes):
+            thread_id = thread_id.decode()
+        
         try:
-            # Send reply via Orchestrator
-            success = await orchestrator.manager_reply(thread_id, text)
+            # Send reply via Orchestrator (with manager identification)
+            success = await orchestrator.manager_reply(thread_id, text, manager_chat_id)
             
             if success:
-                await redis.delete(key)
                 async with httpx.AsyncClient() as client:
                     await client.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
