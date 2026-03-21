@@ -2,10 +2,10 @@
 Responder node for LangGraph pipeline.
 
 Sends the final response to the user via Telegram.
-Prioritizes tool_result over response_text, falls back to a default message.
+Saves the assistant message to the database for context in future interactions.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
@@ -14,30 +14,30 @@ from src.tools.registry import ToolRegistry
 logger = get_logger(__name__)
 
 
-def create_responder_node(tool_registry: ToolRegistry):
+def create_responder_node(tool_registry: ToolRegistry, thread_repo=None):
     """
-    Factory function that creates a responder node with injected ToolRegistry.
+    Factory function that creates a responder node with injected ToolRegistry and ThreadRepository.
 
     Args:
         tool_registry: ToolRegistry instance for sending messages.
+        thread_repo: Optional ThreadRepository for saving assistant messages to history.
 
     Returns:
-        An async function that takes an AgentState dict and returns a dict
-        (usually empty on success, or with requires_human=True on failure).
+        An async function that takes an AgentState dict and returns updates.
     """
     async def _responder_node_impl(state: AgentState) -> Dict[str, Any]:
         """
-        Send the final response to the user.
+        Send the final response to the user and save it to history.
 
         Expected state fields:
           - chat_id: int (Telegram chat ID)
           - tool_result: optional, if present and has a 'text' field, use it.
           - response_text: optional fallback text.
           - project_id: str (for logging)
-          - thread_id: str (for logging)
+          - thread_id: str (for saving message)
 
         Returns a dict with updates to the state:
-          - on success: {"message_sent": True, "response_text": None} (clears response_text)
+          - on success: {"message_sent": True, "response_text": None}
           - if sending fails: {"requires_human": True, "response_text": fallback message}
         """
         chat_id = state.get("chat_id")
@@ -58,14 +58,13 @@ def create_responder_node(tool_registry: ToolRegistry):
         else:
             response_text = "Извините, не удалось сформировать ответ."
 
-        # Log what we're sending
         logger.debug("Sending response",
                      extra={"chat_id": chat_id,
                             "project_id": state.get("project_id"),
                             "thread_id": state.get("thread_id"),
                             "response_preview": response_text[:50]})
 
-        # Call telegram.send_message tool without parse_mode to avoid formatting errors
+        # Call telegram.send_message tool
         try:
             result = await tool_registry.execute(
                 "telegram.send_message",
@@ -80,6 +79,20 @@ def create_responder_node(tool_registry: ToolRegistry):
             )
             if result.get("ok"):
                 logger.info("Message sent successfully", extra={"chat_id": chat_id})
+
+                # Save assistant message to database if repo available
+                thread_id = state.get("thread_id")
+                if thread_id and thread_repo:
+                    try:
+                        await thread_repo.add_message(
+                            thread_id=thread_id,
+                            role="assistant",
+                            content=response_text,
+                        )
+                        logger.debug("Assistant message saved", extra={"thread_id": thread_id})
+                    except Exception as e:
+                        logger.exception("Failed to save assistant message", extra={"thread_id": thread_id})
+
                 # Message sent, clear response_text to avoid double-send
                 return {"message_sent": True, "response_text": None}
             else:
@@ -96,7 +109,7 @@ def create_responder_node(tool_registry: ToolRegistry):
             }
 
     def _get_responder_input_size(state: AgentState) -> int:
-        return len(state.get("response_text", "")) + (len(state.get("tool_result", {})) if state.get("tool_result") else 0)
+        return len(state.get("response_text", "")) + (len(str(state.get("tool_result", {}))) if state.get("tool_result") else 0)
 
     def _get_responder_output_size(result: Dict[str, Any]) -> int:
         return 1  # success/failure flag

@@ -113,6 +113,20 @@ def create_response_generator_node(
             state.get("dialog_state"),
         )
 
+        # ===== DEBUG OUTPUT =====
+        print("\n==== KB CHUNKS ====")
+        for c in state.get("knowledge_chunks", []):
+            print(c.get("content"))
+        print("==== END ====\n")
+
+        print("==== HISTORY ====")
+        for msg in state.get("history", []):
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            print(f"- {role}: {content}")
+        print("==== END ====\n")
+        # =======================
+
         prompt = build_response_prompt(
             decision=decision,
             user_input=state.get("user_input", ""),

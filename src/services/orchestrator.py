@@ -19,7 +19,6 @@ from src.agent.graph import create_agent as create_default_agent
 from src.agent.state import AgentState
 from src.database.models import ThreadStatus
 from src.database.repositories.queue_repository import QueueRepository
-from src.services.summarizer import SummarizerService
 from src.services.lock import acquire_thread_lock, release_thread_lock
 from src.services.redis_client import get_redis_client
 from src.core.config import settings
@@ -109,7 +108,7 @@ class OrchestratorService:
             project_repo=project_repo,
             memory_repo=memory_repo
         )
-        self.summarizer = SummarizerService()
+        
         logger.debug("OrchestratorService initialized")
 
     async def _emit_event(
@@ -514,18 +513,3 @@ class OrchestratorService:
         logger.info("Manager reply sent successfully", extra={"thread_id": thread_id})
         return True
 
-    #async def _summarize_history(self, thread_id: str) -> None:
-        """
-        Фоновая задача: генерирует краткое содержание диалога и сохраняет его в поле context_summary треда.
-        """
-        #try:
-            #logger.info(f"Starting summarization for thread {thread_id}")
-           # messages = await self.threads.get_messages_for_langgraph(thread_id)
-            #if not messages:
-                #logger.warning(f"No messages found for thread {thread_id}, skipping summarization")
-               # return
-            #summary = await self.summarizer.summarize(messages)
-            #await self.threads.update_summary(thread_id, summary)
-            #logger.info(f"Summarization completed for thread {thread_id}")
-        #except Exception as e:
-            #logger.exception(f"Summarization failed for thread {thread_id}: {e}")

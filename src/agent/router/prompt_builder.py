@@ -253,7 +253,7 @@ def build_response_prompt(
         conversation_summary: Optional summary of previous conversation.
         history: Optional list of recent messages.
         user_memory: Optional user memory.
-        knowledge_chunks: Optional KB search results.
+        knowledge_chunks: Optional list of knowledge base chunks.
 
     Returns:
         Formatted prompt string.
@@ -264,17 +264,18 @@ def build_response_prompt(
     if _interpretation_block is None:
         _interpretation_block = _load_prompt_template("interpretation_block.txt")
 
-    # Format knowledge block
-    kb_str = "нет"
-    if knowledge_chunks:
-        kb_str, _, _ = format_kb_results(knowledge_chunks, limit=3)
-
     # Format history
     hist_str = format_history(history, limit=5) if history else "[]"
     # Format memory
     mem_str = _format_memory(user_memory) if user_memory else ""
     # Format features
     feat_str = _format_features(features)
+
+    # Format knowledge chunks if provided
+    if knowledge_chunks:
+        knowledge_block, _, _ = format_kb_results(knowledge_chunks, limit=DEFAULT_KB_LIMIT)
+    else:
+        knowledge_block = "Нет данных из базы знаний."
 
     return _response_prompt_template.format(
         decision=decision,
@@ -283,6 +284,6 @@ def build_response_prompt(
         conversation_summary=conversation_summary or "нет",
         history=hist_str,
         user_memory=mem_str or "нет",
-        knowledge_block=kb_str,
+        knowledge_block=knowledge_block,
         interpretation_block=_interpretation_block
     )

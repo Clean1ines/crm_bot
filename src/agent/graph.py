@@ -71,7 +71,8 @@ def create_agent(
         ticket_create_tool = None
 
     escalate_node = create_escalate_node(thread_repo, queue_repo, ticket_create_tool)
-    responder_node = create_responder_node(tool_registry)
+    # Pass thread_repo to responder node so it can save assistant messages
+    responder_node = create_responder_node(tool_registry, thread_repo=thread_repo)
     persist_node = create_persist_node(thread_repo, event_repo, memory_repo)
 
     # Build graph
@@ -107,14 +108,11 @@ def create_agent(
         {
             "RESPOND": "responder",            # fallback if rules returned RESPOND (though rules now only PROCEED or ESCALATE)
             "ESCALATE": "escalate",
-            "PROCEED_TO_LLM": "kb_search",
+            "PROCEED_TO_LLM": "intent_extractor",  # <-- Changed: go directly to intent_extractor
         }
     )
 
-    # After KB search, go to intent extractor
-    workflow.add_edge("kb_search", "intent_extractor")
-
-    # After intent extraction, go to policy engine
+    # Intent extraction then policy engine (no kb_search before)
     workflow.add_edge("intent_extractor", "policy_engine")
 
     # Conditional edges from policy_engine
@@ -127,12 +125,15 @@ def create_agent(
         "policy_engine",
         route_from_policy,
         {
-            "LLM_GENERATE": "response_generator",
+            "LLM_GENERATE": "kb_search",        # <-- Changed: go to kb_search first
             "ESCALATE_TO_HUMAN": "escalate",
             "CALL_TOOL": "tool_executor",
             "ESCALATE": "escalate",  # fallback
         }
     )
+
+    # After kb_search, generate response
+    workflow.add_edge("kb_search", "response_generator")
 
     # Edges from tool_executor
     workflow.add_conditional_edges(

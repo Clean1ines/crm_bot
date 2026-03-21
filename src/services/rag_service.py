@@ -15,126 +15,166 @@ class RAGService:
         self._repo = knowledge_repo
         self._groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
+    # -------------------------
+    # Utils
+    # -------------------------
     def _normalize(self, text: str) -> str:
-        """Простая нормализация: lower, strip, удаление пунктуации, лишних пробелов."""
         text = text.lower().strip()
-        text = re.sub(r'[^\w\s]', '', text)
-        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r"[^\w\s]", "", text)
+        text = re.sub(r"\s+", " ", text)
         return text
 
-    async def _expand_query(self, query: str) -> List[str]:
-        """Генерация 3 вариантов запроса через Groq."""
-        prompt = f"""Переформулируй пользовательский вопрос тремя разными способами, сохраняя смысл.
-Исходный вопрос: "{query}"
-Верни только список в формате JSON, например: ["вариант1", "вариант2", "вариант3"]"""
+    def _safe_json_extract(self, text: str) -> List[int]:
+        """
+        ЖЁСТКИЙ safe parser вместо хрупкого json.loads.
+        """
+        if not text:
+            return []
+
+        match = re.search(r"\[[0-9,\s]+\]", text)
+        if not match:
+            return []
 
         try:
-            response = await self._groq_client.chat.completions.create(
+            data = json.loads(match.group(0))
+            if isinstance(data, list):
+                return [int(x) for x in data if isinstance(x, (int, float))]
+        except Exception:
+            return []
+
+        return []
+
+    # -------------------------
+    # Query expansion
+    # -------------------------
+    async def _expand_query(self, query: str) -> List[str]:
+        prompt = f"""
+Перефразируй запрос 3 разными способами.
+
+Запрос: "{query}"
+
+Верни ТОЛЬКО JSON массив строк:
+["...", "...", "..."]
+"""
+
+        try:
+            resp = await self._groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.7,
-                max_tokens=200,
+                temperature=0.3,
+                max_tokens=120,
             )
-            content = response.choices[0].message.content.strip()
-            start = content.find('[')
-            end = content.rfind(']') + 1
-            if start != -1 and end != -1:
-                json_str = content[start:end]
-                variants = json.loads(json_str)
-                return [self._normalize(v) for v in variants if v and isinstance(v, str)]
-            else:
-                return [query]
-        except Exception as e:
-            logger.warning(f"Query expansion failed: {e}", extra={"query": query})
-            return [query]
 
-    async def _rerank_candidates(self, query: str, candidates: List[Dict[str, Any]], top_k: int = 2) -> List[Dict[str, Any]]:
-        """
-        Использует LLM для выбора top_k наиболее релевантных чанков.
-        """
+            content = resp.choices[0].message.content or ""
+
+            match = re.search(r"\[.*\]", content, re.DOTALL)
+            if not match:
+                return [query]
+
+            variants = json.loads(match.group(0))
+
+            if not isinstance(variants, list):
+                return [query]
+
+            cleaned = []
+            for v in variants:
+                if isinstance(v, str) and v.strip():
+                    cleaned.append(self._normalize(v))
+
+            return cleaned[:3]
+
+        except Exception as e:
+            logger.warning(f"expand failed: {e}")
+
+        return [query]
+
+    # -------------------------
+    # Hybrid rerank (FIXED)
+    # -------------------------
+    async def _rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int):
+
         if not candidates:
             return []
 
-        # Формируем нумерованный список чанков (сокращаем длинные тексты)
-        items = []
+        q = self._normalize(query)
+
+        scored = []
+
         for idx, c in enumerate(candidates):
-            content = c.get("content", "")[:500]  # ограничим длину
-            items.append(f"{idx+1}. {content}")
 
-        items_text = "\n\n".join(items)
+            content = c.get("content", "")
+            norm_content = self._normalize(content)
 
-        prompt = f"""Пользовательский вопрос: "{query}"
+            # -------------------------
+            # 1. embedding/lexical score (from DB)
+            # -------------------------
+            base_score = float(c.get("score", 0))
 
-Ниже приведены фрагменты из базы знаний. Выбери {top_k} наиболее релевантных фрагмента, которые помогут ответить на вопрос.
+            # -------------------------
+            # 2. keyword overlap boost (CRITICAL for RU)
+            # -------------------------
+            overlap = len(set(q.split()) & set(norm_content.split()))
+            keyword_boost = overlap * 0.15
 
-Фрагменты:
-{items_text}
+            # -------------------------
+            # 3. positional bonus (title / start of chunk)
+            # -------------------------
+            position_boost = 0.05 if len(content) > 0 else 0
 
-Верни только номера выбранных фрагментов в формате JSON-списка, например: [1, 3]
-Не добавляй пояснений."""
+            final_score = base_score + keyword_boost + position_boost
 
-        try:
-            response = await self._groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0,
-                max_tokens=100,
-            )
-            content = response.choices[0].message.content.strip()
-            # Ищем JSON-список
-            start = content.find('[')
-            end = content.rfind(']') + 1
-            if start != -1 and end != -1:
-                json_str = content[start:end]
-                indices = json.loads(json_str)
-                if isinstance(indices, list) and all(isinstance(i, int) for i in indices):
-                    # возвращаем чанки в указанном порядке
-                    selected = [candidates[i-1] for i in indices if 1 <= i <= len(candidates)]
-                    return selected[:top_k]
-        except Exception as e:
-            logger.warning(f"Reranking failed: {e}", extra={"query": query})
+            scored.append((final_score, idx, c))
 
-        # Fallback: вернуть первые top_k по скору
-        return candidates[:top_k]
+        scored.sort(reverse=True, key=lambda x: x[0])
 
+        return [c for _, _, c in scored[:top_k]]
+
+    # -------------------------
+    # Main search pipeline
+    # -------------------------
     async def search_with_expansion(
         self,
         project_id: str,
         query: str,
-        limit_per_query: int = 5,
-        final_limit: int = 2
+        limit_per_query: int = 10,
+        final_limit: int = 3,
     ) -> List[Dict[str, Any]]:
-        """
-        Основной метод: нормализация → генерация вариантов → поиск кандидатов → LLM-ранжирование → топ-k.
-        """
+
         normalized = self._normalize(query)
         variants = await self._expand_query(normalized)
-        if normalized not in variants:
-            variants.insert(0, normalized)
-        variants = list(dict.fromkeys(variants))
 
-        logger.debug("Query variants", extra={"variants": variants})
+        variants = list(dict.fromkeys([normalized] + variants))
 
-        # Собираем кандидатов
         candidates_by_id = {}
-        for variant in variants:
-            chunk_list = await self._repo.search(
-                project_id=project_id,
-                query=variant,
-                limit=limit_per_query,
-                hybrid_fallback=True
-            )
-            for chunk in chunk_list:
-                cid = chunk["id"]
-                if cid not in candidates_by_id or chunk["score"] > candidates_by_id[cid]["score"]:
-                    candidates_by_id[cid] = chunk
 
-        # Превращаем в список и сортируем по скору (все кандидаты, не более 20)
-        candidates = sorted(candidates_by_id.values(), key=lambda x: x["score"], reverse=True)[:20]
+        for v in variants:
+
+            results = await self._repo.search(
+                project_id=project_id,
+                query=v,
+                limit=limit_per_query,
+                hybrid_fallback=True,
+            )
+
+            for r in results:
+                cid = r["id"]
+
+                if cid not in candidates_by_id:
+                    candidates_by_id[cid] = r
+                else:
+                    # keep BEST score
+                    candidates_by_id[cid]["score"] = max(
+                        float(candidates_by_id[cid].get("score", 0)),
+                        float(r.get("score", 0)),
+                    )
+
+        candidates = sorted(
+            candidates_by_id.values(),
+            key=lambda x: float(x.get("score", 0)),
+            reverse=True
+        )[:60]
 
         if not candidates:
             return []
 
-        # Ранжируем через LLM
-        reranked = await self._rerank_candidates(normalized, candidates, top_k=final_limit)
-        return reranked
+        return await self._rerank(query, candidates, final_limit)

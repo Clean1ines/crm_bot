@@ -4,7 +4,8 @@ Knowledge base search node for LangGraph pipeline.
 Performs semantic search using the search_knowledge tool and stores results in state.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, List
+import hashlib
 
 from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
@@ -13,59 +14,148 @@ from src.tools.registry import ToolRegistry
 logger = get_logger(__name__)
 
 
+def _hash_query(query: str) -> str:
+    return hashlib.md5(query.encode("utf-8")).hexdigest()
+
+
 def create_kb_search_node(tool_registry: ToolRegistry):
-    """
-    Factory function that creates a kb_search node with injected ToolRegistry.
 
-    Args:
-        tool_registry: ToolRegistry instance for executing search_knowledge.
-
-    Returns:
-        An async function that takes an AgentState dict and returns a dict
-        with updated knowledge_chunks.
-    """
     async def _kb_search_node_impl(state: AgentState) -> Dict[str, Any]:
-        """
-        Execute knowledge base search and store results in state.
 
-        Expected state fields:
-          - project_id: str
-          - user_input: str
-          - (optional) history, summary etc. – not used directly.
-
-        Returns a dict with updates to the state:
-          - knowledge_chunks: list of search results with 'answer' and 'score'.
-        """
         project_id = state.get("project_id")
         query = state.get("user_input", "")
 
         if not project_id or not query:
-            logger.warning("kb_search_node called without project_id or query")
+            logger.warning(
+                "KB SEARCH SKIPPED",
+                extra={
+                    "project_id": project_id,
+                    "query": query
+                }
+            )
             return {"knowledge_chunks": []}
 
-        logger.info("KB search started", extra={"project_id": project_id, "query": query[:100]})
+        query_hash = _hash_query(query)
+
+        # =========================
+        # TRACE INPUT
+        # =========================
+        logger.info(
+            "KB SEARCH START",
+            extra={
+                "project_id": project_id,
+                "query": query,
+                "query_hash": query_hash,
+                "query_len": len(query),
+            }
+        )
 
         try:
-            # project_id передаётся через context, не в args
+
+            # =========================
+            # RETRIEVAL CALL (SINGLE SOURCE OF TRUTH)
+            # =========================
             result = await tool_registry.execute(
                 "search_knowledge",
                 {
                     "query": query,
-                    "limit": 10  # increased from 5 to improve recall
+                    "limit": 10
                 },
                 context={"project_id": project_id}
             )
-            # result is expected to be {"results": [...]}
+
             chunks = result.get("results", [])
-            logger.info("KB search returned %d chunks", len(chunks), extra={"project_id": project_id})
-            if chunks:
-                for i, chunk in enumerate(chunks):
-                    logger.debug("Result %d: score=%.3f, answer=%s", i+1, chunk.get("score", 0), chunk.get("answer", "")[:50])
-            else:
-                logger.warning("KB search returned no results", extra={"project_id": project_id, "query": query[:100]})
-            return {"knowledge_chunks": chunks}
+
+            # =========================
+            # NORMALIZATION
+            # =========================
+            chunk_ids = []
+            chunk_scores = []
+            normalized_chunks = []
+
+            for i, c in enumerate(chunks):
+                chunk_id = c.get("id", f"no-id-{i}")
+                score = c.get("score")
+
+                chunk_ids.append(chunk_id)
+                chunk_scores.append(score)
+
+                normalized_chunks.append({
+                    "id": chunk_id,
+                    "score": score,
+                    "content": (c.get("content") or "")[:150]   # <-- fix: use 'content' instead of 'answer'
+                })
+
+            # =========================
+            # TRACE OUTPUT
+            # =========================
+            logger.info(
+                "KB SEARCH RESULT",
+                extra={
+                    "project_id": project_id,
+                    "query_hash": query_hash,
+                    "chunks_count": len(chunks),
+                    "chunk_ids": chunk_ids,
+                    "scores": chunk_scores,
+                }
+            )
+
+            # =========================
+            # STABILITY DEBUG (CRITICAL)
+            # =========================
+            order_signature = "|".join(chunk_ids)
+
+            logger.info(
+                "KB ORDER SIGNATURE",
+                extra={
+                    "query_hash": query_hash,
+                    "order": order_signature
+                }
+            )
+
+            # =========================
+            # ANOMALY DETECTION
+            # =========================
+
+            if len(chunks) == 0:
+                logger.warning(
+                    "KB EMPTY RESULT",
+                    extra={
+                        "project_id": project_id,
+                        "query": query,
+                        "query_hash": query_hash
+                    }
+                )
+
+            if len(set(chunk_ids)) != len(chunk_ids):
+                logger.error(
+                    "KB DUPLICATE IDS DETECTED",
+                    extra={
+                        "chunk_ids": chunk_ids
+                    }
+                )
+
+            if len(chunks) > 0 and any(s is None for s in chunk_scores):
+                logger.warning(
+                    "KB MISSING SCORES DETECTED",
+                    extra={
+                        "chunk_scores": chunk_scores
+                    }
+                )
+
+            return {
+                "knowledge_chunks": normalized_chunks
+            }
+
         except Exception as e:
-            logger.exception("KB search failed", extra={"project_id": project_id, "error": str(e)})
+            logger.exception(
+                "KB SEARCH FAILED",
+                extra={
+                    "project_id": project_id,
+                    "query": query,
+                    "error": str(e)
+                }
+            )
             return {"knowledge_chunks": []}
 
     def _get_kb_search_input_size(state: AgentState) -> int:
