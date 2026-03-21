@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from src.core.config import settings
 from src.core.logging import get_logger
 from src.services.orchestrator import OrchestratorService
+from src.services.rag_service import RAGService
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
@@ -82,9 +83,12 @@ def _register_builtin_tools(tool_registry, pool: asyncpg.Pool) -> None:
     queue_repo = QueueRepository(pool)
     project_repo = ProjectRepository(pool)
     
+    # Create RAGService for enhanced search
+    rag_service = RAGService(knowledge_repo)
+    
     # Register built-in tools
-    tool_registry.register(SearchKnowledgeTool(knowledge_repo))
-    logger.info("Registered SearchKnowledgeTool")
+    tool_registry.register(SearchKnowledgeTool(rag_service))
+    logger.info("Registered SearchKnowledgeTool (with RAGService)")
     
     tool_registry.register(EscalateTool(
         thread_repository=thread_repo,

@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 
 from src.core.logging import get_logger
 from src.tools.registry import Tool, ToolExecutionError
+from src.services.rag_service import RAGService
 
 logger = get_logger(__name__)
 
@@ -23,8 +24,11 @@ class SearchKnowledgeTool(Tool):
     """
     Tool for searching project knowledge base using RAG.
     
-    This tool wraps the knowledge_repository.search() function
-    and provides semantic search over embedded documents.
+    This tool wraps the RAGService which provides:
+    - Query normalization
+    - Query expansion via LLM (Groq)
+    - Multi-query vector + FTS search
+    - Result merging and ranking
     
     Usage in canvas:
     {
@@ -74,14 +78,14 @@ class SearchKnowledgeTool(Tool):
         "additionalProperties": False
     }
     
-    def __init__(self, knowledge_repository) -> None:
+    def __init__(self, rag_service: RAGService) -> None:
         """
-        Initialize the SearchKnowledgeTool with a knowledge repository.
+        Initialize the SearchKnowledgeTool with a RAG service.
         
         Args:
-            knowledge_repository: Instance of KnowledgeRepository for search.
+            rag_service: RAGService instance for enhanced search.
         """
-        self._repo = knowledge_repository
+        self._rag_service = rag_service
         logger.debug("SearchKnowledgeTool initialized")
     
     async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -121,12 +125,11 @@ class SearchKnowledgeTool(Tool):
         )
         
         try:
-            # Call the underlying repository search (without category)
-            results = await self._repo.search(
+            # Use RAGService with expansion
+            results = await self._rag_service.search_with_expansion(
                 project_id=str(project_id),
                 query=query,
-                limit=limit,
-                # category removed because repository doesn't support it
+                final_limit=limit
             )
             
             # Format results for canvas/agent consumption
