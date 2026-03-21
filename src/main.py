@@ -10,6 +10,10 @@ from src.core.logging import configure_logging, CorrelationIdMiddleware, get_log
 from src.core.lifespan import lifespan
 from src.api.webhooks import router as webhooks_router
 from src.api.knowledge import router as knowledge_router
+from src.api.projects import router as projects_router
+from src.api.templates import router as templates_router
+from src.api.threads import router as threads_router
+from src.api.chat import router as chat_router
 
 # Configure structured logging
 configure_logging()
@@ -24,6 +28,11 @@ app.add_middleware(CorrelationIdMiddleware)
 # Include routers
 app.include_router(webhooks_router)
 app.include_router(knowledge_router)
+
+app.include_router(projects_router)
+app.include_router(templates_router)
+app.include_router(threads_router)
+app.include_router(chat_router)
 
 if __name__ == "__main__":
     import uvicorn

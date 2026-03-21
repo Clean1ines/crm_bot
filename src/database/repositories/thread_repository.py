@@ -276,3 +276,17 @@ class ThreadRepository:
             }
             logger.debug(f"Analytics retrieved for thread {thread_id}")
             return analytics
+
+# В ThreadRepository:
+
+async def find_by_status(self, status: str) -> List[Dict[str, Any]]:
+    """Возвращает все треды с указанным статусом."""
+    async with self.pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT t.*, c.name as client_name
+            FROM threads t
+            JOIN clients c ON t.client_id = c.id
+            WHERE t.status = $1
+            ORDER BY t.updated_at DESC
+        """, status)
+        return [dict(row) for row in rows]

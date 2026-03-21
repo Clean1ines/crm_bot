@@ -7,7 +7,7 @@ import asyncpg
 from typing import List, Dict, Any, Optional
 
 from src.core.logging import get_logger
-from src.services.embedding_service import embed_text
+from src.services.embedding_service import embed_text, embed_batch
 
 logger = get_logger(__name__)
 
@@ -20,7 +20,7 @@ class KnowledgeRepository:
         self,
         project_id: str,
         query: str,
-        limit: int = 5,
+        limit: int = 10,
         hybrid_fallback: bool = True,
     ) -> List[Dict[str, Any]]:
         """
@@ -37,6 +37,8 @@ class KnowledgeRepository:
         """
         # Generate embedding for the query
         query_embedding = await embed_text(query)
+        # Convert list to pgvector string format: '[0.1,0.2,...]'
+        query_embedding_str = '[' + ','.join(str(x) for x in query_embedding) + ']'
 
         # Vector search
         async with self.pool.acquire() as conn:
@@ -48,7 +50,7 @@ class KnowledgeRepository:
                 ORDER BY embedding <=> $1
                 LIMIT $3
                 """,
-                query_embedding,
+                query_embedding_str,
                 uuid.UUID(project_id),
                 limit,
             )
@@ -119,13 +121,15 @@ class KnowledgeRepository:
         if not chunks:
             return 0
 
-        from src.services.embedding_service import embed_batch
         texts = [c["content"] for c in chunks]
+        # Generate embeddings
         embeddings = await embed_batch(texts)
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 for i, chunk in enumerate(chunks):
+                    # Convert embedding list to pgvector string format
+                    embedding_str = '[' + ','.join(str(x) for x in embeddings[i]) + ']'
                     await conn.execute(
                         """
                         INSERT INTO knowledge_base (project_id, content, embedding)
@@ -133,7 +137,7 @@ class KnowledgeRepository:
                         """,
                         uuid.UUID(project_id),
                         chunk["content"],
-                        embeddings[i],
+                        embedding_str,
                     )
         logger.info(f"Added {len(chunks)} knowledge chunks for project {project_id}")
         return len(chunks)
