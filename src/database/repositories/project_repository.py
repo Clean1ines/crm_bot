@@ -495,38 +495,52 @@ class ProjectRepository:
 
 # Внутри класса ProjectRepository:
 
-async def create_project(self, owner_id: int, name: str, description: Optional[str] = None) -> uuid.UUID:
-    """Создаёт новый проект."""
-    project_id = uuid.uuid4()
-    async with self.pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO projects (id, owner_id, name, description, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, NOW(), NOW())
-        """, project_id, owner_id, name, description)
-    logger.info("Project created", extra={"project_id": str(project_id)})
-    return project_id
+    async def create_project(self, owner_id: int, name: str) -> uuid.UUID:
+        """Создаёт новый проект."""
+        project_id = uuid.uuid4()
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO projects (id, owner_id, name, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, NOW(), NOW())
+            """, project_id, owner_id, name)
+        logger.info("Project created", extra={"project_id": str(project_id)})
+        return project_id
 
-async def get_all_projects(self) -> List[Dict[str, Any]]:
-    """Возвращает список всех проектов."""
-    async with self.pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM projects ORDER BY created_at DESC")
-        return [dict(row) for row in rows]
+    async def get_all_projects(self) -> List[Dict[str, Any]]:
+        """Возвращает список всех проектов."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, owner_id, name, is_pro_mode, template_slug, created_at, updated_at FROM projects ORDER BY created_at DESC")
+            return [dict(row) for row in rows]
 
-async def get_project_by_id(self, project_id: Union[str, uuid.UUID]) -> Optional[Dict[str, Any]]:
-    """Возвращает один проект по ID."""
-    async with self.pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM projects WHERE id = $1", _ensure_uuid(project_id))
-        return dict(row) if row else None
+    async def get_project_by_id(self, project_id: Union[str, uuid.UUID]) -> Optional[Dict[str, Any]]:
+        """Возвращает один проект по ID."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT id, owner_id, name, is_pro_mode, template_slug, created_at, updated_at FROM projects WHERE id = $1", _ensure_uuid(project_id))
+            return dict(row) if row else None
 
-async def update_project(self, project_id: Union[str, uuid.UUID], name: Optional[str], description: Optional[str]) -> None:
-    """Обновляет имя и/или описание проекта."""
-    async with self.pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE projects SET name = COALESCE($1, name), description = COALESCE($2, description), updated_at = NOW()
-            WHERE id = $3
-        """, name, description, _ensure_uuid(project_id))
+    async def update_project(self, project_id: Union[str, uuid.UUID], name: Optional[str]) -> None:
+        """Обновляет имя и/или описание проекта."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE projects SET name = COALESCE($1, name), updated_at = NOW()
+                WHERE id = $2
+            """, name, _ensure_uuid(project_id))
 
-async def delete_project(self, project_id: Union[str, uuid.UUID]) -> None:
-    """Удаляет проект (каскадно удалит связанные данные)."""
-    async with self.pool.acquire() as conn:
-        await conn.execute("DELETE FROM projects WHERE id = $1", _ensure_uuid(project_id))
+    async def delete_project(self, project_id: Union[str, uuid.UUID]) -> None:
+        """Удаляет проект (каскадно удалит связанные данные)."""
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM projects WHERE id = $1", _ensure_uuid(project_id))
+
+    async def get_projects_by_owner(self, owner_id: int) -> list[dict]:
+        """
+        Возвращает список проектов владельца (owner_id = Telegram chat_id).
+        """
+        logger.info("Fetching projects by owner", extra={"owner_id": owner_id})
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, name, is_pro_mode, template_slug, created_at, updated_at
+                FROM projects
+                WHERE owner_id = $1
+                ORDER BY created_at DESC
+            """, str(owner_id))
+            return [dict(row) for row in rows]

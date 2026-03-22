@@ -35,7 +35,7 @@ export const ProjectsSidebar: React.FC = () => {
     isCreating,
     isUpdating,
     isDeleting,
-  } = useProjects();
+  } = useProjects() as any;
 
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -51,13 +51,13 @@ export const ProjectsSidebar: React.FC = () => {
 
   const handleOpenEditModal = (project: Project) => {
     setEditName(project.name);
-    setEditDescription(project.description);
+    setEditDescription((project as any).description || '');
     openEditModal(project);
   };
 
   const handleUpdate = async (name: string, description: string) => {
     if (editingProject) {
-      await updateProject({ id: editingProject.id, name, description });
+      await updateProject({ id: editingProject.id, name, description } as any);
     }
   };
 
@@ -120,13 +120,14 @@ export const ProjectsSidebar: React.FC = () => {
   return (
     <>
       <Sidebar
-        isOpen={isSidebarOpen}
-        onClose={handleCloseSidebar}
-        header={headerContent}
-        footer={footerContent}
-        position="left"
-        width={isMobile ? 'w-64' : 'w-64'}
-        className={isMobile ? 'fixed' : ''}
+      isOpen={isSidebarOpen}
+      onClose={handleCloseSidebar}
+      header={headerContent}
+      footer={footerContent}
+      position="left"
+      width="w-64"
+      // Добавляем fixed только для мобилок через className
+      className={isMobile ? 'fixed top-0 left-0 h-full' : 'relative'}
       >
         <div className="space-y-1">
           {projects.map((project: Project) => (
@@ -167,7 +168,7 @@ export const ProjectsSidebar: React.FC = () => {
         isOpen={isCreateOpen}
         onClose={closeModals}
         onCreate={async (name, description) => {
-          await createProject({ name, description });
+          await createProject({ name, description } as any);
         }}
         isPending={isCreating}
       />
@@ -185,6 +186,7 @@ export const ProjectsSidebar: React.FC = () => {
         isOpen={isDeleteOpen}
         onClose={closeModals}
         onConfirm={handleDelete}
+        projectName={deletingProject?.name || ''}
         itemName={deletingProject?.name || ''}
         itemType="project"
         isPending={isDeleting}

@@ -6,6 +6,7 @@ Dispatches incoming Telegram updates to appropriate handlers based on update typ
 from typing import Dict, Any, Optional, Tuple
 import asyncpg
 import httpx
+import json
 
 from src.core.logging import get_logger
 from src.admin.handlers import (
@@ -61,17 +62,21 @@ async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Di
         response_text = resp_text
         if keyboard:
             keyboard_dict = keyboard.to_dict()
+            logger.debug(f"Callback response keyboard: {json.dumps(keyboard_dict)}")
         
         # Answer callback query first to remove loading state
         async with httpx.AsyncClient() as client:
-            await client.post(
-                f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
-                json={
-                    "callback_query_id": callback_id, 
-                    "text": response_text[:200] if response_text else "", 
-                    "show_alert": False
-                }
-            )
+            try:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_token}/answerCallbackQuery",
+                    json={
+                        "callback_query_id": callback_id, 
+                        "text": response_text[:200] if response_text else "", 
+                        "show_alert": False
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Failed to answer callback query: {e}")
 
     # 2. Handle Message
     elif "message" in update:
@@ -103,6 +108,7 @@ async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Di
                     response_text, keyboard = response
                     if keyboard:
                         keyboard_dict = keyboard.to_dict()
+                        logger.debug(f"Command response keyboard: {json.dumps(keyboard_dict)}")
             else:
                 # Step in wizard
                 response = await handle_admin_step(str(chat_id), text, pool)
@@ -116,6 +122,7 @@ async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Di
                     response_text = resp_text
                     if keyboard:
                         keyboard_dict = keyboard.to_dict()
+                        logger.debug(f"Step response keyboard: {json.dumps(keyboard_dict)}")
         else:
             # Ignore other non-text, non-document messages
             return {"ok": True}
@@ -129,11 +136,20 @@ async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> Di
         }
         if keyboard_dict:
             payload["reply_markup"] = keyboard_dict
-            
+        
+        logger.debug(f"Sending admin message to {chat_id}: payload {json.dumps(payload, ensure_ascii=False)[:500]}")
+        
         async with httpx.AsyncClient() as client:
             try:
-                await client.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json=payload)
+                resp = await client.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json=payload)
+                if resp.status_code != 200:
+                    logger.error(
+                        f"Telegram sendMessage failed with status {resp.status_code}",
+                        extra={"response_text": resp.text, "payload": payload}
+                    )
+                else:
+                    logger.debug("Message sent successfully")
             except Exception as e:
-                logger.error("Failed to send admin message", extra={"error": str(e)})
+                logger.error(f"Exception while sending message: {e}", exc_info=True)
 
     return {"ok": True}

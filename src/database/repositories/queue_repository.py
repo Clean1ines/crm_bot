@@ -63,7 +63,7 @@ class QueueRepository:
         async with self.pool.acquire() as conn:
             payload_json = json.dumps(payload) if payload else None
             row = await conn.fetchrow("""
-                INSERT INTO execution_queue (
+                INSERT INTO public.execution_queue (
                     id, task_type, payload, status, 
                     attempts, max_attempts, created_at, updated_at
                 )
@@ -88,10 +88,18 @@ class QueueRepository:
         Returns:
             Dict с данными задачи или None если задач нет.
         """
-        #logger.debug("Attempting to claim job", extra={"worker_id": worker_id})
+        # Log connection info to debug schema issues
+        async with self.pool.acquire() as conn:
+            db_name = await conn.fetchval("SELECT current_database()")
+            schema_name = await conn.fetchval("SELECT current_schema()")
+            logger.info(
+                "Worker connection info",
+                extra={"database": db_name, "schema": schema_name, "worker_id": worker_id}
+            )
+
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                UPDATE execution_queue
+                UPDATE public.execution_queue
                 SET 
                     status = 'processing',
                     updated_at = NOW(),
@@ -99,7 +107,7 @@ class QueueRepository:
                     worker_id = $1
                 WHERE id = (
                     SELECT id
-                    FROM execution_queue
+                    FROM public.execution_queue
                     WHERE status = 'pending'
                     AND (attempts < max_attempts OR max_attempts IS NULL)
                     ORDER BY created_at ASC
@@ -147,7 +155,7 @@ class QueueRepository:
         )
         async with self.pool.acquire() as conn:
             await conn.execute("""
-                UPDATE execution_queue
+                UPDATE public.execution_queue
                 SET 
                     status = $1, 
                     updated_at = NOW(),
@@ -177,7 +185,7 @@ class QueueRepository:
         )
         async with self.pool.acquire() as conn:
             result = await conn.execute("""
-                UPDATE execution_queue
+                UPDATE public.execution_queue
                 SET 
                     status = 'pending',
                     updated_at = NOW(),
@@ -215,7 +223,7 @@ class QueueRepository:
         async with self.pool.acquire() as conn:
             if increment_attempt:
                 result = await conn.execute("""
-                    UPDATE execution_queue
+                    UPDATE public.execution_queue
                     SET 
                         attempts = attempts + 1,
                         error = $1,
@@ -230,7 +238,7 @@ class QueueRepository:
                 """, error, job_id)
             else:
                 result = await conn.execute("""
-                    UPDATE execution_queue
+                    UPDATE public.execution_queue
                     SET 
                         error = $1,
                         updated_at = NOW(),
@@ -260,7 +268,7 @@ class QueueRepository:
         logger.debug("Incrementing attempts", extra={"job_id": job_id})
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                UPDATE execution_queue
+                UPDATE public.execution_queue
                 SET attempts = attempts + 1, updated_at = NOW()
                 WHERE id = $1
                 RETURNING attempts, max_attempts
@@ -297,7 +305,7 @@ class QueueRepository:
         #)
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT id FROM execution_queue
+                SELECT id FROM public.execution_queue
                 WHERE status = 'processing'
                 AND locked_at < NOW() - INTERVAL '%s minutes'
             """ % timeout_minutes)

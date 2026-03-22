@@ -133,13 +133,12 @@
           "auth"
         ],
         "summary": "Telegram Auth",
-        "description": "Authenticate via Telegram Login Widget.\nAccepts initData, verifies signature, and returns JWT.",
         "operationId": "telegram_auth_api_auth_telegram_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TelegramAuthRequest"
+                "$ref": "#/components/schemas/TelegramAuthData"
               }
             }
           },
@@ -150,9 +149,7 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
+                "schema": {}
               }
             }
           },
@@ -175,7 +172,6 @@
           "bot"
         ],
         "summary": "Get Bot Username",
-        "description": "\u0412\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u0435\u0442 username \u0431\u043e\u0442\u0430, \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u044f ADMIN_BOT_TOKEN.",
         "operationId": "get_bot_username_api_bot_username_get",
         "responses": {
           "200": {
@@ -792,6 +788,73 @@
         }
       }
     },
+    "/api/projects/{project_id}/connect-bot": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Connect Bot",
+        "description": "\u0423\u043d\u0438\u0432\u0435\u0440\u0441\u0430\u043b\u044c\u043d\u044b\u0439 \u044d\u043d\u0434\u043f\u043e\u0438\u043d\u0442 \u0434\u043b\u044f \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f \u0431\u043e\u0442\u043e\u0432 (\u043a\u0430\u043a \u0432 \u0422\u0413 \u0431\u043e\u0442\u0435).",
+        "operationId": "connect_bot_api_projects__project_id__connect_bot_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotConnectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/templates": {
       "get": {
         "tags": [
@@ -1131,6 +1194,24 @@
         ],
         "title": "Body_upload_knowledge_api_projects__project_id__knowledge_post"
       },
+      "BotConnectRequest": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "type"
+        ],
+        "title": "BotConnectRequest"
+      },
       "BotTokenRequest": {
         "properties": {
           "token": {
@@ -1199,17 +1280,6 @@
           "name": {
             "type": "string",
             "title": "Name"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
           }
         },
         "type": "object",
@@ -1221,23 +1291,20 @@
       "ProjectResponse": {
         "properties": {
           "id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "string"
+              }
+            ],
             "title": "Id"
           },
           "name": {
             "type": "string",
             "title": "Name"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
           },
           "is_pro_mode": {
             "type": "boolean",
@@ -1266,7 +1333,6 @@
         "required": [
           "id",
           "name",
-          "description",
           "is_pro_mode",
           "template_slug",
           "managers"
@@ -1285,17 +1351,6 @@
               }
             ],
             "title": "Name"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
           }
         },
         "type": "object",
@@ -1314,18 +1369,56 @@
         ],
         "title": "ReplyRequest"
       },
-      "TelegramAuthRequest": {
+      "TelegramAuthData": {
         "properties": {
-          "init_data": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "first_name": {
             "type": "string",
-            "title": "Init Data"
+            "title": "First Name"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "photo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Photo Url"
+          },
+          "auth_date": {
+            "type": "integer",
+            "title": "Auth Date"
+          },
+          "hash": {
+            "type": "string",
+            "title": "Hash"
           }
         },
+        "additionalProperties": true,
         "type": "object",
         "required": [
-          "init_data"
+          "id",
+          "first_name",
+          "auth_date",
+          "hash"
         ],
-        "title": "TelegramAuthRequest"
+        "title": "TelegramAuthData"
       },
       "TemplateResponse": {
         "properties": {
@@ -1433,24 +1526,6 @@
           "client_name"
         ],
         "title": "ThreadResponse"
-      },
-      "TokenResponse": {
-        "properties": {
-          "access_token": {
-            "type": "string",
-            "title": "Access Token"
-          },
-          "token_type": {
-            "type": "string",
-            "title": "Token Type",
-            "default": "bearer"
-          }
-        },
-        "type": "object",
-        "required": [
-          "access_token"
-        ],
-        "title": "TokenResponse"
       },
       "ValidationError": {
         "properties": {

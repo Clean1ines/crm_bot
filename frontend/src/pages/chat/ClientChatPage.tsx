@@ -1,41 +1,39 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useSendMessage } from '@features/chat/send-message/useSendMessage';
+import { useParams } from 'react-router-dom';
+import { streamFetch } from '@shared/api/client';
 
-interface ChatCanvasProps {
-  projectId: string;
-  model?: string;
-  onModelChange?: (model: string) => void;
-  availableModels?: { id: string; name: string }[];
-}
-
-export const ChatCanvas: React.FC<ChatCanvasProps> = ({
-  projectId,
-  model,
-  onModelChange,
-  availableModels = [],
-}) => {
+export const ClientChatPage: React.FC = () => {
+  const { projectId } = useParams<{ projectId: string }>();
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [input, setInput] = useState('');
-  const { sendMessage, isStreaming } = useSendMessage(projectId);
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async () => {
+  const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
     const userMessage = input.trim();
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setIsStreaming(true);
 
     let assistantContent = '';
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
 
-    await sendMessage(
-      userMessage,
+    await streamFetch(
+      `/api/chat/projects/${projectId}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage }),
+      },
       (chunk) => {
         assistantContent += chunk;
         setMessages(prev => {
@@ -48,14 +46,25 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
         });
       },
       () => {
-        // окончательный текст уже установлен
+        setIsStreaming(false);
       },
-      model
+      (err) => {
+        console.error('Stream error:', err);
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastIndex = newMessages.length - 1;
+          if (newMessages[lastIndex]?.role === 'assistant') {
+            newMessages[lastIndex] = { ...newMessages[lastIndex], content: 'Ошибка: не удалось получить ответ' };
+          }
+          return newMessages;
+        });
+        setIsStreaming(false);
+      }
     );
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-screen">
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -66,32 +75,20 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
         ))}
         <div ref={messagesEndRef} />
       </div>
-      <div className="border-t p-4 flex gap-2">
+      <div className="border-t p-4 flex">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          className="flex-1 border rounded px-3 py-2"
+          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+          className="flex-1 border rounded-l px-3 py-2"
           placeholder="Введите сообщение..."
           disabled={isStreaming}
         />
-        {availableModels.length > 0 && onModelChange && (
-          <select
-            value={model || ''}
-            onChange={(e) => onModelChange(e.target.value)}
-            className="border rounded px-2 py-2"
-          >
-            <option value="">Model</option>
-            {availableModels.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-        )}
         <button
-          onClick={handleSend}
+          onClick={sendMessage}
           disabled={isStreaming}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          className="bg-blue-600 text-white px-4 py-2 rounded-r"
         >
           Отправить
         </button>
