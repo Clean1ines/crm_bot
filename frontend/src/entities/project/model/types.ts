@@ -1,15 +1,5 @@
-export interface Project {
-  id: string;
-  name: string;
-  description: string;
-}
+import { components } from '@/shared/api/generated/schema'; // путь до твоего сгенерированного файла
 
-export interface ProjectState {
-  projects: Project[];
-  currentProjectId: string | null;
-  setProjects: (projects: Project[]) => void;
-  setCurrentProjectId: (id: string | null) => void;
-  addProject: (project: Project) => void;
-  updateProject: (id: string, updates: Partial<Project>) => void;
-  removeProject: (id: string) => void;
-}
+export type Project = components['schemas']['ProjectResponse'];
+export type ProjectCreate = components['schemas']['ProjectCreate'];
+export type ProjectUpdate = components['schemas']['ProjectUpdate'];

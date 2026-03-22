@@ -1,41 +1,31 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { ProjectState } from './types';
+import { Project } from './types';
 
-export const useProjectStore = create<ProjectState>()(
-  persist(
-    (set) => ({
-      projects: [],
-      currentProjectId: null,
+export interface ProjectState {
+  projects: Project[];
+  currentProjectId: string | null;
+  setProjects: (projects: Project[]) => void;
+  setCurrentProjectId: (id: string | null) => void;
+  addProject: (project: Project) => void;
+  updateProject: (id: string, updates: Partial<Project>) => void;
+  removeProject: (id: string) => void;
+}
 
-      setProjects: (projects) => set({ projects }),
-      
-      setCurrentProjectId: (id) => {
-        set({ currentProjectId: id });
-        if (id) localStorage.setItem('selectedProjectId', id);
-        else localStorage.removeItem('selectedProjectId');
-      },
-
-      addProject: (project) =>
-        set((state) => ({ projects: [...state.projects, project] })),
-
-      updateProject: (id, updates) =>
-        set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === id ? { ...p, ...updates } : p
-          ),
-        })),
-
-      removeProject: (id) =>
-        set((state) => ({
-          projects: state.projects.filter((p) => p.id !== id),
-        })),
-    }),
-    {
-      name: 'project-entity-storage',
-      partialize: (state) => ({
-        currentProjectId: state.currentProjectId,
-      }),
-    }
-  )
-);
+export const useProjectStore = create<ProjectState>((set) => ({
+  projects: [],
+  currentProjectId: null,
+  setProjects: (projects) => set({ projects }),
+  setCurrentProjectId: (id) => set({ currentProjectId: id }),
+  addProject: (project) =>
+    set((state) => ({ projects: [...state.projects, project] })),
+  updateProject: (id, updates) =>
+    set((state) => ({
+      projects: state.projects.map((p) =>
+        p.id === id ? { ...p, ...updates } : p
+      ),
+    })),
+  removeProject: (id) =>
+    set((state) => ({
+      projects: state.projects.filter((p) => p.id !== id),
+    })),
+}));

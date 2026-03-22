@@ -1,9 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from pydantic import BaseModel
 from uuid import UUID
 from typing import List, Optional
 
-from src.api.dependencies import get_project_repo, verify_admin_token
+from src.api.dependencies import (
+    get_project_repo,
+    get_current_user_id,
+    verify_admin_token  # kept for potential admin-only endpoints
+)
 from src.database.repositories.project_repository import ProjectRepository
 from src.core.logging import get_logger
 
@@ -13,114 +17,204 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 class ProjectCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-
+    
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
-    description: Optional[str] = None
-
+    
 
 class ProjectResponse(BaseModel):
-    id: str
+    id: UUID | str 
     name: str
-    description: Optional[str]
     is_pro_mode: bool
     template_slug: Optional[str]
-    managers: List[int]  # список chat_id менеджеров
-    # токены не возвращаем для безопасности
-
-
-@router.get("", response_model=List[ProjectResponse], dependencies=[Depends(verify_admin_token)])
-async def list_projects(repo: ProjectRepository = Depends(get_project_repo)):
-    """Возвращает список всех проектов."""
-    # Метод `get_all_projects` нужно добавить в ProjectRepository, если его нет
-    projects = await repo.get_all_projects()
-    # Для каждого проекта подгружаем менеджеров (если не включены в базовом запросе)
-    for p in projects:
-        p["managers"] = await repo.get_managers(p["id"])
-    return projects
-
-
-@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_admin_token)])
-async def create_project(data: ProjectCreate, repo: ProjectRepository = Depends(get_project_repo)):
-    """Создаёт новый проект."""
-    # В ProjectRepository должен быть метод create_project(owner_id, name, description)
-    # owner_id нужно брать из текущего пользователя (админ). Можно передать фиксированный ID или получить из токена.
-    # Для простоты используем owner_id=1 (админ). В реальном приложении – из аутентификации.
-    project_id = await repo.create_project(owner_id=1, name=data.name, description=data.description)
-    project = await repo.get_project_by_id(project_id)  # метод должен существовать
-    project["managers"] = await repo.get_managers(project_id)
-    return project
-
-
-@router.get("/{project_id}", response_model=ProjectResponse, dependencies=[Depends(verify_admin_token)])
-async def get_project(project_id: str, repo: ProjectRepository = Depends(get_project_repo)):
-    project = await repo.get_project_by_id(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project["managers"] = await repo.get_managers(project_id)
-    return project
-
-
-@router.put("/{project_id}", response_model=ProjectResponse, dependencies=[Depends(verify_admin_token)])
-async def update_project(project_id: str, data: ProjectUpdate, repo: ProjectRepository = Depends(get_project_repo)):
-    if not await repo.project_exists(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    await repo.update_project(project_id, data.name, data.description)
-    project = await repo.get_project_by_id(project_id)
-    project["managers"] = await repo.get_managers(project_id)
-    return project
-
-
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_admin_token)])
-async def delete_project(project_id: str, repo: ProjectRepository = Depends(get_project_repo)):
-    if not await repo.project_exists(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    await repo.delete_project(project_id)
+    managers: List[int]
 
 
 class BotTokenRequest(BaseModel):
     token: str
 
 
-@router.post("/{project_id}/bot-token", status_code=200, dependencies=[Depends(verify_admin_token)])
-async def set_bot_token(project_id: str, data: BotTokenRequest, repo: ProjectRepository = Depends(get_project_repo)):
+class ManagerAddRequest(BaseModel):
+    chat_id: int
+
+class BotConnectRequest(BaseModel):
+    token: str
+    type: str  # 'client' | 'manager'
+
+@router.get("", response_model=List[ProjectResponse])
+async def list_projects(
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    """Возвращает список проектов текущего пользователя."""
+    projects = await repo.get_projects_by_owner(current_user_id)
+    # enrich with managers
+    for p in projects:
+        p["managers"] = await repo.get_managers(p["id"])
+    return projects
+
+
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+async def create_project(
+    data: ProjectCreate,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    """Создаёт новый проект для текущего пользователя."""
+    project_id = await repo.create_project(owner_id=current_user_id, name=data.name)
+    project = await repo.get_project_by_id(project_id)
+    if not project:
+        raise HTTPException(status_code=500, detail="Project creation failed")
+    project["managers"] = await repo.get_managers(project_id)
+    return project
+
+
+@router.get("/{project_id}", response_model=ProjectResponse)
+async def get_project(
+    project_id: str,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    project = await repo.get_project_by_id(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    # Ensure user owns the project
+    if project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    project["managers"] = await repo.get_managers(project_id)
+    return project
+
+
+@router.put("/{project_id}", response_model=ProjectResponse)
+async def update_project(
+    project_id: str,
+    data: ProjectUpdate,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
     if not await repo.project_exists(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await repo.update_project(project_id, data.name)
+    updated = await repo.get_project_by_id(project_id)
+    updated["managers"] = await repo.get_managers(project_id)
+    return updated
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: str,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    if not await repo.project_exists(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await repo.delete_project(project_id)
+
+
+@router.post("/{project_id}/bot-token")
+async def set_bot_token(
+    project_id: str,
+    data: BotTokenRequest,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    if not await repo.project_exists(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     await repo.set_bot_token(project_id, data.token)
-    # При желании можно сразу настроить вебхук (вызов Telegram API)
     return {"status": "ok"}
 
 
-@router.post("/{project_id}/manager-token", status_code=200, dependencies=[Depends(verify_admin_token)])
-async def set_manager_token(project_id: str, data: BotTokenRequest, repo: ProjectRepository = Depends(get_project_repo)):
+@router.post("/{project_id}/manager-token")
+async def set_manager_token(
+    project_id: str,
+    data: BotTokenRequest,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
     if not await repo.project_exists(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     await repo.set_manager_bot_token(project_id, data.token)
     return {"status": "ok"}
 
 
-@router.get("/{project_id}/managers", response_model=List[int], dependencies=[Depends(verify_admin_token)])
-async def get_managers(project_id: str, repo: ProjectRepository = Depends(get_project_repo)):
+@router.get("/{project_id}/managers", response_model=List[int])
+async def get_managers(
+    project_id: str,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if not project or project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     return await repo.get_managers(project_id)
 
 
-class ManagerAddRequest(BaseModel):
-    chat_id: int
-
-
-@router.post("/{project_id}/managers", status_code=201, dependencies=[Depends(verify_admin_token)])
-async def add_manager(project_id: str, data: ManagerAddRequest, repo: ProjectRepository = Depends(get_project_repo)):
-    if not await repo.project_exists(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    await repo.add_manager(project_id, data.chat_id)
+@router.post("/{project_id}/managers", status_code=201)
+async def add_manager(
+    project_id: str,
+    data: ManagerAddRequest,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if not project or project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await repo.add_manager(project_id, str(data.chat_id))
     return {"status": "added"}
 
 
-@router.delete("/{project_id}/managers/{chat_id}", status_code=204, dependencies=[Depends(verify_admin_token)])
-async def remove_manager(project_id: str, chat_id: int, repo: ProjectRepository = Depends(get_project_repo)):
-    if not await repo.project_exists(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    await repo.remove_manager(project_id, chat_id)
+@router.delete("/{project_id}/managers/{chat_id}", status_code=204)
+async def remove_manager(
+    project_id: str,
+    chat_id: int,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    # Check ownership
+    project = await repo.get_project_by_id(project_id)
+    if not project or project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await repo.remove_manager(project_id, str(chat_id))
     return None
+
+@router.post("/{project_id}/connect-bot")
+async def connect_bot(
+    project_id: str,
+    data: BotConnectRequest,
+    current_user_id: int = Depends(get_current_user_id),
+    repo: ProjectRepository = Depends(get_project_repo),
+):
+    """Универсальный эндпоинт для подключения ботов (как в ТГ боте)."""
+    # Проверка прав собственности
+    project = await repo.get_project_by_id(project_id)
+    if not project or project.get("owner_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if data.type == "client":
+        await repo.set_bot_token(project_id, data.token)
+    elif data.type == "manager":
+        await repo.set_manager_bot_token(project_id, data.token)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid bot type")
+        
+    return {"status": "ok", "type": data.type}
+

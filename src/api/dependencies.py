@@ -8,11 +8,14 @@ This module provides centralized dependency injection functions for:
 - Tool registry
 - Redis client
 - Admin authentication
+- JWT authentication (for web users)
 
 All dependencies use the global pool from lifespan management.
 """
 
 from typing import Optional, Any, Callable, Awaitable
+from datetime import datetime
+import jwt
 
 from fastapi import Header, HTTPException, Depends
 
@@ -174,16 +177,39 @@ async def get_redis() -> Any:
     return await get_redis_client()
 
 
+async def get_current_user_id(authorization: Optional[str] = Header(default=None)) -> int:
+    """
+    Dependency that validates JWT and returns the user's Telegram chat_id.
+    """
+    if not authorization:
+        logger.warning("Authorization header missing")
+        raise HTTPException(status_code=401, detail="Authorization header required")
+    
+    if not authorization.startswith("Bearer "):
+        logger.warning("Invalid token format")
+        raise HTTPException(status_code=401, detail="Invalid token format. Use 'Bearer <token>'")
+    
+    token = authorization[7:]
+    
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+        chat_id = payload.get("sub")
+        if not chat_id:
+            raise ValueError("Missing subject claim")
+        return int(chat_id)
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token expired")
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning("Invalid token", extra={"error": str(e)})
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+# Keep admin token verification for backward compatibility (if needed)
 async def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> None:
     """
     Проверяет Bearer-токен в заголовке Authorization.
     Используется для защиты эндпоинтов, доступных только администратору.
-    
-    Args:
-        authorization: Value of Authorization header from request.
-    
-    Raises:
-        HTTPException: If token is missing, malformed, or invalid.
     """
     if not authorization:
         logger.warning("Authorization header missing")

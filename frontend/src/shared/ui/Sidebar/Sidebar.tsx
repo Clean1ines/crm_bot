@@ -48,7 +48,7 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
       <aside
         ref={ref}
         className={`
-          fixed top-0 h-full z-50
+          relative h-full z-50 
           bg-[var(--ios-glass)] backdrop-blur-md
           border-[var(--ios-border)]
           ${positionClasses}

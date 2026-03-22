@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build":     "tsc -b && vite build && cp _redirects dist/",
     "lint": "eslint .",
     "preview": "vite preview",
-    "generate-types": "npx openapi-typescript ./openapi.yaml -o ./src/shared/api/generated/schema.ts",
+    "generate-types": "npx openapi-typescript ./openapi.json -o ./src/shared/api/generated/schema.ts",
+    "api:sync": "cd .. && python dump_openapi.py && cp openapi.json ../frontend/openapi.json && cd ../frontend && npx openapi-typescript openapi.json -o src/shared/api/generated/schema.ts",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",

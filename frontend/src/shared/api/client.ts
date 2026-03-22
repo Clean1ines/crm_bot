@@ -3,51 +3,41 @@ import toast from 'react-hot-toast';
 import type { paths, components } from './generated/schema';
 import { createTimeoutMiddleware } from './fetchWithTimeout';
 
-// Extend Window interface for deduplication
+// ---------- Base URL for API (from environment) ----------
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+
 declare global {
   interface Window {
     __lastToast: string | null;
   }
 }
 
+// ---------- Token Management ----------
+export const getSessionToken = (): string | null => localStorage.getItem('mrak_token');
+export const setSessionToken = (token: string): void => localStorage.setItem('mrak_token', token);
+export const clearSessionToken = (): void => localStorage.removeItem('mrak_token');
+
 // ---------- Types ----------
 export type ProjectResponse = components['schemas']['ProjectResponse'];
 type ProjectCreate = components['schemas']['ProjectCreate'];
-type RunCreate = components['schemas']['RunCreate'];               // ADDED
-type NodeExecutionCreate = components['schemas']['NodeExecutionCreate']; // ADDED
-type MessageRequest = components['schemas']['MessageRequest'];     // ADDED
-export type ValidateExecutionResponse = components['schemas']['ValidateExecutionResponse']; // ADDED и экспортирован
-
-// ---------- Token Management ----------
-const getSessionToken = (): string | null => {
-  return sessionStorage.getItem('mrak_session_token');
-};
-
-const setSessionToken = (token: string): void => {
-  sessionStorage.setItem('mrak_session_token', token);
-};
-
-const clearSessionToken = (): void => {
-  sessionStorage.removeItem('mrak_session_token');
-};
+type ProjectUpdate = components['schemas']['ProjectUpdate'];
+type BotTokenRequest = components['schemas']['BotTokenRequest'];
+type ManagerAddRequest = components['schemas']['ManagerAddRequest'];
+type ApplyTemplateRequest = components['schemas']['ApplyTemplateRequest'];
+type ReplyRequest = components['schemas']['ReplyRequest'];
+type ChatMessageRequest = components['schemas']['ChatMessageRequest'];
 
 // ---------- Error Message Extraction ----------
 export const getErrorMessage = (error: unknown): string => {
   if (error && typeof error === 'object') {
-    if ('error' in error && typeof error.error === 'string') {
-      return error.error;
-    }
+    if ('error' in error && typeof error.error === 'string') return error.error;
     if ('detail' in error && Array.isArray(error.detail)) {
       const details = error.detail as Array<{ msg?: string }>;
       return details.map(d => d.msg).filter(Boolean).join(', ');
     }
-    if ('message' in error && typeof error.message === 'string') {
-      return error.message;
-    }
+    if ('message' in error && typeof error.message === 'string') return error.message;
   }
-  if (error instanceof Error) {
-    return error.message;
-  }
+  if (error instanceof Error) return error.message;
   return 'Произошла неизвестная ошибка';
 };
 
@@ -56,18 +46,14 @@ const showErrorToast = (message: string): void => {
   const key = `error-${message}`;
   if (window.__lastToast === key) return;
   window.__lastToast = key;
-  setTimeout(() => {
-    window.__lastToast = null;
-  }, 1000);
+  setTimeout(() => { window.__lastToast = null; }, 1000);
   toast.error(message);
 };
 
 // ---------- API Client Setup ----------
 export const client = createClient<paths>({
-  baseUrl: '',
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseUrl: API_BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
 });
 
 // Request middleware: adds Bearer token if available
@@ -81,19 +67,10 @@ client.use({
   },
 });
 
-// Response middleware: handles errors and 401
+// Response middleware: handles errors
 client.use({
   onResponse({ response }) {
     if (!response.ok) {
-      if (response.status === 401) {
-        clearSessionToken();
-        window.location.href = '/login';
-        return new Response(JSON.stringify({ error: 'Сессия истекла' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
       return response
         .clone()
         .json()
@@ -103,12 +80,9 @@ client.use({
           return response;
         })
         .catch(() => {
-          let message: string;
-          if (response.status >= 500 && response.status < 600) {
-            message = 'Сервер временно недоступен. Пожалуйста, попробуйте позже.';
-          } else {
-            message = `Ошибка ${response.status}: ${response.statusText}`;
-          }
+          const message = response.status >= 500 && response.status < 600
+            ? 'Сервер временно недоступен. Пожалуйста, попробуйте позже.'
+            : `Ошибка ${response.status}: ${response.statusText}`;
           showErrorToast(message);
           return response;
         });
@@ -120,13 +94,15 @@ client.use({
 client.use(createTimeoutMiddleware(30000));
 
 // ---------- Helper for streaming requests ----------
-async function streamFetch(
+export async function streamFetch(
   url: string,
   options: RequestInit,
   onChunk: (chunk: string) => void,
   onFinish: (fullText: string) => void,
   onError: (err: Error) => void
 ) {
+  // If URL is not absolute, prepend API_BASE_URL
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   try {
     const token = getSessionToken();
     const headers = new Headers(options.headers || {});
@@ -135,22 +111,15 @@ async function streamFetch(
     }
     headers.set('Content-Type', 'application/json');
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-
+    const response = await fetch(fullUrl, { ...options, headers });
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
       throw new Error(getErrorMessage(errData) || `HTTP ${response.status}`);
     }
-
     const reader = response.body?.getReader();
     if (!reader) throw new Error('No response body');
-
     const decoder = new TextDecoder();
     let fullText = '';
-
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -158,7 +127,6 @@ async function streamFetch(
       fullText += chunk;
       onChunk(chunk);
     }
-
     onFinish(fullText);
   } catch (err) {
     onError(err instanceof Error ? err : new Error(String(err)));
@@ -166,161 +134,55 @@ async function streamFetch(
 }
 
 // ---------- Typed API Endpoints ----------
-export const api = {
+export const api = Object.assign (client, {
   projects: {
     list: () => client.GET('/api/projects'),
     create: (body: ProjectCreate) => client.POST('/api/projects', { body }),
-    update: (projectId: string, body: ProjectCreate) =>
-      client.PUT('/api/projects/{project_id}', {
-        params: { path: { project_id: projectId } },
-        body,
+    get: (projectId: string) => client.GET('/api/projects/{project_id}', { params: { path: { project_id: projectId } } }),
+    update: (projectId: string, body: ProjectUpdate) => client.PUT('/api/projects/{project_id}', { params: { path: { project_id: projectId } }, body }),
+    delete: (projectId: string) => client.DELETE('/api/projects/{project_id}', { params: { path: { project_id: projectId } } }),
+    setBotToken: (projectId: string, token: string) => client.POST('/api/projects/{project_id}/bot-token', { params: { path: { project_id: projectId } }, body: { token } as BotTokenRequest }),
+    setManagerToken: (projectId: string, token: string) => client.POST('/api/projects/{project_id}/manager-token', { params: { path: { project_id: projectId } }, body: { token } as BotTokenRequest }),
+    getManagers: (projectId: string) => client.GET('/api/projects/{project_id}/managers', { params: { path: { project_id: projectId } } }),
+    addManager: (projectId: string, chat_id: number) => client.POST('/api/projects/{project_id}/managers', { params: { path: { project_id: projectId } }, body: { chat_id } as ManagerAddRequest }),
+    removeManager: (projectId: string, chat_id: number) => client.DELETE('/api/projects/{project_id}/managers/{chat_id}', { params: { path: { project_id: projectId, chat_id } } }),
+  },
+  templates: {
+    list: () => client.GET('/api/templates'),
+    apply: (projectId: string, template_slug: string) => client.POST('/api/templates/projects/{project_id}/apply', { params: { path: { project_id: projectId } }, body: { template_slug } as ApplyTemplateRequest }),
+  },
+  threads: {
+    list: (status?: string) => client.GET('/api/threads', { params: { query: { status } } }),
+    reply: (threadId: string, message: string) => client.POST('/api/threads/{thread_id}/reply', { params: { path: { thread_id: threadId } }, body: { message } as ReplyRequest }),
+  },
+  chat: {
+    sendStream: (projectId: string, message: string, model?: string) =>
+      fetch(`${API_BASE_URL}/api/chat/projects/${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, model } as ChatMessageRequest),
       }),
-    delete: (projectId: string) =>
-      client.DELETE('/api/projects/{project_id}', { params: { path: { project_id: projectId } } }),
   },
-  models: {
-    list: () => client.GET('/api/models'),
-  },
-  modes: {
-    list: () => client.GET('/api/modes'),
-  },
-  artifactTypes: {
-    list: () => client.GET('/api/artifact-types'),
-  },
-  artifacts: {
-    list: (projectId: string) =>
-      client.GET('/api/projects/{project_id}/artifacts', { params: { path: { project_id: projectId } } }),
-  },
-  messages: {
-    list: (projectId: string) =>
-      client.GET('/api/projects/{project_id}/messages', { params: { path: { project_id: projectId } } }),
-  },
-  workflows: {
-    list: (projectId?: string) =>
-      client.GET('/api/workflows', {
-        params: projectId ? { query: { project_id: projectId } } : undefined,
-      }),
-    get: (workflowId: string) =>
-      client.GET('/api/workflows/{workflow_id}', {
-        params: { path: { workflow_id: workflowId } },
-      }),
-    create: (data: components['schemas']['WorkflowCreate'] & { project_id: string }) =>
-      client.POST('/api/workflows', { body: data }),
-    update: (workflowId: string, data: components['schemas']['WorkflowUpdate']) =>
-      client.PUT('/api/workflows/{workflow_id}', {
-        params: { path: { workflow_id: workflowId } },
-        body: data,
-      }),
-    delete: (workflowId: string) =>
-      client.DELETE('/api/workflows/{workflow_id}', {
-        params: { path: { workflow_id: workflowId } },
-      }),
-    nodes: {
-      create: (workflowId: string, data: components['schemas']['WorkflowNodeCreate']) =>
-        client.POST('/api/workflows/{workflow_id}/nodes', {
-          params: { path: { workflow_id: workflowId } },
-          body: data,
-        }),
-      update: (nodeRecordId: string, data: components['schemas']['WorkflowNodeUpdate']) =>
-        client.PUT('/api/workflows/nodes/{node_record_id}', {
-          params: { path: { node_record_id: nodeRecordId } },
-          body: data,
-        }),
-      delete: (nodeRecordId: string) =>
-        client.DELETE('/api/workflows/nodes/{node_record_id}', {
-          params: { path: { node_record_id: nodeRecordId } },
-        }),
-    },
-    edges: {
-      create: (workflowId: string, data: components['schemas']['WorkflowEdgeCreate']) =>
-        client.POST('/api/workflows/{workflow_id}/edges', {
-          params: { path: { workflow_id: workflowId } },
-          body: data,
-        }),
-      delete: (edgeRecordId: string) =>
-        client.DELETE('/api/workflows/edges/{edge_record_id}', {
-          params: { path: { edge_record_id: edgeRecordId } },
-        }),
+  knowledge: {
+    upload: (projectId: string, file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return fetch(`${API_BASE_URL}/api/projects/${projectId}/knowledge`, {
+        method: 'POST',
+        body: formData,
+      });
     },
   },
-  // ==================== ADDED: runs and executions ====================
-  runs: {
-    create: (body: RunCreate) =>
-      client.POST('/api/runs', { body }),
-    get: (runId: string) =>
-      client.GET('/api/runs/{run_id}', { params: { path: { run_id: runId } } }),
-    executeNode: (runId: string, nodeId: string, body: NodeExecutionCreate) =>
-      client.POST('/api/runs/{run_id}/nodes/{node_id}/execute', {
-        params: { path: { run_id: runId, node_id: nodeId } },
-        body,
-      }),
-    freeze: (runId: string) =>
-      client.POST('/api/runs/{run_id}/freeze', { params: { path: { run_id: runId } } }),
-    archive: (runId: string) =>
-      client.POST('/api/runs/{run_id}/archive', { params: { path: { run_id: runId } } }),
-  },
-  executions: {
-    getMessages: (executionId: string) =>
-      client.GET('/api/executions/{exec_id}/messages', { params: { path: { exec_id: executionId } } }),
-    // Streaming message endpoint – returns a raw Response for use with streamFetch
-    sendMessageStream: (executionId: string, body: MessageRequest) =>
-      fetch(`/api/executions/${executionId}/messages`, {
+  auth: {
+    telegram: async (body: { init_data: string }) => {
+      const response = await fetch(`${API_BASE_URL}/api/auth/telegram`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-      }),
-    validate: (executionId: string) =>
-      client.POST('/api/executions/{exec_id}/validate', {
-        params: { path: { exec_id: executionId } },
-        // body удалён, так как метод не требует тела
-      }),
-  },
-  auth: {
-    login: async (body: { master_key: string }) => {
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          const message = getErrorMessage(data) || `Ошибка входа (${res.status})`;
-          showErrorToast(message);
-          throw new Error(message);
-        }
-        if (data.session_token) {
-          setSessionToken(data.session_token);
-        }
-        return data;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Ошибка соединения с сервером';
-        showErrorToast(message);
-        throw error;
-      }
-    },
-    logout: async () => {
-      try {
-        const res = await fetch('/api/auth/logout', { method: 'POST' });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          const message = getErrorMessage(data) || `Ошибка выхода (${res.status})`;
-          showErrorToast(message);
-        }
-        clearSessionToken();
-        return await res.json().catch(() => ({}));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Ошибка соединения с сервером';
-        showErrorToast(message);
-        clearSessionToken();
-        throw error;
-      }
-    },
-    session: async () => {
-      return client.GET('/api/auth/session', {});
+      });
+      const data = await response.json();
+      if (!response.ok) throw data;
+      return { data, response };
     },
   },
-};
-
-// Re-export stream helper for use in hooks
-export { streamFetch };
+});

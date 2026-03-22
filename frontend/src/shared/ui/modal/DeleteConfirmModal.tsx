@@ -8,6 +8,7 @@ interface DeleteConfirmModalProps {
   itemName: string;
   itemType: string; // например, "project", "workflow"
   isPending?: boolean;
+  projectName: string;
 }
 
 /**
@@ -22,6 +23,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   itemName,
   itemType,
   isPending = false,
+  projectName,
 }) => {
   const handleConfirm = async () => {
     await onConfirm();

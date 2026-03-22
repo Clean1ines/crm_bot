@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     MODEL_SELECTION_STRATEGY: str = Field("priority", description="Strategy for model selection: priority, round-robin, etc.")
     RATE_LIMIT_REDIS_PREFIX: str = Field("ratelimit:", description="Redis key prefix for rate limit tracking")
 
+    # JWT for web authentication
+    JWT_SECRET_KEY: str = Field(..., description="Secret key for signing JWT tokens (used for web auth)")
+
+    VITE_API_URL: Optional[str] = Field(None, description="Frontend API URL (for CORS)")
+    FRONTEND_URL: Optional[str] = Field(None, description="Frontend URL (for autologin)")
+
     @field_validator("ADMIN_CHAT_ID")
     def validate_chat_id(cls, v: str) -> str:
         """Ensure chat ID is a valid integer string."""

@@ -4,16 +4,38 @@ Provides reusable UI components for the new flow.
 """
 
 from typing import List, Tuple
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LoginUrl  # Добавлен LoginUrl
+from src.core.config import settings
 
+
+def make_web_panel_button() -> InlineKeyboardButton:
+    """
+    Создает кнопку для автоматического входа в Web-панель.
+    """
+    # Убедись, что в settings.PUBLIC_URL или RENDER_EXTERNAL_URL лежит адрес фронта
+    base_url = settings.RENDER_EXTERNAL_URL or settings.PUBLIC_URL
+    login_url = f"{base_url.rstrip('/')}/login"
+    
+    return InlineKeyboardButton(
+        text="🌐 Открыть Web-панель",
+        login_url=LoginUrl(
+            url=login_url,
+            forward_text="Войти в MRAK-OS",
+            request_write_access=True
+        )
+    )
 
 def make_main_menu_keyboard() -> InlineKeyboardMarkup:
     """
-    Create the main menu keyboard with two buttons.
+    Main menu: 
+    1. Создать проект
+    2. Мои проекты
+    3. Web-панель (авто-логин)
     """
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📁 Создать проект", callback_data="newproject")],
         [InlineKeyboardButton("📦 Мои проекты", callback_data="listprojects")],
+        [make_web_panel_button()], # Та самая третья кнопка
     ])
 
 
