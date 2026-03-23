@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
-import type { Thread } from '../../../entities/thread/model/types';
+import type { Thread, Client, LastMessage } from '../../../entities/thread/model/types';
 
 interface DialogListProps {
   projectId: string;
@@ -100,36 +100,40 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {threads.map((thread) => (
-          <div
-            key={thread.thread_id}
-            onClick={() => setSelectedThreadId(thread.thread_id)}
-            className={`p-3 border-b border-[var(--ios-border)] cursor-pointer transition-colors ${
-              selectedThreadId === thread.thread_id
-                ? 'bg-[var(--ios-selected)]'
-                : 'hover:bg-[var(--ios-hover)]'
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${getStatusColor(thread.status, thread.interaction_mode)}`} />
-              <div className="flex-1">
-                <div className="flex justify-between items-baseline">
-                  <span className="font-medium text-[var(--text-main)]">
-                    {thread.client?.full_name || thread.client?.username || 'Клиент'}
-                  </span>
-                  <span className="text-xs text-[var(--text-muted)]">
-                    {thread.last_message?.created_at
-                      ? new Date(thread.last_message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : ''}
-                  </span>
-                </div>
-                <div className="text-sm text-[var(--text-muted)] truncate">
-                  {thread.last_message?.content || 'Нет сообщений'}
+        {threads.map((thread) => {
+          const client = thread.client as unknown as Client;
+          const lastMsg = thread.last_message as unknown as LastMessage | null;
+          return (
+            <div
+              key={thread.thread_id}
+              onClick={() => setSelectedThreadId(thread.thread_id)}
+              className={`p-3 border-b border-[var(--ios-border)] cursor-pointer transition-colors ${
+                selectedThreadId === thread.thread_id
+                  ? 'bg-[var(--ios-selected)]'
+                  : 'hover:bg-[var(--ios-hover)]'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${getStatusColor(thread.status, thread.interaction_mode)}`} />
+                <div className="flex-1">
+                  <div className="flex justify-between items-baseline">
+                    <span className="font-medium text-[var(--text-main)]">
+                      {client?.full_name || client?.username || 'Клиент'}
+                    </span>
+                    <span className="text-xs text-[var(--text-muted)]">
+                      {lastMsg?.created_at
+                        ? new Date(lastMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : ''}
+                    </span>
+                  </div>
+                  <div className="text-sm text-[var(--text-muted)] truncate">
+                    {lastMsg?.content || 'Нет сообщений'}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {hasMore && !loading && threads.length > 0 && (
           <button
             onClick={loadMore}

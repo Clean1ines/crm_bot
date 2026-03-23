@@ -6,8 +6,18 @@
 import type { components } from '../../../shared/api/generated/schema';
 
 export type Thread = components['schemas']['ThreadResponse'];
-export type Client = NonNullable<Thread['client']>;
-export type LastMessage = NonNullable<Thread['last_message']>;
+
+export interface Client {
+  id: string;
+  full_name?: string | null;
+  username?: string | null;
+  chat_id: number;
+}
+
+export interface LastMessage {
+  content: string;
+  created_at: string;
+}
 
 export interface Message {
   id: string;

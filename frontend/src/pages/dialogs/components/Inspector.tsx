@@ -42,7 +42,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     const loadState = async () => {
       try {
         const { data, error } = await api.threads.getState(threadId);
-        if (!error && data && 'state' in data) {
+        if (!error && data && typeof data === 'object' && 'state' in data) {
           setThreadState(data.state as ThreadState);
         }
       } catch (err) {
@@ -53,7 +53,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     const loadMemory = async () => {
       try {
         const { data, error } = await api.threads.getMemory(threadId);
-        if (!error && data && 'memory' in data) {
+        if (!error && data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);
         }
       } catch (err) {
@@ -65,7 +65,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       setLoadingInspector(true);
       try {
         const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, 0);
-        if (!error && data && 'events' in data) {
+        if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
           setThreadTimeline(data.events as TimelineEvent[]);
           setHasMoreTimeline((data.events as TimelineEvent[]).length === timelineLimit);
         }
@@ -86,7 +86,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     const newOffset = timelineOffset + timelineLimit;
     try {
       const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, newOffset);
-      if (!error && data && 'events' in data) {
+      if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
         setThreadTimeline([...threadTimeline, ...(data.events as TimelineEvent[])]);
         setTimelineOffset(newOffset);
         setHasMoreTimeline((data.events as TimelineEvent[]).length === timelineLimit);
@@ -105,7 +105,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       } else {
         // Refresh memory list
         const { data } = await api.threads.getMemory(threadId);
-        if (data && 'memory' in data) {
+        if (data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);
         }
       }
@@ -121,7 +121,6 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
 
   const saveEditMemory = async () => {
     if (editingMemoryKey) {
-      // Try to parse as JSON, fallback to string
       let parsedValue: unknown;
       try {
         parsedValue = JSON.parse(editingMemoryValue);
@@ -139,16 +138,25 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     setEditingMemoryValue('');
   };
 
-  const renderSummary = () => (
-    <div className="space-y-2">
-      <div className="text-sm text-[var(--text-muted)]">Клиент: {threadId ? threadId.slice(0, 8) : '—'}</div>
-      <div className="text-sm text-[var(--text-muted)]">Статус: {threadState?.status || '—'}</div>
-      <div className="text-sm text-[var(--text-muted)]">Настроение: {threadState?.lifecycle || '—'}</div>
-      <div className="text-sm text-[var(--text-muted)]">Сообщений: {threadState?.total_messages || 0}</div>
-      <div className="text-sm text-[var(--text-muted)]">Создан: {threadState?.created_at ? new Date(threadState.created_at as string).toLocaleString() : '—'}</div>
-      <div className="text-sm text-[var(--text-muted)]">Обновлён: {threadState?.updated_at ? new Date(threadState.updated_at as string).toLocaleString() : '—'}</div>
-    </div>
-  );
+  const renderSummary = () => {
+    const state = threadState as ThreadState & {
+      status?: string;
+      lifecycle?: string;
+      total_messages?: number;
+      created_at?: string;
+      updated_at?: string;
+    };
+    return (
+      <div className="space-y-2">
+        <div className="text-sm text-[var(--text-muted)]">Клиент: {threadId ? threadId.slice(0, 8) : '—'}</div>
+        <div className="text-sm text-[var(--text-muted)]">Статус: {state?.status || '—'}</div>
+        <div className="text-sm text-[var(--text-muted)]">Настроение: {state?.lifecycle || '—'}</div>
+        <div className="text-sm text-[var(--text-muted)]">Сообщений: {state?.total_messages ?? 0}</div>
+        <div className="text-sm text-[var(--text-muted)]">Создан: {state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}</div>
+        <div className="text-sm text-[var(--text-muted)]">Обновлён: {state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}</div>
+      </div>
+    );
+  };
 
   const renderMemory = () => (
     <div className="space-y-2">
@@ -183,27 +191,36 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     </div>
   );
 
-  const renderDecision = () => (
-    <div className="space-y-2">
-      <div className="text-sm">
-        <span className="font-semibold">Решение:</span> {threadState?.decision || '—'}
-      </div>
-      <div className="text-sm">
-        <span className="font-semibold">Намерение:</span> {threadState?.intent || '—'}
-      </div>
-      <div className="text-sm">
-        <span className="font-semibold">Жизненный цикл:</span> {threadState?.lifecycle || '—'}
-      </div>
-      <div className="text-sm">
-        <span className="font-semibold">CTA:</span> {threadState?.cta || '—'}
-      </div>
-      {threadState?.confidence !== undefined && (
+  const renderDecision = () => {
+    const state = threadState as ThreadState & {
+      decision?: string;
+      intent?: string;
+      lifecycle?: string;
+      cta?: string;
+      confidence?: number;
+    };
+    return (
+      <div className="space-y-2">
         <div className="text-sm">
-          <span className="font-semibold">Уверенность:</span> {threadState.confidence}
+          <span className="font-semibold">Решение:</span> {state?.decision || '—'}
         </div>
-      )}
-    </div>
-  );
+        <div className="text-sm">
+          <span className="font-semibold">Намерение:</span> {state?.intent || '—'}
+        </div>
+        <div className="text-sm">
+          <span className="font-semibold">Жизненный цикл:</span> {state?.lifecycle || '—'}
+        </div>
+        <div className="text-sm">
+          <span className="font-semibold">CTA:</span> {state?.cta || '—'}
+        </div>
+        {state?.confidence !== undefined && (
+          <div className="text-sm">
+            <span className="font-semibold">Уверенность:</span> {state.confidence}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderTimeline = () => (
     <div className="space-y-2">

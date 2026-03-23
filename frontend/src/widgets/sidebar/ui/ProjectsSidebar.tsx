@@ -7,6 +7,7 @@ import { CreateProjectModal } from '@features/project/create';
 import { EditProjectModal } from '@features/project/edit';
 import { DeleteConfirmModal } from '@shared/ui';
 import { Sidebar } from '@shared/ui/Sidebar/Sidebar';
+import { useAppStore } from '../../../app/store';
 
 const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({ className, ...props }) => (
   <button
@@ -18,6 +19,7 @@ const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({ class
 export const ProjectsSidebar: React.FC = () => {
   const navigate = useNavigate();
   const { currentProjectId, setCurrentProjectId } = useProjectStore();
+  const { setSelectedProjectId } = useAppStore();
   const {
     projects,
     isCreateOpen,
@@ -69,11 +71,13 @@ export const ProjectsSidebar: React.FC = () => {
 
   const handleProjectClick = (projectId: string) => {
     setCurrentProjectId(projectId);
+    setSelectedProjectId(projectId);
     navigate(`/workspace?projectId=${projectId}`);
   };
 
   const handleProjectSelect = (projectId: string) => {
     setCurrentProjectId(projectId);
+    setSelectedProjectId(projectId);
     navigate(`/workspace?projectId=${projectId}`);
   };
 
@@ -84,7 +88,6 @@ export const ProjectsSidebar: React.FC = () => {
     return <HamburgerMenu onOpenSidebar={handleOpenSidebar} showHomeIcon={false} />;
   }
 
-  // Заголовок (селектор проектов)
   const headerContent = (
     <div className="p-4 border-b border-[var(--ios-border)]">
       <label className="block text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
@@ -105,7 +108,6 @@ export const ProjectsSidebar: React.FC = () => {
     </div>
   );
 
-  // Футер (кнопка создания проекта)
   const footerContent = (
     <div className="p-4 border-t border-[var(--ios-border)] space-y-2">
       <Button
@@ -120,14 +122,13 @@ export const ProjectsSidebar: React.FC = () => {
   return (
     <>
       <Sidebar
-      isOpen={isSidebarOpen}
-      onClose={handleCloseSidebar}
-      header={headerContent}
-      footer={footerContent}
-      position="left"
-      width="w-64"
-      // Добавляем fixed только для мобилок через className
-      className={isMobile ? 'fixed top-0 left-0 h-full' : 'relative'}
+        isOpen={isSidebarOpen}
+        onClose={handleCloseSidebar}
+        header={headerContent}
+        footer={footerContent}
+        position="left"
+        width="w-64"
+        className={isMobile ? 'fixed top-0 left-0 h-full' : 'relative'}
       >
         <div className="space-y-1">
           {projects.map((project: Project) => (
@@ -163,7 +164,6 @@ export const ProjectsSidebar: React.FC = () => {
         </div>
       </Sidebar>
 
-      {/* Модальные окна остаются здесь */}
       <CreateProjectModal
         isOpen={isCreateOpen}
         onClose={closeModals}

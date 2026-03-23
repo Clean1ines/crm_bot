@@ -17,12 +17,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     clearMessages,
     isLoadingMessages,
     setLoadingMessages,
-    selectedModel,
-    inspectorActiveTab,
     setInspectorActiveTab,
-    setThreadState,
-    setThreadTimeline,
-    setThreadMemory,
   } = useAppStore();
 
   const [inputText, setInputText] = useState('');
@@ -45,7 +40,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
           console.error('Failed to load messages', error);
           return;
         }
-        if (data && 'messages' in data) {
+        if (data && typeof data === 'object' && 'messages' in data && Array.isArray(data.messages)) {
           setMessages(data.messages as Message[]);
         }
       } catch (err) {
@@ -69,10 +64,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
       if (msg.type === 'new_message' && msg.message) {
         addMessage(msg.message as Message);
       }
-      // Optionally refresh inspector data when relevant events occur
-      if (msg.type === 'escalation') {
-        // Could trigger reload of thread state, timeline, memory
-      }
     },
   });
 
@@ -85,10 +76,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
         console.error('Failed to send reply', error);
       } else {
         setInputText('');
-        // Optionally reload messages after a short delay to get the new message
+        // Reload messages after a short delay to get the new message
         setTimeout(async () => {
           const { data } = await api.threads.getMessages(threadId, limit, offset);
-          if (data && 'messages' in data) {
+          if (data && typeof data === 'object' && 'messages' in data && Array.isArray(data.messages)) {
             setMessages(data.messages as Message[]);
           }
         }, 500);
@@ -102,7 +93,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
 
   const onMessageClick = (message: Message) => {
     if (message.role === 'assistant' && message.metadata?.explanation) {
-      // Open inspector on decision tab and show explanation
       setInspectorActiveTab('decision');
     }
   };
