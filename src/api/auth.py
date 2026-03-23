@@ -3,12 +3,12 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict # ConfigDict для гибкости
+from pydantic import BaseModel, ConfigDict
 
 from src.core.config import settings
 from src.core.logging import get_logger
-from src.database.repositories.project_repository import ProjectRepository
-from src.api.dependencies import get_project_repo
+from src.database.repositories.user_repository import UserRepository
+from src.api.dependencies import get_user_repository
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -45,35 +45,41 @@ def verify(data: dict, token: str | None):
 @router.post("/telegram")
 async def telegram_auth(
     data: TelegramAuthData,
-    repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
 ):
-    # Универсальный способ получить словарь из Pydantic (v1 и v2)
+    # Универсальный способ получить словарь из Pydantic
     auth_data = data.model_dump(exclude_none=True) if hasattr(data, "model_dump") else data.dict(exclude_none=True)
 
     if not verify(auth_data, settings.ADMIN_BOT_TOKEN):
         logger.error(f"AUTH_FAILED for user {auth_data.get('id')}")
         raise HTTPException(status_code=401, detail="Invalid Telegram signature")
 
-    chat_id = auth_data["id"]
-    projects = await repo.get_projects_by_owner(chat_id)
+    telegram_id = auth_data["id"]
+    first_name = auth_data["first_name"]
+    username = auth_data.get("username")
 
-    # Если проектов нет, возвращаем 403, но с данными юзера, чтобы фронт знал, кто зашел
-    if not projects:
-        logger.warning(f"USER_HAS_NO_PROJECTS: {chat_id}")
-        # Можно кинуть 403, а можно выдать токен, но ограничить доступ — на твой вкус
-        raise HTTPException(status_code=403, detail="Access denied: No projects found")
+    # Create or get user
+    user_id, created = await user_repo.get_or_create_by_telegram(
+        telegram_id, first_name, username
+    )
+    logger.info(
+        "User authenticated",
+        extra={"user_id": user_id, "telegram_id": telegram_id, "created": created}
+    )
 
+    # Generate JWT with user_id
     payload = {
-        "sub": str(chat_id),
-        "username": auth_data.get("username"), # Сохраняем username в токене
+        "sub": user_id,
+        "username": username,
         "iat": int(datetime.utcnow().timestamp()),
         "exp": int((datetime.utcnow() + timedelta(hours=24)).timestamp()),
     }
-
     token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm="HS256")
     
-    # Возвращаем и токен, и username
+    # Return token and user info
     return {
         "access_token": token,
-        "username": auth_data.get("username")
+        "user_id": user_id,
+        "username": username,
+        "full_name": first_name,
     }

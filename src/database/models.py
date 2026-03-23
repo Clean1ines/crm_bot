@@ -7,6 +7,7 @@ Defines database schema for multi-tenant AI bot platform including:
 - Event store for event-sourced agent runtime
 - Workflow templates and custom workflows
 - Manager assignments and execution queue
+- User identities for multi-provider authentication
 """
 
 import enum
@@ -68,6 +69,9 @@ class Project(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     
     # Bot configuration (encrypted at rest)
     bot_token: Mapped[str] = mapped_column(String, nullable=False)
@@ -79,7 +83,7 @@ class Project(Base):
     # Manager bot configuration
     manager_bot_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
-    # Workflow configuration (NEW)
+    # Workflow configuration
     template_slug: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, default=None
     )
@@ -110,10 +114,12 @@ class Project(Base):
     workflows = relationship(
         "Workflow", back_populates="project", cascade="all, delete-orphan"
     )
+    user = relationship("User", foreign_keys=[user_id])
 
     __table_args__ = (
         Index("idx_projects_template_slug", "template_slug"),
         Index("idx_projects_pro_mode", "is_pro_mode", postgresql_where=(is_pro_mode == True)),
+        Index("idx_projects_user_id", "user_id"),
     )
 
 
@@ -179,7 +185,7 @@ class Thread(Base):
     # Manager assignment for escalated threads
     manager_chat_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     
-    # Workflow tracking (NEW)
+    # Workflow tracking
     workflow_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("workflows.id"), nullable=True
     )
@@ -446,4 +452,69 @@ class Workflow(Base):
             postgresql_where=(is_active == True)
         ),
         UniqueConstraint("project_id", "name", name="uq_workflows_project_name"),
+    )
+
+
+class User(Base):
+    """
+    User model representing platform users (project owners, etc.).
+    """
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=func.gen_random_uuid()
+    )
+    project_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    telegram_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    company: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    user_metadata: Mapped[dict] = mapped_column(JSON, default={})
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    identities = relationship("AuthIdentity", back_populates="user", cascade="all, delete-orphan")
+    projects = relationship("Project", foreign_keys=[Project.user_id], back_populates="user")
+
+    __table_args__ = (
+        Index("idx_users_telegram_id", "telegram_id"),
+        Index("idx_users_email", "email"),
+        Index("idx_users_project_id", "project_id"),
+    )
+
+
+class AuthIdentity(Base):
+    """
+    AuthIdentity model linking a user with external authentication providers.
+    """
+    __tablename__ = "auth_identities"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    # Relationships
+    user = relationship("User", back_populates="identities")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_id", name="uq_auth_identities_provider_provider_id"),
+        Index("idx_auth_identities_user", "user_id"),
     )

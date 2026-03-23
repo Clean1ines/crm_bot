@@ -473,7 +473,7 @@ class ProjectRepository:
             return None
 
     # ------------------------------------------------------------------
-    # Utility
+    # Project CRUD operations (with user_id support)
     # ------------------------------------------------------------------
     async def project_exists(self, project_id: Union[str, uuid.UUID]) -> bool:
         """
@@ -493,47 +493,119 @@ class ProjectRepository:
             )
             return result is not None
 
-# Внутри класса ProjectRepository:
-
-    async def create_project(self, owner_id: int, name: str) -> uuid.UUID:
-        """Создаёт новый проект."""
-        project_id = uuid.uuid4()
+    async def create_project(self, owner_id: str, name: str) -> str:
+        """
+        Создаёт новый проект с owner_id (строка, может быть telegram_id или user_id).
+        Для обратной совместимости с админ-ботом.
+        
+        Args:
+            owner_id: Идентификатор владельца (telegram_id или user_id).
+            name: Название проекта.
+        
+        Returns:
+            UUID проекта в виде строки.
+        """
+        logger.info("Creating project", extra={"owner_id": owner_id, "name": name})
         async with self.pool.acquire() as conn:
-            await conn.execute("""
-                INSERT INTO projects (id, owner_id, name, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, NOW(), NOW())
-            """, project_id, owner_id, name)
-        logger.info("Project created", extra={"project_id": str(project_id)})
-        return project_id
+            project_id = await conn.fetchval("""
+                INSERT INTO projects (id, name, owner_id, bot_token, system_prompt)
+                VALUES (gen_random_uuid(), $1, $2, '', 'Ты — полезный AI-ассистент.')
+                RETURNING id
+            """, name, owner_id)
+        logger.info("Project created", extra={"project_id": project_id})
+        return str(project_id)
+
+    async def create_project_with_user_id(self, user_id: str, name: str) -> str:
+        """
+        Создаёт новый проект для пользователя (по user_id).
+        Заполняет оба поля owner_id и user_id.
+        
+        Args:
+            user_id: UUID пользователя.
+            name: Название проекта.
+        
+        Returns:
+            UUID проекта в виде строки.
+        """
+        logger.info("Creating project with user_id", extra={"user_id": user_id, "name": name})
+        async with self.pool.acquire() as conn:
+            project_id = await conn.fetchval("""
+                INSERT INTO projects (id, name, owner_id, user_id, bot_token, system_prompt)
+                VALUES (gen_random_uuid(), $1, $2, $2, '', 'Ты — полезный AI-ассистент.')
+                RETURNING id
+            """, name, user_id)
+        logger.info("Project created", extra={"project_id": project_id})
+        return str(project_id)
 
     async def get_all_projects(self) -> List[Dict[str, Any]]:
-        """Возвращает список всех проектов."""
+        """
+        Возвращает список всех проектов.
+        
+        Returns:
+            Список словарей с полями id, owner_id, user_id, name, is_pro_mode, template_slug, created_at, updated_at.
+        """
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, owner_id, name, is_pro_mode, template_slug, created_at, updated_at FROM projects ORDER BY created_at DESC")
+            rows = await conn.fetch("""
+                SELECT id, owner_id, user_id, name, is_pro_mode, template_slug, created_at, updated_at
+                FROM projects
+                ORDER BY created_at DESC
+            """)
             return [dict(row) for row in rows]
 
     async def get_project_by_id(self, project_id: Union[str, uuid.UUID]) -> Optional[Dict[str, Any]]:
-        """Возвращает один проект по ID."""
+        """
+        Возвращает один проект по ID, включая поля owner_id, user_id.
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+        
+        Returns:
+            Словарь с данными проекта или None.
+        """
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT id, owner_id, name, is_pro_mode, template_slug, created_at, updated_at FROM projects WHERE id = $1", _ensure_uuid(project_id))
+            row = await conn.fetchrow("""
+                SELECT id, owner_id, user_id, name, is_pro_mode, template_slug, created_at, updated_at
+                FROM projects
+                WHERE id = $1
+            """, _ensure_uuid(project_id))
             return dict(row) if row else None
 
     async def update_project(self, project_id: Union[str, uuid.UUID], name: Optional[str]) -> None:
-        """Обновляет имя и/или описание проекта."""
+        """
+        Обновляет имя проекта.
+        
+        Args:
+            project_id: UUID проекта.
+            name: Новое имя (если None, не изменяется).
+        """
+        if name is None:
+            return
         async with self.pool.acquire() as conn:
             await conn.execute("""
-                UPDATE projects SET name = COALESCE($1, name), updated_at = NOW()
+                UPDATE projects SET name = $1, updated_at = NOW()
                 WHERE id = $2
             """, name, _ensure_uuid(project_id))
 
     async def delete_project(self, project_id: Union[str, uuid.UUID]) -> None:
-        """Удаляет проект (каскадно удалит связанные данные)."""
+        """
+        Удаляет проект (каскадно удалит связанные данные).
+        
+        Args:
+            project_id: UUID проекта.
+        """
         async with self.pool.acquire() as conn:
             await conn.execute("DELETE FROM projects WHERE id = $1", _ensure_uuid(project_id))
 
-    async def get_projects_by_owner(self, owner_id: int) -> list[dict]:
+    async def get_projects_by_owner(self, owner_id: str) -> List[Dict[str, Any]]:
         """
-        Возвращает список проектов владельца (owner_id = Telegram chat_id).
+        Возвращает список проектов владельца (owner_id может быть telegram_id или user_id).
+        Используется в админ-боте.
+        
+        Args:
+            owner_id: Идентификатор владельца (строка).
+        
+        Returns:
+            Список проектов.
         """
         logger.info("Fetching projects by owner", extra={"owner_id": owner_id})
         async with self.pool.acquire() as conn:
@@ -542,5 +614,25 @@ class ProjectRepository:
                 FROM projects
                 WHERE owner_id = $1
                 ORDER BY created_at DESC
-            """, str(owner_id))
+            """, owner_id)
+            return [dict(row) for row in rows]
+
+    async def get_projects_by_user_id(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Возвращает список проектов, привязанных к пользователю по user_id.
+        
+        Args:
+            user_id: UUID пользователя.
+        
+        Returns:
+            Список проектов с полями id, name, is_pro_mode, template_slug, created_at, updated_at.
+        """
+        logger.info("Fetching projects by user_id", extra={"user_id": user_id})
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, name, is_pro_mode, template_slug, created_at, updated_at
+                FROM projects
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+            """, user_id)
             return [dict(row) for row in rows]

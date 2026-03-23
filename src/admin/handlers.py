@@ -15,6 +15,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.template_repository import TemplateRepository
 from src.database.repositories.knowledge_repository import KnowledgeRepository
+from src.database.repositories.user_repository import UserRepository
 from src.core.logging import get_logger
 from src.core.config import settings
 from src.services.redis_client import get_redis_client
@@ -174,8 +175,8 @@ async def _step_await_project_name(chat_id: str, name: str, pool) -> AdminRespon
         if existing:
             return "❌ У вас уже есть проект с таким именем. Придумайте другое.", None
 
-    # Create project with owner_id = chat_id
-    project_id = await _create_project_raw(name, owner_id, pool)
+    # Create project with both owner_id and user_id
+    project_id = await _ensure_user_and_create_project(chat_id, name, pool)
     await _clear_state(chat_id)
     # Show project menu
     return await _show_project_menu(chat_id, project_id, pool)
@@ -451,20 +452,54 @@ async def _verify_token(token: str) -> Optional[str]:
             pass
     return None
 
+async def _ensure_user_and_create_project(chat_id: str, name: str, pool) -> str:
+    """
+    Ensure user exists in users table (via UserRepository) and create a project
+    with both owner_id (telegram_id) and user_id (UUID).
+    
+    Args:
+        chat_id: Telegram chat ID as string.
+        name: Project name.
+        pool: Database connection pool.
+    
+    Returns:
+        project_id as string.
+    """
+    user_repo = UserRepository(pool)
+    # get_or_create_by_telegram expects int telegram_id, first_name, username.
+    # We don't have first_name here; we can pass empty string and let it be set later.
+    user_id, created = await user_repo.get_or_create_by_telegram(
+        int(chat_id), first_name="", username=None
+    )
+    logger.info(
+        "User ensured for project creation",
+        extra={"chat_id": chat_id, "user_id": user_id, "created": created}
+    )
+
+    async with pool.acquire() as conn:
+        project_id = await conn.fetchval("""
+            INSERT INTO projects (id, name, owner_id, user_id, bot_token, system_prompt)
+            VALUES (gen_random_uuid(), $1, $2, $3, '', 'Ты — полезный AI-ассистент.')
+            RETURNING id
+        """, name, chat_id, user_id)
+    logger.info("Project created with user_id", extra={"project_id": project_id, "user_id": user_id})
+    return str(project_id)
+
 async def _create_project_raw(name: str, owner_id: str, pool) -> str:
     """
     Insert a new project with given owner_id (Telegram chat_id).
     Returns the new project's UUID as string.
     Uses explicit type cast to text for owner_id.
+    This is kept for backward compatibility, but new code should use _ensure_user_and_create_project.
     """
-    logger.info("Creating project", extra={"name": name, "owner_id": owner_id})
+    logger.info("Creating project (legacy)", extra={"name": name, "owner_id": owner_id})
     async with pool.acquire() as conn:
         project_id = await conn.fetchval("""
             INSERT INTO projects (id, name, owner_id, bot_token, system_prompt)
             VALUES (gen_random_uuid(), $1, $2::text, '', 'Ты — полезный AI-ассистент.')
             RETURNING id
         """, name, owner_id)
-    logger.info("Project created", extra={"project_id": project_id})
+    logger.info("Project created (legacy)", extra={"project_id": project_id})
     return str(project_id)
 
 async def _set_project_token(project_id: str, token: str, pool) -> None:
@@ -519,14 +554,39 @@ async def _get_bot_username(token: str) -> Optional[str]:
     return None
 
 async def _show_projects_list(chat_id: str, pool) -> AdminResponse:
-    """Show list of projects belonging to this owner (excluding admin project) as buttons."""
-    owner_id = chat_id
+    """
+    Show list of projects belonging to this user.
+    First tries to get user_id from auth_identities, then queries projects
+    by user_id OR owner_id (for backward compatibility).
+    """
+    # Try to find user_id for this telegram_id
+    user_id = None
     async with pool.acquire() as conn:
+        row = await conn.fetchrow("""
+            SELECT user_id FROM auth_identities
+            WHERE provider = 'telegram' AND provider_id = $1
+        """, chat_id)
+        if row:
+            user_id = row["user_id"]
+            logger.debug("Found user_id for telegram", extra={"chat_id": chat_id, "user_id": user_id})
+        else:
+            logger.debug("No user_id found for telegram, using legacy owner_id", extra={"chat_id": chat_id})
+
+    if user_id:
+        # Query projects where user_id matches OR owner_id matches (for old projects)
+        rows = await conn.fetch("""
+            SELECT id, name FROM projects
+            WHERE (user_id = $1 OR owner_id = $2::text)
+              AND id != $3
+            ORDER BY created_at DESC
+        """, user_id, chat_id, settings.ADMIN_PROJECT_ID)
+    else:
+        # Fallback to legacy owner_id query
         rows = await conn.fetch("""
             SELECT id, name FROM projects
             WHERE owner_id = $1::text AND id != $2
             ORDER BY created_at DESC
-        """, owner_id, settings.ADMIN_PROJECT_ID)
+        """, chat_id, settings.ADMIN_PROJECT_ID)
 
     if not rows:
         text = "📭 У вас пока нет проектов. Создайте первый!"
@@ -587,4 +647,3 @@ async def _get_project_menu_keyboard(project_id: str, pool) -> InlineKeyboardMar
     has_client = bool(settings_dict.get("bot_token")) if settings_dict else False
     has_manager = bool(settings_dict.get("manager_bot_token")) if settings_dict else False
     return make_project_dynamic_keyboard(project_id, has_client, has_manager)
-

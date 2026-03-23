@@ -27,6 +27,7 @@ from src.database.repositories.queue_repository import QueueRepository
 from src.database.repositories.event_repository import EventRepository
 from src.database.repositories.template_repository import TemplateRepository
 from src.database.repositories.workflow_repository import WorkflowRepository
+from src.database.repositories.user_repository import UserRepository
 from src.services.redis_client import get_redis_client
 
 import src.core.lifespan
@@ -144,6 +145,19 @@ def get_workflow_repo(pool: Any = Depends(get_pool)) -> WorkflowRepository:
     return WorkflowRepository(pool)
 
 
+def get_user_repository(pool: Any = Depends(get_pool)) -> UserRepository:
+    """
+    Return a new UserRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        UserRepository: Repository for user and auth identity operations.
+    """
+    return UserRepository(pool)
+
+
 def get_tool_registry() -> Any:
     """
     Return the global ToolRegistry singleton instance.
@@ -177,9 +191,20 @@ async def get_redis() -> Any:
     return await get_redis_client()
 
 
-async def get_current_user_id(authorization: Optional[str] = Header(default=None)) -> int:
+async def get_current_user_id(authorization: Optional[str] = Header(default=None)) -> str:
     """
-    Dependency that validates JWT and returns the user's Telegram chat_id.
+    Dependency that validates JWT and returns the user's UUID.
+    
+    The JWT must contain a 'sub' claim with the user's UUID.
+    
+    Args:
+        authorization: Bearer token from Authorization header.
+    
+    Returns:
+        str: User ID (UUID) extracted from the token.
+    
+    Raises:
+        HTTPException: If token is missing, invalid, or expired.
     """
     if not authorization:
         logger.warning("Authorization header missing")
@@ -193,10 +218,11 @@ async def get_current_user_id(authorization: Optional[str] = Header(default=None
     
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
-        chat_id = payload.get("sub")
-        if not chat_id:
+        user_id = payload.get("sub")
+        if not user_id:
             raise ValueError("Missing subject claim")
-        return int(chat_id)
+        # Ensure it's a string (UUID)
+        return str(user_id)
     except jwt.ExpiredSignatureError:
         logger.warning("Token expired")
         raise HTTPException(status_code=401, detail="Token expired")
@@ -205,7 +231,6 @@ async def get_current_user_id(authorization: Optional[str] = Header(default=None
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-# Keep admin token verification for backward compatibility (if needed)
 async def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> None:
     """
     Проверяет Bearer-токен в заголовке Authorization.
