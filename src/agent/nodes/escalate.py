@@ -13,6 +13,7 @@ from src.database.models import ThreadStatus
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.queue_repository import QueueRepository
 from src.tools.builtins import TicketCreateTool
+from src.services.redis_client import get_redis_client
 
 logger = get_logger(__name__)
 
@@ -48,7 +49,8 @@ def create_escalate_node(
           1. Create a ticket in the tasks table.
           2. Enqueue a 'notify_manager' task with relevant payload.
           3. Enqueue a 'update_metrics' task with escalated=True.
-          4. Set requires_human=True and a standard response text in the state.
+          4. Publish an event to Redis for WebSocket clients.
+          5. Set requires_human=True and a standard response text in the state.
 
         Returns a dict with updates to the state.
         """
@@ -116,7 +118,21 @@ def create_escalate_node(
         except Exception as e:
             logger.exception("Failed to enqueue metrics update", extra={"thread_id": thread_id})
 
-        # 4. Return updates to state
+        # 4. Publish event to Redis for WebSocket clients
+        try:
+            redis = await get_redis_client()
+            event_data = {
+                "type": "escalation",
+                "thread_id": thread_id,
+                "user_input": user_input[:200],
+                "timestamp": __import__("datetime").datetime.utcnow().isoformat()
+            }
+            await redis.publish(f"thread:{thread_id}", json.dumps(event_data, default=str))
+            logger.debug("Escalation event published to Redis", extra={"thread_id": thread_id})
+        except Exception as e:
+            logger.warning("Failed to publish escalation event", extra={"thread_id": thread_id, "error": str(e)})
+
+        # 5. Return updates to state
         return {
             "requires_human": True,
             "response_text": "Ваш вопрос передан менеджеру. Ожидайте ответа в ближайшее время.",

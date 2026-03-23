@@ -29,6 +29,7 @@ from src.database.repositories.template_repository import TemplateRepository
 from src.database.repositories.workflow_repository import WorkflowRepository
 from src.database.repositories.user_repository import UserRepository
 from src.database.repositories.metrics_repository import MetricsRepository
+from src.database.repositories.memory_repository import MemoryRepository
 from src.services.redis_client import get_redis_client
 
 import src.core.lifespan
@@ -170,6 +171,19 @@ def get_metrics_repository(pool: Any = Depends(get_pool)) -> MetricsRepository:
         MetricsRepository: Repository for thread and project metrics.
     """
     return MetricsRepository(pool)
+
+
+def get_memory_repository(pool: Any = Depends(get_pool)) -> MemoryRepository:
+    """
+    Return a new MemoryRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        MemoryRepository: Repository for user memory (long-term facts).
+    """
+    return MemoryRepository(pool)
 
 
 def get_tool_registry() -> Any:

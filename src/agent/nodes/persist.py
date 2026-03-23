@@ -5,6 +5,8 @@ Saves assistant message and state to the database, emits events for auditing,
 stores dialog_state in long-term memory, and updates analytics columns.
 """
 
+import datetime
+import json
 from typing import Any, Dict, Optional
 
 from src.core.logging import get_logger, log_node_execution
@@ -14,6 +16,7 @@ from src.database.repositories.event_repository import EventRepository
 from src.database.repositories.memory_repository import MemoryRepository
 from src.database.repositories.queue_repository import QueueRepository
 from src.database.models import ThreadStatus
+from src.services.redis_client import get_redis_client
 
 logger = get_logger(__name__)
 
@@ -173,6 +176,26 @@ def create_persist_node(
                     content=response_text,
                 )
                 logger.debug("Assistant message saved", extra={"thread_id": thread_id})
+
+                # Publish new message to Redis for WebSocket clients
+                try:
+                    redis = await get_redis_client()
+                    message_data = {
+                        "type": "new_message",
+                        "thread_id": thread_id,
+                        "message": {
+                            "id": None,  # we don't have id yet, but could fetch
+                            "role": "assistant",
+                            "content": response_text,
+                            "created_at": datetime.datetime.utcnow().isoformat(),
+                            "metadata": state.get("metadata", {})
+                        }
+                    }
+                    await redis.publish(f"thread:{thread_id}", json.dumps(message_data, default=str))
+                    logger.debug("Message event published to Redis", extra={"thread_id": thread_id})
+                except Exception as e:
+                    logger.warning("Failed to publish message event", extra={"thread_id": thread_id, "error": str(e)})
+
             except Exception:
                 logger.exception("Failed to save assistant message", extra={"thread_id": thread_id})
                 # Continue to save state anyway.
@@ -366,7 +389,7 @@ def create_persist_node(
                 if thread_info:
                     created_at = thread_info.get("created_at")
                     if created_at:
-                        resolution_time = (datetime.utcnow() - created_at).total_seconds()
+                        resolution_time = (datetime.datetime.utcnow() - created_at).total_seconds()
                     else:
                         resolution_time = None
                 else:
