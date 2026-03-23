@@ -550,7 +550,16 @@ class ProjectRepository:
                 FROM projects
                 ORDER BY created_at DESC
             """)
-            return [dict(row) for row in rows]
+            projects = []
+            for row in rows:
+                proj = dict(row)
+                proj["id"] = str(proj["id"])
+                if proj.get("owner_id"):
+                    proj["owner_id"] = str(proj["owner_id"])
+                if proj.get("user_id"):
+                    proj["user_id"] = str(proj["user_id"])
+                projects.append(proj)
+            return projects
 
     async def get_project_by_id(self, project_id: Union[str, uuid.UUID]) -> Optional[Dict[str, Any]]:
         """
@@ -568,7 +577,15 @@ class ProjectRepository:
                 FROM projects
                 WHERE id = $1
             """, _ensure_uuid(project_id))
-            return dict(row) if row else None
+            if not row:
+                return None
+            proj = dict(row)
+            proj["id"] = str(proj["id"])
+            if proj.get("owner_id"):
+                proj["owner_id"] = str(proj["owner_id"])
+            if proj.get("user_id"):
+                proj["user_id"] = str(proj["user_id"])
+            return proj
 
     async def update_project(self, project_id: Union[str, uuid.UUID], name: Optional[str]) -> None:
         """
@@ -615,7 +632,12 @@ class ProjectRepository:
                 WHERE owner_id = $1
                 ORDER BY created_at DESC
             """, owner_id)
-            return [dict(row) for row in rows]
+            projects = []
+            for row in rows:
+                proj = dict(row)
+                proj["id"] = str(proj["id"])
+                projects.append(proj)
+            return projects
 
     async def get_projects_by_user_id(self, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -625,7 +647,7 @@ class ProjectRepository:
             user_id: UUID пользователя.
         
         Returns:
-            Список проектов с полями id, name, is_pro_mode, template_slug, created_at, updated_at.
+            Список проектов с полями id, name, is_pro_mode, template_slug, created_at, updated_at, user_id.
         """
         logger.info("Fetching projects by user_id", extra={"user_id": user_id})
         async with self.pool.acquire() as conn:
@@ -635,4 +657,10 @@ class ProjectRepository:
                 WHERE user_id = $1
                 ORDER BY created_at DESC
             """, user_id)
-            return [dict(row) for row in rows]
+            projects = []
+            for row in rows:
+                proj = dict(row)
+                proj["id"] = str(proj["id"])
+                proj["user_id"] = user_id  # add user_id explicitly
+                projects.append(proj)
+            return projects

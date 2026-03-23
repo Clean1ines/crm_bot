@@ -5,10 +5,12 @@ This module keeps routing deterministic and adds a compact dialog_state layer
 that tracks repeated intent, topic, CTA, and lead status across turns.
 """
 
+import json
 from typing import Any, Dict, Optional, Tuple
 
 from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
+from src.database.repositories.event_repository import EventRepository
 
 logger = get_logger(__name__)
 
@@ -505,12 +507,15 @@ def get_decision(
     return new_lifecycle, decision, cta
 
 
-def create_policy_engine_node():
+def create_policy_engine_node(event_repo: Optional[EventRepository] = None):
     """
     Factory function that creates a policy engine node.
 
     The policy engine is a pure Python function that uses lifecycle,
     extracted intent, dialog_state, and features to decide the next action.
+
+    Args:
+        event_repo: Optional EventRepository to emit policy_decision events.
 
     Returns:
         An async function that takes an AgentState dict and returns updates
@@ -526,10 +531,14 @@ def create_policy_engine_node():
           - features: Optional[Dict]
           - user_memory: Optional[Dict]
           - dialog_state: Optional[Dict]
+          - thread_id: str
+          - project_id: str
 
         Returns:
             Dict with decision, lifecycle (if changed), cta, dialog_state, topic, lead_status.
         """
+        thread_id = state.get("thread_id")
+        project_id = state.get("project_id")
         lifecycle = state.get("lifecycle") or DEFAULT_LIFECYCLE
         intent = state.get("intent")
         features = state.get("features")
@@ -554,6 +563,28 @@ def create_policy_engine_node():
             decision=decision,
             features=features,
         )
+
+        # Emit policy_decision event if event_repo is available.
+        if event_repo and thread_id and project_id:
+            try:
+                await event_repo.append(
+                    stream_id=thread_id,
+                    project_id=project_id,
+                    event_type="policy_decision",
+                    payload={
+                        "decision": decision,
+                        "intent": normalized_intent,
+                        "lifecycle": new_lifecycle,
+                        "cta": cta,
+                        "topic": topic,
+                        "repeat_count": next_dialog_state.get("repeat_count"),
+                        "lead_status": next_dialog_state.get("lead_status"),
+                        "confidence": state.get("confidence"),
+                    },
+                )
+                logger.debug("Policy decision event emitted", extra={"thread_id": thread_id})
+            except Exception as e:
+                logger.warning("Failed to emit policy_decision event", extra={"error": str(e)})
 
         logger.debug(
             "Policy decision finalized",

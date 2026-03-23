@@ -59,6 +59,36 @@ def _merge_dialog_state_into_user_memory(
     return merged
 
 
+def _build_explanation(decision: str, intent: str, lifecycle: str, cta: str) -> str:
+    """
+    Build a human-readable explanation for the bot's response in demo mode.
+
+    Args:
+        decision: The decision made by policy engine.
+        intent: The detected intent.
+        lifecycle: Current lifecycle stage.
+        cta: Call-to-action.
+
+    Returns:
+        A string explaining why the bot responded that way.
+    """
+    parts = []
+    if intent:
+        parts.append(f"Я распознал намерение: {intent}")
+    if decision == "LLM_GENERATE":
+        parts.append("Я сгенерировал ответ на основе вашего вопроса и базы знаний.")
+    elif decision == "ESCALATE_TO_HUMAN":
+        parts.append("Я бы передал вопрос менеджеру, так как он требует человеческого вмешательства.")
+    if lifecycle:
+        parts.append(f"На основе нашего разговора я определил стадию: {lifecycle}.")
+    if cta and cta != "none":
+        parts.append(f"Следующим шагом я предлагаю: {cta}.")
+
+    if not parts:
+        return "Ответ сгенерирован на основе вашего сообщения."
+    return " ".join(parts)
+
+
 def create_response_generator_node(
     llm: Optional[ChatGroq] = None,
     model_name: Optional[str] = None,
@@ -96,9 +126,10 @@ def create_response_generator_node(
           - user_memory: Optional[Dict]
           - dialog_state: Optional[Dict]
           - features: Optional[Dict]
+          - demo_mode: Optional[bool]
 
         Returns:
-            Dict with response_text.
+            Dict with response_text and optionally metadata (explanation).
         """
         decision = state.get("decision", "LLM_GENERATE")
         if decision not in ["LLM_GENERATE", "RESPOND_KB", "RESPOND_TEMPLATE"]:
@@ -148,7 +179,21 @@ def create_response_generator_node(
                     "decision": decision,
                 },
             )
-            return {"response_text": response_text}
+
+            # Prepare metadata
+            metadata: Dict[str, Any] = {}
+            # In demo mode, add explanation
+            if state.get("demo_mode"):
+                explanation = _build_explanation(
+                    decision=decision,
+                    intent=state.get("intent", ""),
+                    lifecycle=state.get("lifecycle", ""),
+                    cta=state.get("cta", ""),
+                )
+                metadata["explanation"] = explanation
+                logger.debug("Added explanation to metadata", extra={"explanation": explanation})
+
+            return {"response_text": response_text, "metadata": metadata}
 
         except Exception:
             logger.exception("Response generation failed", extra={"decision": decision})

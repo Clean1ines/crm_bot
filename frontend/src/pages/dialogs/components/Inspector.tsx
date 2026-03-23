@@ -145,9 +145,16 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       total_messages?: number;
       created_at?: string;
       updated_at?: string;
+      interaction_mode?: string;
     };
+    const isDemo = state?.interaction_mode === 'demo';
     return (
       <div className="space-y-2">
+        {isDemo && (
+          <div className="bg-yellow-500/20 text-yellow-500 px-2 py-1 rounded text-xs inline-block">
+            Демо-режим
+          </div>
+        )}
         <div className="text-sm text-[var(--text-muted)]">Клиент: {threadId ? threadId.slice(0, 8) : '—'}</div>
         <div className="text-sm text-[var(--text-muted)]">Статус: {state?.status || '—'}</div>
         <div className="text-sm text-[var(--text-muted)]">Настроение: {state?.lifecycle || '—'}</div>
@@ -191,33 +198,37 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     </div>
   );
 
-  const renderDecision = () => {
-    const state = threadState as ThreadState & {
-      decision?: string;
-      intent?: string;
-      lifecycle?: string;
-      cta?: string;
-      confidence?: number;
-    };
+  const renderDecisionTrace = () => {
+    const policyEvents = threadTimeline.filter(e => e.type === 'policy_decision');
     return (
       <div className="space-y-2">
-        <div className="text-sm">
-          <span className="font-semibold">Решение:</span> {state?.decision || '—'}
-        </div>
-        <div className="text-sm">
-          <span className="font-semibold">Намерение:</span> {state?.intent || '—'}
-        </div>
-        <div className="text-sm">
-          <span className="font-semibold">Жизненный цикл:</span> {state?.lifecycle || '—'}
-        </div>
-        <div className="text-sm">
-          <span className="font-semibold">CTA:</span> {state?.cta || '—'}
-        </div>
-        {state?.confidence !== undefined && (
-          <div className="text-sm">
-            <span className="font-semibold">Уверенность:</span> {state.confidence}
-          </div>
-        )}
+        {policyEvents.length === 0 && <div className="text-sm text-[var(--text-muted)]">Нет записей решений</div>}
+        {policyEvents.map((event) => {
+          const payload = event.payload;
+          const decision = typeof payload.decision === 'string' ? payload.decision : '—';
+          const intent = typeof payload.intent === 'string' ? payload.intent : '—';
+          const lifecycle = typeof payload.lifecycle === 'string' ? payload.lifecycle : '—';
+          const cta = typeof payload.cta === 'string' ? payload.cta : '—';
+          const repeatCount = typeof payload.repeat_count === 'number' ? payload.repeat_count : undefined;
+          const leadStatus = typeof payload.lead_status === 'string' ? payload.lead_status : undefined;
+          return (
+            <div key={event.id} className="border-l-2 border-blue-500 pl-2 py-1">
+              <div className="text-xs text-[var(--text-muted)]">
+                {new Date(event.ts).toLocaleString()}
+              </div>
+              <div className="text-sm font-mono">Решение: {decision}</div>
+              <div className="text-xs text-[var(--text-muted)]">
+                Намерение: {intent}, ЖЦ: {lifecycle}, CTA: {cta}
+              </div>
+              {repeatCount !== undefined && (
+                <div className="text-xs text-[var(--text-muted)]">Повторов: {repeatCount}</div>
+              )}
+              {leadStatus !== undefined && (
+                <div className="text-xs text-[var(--text-muted)]">Статус лида: {leadStatus}</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -252,7 +263,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   const tabs = [
     { id: 'summary', label: 'Сводка', component: renderSummary },
     { id: 'memory', label: 'Память', component: renderMemory },
-    { id: 'decision', label: 'Решение', component: renderDecision },
+    { id: 'decision', label: 'Решение', component: renderDecisionTrace },
     { id: 'timeline', label: 'События', component: renderTimeline },
     { id: 'raw', label: 'Raw', component: renderRaw },
   ] as const;

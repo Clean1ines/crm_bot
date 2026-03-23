@@ -18,10 +18,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     isLoadingMessages,
     setLoadingMessages,
     setInspectorActiveTab,
+    threadState,
+    setThreadState,
   } = useAppStore();
 
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isEnablingDemo, setIsEnablingDemo] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [limit] = useState(50);
   const [offset] = useState(0);
@@ -91,11 +94,35 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     }
   };
 
+  const enableDemoMode = async () => {
+    if (!threadId || isEnablingDemo) return;
+    setIsEnablingDemo(true);
+    try {
+      const { error } = await api.threads.enableDemo(threadId);
+      if (error) {
+        console.error('Failed to enable demo mode', error);
+      } else {
+        // Refresh thread state to get updated interaction_mode
+        const { data } = await api.threads.getState(threadId);
+        if (data && typeof data === 'object' && 'state' in data) {
+          setThreadState(data.state as Record<string, unknown>);
+        }
+      }
+    } catch (err) {
+      console.error('Error enabling demo mode', err);
+    } finally {
+      setIsEnablingDemo(false);
+    }
+  };
+
   const onMessageClick = (message: Message) => {
     if (message.role === 'assistant' && message.metadata?.explanation) {
       setInspectorActiveTab('decision');
     }
   };
+
+  // Determine if demo button should be shown (always for now, but could be based on state)
+  const showDemoButton = threadId && threadState && (threadState.interaction_mode !== 'demo');
 
   return (
     <div className="flex flex-col h-full bg-[var(--ios-bg)]">
@@ -104,11 +131,22 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
         <div className="font-medium text-[var(--text-main)]">
           {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
         </div>
-        {threadId && (
-          <div className="text-xs text-[var(--text-muted)]">
-            {isConnected ? '🔵 Онлайн' : '⚪ Офлайн'}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {showDemoButton && (
+            <button
+              onClick={enableDemoMode}
+              disabled={isEnablingDemo}
+              className="px-2 py-1 text-xs bg-yellow-500 text-black rounded hover:bg-yellow-600 disabled:opacity-50"
+            >
+              {isEnablingDemo ? 'Включение...' : '🔥 Попробовать демо'}
+            </button>
+          )}
+          {threadId && (
+            <div className="text-xs text-[var(--text-muted)]">
+              {isConnected ? '🔵 Онлайн' : '⚪ Офлайн'}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Messages area */}
@@ -133,6 +171,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
               {msg.metadata?.latency_ms && (
                 <div className="text-xs opacity-70 mt-1">
                   ⏱️ {msg.metadata.latency_ms}ms | 🧠 {msg.metadata.tokens || 0} токенов
+                </div>
+              )}
+              {msg.metadata?.explanation && (
+                <div className="text-xs text-yellow-500 mt-1">
+                  📖 {msg.metadata.explanation}
                 </div>
               )}
             </div>

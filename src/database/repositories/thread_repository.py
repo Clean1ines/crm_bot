@@ -371,12 +371,23 @@ class ThreadRepository:
         
         dialogs = []
         for row in rows:
+            # Convert datetime objects to ISO format strings
+            thread_created_at = row["thread_created_at"]
+            if thread_created_at:
+                thread_created_at = thread_created_at.isoformat()
+            thread_updated_at = row["thread_updated_at"]
+            if thread_updated_at:
+                thread_updated_at = thread_updated_at.isoformat()
+            last_msg_created_at = row["last_message_created_at"]
+            if last_msg_created_at:
+                last_msg_created_at = last_msg_created_at.isoformat()
+
             dialogs.append({
                 "thread_id": str(row["thread_id"]),
                 "status": row["status"],
                 "interaction_mode": row["interaction_mode"],
-                "thread_created_at": row["thread_created_at"],
-                "thread_updated_at": row["thread_updated_at"],
+                "thread_created_at": thread_created_at,
+                "thread_updated_at": thread_updated_at,
                 "client": {
                     "id": str(row["client_id"]),
                     "full_name": row["full_name"],
@@ -385,7 +396,7 @@ class ThreadRepository:
                 },
                 "last_message": {
                     "content": row["last_message_content"],
-                    "created_at": row["last_message_created_at"]
+                    "created_at": last_msg_created_at
                 } if row["last_message_content"] else None,
                 "unread_count": 0  # placeholder
             })
@@ -409,11 +420,14 @@ class ThreadRepository:
         
         messages = []
         for row in rows:
+            created_at = row["created_at"]
+            if created_at:
+                created_at = created_at.isoformat()
             messages.append({
                 "id": str(row["id"]),
                 "role": row["role"],
                 "content": row["content"],
-                "created_at": row["created_at"],
+                "created_at": created_at,
                 "metadata": row["metadata"] or {}
             })
         

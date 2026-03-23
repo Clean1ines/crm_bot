@@ -11,7 +11,7 @@ import { TicketDetailPage } from '@pages/manager/TicketDetailPage';
 import { TelegramLoginPage } from '@pages/login/TelegramLoginPage';
 import { DialogsPage } from '@pages/dialogs/DialogsPage';
 import { ComingSoon } from '@pages/ComingSoon';
-import { Layout } from './Layout';
+import { Layout } from './app/Layout';
 import { getSessionToken } from '@shared/api/client';
 
 const AuthGuard = ({ children }: { children: React.ReactNode }) => {
