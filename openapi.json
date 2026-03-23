@@ -980,12 +980,46 @@
         "tags": [
           "threads"
         ],
-        "summary": "List Threads",
-        "description": "\u0412\u043e\u0437\u0432\u0440\u0430\u0449\u0430\u0435\u0442 \u0441\u043f\u0438\u0441\u043e\u043a \u0442\u0440\u0435\u0434\u043e\u0432. \u0414\u043b\u044f \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u0441\u043a\u043e\u0433\u043e \u043f\u043e\u0440\u0442\u0430\u043b\u0430 \u043e\u0431\u044b\u0447\u043d\u043e status=manual.",
-        "operationId": "list_threads_api_threads_get",
+        "summary": "List Dialogs",
+        "description": "Get paginated list of dialogs (threads) for a project.\nIncludes client info and last message.",
+        "operationId": "list_dialogs_api_threads_get",
         "parameters": [
           {
-            "name": "status",
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Project ID to filter threads",
+              "title": "Project Id"
+            },
+            "description": "Project ID to filter threads"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "status_filter",
             "in": "query",
             "required": false,
             "schema": {
@@ -997,10 +1031,28 @@
                   "type": "null"
                 }
               ],
-              "description": "\u0424\u0438\u043b\u044c\u0442\u0440 \u043f\u043e \u0441\u0442\u0430\u0442\u0443\u0441\u0443 (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, 'manual')",
-              "title": "Status"
+              "description": "Filter by thread status (active, manual, closed)",
+              "title": "Status Filter"
             },
-            "description": "\u0424\u0438\u043b\u044c\u0442\u0440 \u043f\u043e \u0441\u0442\u0430\u0442\u0443\u0441\u0443 (\u043d\u0430\u043f\u0440\u0438\u043c\u0435\u0440, 'manual')"
+            "description": "Filter by thread status (active, manual, closed)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search by client name or username",
+              "title": "Search"
+            },
+            "description": "Search by client name or username"
           },
           {
             "name": "authorization",
@@ -1029,8 +1081,88 @@
                   "items": {
                     "$ref": "#/components/schemas/ThreadResponse"
                   },
-                  "title": "Response List Threads Api Threads Get"
+                  "title": "Response List Dialogs Api Threads Get"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/messages": {
+      "get": {
+        "tags": [
+          "threads"
+        ],
+        "summary": "Get Messages",
+        "description": "Get paginated messages for a thread.",
+        "operationId": "get_messages_api_threads__thread_id__messages_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -1053,7 +1185,7 @@
           "threads"
         ],
         "summary": "Reply To Thread",
-        "description": "\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u044f\u0435\u0442 \u043e\u0442\u0432\u0435\u0442 \u043c\u0435\u043d\u0435\u0434\u0436\u0435\u0440\u0430 \u0432 \u0443\u043a\u0430\u0437\u0430\u043d\u043d\u044b\u0439 \u0442\u0440\u0435\u0434.",
+        "description": "Send a manager reply to a thread. Only allowed if thread is in manual mode.",
         "operationId": "reply_to_thread_api_threads__thread_id__reply_post",
         "parameters": [
           {
@@ -1092,6 +1224,322 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/timeline": {
+      "get": {
+        "tags": [
+          "threads"
+        ],
+        "summary": "Get Timeline",
+        "description": "Get paginated timeline of events for a thread (from events table).",
+        "operationId": "get_timeline_api_threads__thread_id__timeline_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/memory": {
+      "get": {
+        "tags": [
+          "threads"
+        ],
+        "summary": "Get Memory",
+        "description": "Get user memory for the client of this thread.",
+        "operationId": "get_memory_api_threads__thread_id__memory_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "threads"
+        ],
+        "summary": "Update Memory Entry",
+        "description": "Update a specific memory entry for the client of this thread.\nIf the key does not exist, it will be created with type 'user_edited'.",
+        "operationId": "update_memory_entry_api_threads__thread_id__memory_patch",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/state": {
+      "get": {
+        "tags": [
+          "threads"
+        ],
+        "summary": "Get State",
+        "description": "Get the current state_json (LangGraph state) for the thread.",
+        "operationId": "get_state_api_threads__thread_id__state_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/demo": {
+      "post": {
+        "tags": [
+          "threads"
+        ],
+        "summary": "Enable Demo Mode",
+        "description": "Switch the thread to demo mode (interaction_mode='demo').",
+        "operationId": "enable_demo_mode_api_threads__thread_id__demo_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1202,6 +1650,174 @@
         },
         "responses": {
           "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/clients": {
+      "get": {
+        "tags": [
+          "clients"
+        ],
+        "summary": "List Clients",
+        "description": "Get paginated list of clients for a project.",
+        "operationId": "list_clients_api_clients_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Project ID",
+              "title": "Project Id"
+            },
+            "description": "Project ID"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search by name or username",
+              "title": "Search"
+            },
+            "description": "Search by name or username"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/clients/{client_id}": {
+      "get": {
+        "tags": [
+          "clients"
+        ],
+        "summary": "Get Client",
+        "description": "Get detailed client information, including memory.",
+        "operationId": "get_client_api_clients__client_id__get",
+        "parameters": [
+          {
+            "name": "client_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Client Id"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Project ID",
+              "title": "Project Id"
+            },
+            "description": "Project ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -1543,34 +2159,36 @@
       },
       "ThreadResponse": {
         "properties": {
-          "id": {
+          "thread_id": {
             "type": "string",
-            "title": "Id"
-          },
-          "client_id": {
-            "type": "string",
-            "title": "Client Id"
-          },
-          "project_id": {
-            "type": "string",
-            "title": "Project Id"
+            "title": "Thread Id"
           },
           "status": {
             "type": "string",
             "title": "Status"
           },
-          "created_at": {
+          "interaction_mode": {
             "type": "string",
-            "title": "Created At"
+            "title": "Interaction Mode"
           },
-          "updated_at": {
+          "thread_created_at": {
             "type": "string",
-            "title": "Updated At"
+            "title": "Thread Created At"
+          },
+          "thread_updated_at": {
+            "type": "string",
+            "title": "Thread Updated At"
+          },
+          "client": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Client"
           },
           "last_message": {
             "anyOf": [
               {
-                "type": "string"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
@@ -1578,30 +2196,43 @@
             ],
             "title": "Last Message"
           },
-          "client_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Client Name"
+          "unread_count": {
+            "type": "integer",
+            "title": "Unread Count"
           }
         },
         "type": "object",
         "required": [
-          "id",
-          "client_id",
-          "project_id",
+          "thread_id",
           "status",
-          "created_at",
-          "updated_at",
+          "interaction_mode",
+          "thread_created_at",
+          "thread_updated_at",
+          "client",
           "last_message",
-          "client_name"
+          "unread_count"
         ],
         "title": "ThreadResponse"
+      },
+      "UpdateMemoryRequest": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "type": "string",
+            "contentMediaType": "application/json",
+            "contentSchema": {},
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "UpdateMemoryRequest"
       },
       "ValidationError": {
         "properties": {

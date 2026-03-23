@@ -277,10 +277,31 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Threads
-         * @description Возвращает список тредов. Для менеджерского портала обычно status=manual.
+         * List Dialogs
+         * @description Get paginated list of dialogs (threads) for a project.
+         *     Includes client info and last message.
          */
-        get: operations["list_threads_api_threads_get"];
+        get: operations["list_dialogs_api_threads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Messages
+         * @description Get paginated messages for a thread.
+         */
+        get: operations["get_messages_api_threads__thread_id__messages_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -300,9 +321,94 @@ export interface paths {
         put?: never;
         /**
          * Reply To Thread
-         * @description Отправляет ответ менеджера в указанный тред.
+         * @description Send a manager reply to a thread. Only allowed if thread is in manual mode.
          */
         post: operations["reply_to_thread_api_threads__thread_id__reply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Timeline
+         * @description Get paginated timeline of events for a thread (from events table).
+         */
+        get: operations["get_timeline_api_threads__thread_id__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Memory
+         * @description Get user memory for the client of this thread.
+         */
+        get: operations["get_memory_api_threads__thread_id__memory_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Memory Entry
+         * @description Update a specific memory entry for the client of this thread.
+         *     If the key does not exist, it will be created with type 'user_edited'.
+         */
+        patch: operations["update_memory_entry_api_threads__thread_id__memory_patch"];
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get State
+         * @description Get the current state_json (LangGraph state) for the thread.
+         */
+        get: operations["get_state_api_threads__thread_id__state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enable Demo Mode
+         * @description Switch the thread to demo mode (interaction_mode='demo').
+         */
+        post: operations["enable_demo_mode_api_threads__thread_id__demo_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -343,6 +449,46 @@ export interface paths {
          *     In production, this would typically be run as a cron job.
          */
         post: operations["aggregate_metrics_api_admin_metrics_aggregate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Clients
+         * @description Get paginated list of clients for a project.
+         */
+        get: operations["list_clients_api_clients_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/clients/{client_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Client
+         * @description Get detailed client information, including memory.
+         */
+        get: operations["get_client_api_clients__client_id__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -464,22 +610,33 @@ export interface components {
         };
         /** ThreadResponse */
         ThreadResponse: {
-            /** Id */
-            id: string;
-            /** Client Id */
-            client_id: string;
-            /** Project Id */
-            project_id: string;
+            /** Thread Id */
+            thread_id: string;
             /** Status */
             status: string;
-            /** Created At */
-            created_at: string;
-            /** Updated At */
-            updated_at: string;
+            /** Interaction Mode */
+            interaction_mode: string;
+            /** Thread Created At */
+            thread_created_at: string;
+            /** Thread Updated At */
+            thread_updated_at: string;
+            /** Client */
+            client: {
+                [key: string]: unknown;
+            };
             /** Last Message */
-            last_message: string | null;
-            /** Client Name */
-            client_name: string | null;
+            last_message: {
+                [key: string]: unknown;
+            } | null;
+            /** Unread Count */
+            unread_count: number;
+        };
+        /** UpdateMemoryRequest */
+        UpdateMemoryRequest: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -1092,11 +1249,17 @@ export interface operations {
             };
         };
     };
-    list_threads_api_threads_get: {
+    list_dialogs_api_threads_get: {
         parameters: {
-            query?: {
-                /** @description Фильтр по статусу (например, 'manual') */
-                status?: string | null;
+            query: {
+                /** @description Project ID to filter threads */
+                project_id: string;
+                limit?: number;
+                offset?: number;
+                /** @description Filter by thread status (active, manual, closed) */
+                status_filter?: string | null;
+                /** @description Search by client name or username */
+                search?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -1126,6 +1289,42 @@ export interface operations {
             };
         };
     };
+    get_messages_api_threads__thread_id__messages_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     reply_to_thread_api_threads__thread_id__reply_post: {
         parameters: {
             query?: never;
@@ -1142,6 +1341,178 @@ export interface operations {
                 "application/json": components["schemas"]["ReplyRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_timeline_api_threads__thread_id__timeline_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_memory_api_threads__thread_id__memory_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_memory_entry_api_threads__thread_id__memory_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMemoryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_state_api_threads__thread_id__state_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_demo_mode_api_threads__thread_id__demo_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -1215,6 +1586,80 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clients_api_clients_get: {
+        parameters: {
+            query: {
+                /** @description Project ID */
+                project_id: string;
+                limit?: number;
+                offset?: number;
+                /** @description Search by name or username */
+                search?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_client_api_clients__client_id__get: {
+        parameters: {
+            query: {
+                /** @description Project ID */
+                project_id: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                client_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

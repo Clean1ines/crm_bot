@@ -26,6 +26,7 @@ type ManagerAddRequest = components['schemas']['ManagerAddRequest'];
 type ApplyTemplateRequest = components['schemas']['ApplyTemplateRequest'];
 type ReplyRequest = components['schemas']['ReplyRequest'];
 type ChatMessageRequest = components['schemas']['ChatMessageRequest'];
+type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
 
 // ---------- Error Message Extraction ----------
 export const getErrorMessage = (error: unknown): string => {
@@ -134,7 +135,7 @@ export async function streamFetch(
 }
 
 // ---------- Typed API Endpoints ----------
-export const api = Object.assign (client, {
+export const api = Object.assign(client, {
   projects: {
     list: () => client.GET('/api/projects'),
     create: (body: ProjectCreate) => client.POST('/api/projects', { body }),
@@ -146,14 +147,29 @@ export const api = Object.assign (client, {
     getManagers: (projectId: string) => client.GET('/api/projects/{project_id}/managers', { params: { path: { project_id: projectId } } }),
     addManager: (projectId: string, chat_id: number) => client.POST('/api/projects/{project_id}/managers', { params: { path: { project_id: projectId } }, body: { chat_id } as ManagerAddRequest }),
     removeManager: (projectId: string, chat_id: number) => client.DELETE('/api/projects/{project_id}/managers/{chat_id}', { params: { path: { project_id: projectId, chat_id } } }),
+    connectBot: (projectId: string, token: string, type: 'client' | 'manager') => client.POST('/api/projects/{project_id}/connect-bot', { params: { path: { project_id: projectId } }, body: { token, type } }),
   },
   templates: {
     list: () => client.GET('/api/templates'),
     apply: (projectId: string, template_slug: string) => client.POST('/api/templates/projects/{project_id}/apply', { params: { path: { project_id: projectId } }, body: { template_slug } as ApplyTemplateRequest }),
   },
   threads: {
-    list: (status?: string) => client.GET('/api/threads', { params: { query: { status } } }),
-    reply: (threadId: string, message: string) => client.POST('/api/threads/{thread_id}/reply', { params: { path: { thread_id: threadId } }, body: { message } as ReplyRequest }),
+    list: (params: { project_id: string; limit?: number; offset?: number; status_filter?: string | null; search?: string | null }) =>
+      client.GET('/api/threads', { params: { query: params } }),
+    getMessages: (threadId: string, limit?: number, offset?: number) =>
+      client.GET('/api/threads/{thread_id}/messages', { params: { path: { thread_id: threadId }, query: { limit, offset } } }),
+    reply: (threadId: string, message: string) =>
+      client.POST('/api/threads/{thread_id}/reply', { params: { path: { thread_id: threadId } }, body: { message } as ReplyRequest }),
+    getTimeline: (threadId: string, limit?: number, offset?: number) =>
+      client.GET('/api/threads/{thread_id}/timeline', { params: { path: { thread_id: threadId }, query: { limit, offset } } }),
+    getMemory: (threadId: string) =>
+      client.GET('/api/threads/{thread_id}/memory', { params: { path: { thread_id: threadId } } }),
+    updateMemory: (threadId: string, key: string, value: unknown) =>
+      client.PATCH('/api/threads/{thread_id}/memory', { params: { path: { thread_id: threadId } }, body: { key, value: JSON.stringify(value) } as UpdateMemoryRequest }),
+    getState: (threadId: string) =>
+      client.GET('/api/threads/{thread_id}/state', { params: { path: { thread_id: threadId } } }),
+    enableDemo: (threadId: string) =>
+      client.POST('/api/threads/{thread_id}/demo', { params: { path: { thread_id: threadId } } }),
   },
   chat: {
     sendStream: (projectId: string, message: string, model?: string) =>
@@ -184,5 +200,11 @@ export const api = Object.assign (client, {
       if (!response.ok) throw data;
       return { data, response };
     },
+  },
+  clients: {
+    list: (params: { project_id: string; limit?: number; offset?: number; search?: string | null }) =>
+      client.GET('/api/clients', { params: { query: params } }),
+    get: (clientId: string, projectId: string) =>
+      client.GET('/api/clients/{client_id}', { params: { path: { client_id: clientId }, query: { project_id: projectId } } }),
   },
 });
