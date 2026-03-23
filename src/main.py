@@ -4,8 +4,9 @@ Sets up logging, middleware, and includes routers.
 """
 
 from fastapi import FastAPI
-
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import traceback
 
 from src.core.config import settings
 from src.core.logging import configure_logging, CorrelationIdMiddleware, get_logger
@@ -18,8 +19,7 @@ from src.api.threads import router as threads_router
 from src.api.chat import router as chat_router
 from src.api.auth import router as auth_router
 from src.api.bot import router as bot_router
-from fastapi.responses import JSONResponse
-import traceback
+from src.api.metrics import router as metrics_router
 
 # Configure structured logging
 configure_logging()
@@ -39,8 +39,6 @@ app.add_middleware(
 
 # Add logging middleware
 app.add_middleware(CorrelationIdMiddleware)
-from fastapi.responses import JSONResponse
-import traceback
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
@@ -65,6 +63,7 @@ app.include_router(projects_router)
 app.include_router(templates_router)
 app.include_router(threads_router)
 app.include_router(chat_router)
+app.include_router(metrics_router)
 
 
 if __name__ == "__main__":

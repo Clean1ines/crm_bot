@@ -142,6 +142,9 @@ class Client(Base):
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     crm_contact_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(50), nullable=False, server_default="telegram"
+    )
     
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

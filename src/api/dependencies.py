@@ -28,6 +28,7 @@ from src.database.repositories.event_repository import EventRepository
 from src.database.repositories.template_repository import TemplateRepository
 from src.database.repositories.workflow_repository import WorkflowRepository
 from src.database.repositories.user_repository import UserRepository
+from src.database.repositories.metrics_repository import MetricsRepository
 from src.services.redis_client import get_redis_client
 
 import src.core.lifespan
@@ -156,6 +157,19 @@ def get_user_repository(pool: Any = Depends(get_pool)) -> UserRepository:
         UserRepository: Repository for user and auth identity operations.
     """
     return UserRepository(pool)
+
+
+def get_metrics_repository(pool: Any = Depends(get_pool)) -> MetricsRepository:
+    """
+    Return a new MetricsRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        MetricsRepository: Repository for thread and project metrics.
+    """
+    return MetricsRepository(pool)
 
 
 def get_tool_registry() -> Any:

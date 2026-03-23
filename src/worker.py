@@ -2,6 +2,8 @@
 Worker process for handling background tasks from the execution queue.
 Currently supports:
 - notify_manager: sends an inline keyboard notification to the manager.
+- update_metrics: updates thread_metrics and project_metrics_daily.
+- aggregate_metrics: recalculates metrics for a given date.
 """
 
 import asyncio
@@ -17,6 +19,7 @@ from src.core.logging import get_logger
 from src.database.repositories.queue_repository import QueueRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.project_repository import ProjectRepository
+from src.database.repositories.metrics_repository import MetricsRepository
 
 logger = get_logger(__name__)
 
@@ -64,6 +67,7 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
     queue_repo = QueueRepository(pool)
     thread_repo = ThreadRepository(pool)
     project_repo = ProjectRepository(pool)
+    metrics_repo = MetricsRepository(pool)
     
     worker_id = f"worker-{id(asyncio.current_task())}"
     logger.info("Worker started", extra={"worker_id": worker_id})
@@ -92,7 +96,6 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
                 success = await _handle_notify_manager(
                     job, thread_repo, project_repo, queue_repo, worker_id
                 )
-                
                 if success:
                     await queue_repo.complete_job(job["id"], success=True)
                 else:
@@ -123,6 +126,14 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
                             extra={"job_id": job["id"], "backoff_seconds": backoff, "next_attempt": attempts + 1}
                         )
                         await asyncio.sleep(backoff)
+
+            elif job["task_type"] == "update_metrics":
+                await _handle_update_metrics(job, metrics_repo, thread_repo)
+                await queue_repo.complete_job(job["id"], success=True)
+
+            elif job["task_type"] == "aggregate_metrics":
+                await _handle_aggregate_metrics(job, metrics_repo)
+                await queue_repo.complete_job(job["id"], success=True)
 
             else:
                 logger.warning(
@@ -308,6 +319,81 @@ async def _handle_notify_manager(
             )
 
     return success_count > 0
+
+
+async def _handle_update_metrics(
+    job: Dict[str, Any],
+    metrics_repo: MetricsRepository,
+    thread_repo: ThreadRepository
+) -> None:
+    """
+    Handle update_metrics task.
+    
+    Payload may contain:
+        thread_id (required)
+        total_messages (optional, increment)
+        ai_messages (optional, increment)
+        manager_messages (optional, increment)
+        escalated (optional, set to True)
+        resolution_time (optional, set)
+        close_ticket (optional, flag to also update project daily)
+    """
+    payload = job.get("payload", {})
+    thread_id = payload.get("thread_id")
+    if not thread_id:
+        logger.error("update_metrics job missing thread_id", extra={"job_id": job["id"]})
+        return
+    
+    # Update thread_metrics
+    await metrics_repo.update_thread_metrics(
+        thread_id=thread_id,
+        total_messages=payload.get("total_messages"),
+        ai_messages=payload.get("ai_messages"),
+        manager_messages=payload.get("manager_messages"),
+        escalated=payload.get("escalated"),
+        resolution_time=payload.get("resolution_time")
+    )
+    
+    # If thread is closed, also update project daily metrics
+    if payload.get("close_ticket"):
+        # Get thread project info
+        thread_info = await thread_repo.get_thread_with_project(thread_id)
+        if thread_info:
+            project_id = thread_info["project_id"]
+            # For now, just update total_threads (maybe we need more accurate aggregation)
+            await metrics_repo.update_project_daily_metrics(
+                project_id=project_id,
+                date=datetime.utcnow().date(),
+                total_threads_delta=1,
+                escalations_delta=1 if payload.get("escalated") else 0,
+                # tokens_used we don't have
+            )
+        else:
+            logger.warning("Thread not found for project daily update", extra={"thread_id": thread_id})
+
+
+async def _handle_aggregate_metrics(
+    job: Dict[str, Any],
+    metrics_repo: MetricsRepository
+) -> None:
+    """
+    Handle aggregate_metrics task.
+    
+    Payload should contain:
+        date: str in YYYY-MM-DD format
+    """
+    payload = job.get("payload", {})
+    date_str = payload.get("date")
+    if not date_str:
+        logger.error("aggregate_metrics job missing date", extra={"job_id": job["id"]})
+        return
+    try:
+        target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        logger.error("Invalid date format", extra={"date": date_str})
+        return
+    
+    await metrics_repo.aggregate_for_date(target_date)
 
 
 async def main():

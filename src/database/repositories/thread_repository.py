@@ -13,16 +13,16 @@ class ThreadRepository:
         """
         self.pool = pool
 
-    async def get_or_create_client(self, project_id: str, chat_id: int, username: str = None) -> str:
+    async def get_or_create_client(self, project_id: str, chat_id: int, username: str = None, source: str = "telegram") -> str:
         """Возвращает UUID клиента, создавая его при необходимости."""
         logger.info(f"Getting or creating client for project {project_id}, chat {chat_id}")
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO clients (project_id, chat_id, username)
-                VALUES ($1, $2, $3)
+                INSERT INTO clients (project_id, chat_id, username, source)
+                VALUES ($1, $2, $3, $4)
                 ON CONFLICT (project_id, chat_id) DO UPDATE SET username = EXCLUDED.username
                 RETURNING id
-            """, uuid.UUID(project_id), chat_id, username)
+            """, uuid.UUID(project_id), chat_id, username, source)
             client_id = str(row['id'])
             logger.info(f"Client {client_id} ensured")
             return client_id
@@ -276,6 +276,32 @@ class ThreadRepository:
             }
             logger.debug(f"Analytics retrieved for thread {thread_id}")
             return analytics
+
+    async def get_message_counts(self, thread_id: str) -> Dict[str, int]:
+        """
+        Возвращает количество сообщений по ролям для треда.
+        
+        Args:
+            thread_id: UUID треда.
+        
+        Returns:
+            Словарь с ключами total, ai, manager.
+        """
+        logger.debug(f"Fetching message counts for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(CASE WHEN role = 'assistant' THEN 1 END) as ai,
+                    COUNT(CASE WHEN role = 'user' THEN 1 END) as manager  -- manager messages are 'user' role from manager bot
+                FROM messages
+                WHERE thread_id = $1
+            """, uuid.UUID(thread_id))
+            return {
+                "total": row["total"] or 0,
+                "ai": row["ai"] or 0,
+                "manager": row["manager"] or 0
+            }
 
 # В ThreadRepository:
 

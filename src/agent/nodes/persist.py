@@ -12,6 +12,8 @@ from src.agent.state import AgentState
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.event_repository import EventRepository
 from src.database.repositories.memory_repository import MemoryRepository
+from src.database.repositories.queue_repository import QueueRepository
+from src.database.models import ThreadStatus
 
 logger = get_logger(__name__)
 
@@ -116,6 +118,7 @@ def create_persist_node(
     event_repo: Optional[EventRepository] = None,
     memory_repo: Optional[MemoryRepository] = None,
     summarizer: Optional[Any] = None,
+    queue_repo: Optional[QueueRepository] = None,
 ):
     """
     Factory function that creates a persist node with injected dependencies.
@@ -125,6 +128,7 @@ def create_persist_node(
         event_repo: Optional EventRepository for emitting events.
         memory_repo: Optional MemoryRepository for storing user memory.
         summarizer: Optional SummarizerService for background summarization.
+        queue_repo: Optional QueueRepository for enqueuing metrics updates.
 
     Returns:
         An async function that takes an AgentState dict and returns a dict
@@ -144,6 +148,7 @@ def create_persist_node(
           - client_id: optional
           - intent, lifecycle, cta, decision: optional for analytics
           - dialog_state: optional for long-term dialog memory
+          - close_ticket: optional boolean to indicate closing the thread
 
         Returns:
             Empty dict on success, or {"error": ...} on failure.
@@ -153,6 +158,7 @@ def create_persist_node(
         response_text = state.get("response_text")
         user_input = (state.get("user_input") or "").lower()
         client_id = state.get("client_id")
+        close_ticket = state.get("close_ticket", False)
 
         if not thread_id or not project_id:
             logger.error("persist_node missing required identifiers")
@@ -350,7 +356,41 @@ def create_persist_node(
                 extra={"thread_id": thread_id, "error": str(exc)},
             )
 
-        # 6. Trigger summarization (placeholder).
+        # 6. Handle thread closure and metrics update
+        if close_ticket and queue_repo:
+            try:
+                # Get message counts
+                counts = await thread_repo.get_message_counts(thread_id)
+                # Get thread creation time
+                thread_info = await thread_repo.get_thread_with_project(thread_id)
+                if thread_info:
+                    created_at = thread_info.get("created_at")
+                    if created_at:
+                        resolution_time = (datetime.utcnow() - created_at).total_seconds()
+                    else:
+                        resolution_time = None
+                else:
+                    resolution_time = None
+                
+                await queue_repo.enqueue(
+                    task_type="update_metrics",
+                    payload={
+                        "thread_id": thread_id,
+                        "total_messages": counts["total"],
+                        "ai_messages": counts["ai"],
+                        "manager_messages": counts["manager"],
+                        "resolution_time": resolution_time,
+                        "close_ticket": True
+                    }
+                )
+                logger.debug("Metrics update enqueued for closed thread", extra={"thread_id": thread_id})
+            except Exception as exc:
+                logger.warning(
+                    "Failed to enqueue metrics update",
+                    extra={"thread_id": thread_id, "error": str(exc)},
+                )
+
+        # 7. Trigger summarization (placeholder).
         # if summarizer and condition_met:
         #     asyncio.create_task(summarizer.summarize_and_save(thread_id))
 

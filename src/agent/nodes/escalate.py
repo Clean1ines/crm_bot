@@ -47,7 +47,8 @@ def create_escalate_node(
         Actions:
           1. Create a ticket in the tasks table.
           2. Enqueue a 'notify_manager' task with relevant payload.
-          3. Set requires_human=True and a standard response text in the state.
+          3. Enqueue a 'update_metrics' task with escalated=True.
+          4. Set requires_human=True and a standard response text in the state.
 
         Returns a dict with updates to the state.
         """
@@ -102,7 +103,20 @@ def create_escalate_node(
         except Exception as e:
             logger.exception("Failed to enqueue manager notification", extra={"thread_id": thread_id})
 
-        # 3. Return updates to state
+        # 3. Enqueue metrics update task
+        try:
+            await queue_repo.enqueue(
+                task_type="update_metrics",
+                payload={
+                    "thread_id": thread_id,
+                    "escalated": True
+                }
+            )
+            logger.debug("Metrics update enqueued", extra={"thread_id": thread_id})
+        except Exception as e:
+            logger.exception("Failed to enqueue metrics update", extra={"thread_id": thread_id})
+
+        # 4. Return updates to state
         return {
             "requires_human": True,
             "response_text": "Ваш вопрос передан менеджеру. Ожидайте ответа в ближайшее время.",
