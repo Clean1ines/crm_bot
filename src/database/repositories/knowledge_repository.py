@@ -4,7 +4,7 @@ Knowledge repository for RAG with hybrid search (vector + FTS + scoring fusion).
 
 import uuid
 import asyncpg
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from src.core.logging import get_logger
 from src.services.embedding_service import embed_text, embed_batch
@@ -111,6 +111,7 @@ class KnowledgeRepository:
         self,
         project_id: str,
         chunks: List[Dict[str, Any]],
+        document_id: Optional[str] = None,
     ) -> int:
 
         if not chunks:
@@ -126,12 +127,125 @@ class KnowledgeRepository:
 
                     await conn.execute(
                         """
-                        INSERT INTO knowledge_base (project_id, content, embedding)
-                        VALUES ($1, $2, $3::vector)
+                        INSERT INTO knowledge_base (project_id, document_id, content, embedding)
+                        VALUES ($1, $2, $3, $4::vector)
                         """,
                         uuid.UUID(project_id),
+                        uuid.UUID(document_id) if document_id else None,
                         chunk["content"],
                         emb_str,
                     )
 
         return len(chunks)
+
+    # Document management methods
+
+    async def create_document(
+        self,
+        project_id: str,
+        file_name: str,
+        file_size: Optional[int] = None,
+        uploaded_by: Optional[str] = None,
+    ) -> str:
+        """
+        Create a new document record.
+        
+        Returns:
+            document_id as string.
+        """
+        logger.info("Creating knowledge document", extra={"project_id": project_id, "file_name": file_name})
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO knowledge_documents (project_id, file_name, file_size, uploaded_by)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            """, uuid.UUID(project_id), file_name, file_size, uploaded_by)
+            doc_id = str(row["id"])
+            logger.info("Document created", extra={"document_id": doc_id})
+            return doc_id
+
+    async def get_documents(
+        self,
+        project_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        List documents for a project.
+        """
+        logger.debug("Fetching knowledge documents", extra={"project_id": project_id, "limit": limit, "offset": offset})
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
+                FROM knowledge_documents
+                WHERE project_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+            """, uuid.UUID(project_id), limit, offset)
+        
+        docs = []
+        for row in rows:
+            # Also count chunks? optional
+            chunk_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
+                row["id"]
+            )
+            doc = dict(row)
+            doc["id"] = str(doc["id"])
+            doc["chunk_count"] = chunk_count
+            docs.append(doc)
+        
+        logger.debug(f"Retrieved {len(docs)} documents")
+        return docs
+
+    async def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a single document by ID.
+        """
+        logger.debug("Fetching knowledge document", extra={"document_id": document_id})
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, project_id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
+                FROM knowledge_documents
+                WHERE id = $1
+            """, uuid.UUID(document_id))
+            if not row:
+                return None
+            chunk_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
+                row["id"]
+            )
+            doc = dict(row)
+            doc["id"] = str(doc["id"])
+            doc["project_id"] = str(doc["project_id"])
+            doc["chunk_count"] = chunk_count
+            return doc
+
+    async def update_document_status(
+        self,
+        document_id: str,
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        Update document processing status.
+        """
+        logger.info("Updating document status", extra={"document_id": document_id, "status": status})
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE knowledge_documents
+                SET status = $1, error = $2, updated_at = NOW()
+                WHERE id = $3
+            """, status, error, uuid.UUID(document_id))
+
+    async def delete_document(self, document_id: str) -> None:
+        """
+        Delete a document and its chunks.
+        """
+        logger.info("Deleting knowledge document", extra={"document_id": document_id})
+        async with self.pool.acquire() as conn:
+            # Chunks will be deleted automatically by ON DELETE CASCADE if foreign key is set correctly,
+            # but we have ON DELETE SET NULL, so we need to delete them explicitly.
+            await conn.execute("DELETE FROM knowledge_base WHERE document_id = $1", uuid.UUID(document_id))
+            await conn.execute("DELETE FROM knowledge_documents WHERE id = $1", uuid.UUID(document_id))
+        logger.info("Document deleted", extra={"document_id": document_id})

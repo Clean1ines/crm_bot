@@ -326,10 +326,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/metrics/aggregate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Aggregate Metrics
+         * @description Manually trigger metrics aggregation for a specific date.
+         *     This endpoint is protected by admin token.
+         *
+         *     In production, this would typically be run as a cron job.
+         */
+        post: operations["aggregate_metrics_api_admin_metrics_aggregate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AggregateMetricsRequest
+         * @description Request body for manual metrics aggregation.
+         */
+        AggregateMetricsRequest: {
+            /** Date */
+            date: string;
+        };
         /** ApplyTemplateRequest */
         ApplyTemplateRequest: {
             /** Template Slug */
@@ -386,6 +417,8 @@ export interface components {
             template_slug: string | null;
             /** Managers */
             managers: number[];
+            /** User Id */
+            user_id: string | null;
         };
         /** ProjectUpdate */
         ProjectUpdate: {
@@ -1147,6 +1180,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    aggregate_metrics_api_admin_metrics_aggregate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AggregateMetricsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

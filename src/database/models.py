@@ -180,6 +180,9 @@ class Thread(Base):
     status: Mapped[ThreadStatus] = mapped_column(
         default=ThreadStatus.ACTIVE, nullable=False
     )
+    interaction_mode: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="normal"
+    )
     
     # Context management for LangGraph
     context_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -218,6 +221,7 @@ class Thread(Base):
             postgresql_where=(status == ThreadStatus.MANUAL)
         ),
         Index("idx_threads_workflow", "workflow_id", "workflow_version"),
+        Index("idx_threads_interaction_mode", "interaction_mode"),
     )
 
 
@@ -255,12 +259,54 @@ class Message(Base):
     )
 
 
+class KnowledgeDocument(Base):
+    """
+    Document model representing an uploaded file in the knowledge base.
+    
+    Each document can have multiple chunks in the knowledge_base table.
+    """
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, server_default=func.gen_random_uuid()
+    )
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pending"
+    )
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    # Relationships
+    project = relationship("Project", back_populates="knowledge_documents")
+    chunks = relationship(
+        "KnowledgeBase", back_populates="document", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("idx_knowledge_documents_project", "project_id"),
+        Index("idx_knowledge_documents_status", "status"),
+    )
+
+
 class KnowledgeBase(Base):
     """
     KnowledgeBase model for RAG (Retrieval-Augmented Generation).
     
     Stores document chunks with vector embeddings for semantic search
-    using pgvector. Each chunk belongs to exactly one project.
+    using pgvector. Each chunk belongs to exactly one project and optionally
+    to a document.
     """
     __tablename__ = "knowledge_base"
 
@@ -269,6 +315,9 @@ class KnowledgeBase(Base):
     )
     project_id: Mapped[str] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="SET NULL"), nullable=True
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     
@@ -288,9 +337,11 @@ class KnowledgeBase(Base):
 
     # Relationships
     project = relationship("Project", back_populates="knowledge_base")
+    document = relationship("KnowledgeDocument", back_populates="chunks")
 
     __table_args__ = (
         Index("idx_knowledge_project_category", "project_id", "category"),
+        Index("idx_knowledge_base_document", "document_id"),
         Index(
             "idx_knowledge_embedding",
             "embedding",

@@ -233,3 +233,55 @@ class EventRepository:
         )
         
         return events
+    
+    async def get_events_for_thread(
+        self,
+        thread_id: str,
+        limit: int = 30,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve events for a specific thread with pagination.
+        
+        This method returns events in descending order (most recent first)
+        for display in the UI timeline.
+        
+        Args:
+            thread_id: UUID of the thread.
+            limit: Maximum number of events to return.
+            offset: Number of events to skip.
+        
+        Returns:
+            List of events with id, type, payload, and created_at.
+        """
+        logger.debug("Fetching events for thread", extra={"thread_id": thread_id, "limit": limit, "offset": offset})
+        thread_uuid = UUID(thread_id)
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, event_type, payload, created_at
+                FROM events
+                WHERE stream_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+                """,
+                thread_uuid,
+                limit,
+                offset
+            )
+        
+        events = [
+            {
+                "id": row["id"],
+                "type": row["event_type"],
+                "payload": row["payload"],
+                "ts": row["created_at"]
+            }
+            for row in rows
+        ]
+        
+        logger.debug(
+            "Events for thread loaded",
+            extra={"thread_id": thread_id, "event_count": len(events)}
+        )
+        return events

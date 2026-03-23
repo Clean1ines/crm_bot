@@ -216,3 +216,36 @@ class MemoryRepository:
         # Store as a dict under key 'stage'
         await self.set(project_id, client_id, "stage", {"stage": lifecycle}, "lifecycle")
         logger.info("Lifecycle stored", extra={"project_id": project_id, "client_id": client_id, "lifecycle": lifecycle})
+
+    async def update_by_key(
+        self,
+        project_id: str,
+        client_id: str,
+        key: str,
+        value: Any
+    ) -> None:
+        """
+        Update a memory entry by key (preserves type). If the entry does not exist,
+        it will be created with a default type 'user_edited'.
+        
+        Args:
+            project_id: UUID of the project.
+            client_id: UUID of the client.
+            key: Memory key to update.
+            value: New value (JSON-serializable).
+        """
+        # Get existing type if present
+        project_uuid = uuid.UUID(project_id)
+        client_uuid = uuid.UUID(client_id)
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT type FROM user_memory
+                WHERE project_id = $1 AND client_id = $2 AND key = $3
+            """, project_uuid, client_uuid, key)
+            type_ = row["type"] if row else "user_edited"
+        
+        await self.set(project_id, client_id, key, value, type_)
+        logger.debug(
+            "Memory updated by key",
+            extra={"project_id": project_id, "client_id": client_id, "key": key}
+        )

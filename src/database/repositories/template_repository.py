@@ -56,7 +56,7 @@ class TemplateRepository:
         
         rows = await self.pool.fetch(
             """
-            SELECT id, slug, name, description, graph_json
+            SELECT id, slug, name, graph_json
             FROM workflow_templates
             WHERE is_active = true
             ORDER BY name
@@ -68,7 +68,6 @@ class TemplateRepository:
                 "id": str(row["id"]),
                 "slug": row["slug"],
                 "name": row["name"],
-                "description": row["description"],
                 "graph_json": row["graph_json"]
             }
             for row in rows
@@ -106,7 +105,7 @@ class TemplateRepository:
         
         row = await self.pool.fetchrow(
             """
-            SELECT id, slug, name, description, graph_json
+            SELECT id, slug, name, graph_json
             FROM workflow_templates
             WHERE slug = $1 AND is_active = true
             """,
@@ -121,7 +120,6 @@ class TemplateRepository:
             "id": str(row["id"]),
             "slug": row["slug"],
             "name": row["name"],
-            "description": row["description"],
             "graph_json": row["graph_json"]
         }
         
@@ -149,7 +147,7 @@ class TemplateRepository:
         
         row = await self.pool.fetchrow(
             """
-            SELECT id, slug, name, description, graph_json
+            SELECT id, slug, name, graph_json
             FROM workflow_templates
             WHERE id = $1 AND is_active = true
             """,
@@ -167,7 +165,6 @@ class TemplateRepository:
             "id": str(row["id"]),
             "slug": row["slug"],
             "name": row["name"],
-            "description": row["description"],
             "graph_json": row["graph_json"]
         }
         

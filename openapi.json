@@ -1163,10 +1163,82 @@
           }
         }
       }
+    },
+    "/api/admin/metrics/aggregate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Aggregate Metrics",
+        "description": "Manually trigger metrics aggregation for a specific date.\nThis endpoint is protected by admin token.\n\nIn production, this would typically be run as a cron job.",
+        "operationId": "aggregate_metrics_api_admin_metrics_aggregate_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AggregateMetricsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AggregateMetricsRequest": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "AggregateMetricsRequest",
+        "description": "Request body for manual metrics aggregation."
+      },
       "ApplyTemplateRequest": {
         "properties": {
           "template_slug": {
@@ -1291,15 +1363,7 @@
       "ProjectResponse": {
         "properties": {
           "id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "string"
-              }
-            ],
+            "type": "string",
             "title": "Id"
           },
           "name": {
@@ -1327,6 +1391,17 @@
             },
             "type": "array",
             "title": "Managers"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "type": "object",
@@ -1335,7 +1410,8 @@
           "name",
           "is_pro_mode",
           "template_slug",
-          "managers"
+          "managers",
+          "user_id"
         ],
         "title": "ProjectResponse"
       },

@@ -303,16 +303,146 @@ class ThreadRepository:
                 "manager": row["manager"] or 0
             }
 
-# В ThreadRepository:
-
-async def find_by_status(self, status: str) -> List[Dict[str, Any]]:
-    """Возвращает все треды с указанным статусом."""
-    async with self.pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT t.*, c.name as client_name
+    async def get_dialogs(
+        self,
+        project_id: str,
+        limit: int = 20,
+        offset: int = 0,
+        status_filter: Optional[str] = None,
+        search: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Возвращает список диалогов (тредов) с дополнительными полями:
+        - thread id, status, interaction_mode, updated_at, created_at
+        - client id, full_name, username, chat_id
+        - last_message content and created_at
+        - unread_count (optional, placeholder)
+        """
+        logger.info("Fetching dialogs", extra={"project_id": project_id, "limit": limit, "offset": offset})
+        
+        # Build WHERE clause
+        where_parts = ["c.project_id = $1"]
+        params = [uuid.UUID(project_id)]
+        param_idx = 2
+        
+        if status_filter:
+            where_parts.append(f"t.status = ${param_idx}")
+            params.append(status_filter)
+            param_idx += 1
+        
+        if search:
+            where_parts.append(f"(c.full_name ILIKE $${param_idx} OR c.username ILIKE $${param_idx})")
+            params.append(f"%{search}%")
+            param_idx += 1
+        
+        where_clause = " AND ".join(where_parts)
+        
+        # Query with last message subquery
+        query = f"""
+            SELECT
+                t.id AS thread_id,
+                t.status,
+                t.interaction_mode,
+                t.created_at AS thread_created_at,
+                t.updated_at AS thread_updated_at,
+                c.id AS client_id,
+                c.full_name,
+                c.username,
+                c.chat_id,
+                lm.content AS last_message_content,
+                lm.created_at AS last_message_created_at
             FROM threads t
             JOIN clients c ON t.client_id = c.id
-            WHERE t.status = $1
+            LEFT JOIN LATERAL (
+                SELECT content, created_at
+                FROM messages m
+                WHERE m.thread_id = t.id
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE {where_clause}
             ORDER BY t.updated_at DESC
-        """, status)
-        return [dict(row) for row in rows]
+            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+        """
+        params.extend([limit, offset])
+        
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+        
+        dialogs = []
+        for row in rows:
+            dialogs.append({
+                "thread_id": str(row["thread_id"]),
+                "status": row["status"],
+                "interaction_mode": row["interaction_mode"],
+                "thread_created_at": row["thread_created_at"],
+                "thread_updated_at": row["thread_updated_at"],
+                "client": {
+                    "id": str(row["client_id"]),
+                    "full_name": row["full_name"],
+                    "username": row["username"],
+                    "chat_id": row["chat_id"]
+                },
+                "last_message": {
+                    "content": row["last_message_content"],
+                    "created_at": row["last_message_created_at"]
+                } if row["last_message_content"] else None,
+                "unread_count": 0  # placeholder
+            })
+        
+        logger.debug(f"Retrieved {len(dialogs)} dialogs")
+        return dialogs
+
+    async def get_messages(self, thread_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Возвращает сообщения треда с пагинацией.
+        """
+        logger.debug(f"Fetching messages for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, role, content, created_at, metadata
+                FROM messages
+                WHERE thread_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+            """, uuid.UUID(thread_id), limit, offset)
+        
+        messages = []
+        for row in rows:
+            messages.append({
+                "id": str(row["id"]),
+                "role": row["role"],
+                "content": row["content"],
+                "created_at": row["created_at"],
+                "metadata": row["metadata"] or {}
+            })
+        
+        messages.reverse()  # chronological order for display
+        logger.debug(f"Retrieved {len(messages)} messages")
+        return messages
+
+    async def update_interaction_mode(self, thread_id: str, mode: str) -> None:
+        """
+        Обновляет interaction_mode треда.
+        """
+        logger.info(f"Updating interaction mode for thread {thread_id} to {mode}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET interaction_mode = $1, updated_at = NOW()
+                WHERE id = $2
+            """, mode, uuid.UUID(thread_id))
+
+    # В ThreadRepository:
+
+    async def find_by_status(self, status: str) -> List[Dict[str, Any]]:
+        """Возвращает все треды с указанным статусом."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT t.*, c.name as client_name
+                FROM threads t
+                JOIN clients c ON t.client_id = c.id
+                WHERE t.status = $1
+                ORDER BY t.updated_at DESC
+            """, status)
+            return [dict(row) for row in rows]
