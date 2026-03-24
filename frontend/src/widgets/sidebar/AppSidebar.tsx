@@ -32,7 +32,7 @@ const navItems: NavItem[] = [
   { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" /> },
   { path: 'analytics', label: 'Аналитика', icon: <BarChart3 className="w-4 h-4" /> },
   { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" /> },
-  { path: 'managers', label: 'Менеджеры', icon: <UserCog className="w-4 h-4" /> },
+  { path: 'tickets', label: 'Тикеты', icon: <UserCog className="w-4 h-4" /> },
 ];
 
 export const AppSidebar: React.FC = () => {
@@ -94,6 +94,37 @@ export const AppSidebar: React.FC = () => {
 
   const currentProject = projects.find((p: Project) => p.id === selectedProjectId);
 
+  const renderNavItem = (item: NavItem) => {
+    const disabled = !selectedProjectId;
+    const linkClasses = (isActive: boolean) => {
+      const base = 'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150';
+      const activeClass = 'bg-white text-[var(--accent-primary)] shadow-sm';
+      const inactiveClass = 'text-[var(--text-secondary)] hover:bg-white hover:text-[var(--text-primary)] hover:shadow-sm';
+      return `${base} ${isActive ? activeClass : inactiveClass}`;
+    };
+    const disabledClasses = 'flex items-center gap-3 px-3 py-2 rounded-lg text-[var(--text-muted)] opacity-50 cursor-not-allowed';
+
+    if (disabled) {
+      return (
+        <div key={item.path} className={disabledClasses}>
+          {item.icon}
+          <span className="text-sm font-medium">{item.label}</span>
+        </div>
+      );
+    }
+
+    return (
+      <NavLink
+        key={item.path}
+        to={`/projects/${selectedProjectId}/${item.path}`}
+        className={({ isActive }) => linkClasses(isActive)}
+      >
+        {item.icon}
+        <span className="text-sm font-medium">{item.label}</span>
+      </NavLink>
+    );
+  };
+
   return (
     <aside className="w-64 h-full bg-[var(--surface-secondary)] flex flex-col">
       <div className="p-5 flex items-center gap-2">
@@ -125,21 +156,7 @@ export const AppSidebar: React.FC = () => {
       </div>
 
       <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={`/projects/${selectedProjectId}/${item.path}`}
-            className={({ isActive }) => {
-              const base = 'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150';
-              const activeClass = 'bg-white text-[var(--accent-primary)] shadow-sm';
-              const inactiveClass = 'text-[var(--text-secondary)] hover:bg-white hover:text-[var(--text-primary)] hover:shadow-sm';
-              return `${base} ${isActive ? activeClass : inactiveClass}`;
-            }}
-          >
-            {item.icon}
-            <span className="text-sm font-medium">{item.label}</span>
-          </NavLink>
-        ))}
+        {navItems.map(renderNavItem)}
       </nav>
 
       <div className="p-4 space-y-2">

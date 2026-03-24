@@ -3,16 +3,16 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@shared/api/queryClient';
 import { Toast } from '@shared/ui/toast/Toast';
-import { ProjectsPage } from '@pages/projects/ProjectsPage';
-import { ProjectDetailPage } from '@pages/projects/ProjectDetailPage';
 import { ClientChatPage } from '@pages/chat/ClientChatPage';
 import { TicketsPage } from '@pages/manager/TicketsPage';
 import { TicketDetailPage } from '@pages/manager/TicketDetailPage';
 import { TelegramLoginPage } from '@pages/login/TelegramLoginPage';
 import { DialogsPage } from '@pages/dialogs/DialogsPage';
 import { ComingSoon } from '@pages/ComingSoon';
+import { ChannelSettingsPage } from '@pages/channels/ChannelSettingsPage';
 import { Layout } from './Layout';
 import { getSessionToken } from '@shared/api/client';
+import { useProjects } from '@entities/project/api/useProjects';
 
 const AuthGuard = ({ children }: { children: React.ReactNode }) => {
   const token = getSessionToken();
@@ -20,6 +20,21 @@ const AuthGuard = ({ children }: { children: React.ReactNode }) => {
     return <Navigate to="/login" replace />;
   }
   return <>{children}</>;
+};
+
+const RootRedirect: React.FC = () => {
+  const { projects, isLoading } = useProjects();
+
+  if (isLoading) {
+    return <div className="flex items-center justify-center h-screen text-white">Загрузка...</div>;
+  }
+
+  if (!projects || projects.length === 0) {
+    return <Navigate to="/channels" replace />;
+  }
+
+  const firstProjectId = projects[0].id;
+  return <Navigate to={`/projects/${firstProjectId}/dialogs`} replace />;
 };
 
 class ErrorBoundary extends React.Component<
@@ -63,23 +78,22 @@ function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<TelegramLoginPage />} />
-            <Route path="/" element={<Navigate to="/projects" replace />} />
+            <Route path="/" element={<RootRedirect />} />
             
             <Route element={<AuthGuard><Layout /></AuthGuard>}>
-              <Route path="/projects" element={<ProjectsPage />} />
-              <Route path="/projects/:projectId" element={<DialogsPage />} />
               <Route path="/chat/:projectId" element={<ClientChatPage />} />
-              <Route path="/manager/tickets" element={<TicketsPage />} />
-              <Route path="/manager/tickets/:threadId" element={<TicketDetailPage />} />
               <Route path="/projects/:projectId/dialogs" element={<DialogsPage />} />
               <Route path="/projects/:projectId/clients" element={<ComingSoon />} />
               <Route path="/projects/:projectId/workflow" element={<ComingSoon />} />
               <Route path="/projects/:projectId/knowledge" element={<ComingSoon />} />
               <Route path="/projects/:projectId/analytics" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/channels" element={<ComingSoon />} />
+              <Route path="/projects/:projectId/channels" element={<ChannelSettingsPage />} />
+              <Route path="/projects/:projectId/tickets" element={<TicketsPage />} />
+              <Route path="/projects/:projectId/tickets/:threadId" element={<TicketDetailPage />} />
               <Route path="/projects/:projectId/managers" element={<ComingSoon />} />
               <Route path="/projects/:projectId/billing" element={<ComingSoon />} />
               <Route path="/projects/:projectId/settings" element={<ComingSoon />} />
+              <Route path="/channels" element={<ChannelSettingsPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

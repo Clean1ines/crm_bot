@@ -37,7 +37,7 @@ export const TicketsPage: React.FC = () => {
           const lastMsg = ticket.last_message as unknown as LastMessage | null;
           return (
             <div key={ticket.thread_id} className="border p-3 rounded">
-              <Link to={`/manager/tickets/${ticket.thread_id}`} className="text-blue-600 hover:underline">
+              <Link to={`/projects/${selectedProjectId}/tickets/${ticket.thread_id}`} className="text-blue-600 hover:underline">
                 Тикет #{ticket.thread_id.slice(0, 8)} - {client?.full_name || client?.username || 'Клиент'}
               </Link>
               <p className="text-sm text-gray-600">

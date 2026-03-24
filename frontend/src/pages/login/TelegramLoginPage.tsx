@@ -7,13 +7,17 @@ import '../../app/styles/landing.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
+/**
+ * Landing page with Telegram login widget.
+ * Handles OAuth callback and redirects to the app root after successful authentication.
+ */
 export const TelegramLoginPage: React.FC = () => {
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const widgetContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const log = (label: string, data?: any) => {
+  const log = (label: string, data?: unknown) => {
     console.log(`[TG-FRONT] ${label}`, data ?? '');
   };
 
@@ -59,7 +63,8 @@ export const TelegramLoginPage: React.FC = () => {
       .then((res) => {
         log('AUTH_SUCCESS', res);
         localStorage.setItem('mrak_token', res.access_token);
-        navigate('/projects', { replace: true });
+        // Redirect to root, where RootRedirect will decide the final destination
+        navigate('/', { replace: true });
       })
       .catch((err) => {
         log('AUTH_ERROR', err);

@@ -15,10 +15,9 @@ export const useProjects = () => {
   const { data: projects = [], isLoading, error } = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
-      // Вызываем ровно так, как в твоем paths
       const { data, error } = await api.GET('/api/projects');
       if (error) throw error;
-      return data; // Здесь тип уже ProjectResponse[] автоматически
+      return data;
     },
   });
 
@@ -56,6 +55,23 @@ export const useProjects = () => {
     },
   });
 
+  // Обновление токена бота
+  const updateBotTokenMutation = useMutation({
+    mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
+      const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
+        params: {
+          path: { project_id: projectId }
+        },
+        body: { token: token || '' }
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+
   return {
     projects,
     isLoading,
@@ -75,7 +91,9 @@ export const useProjects = () => {
     },
     createProject: (name: string) => createMutation.mutateAsync(name),
     deleteProject: (id: string) => deleteMutation.mutateAsync(id),
+    updateBotToken: updateBotTokenMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isDeleting: deleteMutation.isPending,
+    isUpdatingBotToken: updateBotTokenMutation.isPending,
   };
 };
