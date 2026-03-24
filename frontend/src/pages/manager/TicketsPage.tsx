@@ -23,27 +23,33 @@ export const TicketsPage: React.FC = () => {
     enabled: !!selectedProjectId,
   });
 
-  if (!selectedProjectId) return <div>Выберите проект</div>;
-  if (isLoading) return <div>Загрузка тикетов...</div>;
-  if (error) return <div>Ошибка: {String(error)}</div>;
-  if (!data || data.length === 0) return <div>Нет открытых тикетов</div>;
+  if (!selectedProjectId) return <div className="p-6 text-[var(--text-muted)]">Выберите проект</div>;
+  if (isLoading) return <div className="p-6 text-[var(--text-muted)]">Загрузка тикетов...</div>;
+  if (error) return <div className="p-6 text-[var(--accent-danger)]">Ошибка: {String(error)}</div>;
+  if (!data || data.length === 0) return <div className="p-6 text-[var(--text-muted)]">Нет открытых тикетов</div>;
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Тикеты (ожидают ответа)</h1>
-      <div className="space-y-2">
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-6">Тикеты (ожидают ответа)</h1>
+      <div className="space-y-3">
         {data.map((ticket: Thread) => {
           const client = ticket.client as unknown as Client;
           const lastMsg = ticket.last_message as unknown as LastMessage | null;
           return (
-            <div key={ticket.thread_id} className="border p-3 rounded">
-              <Link to={`/projects/${selectedProjectId}/tickets/${ticket.thread_id}`} className="text-blue-600 hover:underline">
+            <div
+              key={ticket.thread_id}
+              className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow"
+            >
+              <Link
+                to={`/projects/${selectedProjectId}/tickets/${ticket.thread_id}`}
+                className="text-[var(--accent-primary)] font-medium hover:underline"
+              >
                 Тикет #{ticket.thread_id.slice(0, 8)} - {client?.full_name || client?.username || 'Клиент'}
               </Link>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-[var(--text-secondary)] mt-1 line-clamp-2">
                 {lastMsg?.content || 'Нет сообщений'}
               </p>
-              <p className="text-xs text-gray-400">
+              <p className="text-xs text-[var(--text-muted)] mt-2">
                 Создан: {new Date(ticket.thread_created_at).toLocaleString()}
               </p>
             </div>

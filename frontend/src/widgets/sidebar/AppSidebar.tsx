@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects, Project } from '@entities/project';
 import { useAppStore } from '../../app/store';
 import { CreateProjectModal } from '@features/project/create';
@@ -37,8 +37,9 @@ const navItems: NavItem[] = [
 
 export const AppSidebar: React.FC = () => {
   const navigate = useNavigate();
-  const { selectedProjectId, setSelectedProjectId } = useAppStore();
-  const { currentProjectId, setCurrentProjectId } = useProjectStore();
+  const { projectId: urlProjectId } = useParams<{ projectId: string }>();
+  const { setSelectedProjectId } = useAppStore();
+  const { setCurrentProjectId } = useProjectStore();
   const {
     projects,
     isCreateOpen,
@@ -92,10 +93,13 @@ export const AppSidebar: React.FC = () => {
 
   if (!isOpen && isMobile) return null;
 
-  const currentProject = projects.find((p: Project) => p.id === selectedProjectId);
+  // For dropdown display, we need the current project name. Use URL project if available, else use store's selected.
+  const activeProjectId = urlProjectId || undefined;
+  const currentProject = projects.find((p: Project) => p.id === activeProjectId);
 
   const renderNavItem = (item: NavItem) => {
-    const disabled = !selectedProjectId;
+    // Disable if there's no project ID in URL (i.e., not in a project context)
+    const disabled = !urlProjectId;
     const linkClasses = (isActive: boolean) => {
       const base = 'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150';
       const activeClass = 'bg-white text-[var(--accent-primary)] shadow-sm';
@@ -113,10 +117,12 @@ export const AppSidebar: React.FC = () => {
       );
     }
 
+    // Use the URL projectId directly to construct the link
+    const to = `/projects/${urlProjectId}/${item.path}`;
     return (
       <NavLink
         key={item.path}
-        to={`/projects/${selectedProjectId}/${item.path}`}
+        to={to}
         className={({ isActive }) => linkClasses(isActive)}
       >
         {item.icon}

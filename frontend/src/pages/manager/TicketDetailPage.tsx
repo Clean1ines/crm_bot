@@ -57,42 +57,61 @@ export const TicketDetailPage: React.FC = () => {
     },
   });
 
-  if (!threadId) return <div>Некорректный ID тикета</div>;
-  if (messagesLoading) return <div>Загрузка...</div>;
-  if (messagesError) return <div>Ошибка: {String(messagesError)}</div>;
+  if (!threadId) return <div className="p-6 text-[var(--text-muted)]">Некорректный ID тикета</div>;
+  if (messagesLoading) return <div className="p-6 text-[var(--text-muted)]">Загрузка...</div>;
+  if (messagesError) return <div className="p-6 text-[var(--accent-danger)]">Ошибка: {String(messagesError)}</div>;
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Тикет от {clientName}</h1>
-      <div className="mb-4">
-        <p className="text-gray-600">Статус: {ticketInfo?.status || 'manual'}</p>
-        <p className="text-gray-600">Создан: {ticketInfo ? new Date(ticketInfo.thread_created_at).toLocaleString() : '—'}</p>
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Тикет от {clientName}</h1>
+        <div className="mt-2 flex gap-4 text-sm text-[var(--text-secondary)]">
+          <span>Статус: <span className="font-medium">{ticketInfo?.status || 'manual'}</span></span>
+          <span>Создан: {ticketInfo ? new Date(ticketInfo.thread_created_at).toLocaleString() : '—'}</span>
+        </div>
       </div>
-      <div className="border rounded p-4 mb-4 max-h-96 overflow-y-auto">
-        <h2 className="font-semibold mb-2">История диалога</h2>
-        {messages.length === 0 && <p className="text-gray-500">Нет сообщений</p>}
-        {messages.map((msg) => (
-          <div key={msg.id} className={`mb-2 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-            <div className={`inline-block p-2 rounded ${msg.role === 'user' ? 'bg-blue-100' : 'bg-gray-100'}`}>
-              <div className="text-xs text-gray-500">{msg.role === 'user' ? 'Клиент' : 'Бот'}</div>
-              <div>{msg.content}</div>
-              <div className="text-xs text-gray-400">{new Date(msg.created_at).toLocaleString()}</div>
+
+      <div className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 mb-6 max-h-96 overflow-y-auto shadow-sm">
+        <h2 className="font-medium text-[var(--text-primary)] mb-3">История диалога</h2>
+        {messages.length === 0 && <p className="text-[var(--text-muted)]">Нет сообщений</p>}
+        <div className="space-y-3">
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[70%] rounded-2xl px-4 py-2 shadow-sm ${
+                  msg.role === 'user'
+                    ? 'bg-[var(--accent-primary)] text-white'
+                    : 'bg-[var(--surface-secondary)] text-[var(--text-primary)] border border-[var(--border-subtle)]'
+                }`}
+              >
+                <div className="text-xs opacity-80 mb-1">
+                  {msg.role === 'user' ? 'Клиент' : 'Бот'}
+                </div>
+                <div className="text-sm">{msg.content}</div>
+                <div className="text-xs opacity-70 mt-1 text-right">
+                  {new Date(msg.created_at).toLocaleString()}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-      <div className="mt-4">
+
+      <div className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm">
         <textarea
           value={replyText}
           onChange={(e) => setReplyText(e.target.value)}
-          className="w-full border rounded p-2"
+          className="w-full border border-[var(--border-subtle)] rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)] focus:border-transparent bg-white text-[var(--text-primary)]"
           rows={4}
           placeholder="Введите ответ..."
         />
         <button
           onClick={() => replyMutation.mutate(replyText)}
           disabled={replyMutation.isPending || !replyText.trim()}
-          className="mt-2 bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50"
+          className="mt-3 px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:bg-[var(--accent-primary)]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {replyMutation.isPending ? 'Отправка...' : 'Отправить ответ'}
         </button>

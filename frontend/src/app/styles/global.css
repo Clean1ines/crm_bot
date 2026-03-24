@@ -22,10 +22,16 @@
   --text-secondary: #5A524A;
   --text-muted: #8C857D;
 
-  /* Функциональные цвета */
-  --accent-success: #2A7A4B;
-  --accent-danger: #B45A3C;
-  --accent-warning: #C78C3E;
+  /* Функциональные цвета — премиальные оттенки */
+  --accent-success: #7C8B6E;        /* muted olive for success elements */
+  --accent-success-bg: #F0F2EA;     /* light olive background */
+  --accent-success-border: #D6DDCD; /* soft olive border */
+  --accent-success-text: #4A5B3A;   /* dark olive text */
+  --accent-danger: #B45A3C;         /* warm terracotta for destructive actions */
+  --accent-danger-bg: #FDF1EC;      /* light terracotta background */
+  --accent-danger-border: #F3DDD3;  /* soft terracotta border */
+  --accent-danger-text: #9B4A2E;    /* deep terracotta text */
+  --accent-warning: #C78C3E;        /* golden amber */
 
   /* Радиусы */
   --radius-sm: 0.375rem;
@@ -66,7 +72,7 @@ html, body, #root {
   overflow-x: hidden;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar - applies to all scrollable elements */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -80,7 +86,13 @@ html, body, #root {
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-soft);
+  background: var(--accent-primary);
+}
+
+/* Ensure scrollbars appear on any overflow element */
+.overflow-y-auto, .overflow-x-auto, .overflow-auto {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent-muted) var(--surface-secondary);
 }
 
 /* Hide scrollbar for tabs container */

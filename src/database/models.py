@@ -83,6 +83,10 @@ class Project(Base):
     # Manager bot configuration
     manager_bot_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
+    # Bot usernames for display in UI
+    client_bot_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    manager_bot_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
     # Workflow configuration
     template_slug: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True, default=None
@@ -120,6 +124,8 @@ class Project(Base):
         Index("idx_projects_template_slug", "template_slug"),
         Index("idx_projects_pro_mode", "is_pro_mode", postgresql_where=(is_pro_mode == True)),
         Index("idx_projects_user_id", "user_id"),
+        Index("idx_projects_client_bot_username", "client_bot_username"),
+        Index("idx_projects_manager_bot_username", "manager_bot_username"),
     )
 
 

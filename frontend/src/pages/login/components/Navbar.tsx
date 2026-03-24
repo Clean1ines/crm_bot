@@ -1,7 +1,11 @@
 import React from 'react';
 import { Button } from './Button';
 
-export const Navbar: React.FC = () => {
+interface NavbarProps {
+  onLoginClick?: () => void;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({ onLoginClick }) => {
   return (
     <nav className="flex justify-between items-center py-4 px-6 md:px-12 border-b border-[#E5E2DA]">
       <div className="flex items-center gap-2">
@@ -9,7 +13,7 @@ export const Navbar: React.FC = () => {
         <span className="font-semibold text-[#1E1E1E] text-lg">Logo</span>
       </div>
       <div className="flex items-center gap-3">
-        <Button variant="secondary">Войти</Button>
+        <Button variant="secondary" onClick={onLoginClick}>Войти</Button>
         <Button variant="primary">Начать бесплатно</Button>
       </div>
     </nav>

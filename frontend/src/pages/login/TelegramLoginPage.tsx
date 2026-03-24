@@ -7,13 +7,10 @@ import '../../app/styles/landing.css';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
-/**
- * Landing page with Telegram login widget.
- * Handles OAuth callback and redirects to the app root after successful authentication.
- */
 export const TelegramLoginPage: React.FC = () => {
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showLoginWidget, setShowLoginWidget] = useState(false);
   const widgetContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -63,7 +60,6 @@ export const TelegramLoginPage: React.FC = () => {
       .then((res) => {
         log('AUTH_SUCCESS', res);
         localStorage.setItem('mrak_token', res.access_token);
-        // Redirect to root, where RootRedirect will decide the final destination
         navigate('/', { replace: true });
       })
       .catch((err) => {
@@ -72,15 +68,16 @@ export const TelegramLoginPage: React.FC = () => {
       });
   }, [navigate]);
 
-  // Inject Telegram widget if no hash is present (i.e., we are not in callback mode)
+  // Inject Telegram widget when showLoginWidget becomes true
   useEffect(() => {
-    if (!botUsername || !widgetContainerRef.current) return;
+    if (!showLoginWidget) return;
+    if (!botUsername) return;
 
-    // If we are in callback (hash present), don't show widget
-    if (window.location.search.includes('hash=')) return;
+    const container = widgetContainerRef.current;
+    if (!container) return;
 
-    widgetContainerRef.current.innerHTML = '';
-    log('INJECTING_WIDGET');
+    // Clear container in case it was already used
+    container.innerHTML = '';
 
     const script = document.createElement('script');
     script.src = 'https://telegram.org/js/telegram-widget.js?22';
@@ -92,38 +89,42 @@ export const TelegramLoginPage: React.FC = () => {
     script.async = true;
 
     script.onload = () => log('WIDGET_LOADED');
-    widgetContainerRef.current.appendChild(script);
-  }, [botUsername]);
+    script.onerror = () => {
+      log('WIDGET_LOAD_ERROR');
+      container.innerHTML = '<p class="text-red-600">Ошибка загрузки виджета. Попробуйте позже.</p>';
+    };
+    container.appendChild(script);
+  }, [showLoginWidget, botUsername]);
 
-  // If we are waiting for auth response, show spinner
+  const handleLoginClick = () => {
+    setShowLoginWidget(true);
+  };
+
   if (isLoading || window.location.search.includes('hash=')) {
     return (
-      <div className="min-h-screen w-screen flex items-center justify-center bg-[#F6F4EF]">
+      <div className="min-h-screen w-screen flex items-center justify-center bg-[var(--bg-primary)]">
         <div className="flex flex-col items-center gap-4">
           <div className="spinner"></div>
-          <span className="text-[#6B6B6B] font-medium">Verifying Telegram session...</span>
+          <span className="text-[var(--text-secondary)] font-medium">Verifying Telegram session...</span>
         </div>
       </div>
     );
   }
 
-  // Otherwise, show full landing page with widget in the right column
   return (
-    <div className="min-h-screen bg-[#F6F4EF]">
-      <Navbar />
+    <div className="min-h-screen bg-[var(--bg-primary)]">
+      <Navbar onLoginClick={handleLoginClick} />
       <main className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-          {/* Left column */}
           <HeroSection />
-
-          {/* Right column */}
           <div className="relative">
-            {botUsername ? (
-              <div ref={widgetContainerRef} className="flex justify-center" />
+            {!showLoginWidget ? (
+              <ChatWidget />
             ) : (
-              <div className="animate-pulse">
-                <ChatWidget />
-              </div>
+              <div
+                ref={widgetContainerRef}
+                className="flex justify-center w-full"
+              />
             )}
           </div>
         </div>

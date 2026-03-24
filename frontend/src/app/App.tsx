@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@shared/api/queryClient';
 import { Toast } from '@shared/ui/toast/Toast';
@@ -35,6 +35,12 @@ const RootRedirect: React.FC = () => {
 
   const firstProjectId = projects[0].id;
   return <Navigate to={`/projects/${firstProjectId}/dialogs`} replace />;
+};
+
+// Обёртка для DialogsPage, которая пересоздаёт компонент при изменении projectId
+const DialogsPageWrapper = () => {
+  const { projectId } = useParams<{ projectId: string }>();
+  return <DialogsPage key={projectId} />;
 };
 
 class ErrorBoundary extends React.Component<
@@ -82,7 +88,7 @@ function App() {
             
             <Route element={<AuthGuard><Layout /></AuthGuard>}>
               <Route path="/chat/:projectId" element={<ClientChatPage />} />
-              <Route path="/projects/:projectId/dialogs" element={<DialogsPage />} />
+              <Route path="/projects/:projectId/dialogs" element={<DialogsPageWrapper />} />
               <Route path="/projects/:projectId/clients" element={<ComingSoon />} />
               <Route path="/projects/:projectId/workflow" element={<ComingSoon />} />
               <Route path="/projects/:projectId/knowledge" element={<ComingSoon />} />

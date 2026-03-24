@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
 import type { MemoryEntry, TimelineEvent, ThreadState } from '../../../entities/thread/model/types';
-import { Edit2, Save, X, MoreHorizontal, AlertCircle, ChevronDown } from 'lucide-react';
+import { Edit2, Save, X, AlertCircle, ChevronDown } from 'lucide-react';
 
 interface Tab {
   id: string;
@@ -35,11 +35,12 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   const [timelineLimit] = useState(30);
   const [timelineOffset, setTimelineOffset] = useState(0);
   const [hasMoreTimeline, setHasMoreTimeline] = useState(true);
-  const [visibleTabs, setVisibleTabs] = useState<string[]>([]);
-  const [hiddenTabs, setHiddenTabs] = useState<Tab[]>([]);
-  const [showHiddenMenu, setShowHiddenMenu] = useState(false);
-  const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const [showTabMenu, setShowTabMenu] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  const isRequestValid = (id: number) => id === requestIdRef.current && isMountedRef.current;
 
   const renderSummary = () => {
     const state = threadState as ThreadState & {
@@ -199,7 +200,11 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     { id: 'raw', label: 'Raw', component: renderRaw },
   ];
 
+  // Data loading effect with request cancellation
   useEffect(() => {
+    isMountedRef.current = true;
+    const currentRequestId = ++requestIdRef.current;
+
     if (!threadId) {
       setThreadState(null);
       setThreadTimeline([]);
@@ -212,74 +217,91 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     const loadState = async () => {
       try {
         const { data, error } = await api.threads.getState(threadId);
+        if (!isRequestValid(currentRequestId)) return;
         if (!error && data && typeof data === 'object' && 'state' in data) {
           setThreadState(data.state as ThreadState);
         }
       } catch (err) {
-        console.error('Failed to load thread state', err);
+        if (isRequestValid(currentRequestId)) console.error('Failed to load thread state', err);
       }
     };
 
     const loadMemory = async () => {
       try {
         const { data, error } = await api.threads.getMemory(threadId);
+        if (!isRequestValid(currentRequestId)) return;
         if (!error && data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);
         }
       } catch (err) {
-        console.error('Failed to load memory', err);
+        if (isRequestValid(currentRequestId)) console.error('Failed to load memory', err);
       }
     };
 
     const loadTimeline = async () => {
+      if (!isRequestValid(currentRequestId)) return;
       setLoadingInspector(true);
       try {
         const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, 0);
+        if (!isRequestValid(currentRequestId)) return;
         if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
           setThreadTimeline(data.events as TimelineEvent[]);
           setHasMoreTimeline((data.events as TimelineEvent[]).length === timelineLimit);
         }
       } catch (err) {
-        console.error('Failed to load timeline', err);
+        if (isRequestValid(currentRequestId)) console.error('Failed to load timeline', err);
       } finally {
-        setLoadingInspector(false);
+        if (isRequestValid(currentRequestId)) setLoadingInspector(false);
       }
     };
 
     loadState();
     loadMemory();
     loadTimeline();
-  }, [threadId, setThreadState, setThreadMemory, setThreadTimeline, setLoadingInspector]);
+
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [threadId, timelineLimit, setThreadState, setThreadMemory, setThreadTimeline, setLoadingInspector]);
 
   const loadMoreTimeline = async () => {
     if (!threadId || !hasMoreTimeline) return;
+    const currentRequestId = requestIdRef.current;
+    if (!isRequestValid(currentRequestId)) return;
+
     const newOffset = timelineOffset + timelineLimit;
     try {
       const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, newOffset);
+      if (!isRequestValid(currentRequestId)) return;
       if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
-        setThreadTimeline([...threadTimeline, ...(data.events as TimelineEvent[])]);
+        const newEvents = data.events as TimelineEvent[];
+        setThreadTimeline([...threadTimeline, ...newEvents]);
         setTimelineOffset(newOffset);
-        setHasMoreTimeline((data.events as TimelineEvent[]).length === timelineLimit);
+        setHasMoreTimeline(newEvents.length === timelineLimit);
       }
     } catch (err) {
-      console.error('Failed to load more timeline', err);
+      if (isRequestValid(currentRequestId)) console.error('Failed to load more timeline', err);
     }
   };
 
   const updateMemory = async (key: string, value: unknown) => {
     if (!threadId) return;
+    const currentRequestId = requestIdRef.current;
+    if (!isRequestValid(currentRequestId)) return;
     try {
       const { error } = await api.threads.updateMemory(threadId, key, value);
+      if (!isRequestValid(currentRequestId)) return;
       if (error) {
         console.error('Failed to update memory', error);
       } else {
         const { data } = await api.threads.getMemory(threadId);
+        if (!isRequestValid(currentRequestId)) return;
         if (data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);
         }
       }
     } catch (err) {
-      console.error('Error updating memory', err);
+      if (isRequestValid(currentRequestId)) console.error('Error updating memory', err);
     }
   };
 
@@ -307,98 +329,47 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     setEditingMemoryValue('');
   };
 
-  useEffect(() => {
-    const checkOverflow = () => {
-      if (!tabsContainerRef.current) return;
-      const container = tabsContainerRef.current;
-      const children = Array.from(container.children);
-      let totalWidth = 0;
-      const containerWidth = container.clientWidth;
-      const visible: string[] = [];
-      const hidden: Tab[] = [];
-
-      for (let i = 0; i < children.length; i++) {
-        const child = children[i] as HTMLElement;
-        if (child.style.display === 'none') continue;
-        totalWidth += child.offsetWidth;
-        if (totalWidth <= containerWidth - 40) {
-          visible.push(tabs[i].id);
-        } else {
-          hidden.push(tabs[i]);
-        }
-      }
-      setVisibleTabs(visible);
-      setHiddenTabs(hidden);
-    };
-
-    checkOverflow();
-    window.addEventListener('resize', checkOverflow);
-    return () => window.removeEventListener('resize', checkOverflow);
-  }, [tabs]);
-
+  // Click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (moreButtonRef.current && !moreButtonRef.current.contains(event.target as Node)) {
-        setShowHiddenMenu(false);
+        setShowTabMenu(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const visibleTabsList = tabs.filter(t => visibleTabs.includes(t.id));
-  const hiddenTabsList = tabs.filter(t => !visibleTabs.includes(t.id));
-
   return (
     <div className="flex flex-col h-full bg-white shadow-sm">
-      {/* Header without border */}
       <div className="p-4">
-        <div className="relative flex items-center">
-          <div
-            ref={tabsContainerRef}
-            className="flex gap-2 overflow-x-auto scrollbar-hide"
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        <div className="relative">
+          <button
+            ref={moreButtonRef}
+            onClick={() => setShowTabMenu(!showTabMenu)}
+            className="px-2 py-1 text-sm rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
           >
-            {visibleTabsList.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw')}
-                className={`px-2 py-1 text-sm rounded-md transition-all whitespace-nowrap ${
-                  inspectorActiveTab === tab.id
-                    ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)]'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          {hiddenTabsList.length > 0 && (
-            <div className="relative ml-2">
-              <button
-                ref={moreButtonRef}
-                onClick={() => setShowHiddenMenu(!showHiddenMenu)}
-                className="px-2 py-1 text-sm rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
-              >
-                <MoreHorizontal className="w-4 h-4" />
-                <ChevronDown className="w-3 h-3" />
-              </button>
-              {showHiddenMenu && (
-                <div className="absolute right-0 mt-1 w-40 bg-white rounded-md shadow-lg border border-[var(--border-subtle)] z-10">
-                  {hiddenTabsList.map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => {
-                        setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw');
-                        setShowHiddenMenu(false);
-                      }}
-                      className="block w-full text-left px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+            <span>{tabs.find(t => t.id === inspectorActiveTab)?.label || 'Вкладки'}</span>
+            <ChevronDown className="w-3 h-3" />
+          </button>
+          {showTabMenu && (
+            <div className="absolute left-0 mt-1 w-40 bg-white rounded-md shadow-lg border border-[var(--border-subtle)] z-10">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw');
+                    setShowTabMenu(false);
+                  }}
+                  className={`block w-full text-left px-3 py-2 text-sm ${
+                    inspectorActiveTab === tab.id
+                      ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)]'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
           )}
         </div>

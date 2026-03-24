@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
-import { useWebSocket } from '../../../shared/lib/websocket';
 import type { Message } from '../../../entities/thread/model/types';
 import { Send, Sparkles } from 'lucide-react';
 
@@ -58,15 +57,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  const { isConnected } = useWebSocket({
-    threadId,
-    onMessage: (msg) => {
-      if (msg.type === 'new_message' && msg.message) {
-        addMessage(msg.message as Message);
-      }
-    },
-  });
 
   const handleSend = async () => {
     if (!threadId || !inputText.trim() || isSending) return;
@@ -138,11 +128,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
                   <span className="hover:text-white">{isEnablingDemo ? 'Включение...' : 'Попробовать демо'}</span>
                 </button>
               )}
-              {threadId && (
-                <div className="text-xs text-[var(--text-muted)]">
-                  {isConnected ? '🟢 Онлайн' : '⚪ Офлайн'}
-                </div>
-              )}
+              {/* WebSocket индикатор удалён */}
             </div>
           </div>
 

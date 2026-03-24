@@ -565,6 +565,10 @@ export interface components {
             managers: number[];
             /** User Id */
             user_id: string | null;
+            /** Client Bot Username */
+            client_bot_username?: string | null;
+            /** Manager Bot Username */
+            manager_bot_username?: string | null;
         };
         /** ProjectUpdate */
         ProjectUpdate: {

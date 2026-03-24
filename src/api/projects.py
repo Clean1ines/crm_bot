@@ -30,6 +30,8 @@ class ProjectResponse(BaseModel):
     template_slug: Optional[str]
     managers: List[int]
     user_id: Optional[str]
+    client_bot_username: Optional[str] = None
+    manager_bot_username: Optional[str] = None
 
 
 class BotTokenRequest(BaseModel):

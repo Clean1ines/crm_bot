@@ -11,7 +11,6 @@ export const useProjects = () => {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
-  // Список проектов
   const { data: projects = [], isLoading, error } = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
@@ -21,7 +20,6 @@ export const useProjects = () => {
     },
   });
 
-  // Создание
   const createMutation = useMutation({
     mutationFn: async (name: string) => {
       const { data, error } = await api.POST('/api/projects', {
@@ -37,7 +35,6 @@ export const useProjects = () => {
     },
   });
 
-  // Удаление
   const deleteMutation = useMutation({
     mutationFn: async (projectId: string) => {
       const { error } = await api.DELETE('/api/projects/{project_id}', {
@@ -55,17 +52,49 @@ export const useProjects = () => {
     },
   });
 
-  // Обновление токена бота
+  // Клиентский бот
   const updateBotTokenMutation = useMutation({
     mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
-      const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
-        params: {
-          path: { project_id: projectId }
-        },
-        body: { token: token || '' }
-      });
-      if (error) throw error;
-      return data;
+      if (token === null) {
+        // Revoke: set empty token (or use delete? For now set empty)
+        const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
+          params: { path: { project_id: projectId } },
+          body: { token: '' }
+        });
+        if (error) throw error;
+        return data;
+      } else {
+        const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
+          params: { path: { project_id: projectId } },
+          body: { token }
+        });
+        if (error) throw error;
+        return data;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+    },
+  });
+
+  // Менеджерский бот
+  const updateManagerBotTokenMutation = useMutation({
+    mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
+      if (token === null) {
+        const { data, error } = await api.POST('/api/projects/{project_id}/manager-token', {
+          params: { path: { project_id: projectId } },
+          body: { token: '' }
+        });
+        if (error) throw error;
+        return data;
+      } else {
+        const { data, error } = await api.POST('/api/projects/{project_id}/manager-token', {
+          params: { path: { project_id: projectId } },
+          body: { token }
+        });
+        if (error) throw error;
+        return data;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -92,8 +121,10 @@ export const useProjects = () => {
     createProject: (name: string) => createMutation.mutateAsync(name),
     deleteProject: (id: string) => deleteMutation.mutateAsync(id),
     updateBotToken: updateBotTokenMutation.mutateAsync,
+    updateManagerBotToken: updateManagerBotTokenMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isDeleting: deleteMutation.isPending,
     isUpdatingBotToken: updateBotTokenMutation.isPending,
+    isUpdatingManagerBotToken: updateManagerBotTokenMutation.isPending,
   };
 };

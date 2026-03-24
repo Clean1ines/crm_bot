@@ -8,7 +8,7 @@ import { Inspector } from './components/Inspector';
 export const DialogsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
-  const { selectedThreadId, setSelectedThreadId } = useAppStore();
+  const { selectedThreadId, setSelectedThreadId, clearMessages } = useAppStore();
 
   useEffect(() => {
     if (!projectId) {
@@ -16,23 +16,29 @@ export const DialogsPage: React.FC = () => {
     }
   }, [projectId, navigate]);
 
+  // Reset thread selection when project changes
+  useEffect(() => {
+    if (projectId) {
+      setSelectedThreadId(null);
+      clearMessages();
+    }
+  }, [projectId, setSelectedThreadId, clearMessages]);
+
   if (!projectId) return null;
 
+  // Force remount of each child component when projectId changes by using key
   return (
     <div className="flex h-full bg-[var(--bg-primary)]">
-      {/* Левая колонка — список диалогов (max-width 320px) */}
       <div className="flex-1 max-w-[320px] min-w-[240px]">
-        <DialogList projectId={projectId} />
+        <DialogList key={`dialoglist-${projectId}`} projectId={projectId} />
       </div>
 
-      {/* Центральная колонка — чат (всегда имеет приоритет) */}
       <div className="flex-[2] min-w-[400px]">
-        <ChatWindow threadId={selectedThreadId} projectId={projectId} />
+        <ChatWindow key={`chatwindow-${projectId}`} threadId={selectedThreadId} projectId={projectId} />
       </div>
 
-      {/* Правая колонка — инспектор (max-width 320px) */}
-      <div className="flex-1 max-w-[320px] min-w-[240px]">
-        <Inspector threadId={selectedThreadId} projectId={projectId} />
+     <div className="flex-1 max-w-[320px] min-w-[240px]">
+        <Inspector key={`inspector-${projectId}`} threadId={selectedThreadId} projectId={projectId} />
       </div>
     </div>
   );

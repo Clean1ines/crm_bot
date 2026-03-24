@@ -7,10 +7,12 @@ including bot tokens, manager settings, and workflow template tracking.
 
 import uuid
 import asyncpg
+import httpx
 from typing import Optional, Dict, Any, List, Union
 
 from src.core.logging import get_logger
 from src.utils.encryption import encrypt_token, decrypt_token
+from src.core.config import settings
 
 logger = get_logger(__name__)
 
@@ -72,6 +74,28 @@ class ProjectRepository:
         """
         return decrypt_token(encrypted) if encrypted else None
 
+    async def _get_bot_username(self, token: str) -> Optional[str]:
+        """
+        Get bot username from Telegram API using the token.
+        
+        Args:
+            token: Bot token (unencrypted).
+        
+        Returns:
+            Username of the bot (without @) or None if request fails.
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=5.0
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    return resp.json()["result"]["username"]
+        except Exception as e:
+            logger.warning("Failed to fetch bot username", extra={"error": str(e)})
+        return None
+
     # ------------------------------------------------------------------
     # Public methods - Core project settings
     # ------------------------------------------------------------------
@@ -92,7 +116,8 @@ class ProjectRepository:
             # Получаем основные поля проекта
             row = await conn.fetchrow("""
                 SELECT system_prompt, bot_token, webhook_url, manager_bot_token, 
-                       webhook_secret, template_slug, is_pro_mode
+                       webhook_secret, template_slug, is_pro_mode,
+                       client_bot_username, manager_bot_username
                 FROM projects
                 WHERE id = $1
             """, _ensure_uuid(project_id))
@@ -137,21 +162,30 @@ class ProjectRepository:
                 logger.warning("No bot token found", extra={"project_id": str(project_id)})
             return token
 
-    async def set_bot_token(self, project_id: Union[str, uuid.UUID], token: str) -> None:
+    async def set_bot_token(self, project_id: Union[str, uuid.UUID], token: Optional[str]) -> None:
         """
         Устанавливает bot_token для проекта (шифрует перед сохранением).
+        Также обновляет client_bot_username, получая его из Telegram API.
         
         Args:
             project_id: UUID проекта в строковом формате или объект UUID.
-            token: Токен бота для шифрования и сохранения.
+            token: Токен бота для шифрования и сохранения (None для удаления).
         """
         logger.info("Setting bot token", extra={"project_id": str(project_id)})
         encrypted = self._encrypt_if_present(token)
+        username = None
+        if token:
+            username = await self._get_bot_username(token)
+            if username:
+                logger.info("Bot username resolved", extra={"username": username})
+            else:
+                logger.warning("Could not fetch bot username from token")
         async with self.pool.acquire() as conn:
             await conn.execute("""
-                UPDATE projects SET bot_token = $1, updated_at = NOW()
-                WHERE id = $2
-            """, encrypted, _ensure_uuid(project_id))
+                UPDATE projects 
+                SET bot_token = $1, client_bot_username = $2, updated_at = NOW()
+                WHERE id = $3
+            """, encrypted, username, _ensure_uuid(project_id))
 
     async def get_manager_bot_token(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
         """
@@ -175,21 +209,30 @@ class ProjectRepository:
                 logger.warning("No manager bot token found", extra={"project_id": str(project_id)})
             return token
 
-    async def set_manager_bot_token(self, project_id: Union[str, uuid.UUID], token: str) -> None:
+    async def set_manager_bot_token(self, project_id: Union[str, uuid.UUID], token: Optional[str]) -> None:
         """
         Устанавливает manager_bot_token для проекта (шифрует перед сохранением).
+        Также обновляет manager_bot_username, получая его из Telegram API.
         
         Args:
             project_id: UUID проекта в строковом формате или объект UUID.
-            token: Токен менеджерского бота для шифрования и сохранения.
+            token: Токен менеджерского бота для шифрования и сохранения (None для удаления).
         """
         logger.info("Setting manager bot token", extra={"project_id": str(project_id)})
         encrypted = self._encrypt_if_present(token)
+        username = None
+        if token:
+            username = await self._get_bot_username(token)
+            if username:
+                logger.info("Manager bot username resolved", extra={"username": username})
+            else:
+                logger.warning("Could not fetch manager bot username from token")
         async with self.pool.acquire() as conn:
             await conn.execute("""
-                UPDATE projects SET manager_bot_token = $1, updated_at = NOW()
-                WHERE id = $2
-            """, encrypted, _ensure_uuid(project_id))
+                UPDATE projects 
+                SET manager_bot_token = $1, manager_bot_username = $2, updated_at = NOW()
+                WHERE id = $3
+            """, encrypted, username, _ensure_uuid(project_id))
 
     async def get_webhook_secret(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
         """
@@ -573,7 +616,8 @@ class ProjectRepository:
         """
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                SELECT id, owner_id, user_id, name, is_pro_mode, template_slug, created_at, updated_at
+                SELECT id, owner_id, user_id, name, is_pro_mode, template_slug, created_at, updated_at,
+                       client_bot_username, manager_bot_username
                 FROM projects
                 WHERE id = $1
             """, _ensure_uuid(project_id))
@@ -627,7 +671,8 @@ class ProjectRepository:
         logger.info("Fetching projects by owner", extra={"owner_id": owner_id})
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT id, name, is_pro_mode, template_slug, created_at, updated_at
+                SELECT id, name, is_pro_mode, template_slug, created_at, updated_at,
+                       client_bot_username, manager_bot_username
                 FROM projects
                 WHERE owner_id = $1
                 ORDER BY created_at DESC
@@ -642,17 +687,20 @@ class ProjectRepository:
     async def get_projects_by_user_id(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Возвращает список проектов, привязанных к пользователю по user_id.
+        Включает поля client_bot_username и manager_bot_username.
         
         Args:
             user_id: UUID пользователя.
         
         Returns:
-            Список проектов с полями id, name, is_pro_mode, template_slug, created_at, updated_at, user_id.
+            Список проектов с полями id, name, is_pro_mode, template_slug, created_at, updated_at, user_id,
+            client_bot_username, manager_bot_username.
         """
         logger.info("Fetching projects by user_id", extra={"user_id": user_id})
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT id, name, is_pro_mode, template_slug, created_at, updated_at
+                SELECT id, name, is_pro_mode, template_slug, created_at, updated_at,
+                       client_bot_username, manager_bot_username
                 FROM projects
                 WHERE user_id = $1
                 ORDER BY created_at DESC
@@ -661,6 +709,6 @@ class ProjectRepository:
             for row in rows:
                 proj = dict(row)
                 proj["id"] = str(proj["id"])
-                proj["user_id"] = user_id  # add user_id explicitly
+                proj["user_id"] = user_id
                 projects.append(proj)
             return projects

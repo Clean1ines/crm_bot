@@ -2018,6 +2018,28 @@
               }
             ],
             "title": "User Id"
+          },
+          "client_bot_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Bot Username"
+          },
+          "manager_bot_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manager Bot Username"
           }
         },
         "type": "object",
