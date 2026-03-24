@@ -1,28 +1,16 @@
 import React from 'react';
 
 interface SidebarProps {
-  /** Открыта ли боковая панель */
   isOpen: boolean;
-  /** Функция закрытия (вызывается при клике на крестик) */
   onClose: () => void;
-  /** Заголовок (опционально) */
   header?: React.ReactNode;
-  /** Нижняя часть (футер) */
   footer?: React.ReactNode;
-  /** Основное содержимое */
   children: React.ReactNode;
-  /** Позиция: слева или справа (по умолчанию left) */
   position?: 'left' | 'right';
-  /** Ширина (Tailwind класс, по умолчанию 'w-64') */
   width?: string;
-  /** Дополнительные CSS классы */
   className?: string;
 }
 
-/**
- * Базовая боковая панель с возможностью закрытия.
- * Поддерживает левое/правое расположение и кастомизацию ширины.
- */
 export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
   (
     {
@@ -32,7 +20,7 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
       footer,
       children,
       position = 'left',
-      width = 'w-64',
+      width = 'w-72',
       className = '',
     },
     ref
@@ -48,9 +36,9 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
       <aside
         ref={ref}
         className={`
-          relative h-full z-50 
-          bg-[var(--ios-glass)] backdrop-blur-md
-          border-[var(--ios-border)]
+          relative h-full z-40 
+          bg-[var(--bg-primary)]
+          border-[var(--border-subtle)]
           ${positionClasses}
           ${width}
           flex flex-col
@@ -59,10 +47,10 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
         data-testid="sidebar"
       >
         {/* Кнопка закрытия */}
-        <div className="flex justify-end p-2">
+        <div className="flex justify-end p-3">
           <button
             onClick={onClose}
-            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
             aria-label="Close sidebar"
             data-testid="close-sidebar"
           >
@@ -74,13 +62,13 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
         </div>
 
         {/* Заголовок (если есть) */}
-        {header && <div className="px-4 pb-2 border-b border-[var(--ios-border)]">{header}</div>}
+        {header && <div className="px-4 pb-3 border-b border-[var(--border-subtle)]">{header}</div>}
 
         {/* Основное содержимое (прокручиваемое) */}
         <div className="flex-1 overflow-y-auto p-2">{children}</div>
 
         {/* Футер (если есть) */}
-        {footer && <div className="p-4 border-t border-[var(--ios-border)]">{footer}</div>}
+        {footer && <div className="p-4 border-t border-[var(--border-subtle)]">{footer}</div>}
       </aside>
     );
   }

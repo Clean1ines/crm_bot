@@ -19,19 +19,19 @@ export const DialogsPage: React.FC = () => {
   if (!projectId) return null;
 
   return (
-    <div className="flex h-full">
-      {/* Left column: Dialog list */}
-      <div className="w-80 flex-shrink-0">
+    <div className="flex h-full bg-[var(--bg-primary)]">
+      {/* Левая колонка — список диалогов (max-width 320px) */}
+      <div className="flex-1 max-w-[320px] min-w-[240px]">
         <DialogList projectId={projectId} />
       </div>
 
-      {/* Center column: Chat */}
-      <div className="flex-1 flex flex-col">
+      {/* Центральная колонка — чат (всегда имеет приоритет) */}
+      <div className="flex-[2] min-w-[400px]">
         <ChatWindow threadId={selectedThreadId} projectId={projectId} />
       </div>
 
-      {/* Right column: Inspector */}
-      <div className="w-80 flex-shrink-0">
+      {/* Правая колонка — инспектор (max-width 320px) */}
+      <div className="flex-1 max-w-[320px] min-w-[240px]">
         <Inspector threadId={selectedThreadId} projectId={projectId} />
       </div>
     </div>

@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+/* Light theme overrides */
+:root {
+  --landing-bg: #F6F4EF;
+  --landing-card: #FFFFFF;
+  --landing-primary: #B87333;
+  --landing-text: #1E1E1E;
+  --landing-muted: #6B6B6B;
+  --landing-border: #E5E2DA;
+  --landing-bubble-user: #FFFFFF;
+  --landing-bubble-assistant: #F1ECE5;
+}
+
+body {
+  background-color: var(--landing-bg);
+  font-family: system-ui, -apple-system, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: var(--landing-text);
+  overflow-y: auto;
+}
+
+/* Keep spinner for auth */
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--landing-border);
+  border-top-color: var(--landing-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

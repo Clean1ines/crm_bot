@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
 import type { Thread, Client, LastMessage } from '../../../entities/thread/model/types';
+import { Search, Circle } from 'lucide-react';
 
 interface DialogListProps {
   projectId: string;
@@ -62,40 +63,52 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
   };
 
   const getStatusColor = (status: string, interactionMode: string) => {
-    if (status === 'manual') return 'bg-red-500';
-    if (interactionMode === 'demo') return 'bg-yellow-500';
-    return 'bg-green-500';
+    if (status === 'manual') return 'text-[var(--accent-danger)]';
+    if (interactionMode === 'demo') return 'text-[var(--accent-warning)]';
+    return 'text-[var(--accent-success)]';
+  };
+
+  const getLastMessageRole = (thread: Thread) => {
+    return 'assistant';
+  };
+
+  const getMessageBackground = (role: string) => {
+    if (role === 'assistant') return 'bg-[var(--surface-secondary)]';
+    if (role === 'manager') return 'bg-[var(--accent-muted)]';
+    return 'bg-white';
   };
 
   return (
-    <div className="flex flex-col h-full border-r border-[var(--ios-border)] bg-[var(--ios-bg)]">
-      <div className="p-4 border-b border-[var(--ios-border)]">
-        <input
-          type="text"
-          placeholder="Поиск по имени..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg bg-[var(--ios-input-bg)] text-[var(--text-main)] border border-[var(--ios-border)] focus:outline-none focus:ring-1 focus:ring-blue-500"
-        />
-        <div className="flex gap-2 mt-2">
-          <button
-            onClick={() => setStatusFilter(null)}
-            className={`px-2 py-1 text-xs rounded-full ${!statusFilter ? 'bg-blue-500 text-white' : 'bg-[var(--ios-bg-secondary)] text-[var(--text-muted)]'}`}
-          >
-            Все
-          </button>
-          <button
-            onClick={() => setStatusFilter('active')}
-            className={`px-2 py-1 text-xs rounded-full ${statusFilter === 'active' ? 'bg-blue-500 text-white' : 'bg-[var(--ios-bg-secondary)] text-[var(--text-muted)]'}`}
-          >
-            Авто
-          </button>
-          <button
-            onClick={() => setStatusFilter('manual')}
-            className={`px-2 py-1 text-xs rounded-full ${statusFilter === 'manual' ? 'bg-blue-500 text-white' : 'bg-[var(--ios-bg-secondary)] text-[var(--text-muted)]'}`}
-          >
-            Менеджер
-          </button>
+    <div className="flex flex-col h-full bg-white shadow-sm">
+      <div className="p-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            placeholder="Поиск по имени..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--surface-secondary)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
+          />
+        </div>
+        <div className="flex gap-2 mt-3">
+          {[
+            { label: 'Все', value: null },
+            { label: 'Авто', value: 'active' },
+            { label: 'Менеджер', value: 'manual' },
+          ].map((filter) => (
+            <button
+              key={filter.label}
+              onClick={() => setStatusFilter(filter.value)}
+              className={`px-2 py-1 text-xs rounded-full transition-all ${
+                statusFilter === filter.value
+                  ? 'bg-[var(--accent-primary)] text-white shadow-sm'
+                  : 'bg-[var(--surface-secondary)] text-[var(--text-secondary)] hover:bg-white hover:shadow-sm hover:text-[var(--text-primary)]'
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -103,31 +116,39 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
         {threads.map((thread) => {
           const client = thread.client as unknown as Client;
           const lastMsg = thread.last_message as unknown as LastMessage | null;
+          const isActive = selectedThreadId === thread.thread_id;
+          const lastMsgRole = getLastMessageRole(thread);
+          const bubbleBg = getMessageBackground(lastMsgRole);
           return (
             <div
               key={thread.thread_id}
               onClick={() => setSelectedThreadId(thread.thread_id)}
-              className={`p-3 border-b border-[var(--ios-border)] cursor-pointer transition-colors ${
-                selectedThreadId === thread.thread_id
-                  ? 'bg-[var(--ios-selected)]'
-                  : 'hover:bg-[var(--ios-hover)]'
+              className={`relative p-3 mx-2 mb-1 rounded-lg cursor-pointer transition-all duration-150 ${
+                isActive
+                  ? 'bg-[var(--surface-secondary)] shadow-sm'
+                  : 'hover:bg-[var(--surface-secondary)] hover:shadow-sm'
               }`}
             >
+              {isActive && (
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-[var(--accent-primary)] rounded-full" />
+              )}
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${getStatusColor(thread.status, thread.interaction_mode)}`} />
-                <div className="flex-1">
+                <Circle className={`w-2 h-2 fill-current ${getStatusColor(thread.status, thread.interaction_mode)}`} />
+                <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
-                    <span className="font-medium text-[var(--text-main)]">
+                    <span className="font-medium text-[var(--text-primary)] truncate">
                       {client?.full_name || client?.username || 'Клиент'}
                     </span>
-                    <span className="text-xs text-[var(--text-muted)]">
+                    <span className="text-xs text-[var(--text-muted)] ml-2 flex-shrink-0">
                       {lastMsg?.created_at
                         ? new Date(lastMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                         : ''}
                     </span>
                   </div>
-                  <div className="text-sm text-[var(--text-muted)] truncate">
-                    {lastMsg?.content || 'Нет сообщений'}
+                  <div className="text-sm text-[var(--text-secondary)] truncate">
+                    <span className={`inline-block px-1 rounded ${bubbleBg}`}>
+                      {lastMsg?.content || 'Нет сообщений'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -137,7 +158,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
         {hasMore && !loading && threads.length > 0 && (
           <button
             onClick={loadMore}
-            className="w-full p-2 text-center text-sm text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            className="w-full p-2 text-center text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           >
             Загрузить ещё
           </button>

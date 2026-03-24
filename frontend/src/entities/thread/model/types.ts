@@ -21,7 +21,7 @@ export interface LastMessage {
 
 export interface Message {
   id: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'manager';
   content: string;
   created_at: string;
   metadata?: {

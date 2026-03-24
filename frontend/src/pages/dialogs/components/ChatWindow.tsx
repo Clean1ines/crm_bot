@@ -3,6 +3,7 @@ import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
 import { useWebSocket } from '../../../shared/lib/websocket';
 import type { Message } from '../../../entities/thread/model/types';
+import { Send, Sparkles } from 'lucide-react';
 
 interface ChatWindowProps {
   threadId: string | null;
@@ -29,7 +30,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
   const [limit] = useState(50);
   const [offset] = useState(0);
 
-  // Load messages when thread changes
   useEffect(() => {
     if (!threadId) {
       clearMessages();
@@ -55,12 +55,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     loadMessages();
   }, [threadId, limit, offset, setMessages, setLoadingMessages]);
 
-  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // WebSocket for real-time updates
   const { isConnected } = useWebSocket({
     threadId,
     onMessage: (msg) => {
@@ -79,7 +77,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
         console.error('Failed to send reply', error);
       } else {
         setInputText('');
-        // Reload messages after a short delay to get the new message
         setTimeout(async () => {
           const { data } = await api.threads.getMessages(threadId, limit, offset);
           if (data && typeof data === 'object' && 'messages' in data && Array.isArray(data.messages)) {
@@ -102,7 +99,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
       if (error) {
         console.error('Failed to enable demo mode', error);
       } else {
-        // Refresh thread state to get updated interaction_mode
         const { data } = await api.threads.getState(threadId);
         if (data && typeof data === 'object' && 'state' in data) {
           setThreadState(data.state as Record<string, unknown>);
@@ -121,97 +117,105 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     }
   };
 
-  // Determine if demo button should be shown (always for now, but could be based on state)
   const showDemoButton = threadId && threadState && (threadState.interaction_mode !== 'demo');
 
   return (
-    <div className="flex flex-col h-full bg-[var(--ios-bg)]">
-      {/* Header */}
-      <div className="p-3 border-b border-[var(--ios-border)] flex items-center justify-between">
-        <div className="font-medium text-[var(--text-main)]">
-          {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
-        </div>
-        <div className="flex items-center gap-2">
-          {showDemoButton && (
-            <button
-              onClick={enableDemoMode}
-              disabled={isEnablingDemo}
-              className="px-2 py-1 text-xs bg-yellow-500 text-black rounded hover:bg-yellow-600 disabled:opacity-50"
-            >
-              {isEnablingDemo ? 'Включение...' : '🔥 Попробовать демо'}
-            </button>
-          )}
+    <div className="flex flex-col h-full items-center justify-center bg-transparent">
+      <div className="w-full max-w-3xl mx-4 my-4">
+        <div className="bg-white rounded-xl shadow-card overflow-hidden transition-all">
+          <div className="p-4 flex items-center justify-between">
+            <div className="font-medium text-[var(--text-primary)]">
+              {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
+            </div>
+            <div className="flex items-center gap-2">
+              {showDemoButton && (
+                <button
+                  onClick={enableDemoMode}
+                  disabled={isEnablingDemo}
+                  className="px-2 py-1 text-xs bg-[var(--accent-muted)] text-[var(--accent-primary)] rounded-md hover:bg-[var(--accent-primary)] hover:text-white transition-all disabled:opacity-50 flex items-center gap-1"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span className="hover:text-white">{isEnablingDemo ? 'Включение...' : 'Попробовать демо'}</span>
+                </button>
+              )}
+              {threadId && (
+                <div className="text-xs text-[var(--text-muted)]">
+                  {isConnected ? '🟢 Онлайн' : '⚪ Офлайн'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 max-h-[calc(100vh-180px)]">
+            {isLoadingMessages && <div className="text-center text-[var(--text-muted)]">Загрузка сообщений...</div>}
+            {messages.map((msg, idx) => {
+              let bubbleClasses = '';
+              if (msg.role === 'user') {
+                bubbleClasses = 'bg-white shadow-sm text-[var(--text-primary)]';
+              } else if (msg.role === 'assistant') {
+                bubbleClasses = 'bg-[var(--surface-secondary)] text-[var(--text-primary)]';
+              } else if (msg.role === 'manager') {
+                bubbleClasses = 'bg-[var(--accent-muted)] text-[var(--accent-primary)] shadow-sm';
+              } else {
+                bubbleClasses = 'bg-[var(--surface-secondary)] text-[var(--text-primary)]';
+              }
+              return (
+                <div
+                  key={msg.id || idx}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[70%] rounded-lg p-3 cursor-pointer ${bubbleClasses} transition-all hover:shadow-sm`}
+                    onClick={() => onMessageClick(msg)}
+                  >
+                    <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                    {msg.metadata?.latency_ms && (
+                      <div className="text-xs text-[var(--text-muted)] mt-1">
+                        ⏱️ {msg.metadata.latency_ms}ms | 🧠 {msg.metadata.tokens || 0} токенов
+                      </div>
+                    )}
+                    {msg.metadata?.explanation && (
+                      <div className="text-xs text-[var(--accent-primary)] mt-1">
+                        📖 {msg.metadata.explanation}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </div>
+
           {threadId && (
-            <div className="text-xs text-[var(--text-muted)]">
-              {isConnected ? '🔵 Онлайн' : '⚪ Офлайн'}
+            <div className="p-4">
+              <div className="flex gap-2">
+                <textarea
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Введите ответ..."
+                  className="flex-1 resize-none rounded-lg bg-[var(--surface-secondary)] text-[var(--text-primary)] p-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
+                  rows={2}
+                  disabled={isSending}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={!inputText.trim() || isSending}
+                  className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg disabled:opacity-50 hover:bg-[var(--accent-hover)] transition-all hover:shadow-sm flex items-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  Отправить
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
-
-      {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {isLoadingMessages && <div className="text-center text-[var(--text-muted)]">Загрузка сообщений...</div>}
-        {messages.map((msg, idx) => (
-          <div
-            key={msg.id || idx}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[70%] rounded-lg p-3 cursor-pointer ${
-                msg.role === 'user'
-                  ? 'bg-blue-500 text-white'
-                  : msg.role === 'assistant'
-                  ? 'bg-[var(--ios-bg-secondary)] text-[var(--text-main)]'
-                  : 'bg-gray-500 text-white'
-              }`}
-              onClick={() => onMessageClick(msg)}
-            >
-              <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
-              {msg.metadata?.latency_ms && (
-                <div className="text-xs opacity-70 mt-1">
-                  ⏱️ {msg.metadata.latency_ms}ms | 🧠 {msg.metadata.tokens || 0} токенов
-                </div>
-              )}
-              {msg.metadata?.explanation && (
-                <div className="text-xs text-yellow-500 mt-1">
-                  📖 {msg.metadata.explanation}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input area */}
-      {threadId && (
-        <div className="p-3 border-t border-[var(--ios-border)]">
-          <div className="flex gap-2">
-            <textarea
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Введите ответ менеджера..."
-              className="flex-1 resize-none rounded-lg bg-[var(--ios-input-bg)] text-[var(--text-main)] border border-[var(--ios-border)] p-2 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              rows={2}
-              disabled={isSending}
-            />
-            <button
-              onClick={handleSend}
-              disabled={!inputText.trim() || isSending}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg disabled:opacity-50"
-            >
-              Отправить
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

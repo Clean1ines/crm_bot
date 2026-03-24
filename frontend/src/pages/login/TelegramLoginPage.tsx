@@ -1,32 +1,37 @@
-import React, { useEffect, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Navbar } from './components/Navbar';
+import { HeroSection } from './components/HeroSection';
+import { ChatWidget } from './components/ChatWidget';
+import '../../app/styles/landing.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "";
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export const TelegramLoginPage: React.FC = () => {
   const [botUsername, setBotUsername] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const widgetContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   const log = (label: string, data?: any) => {
-    console.log(`[TG-FRONT] ${label}`, data ?? "");
+    console.log(`[TG-FRONT] ${label}`, data ?? '');
   };
 
-  // 1. Получаем username бота
+  // Fetch bot username for widget
   useEffect(() => {
-    log("BOT_FETCH_START");
+    log('BOT_FETCH_START');
     fetch(`${API_BASE_URL}/api/bot/username`)
       .then(async (res) => {
         const txt = await res.text();
         if (!res.ok) throw new Error(txt);
         const json = JSON.parse(txt);
-        log("BOT_FETCH_OK", json);
+        log('BOT_FETCH_OK', json);
         setBotUsername(json.username);
       })
-      .catch((err) => log("BOT_FETCH_ERROR", err));
+      .catch((err) => log('BOT_FETCH_ERROR', err));
   }, []);
 
-  // 2. Обработка callback ОТ TELEGRAM
+  // Handle Telegram callback (hash in URL)
   useEffect(() => {
     const raw = window.location.search;
     if (!raw) return;
@@ -36,67 +41,88 @@ export const TelegramLoginPage: React.FC = () => {
 
     if (!data.hash) return;
 
-    // УБРАЛИ ПРОВЕРКУ tg_done, ЧТОБЫ ИСКЛЮЧИТЬ ЗАВИСАНИЕ
-    log("AUTH_REQUEST", data);
+    setIsLoading(true);
+    log('AUTH_REQUEST', data);
 
     fetch(`${API_BASE_URL}/api/auth/telegram`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
       .then(async (res) => {
         if (!res.ok) {
-           const errText = await res.text();
-           throw new Error(errText);
+          const errText = await res.text();
+          throw new Error(errText);
         }
         return res.json();
       })
       .then((res) => {
-        log("AUTH_SUCCESS", res);
-        localStorage.setItem("mrak_token", res.access_token);
-        // Редирект через navigate, чтобы не рвать сетевые запросы
-        navigate("/projects", { replace: true });
+        log('AUTH_SUCCESS', res);
+        localStorage.setItem('mrak_token', res.access_token);
+        navigate('/projects', { replace: true });
       })
       .catch((err) => {
-        log("AUTH_ERROR", err);
+        log('AUTH_ERROR', err);
+        setIsLoading(false);
       });
   }, [navigate]);
 
-  // 3. Инжект виджета
+  // Inject Telegram widget if no hash is present (i.e., we are not in callback mode)
   useEffect(() => {
     if (!botUsername || !widgetContainerRef.current) return;
-    
-    // Если в URL есть хэш, не рисуем виджет, чтобы не путать юзера
-    if (window.location.search.includes("hash=")) return;
 
-    widgetContainerRef.current.innerHTML = "";
-    log("INJECTING_WIDGET");
+    // If we are in callback (hash present), don't show widget
+    if (window.location.search.includes('hash=')) return;
 
-    const script = document.createElement("script");
-    script.src = "https://telegram.org/js/telegram-widget.js?22";
-    script.setAttribute("data-telegram-login", botUsername);
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-userpic", "false");
-    script.setAttribute("data-request-access", "write");
-    script.setAttribute("data-auth-url", window.location.origin + window.location.pathname);
+    widgetContainerRef.current.innerHTML = '';
+    log('INJECTING_WIDGET');
+
+    const script = document.createElement('script');
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', botUsername);
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-userpic', 'false');
+    script.setAttribute('data-request-access', 'write');
+    script.setAttribute('data-auth-url', window.location.origin + window.location.pathname);
     script.async = true;
 
-    script.onload = () => log("WIDGET_LOADED");
+    script.onload = () => log('WIDGET_LOADED');
     widgetContainerRef.current.appendChild(script);
   }, [botUsername]);
 
-  return (
-    <div className="min-h-screen w-screen flex items-center justify-center bg-black text-white">
-      {window.location.search.includes("hash=") ? (
+  // If we are waiting for auth response, show spinner
+  if (isLoading || window.location.search.includes('hash=')) {
+    return (
+      <div className="min-h-screen w-screen flex items-center justify-center bg-[#F6F4EF]">
         <div className="flex flex-col items-center gap-4">
-           <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-           <span className="text-orange-500 font-medium">Verifying Telegram session...</span>
+          <div className="spinner"></div>
+          <span className="text-[#6B6B6B] font-medium">Verifying Telegram session...</span>
         </div>
-      ) : !botUsername ? (
-        <span className="opacity-50">Initializing secure connection...</span>
-      ) : (
-        <div ref={widgetContainerRef} />
-      )}
+      </div>
+    );
+  }
+
+  // Otherwise, show full landing page with widget in the right column
+  return (
+    <div className="min-h-screen bg-[#F6F4EF]">
+      <Navbar />
+      <main className="max-w-7xl mx-auto px-6 md:px-12 py-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+          {/* Left column */}
+          <HeroSection />
+
+          {/* Right column */}
+          <div className="relative">
+            {botUsername ? (
+              <div ref={widgetContainerRef} className="flex justify-center" />
+            ) : (
+              <div className="animate-pulse">
+                <ChatWidget />
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
     </div>
   );
 };
