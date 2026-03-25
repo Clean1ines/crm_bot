@@ -5,12 +5,13 @@ from uuid import UUID
 
 from src.api.dependencies import (
     get_thread_repo, get_event_repo, get_memory_repository, get_project_repo,
-    get_current_user_id, get_orchestrator
+    get_current_user_id, get_orchestrator, get_user_repository
 )
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.event_repository import EventRepository
 from src.database.repositories.memory_repository import MemoryRepository
 from src.database.repositories.project_repository import ProjectRepository
+from src.database.repositories.user_repository import UserRepository
 from src.services.orchestrator import OrchestratorService
 from src.core.logging import get_logger
 
@@ -100,6 +101,7 @@ async def reply_to_thread(
     thread_repo: ThreadRepository = Depends(get_thread_repo),
     project_repo: ProjectRepository = Depends(get_project_repo),
     orchestrator: OrchestratorService = Depends(get_orchestrator),
+    user_repo: UserRepository = Depends(get_user_repository),
 ):
     """
     Send a manager reply to a thread. Only allowed if thread is in manual mode.
@@ -114,8 +116,14 @@ async def reply_to_thread(
     if thread["status"] != "manual":
         raise HTTPException(status_code=400, detail="Thread is not in manual mode")
 
+    # Get the user's Telegram chat ID
+    user = await user_repo.get_user_by_id(current_user_id)
+    if not user or not user.get("telegram_id"):
+        raise HTTPException(status_code=400, detail="User has no Telegram account linked")
+    manager_chat_id = str(user["telegram_id"])
+
     # Send reply via orchestrator
-    await orchestrator.manager_reply(thread_id, data.message)
+    await orchestrator.manager_reply(thread_id, data.message, manager_chat_id)
     return {"status": "sent"}
 
 

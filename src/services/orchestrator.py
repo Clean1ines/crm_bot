@@ -23,6 +23,7 @@ from src.services.lock import acquire_thread_lock, release_thread_lock
 from src.services.redis_client import get_redis_client
 from src.core.config import settings
 from src.core.logging import get_logger
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -138,8 +139,8 @@ class OrchestratorService:
         
         try:
             await self.event_repo.append(
-                stream_id=uuid.UUID(stream_id),
-                project_id=uuid.UUID(project_id),
+                stream_id=ensure_uuid(stream_id),
+                project_id=ensure_uuid(project_id),
                 event_type=event_type,
                 payload=payload
             )
@@ -217,7 +218,7 @@ class OrchestratorService:
                         extra={"project_id": project_id, "workflow_id": workflow_id}
                     )
                     workflow_data = await self.workflow_repo.get_by_id(
-                        uuid.UUID(workflow_id), include_graph=True
+                        ensure_uuid(workflow_id), include_graph=True
                     )
                     if workflow_data and "graph_json" in workflow_data:
                         return self._build_graph_from_json(workflow_data["graph_json"])
@@ -463,13 +464,13 @@ class OrchestratorService:
                     UPDATE threads
                     SET updated_at = NOW()
                     WHERE id = $1
-                """, uuid.UUID(thread_id))
+                """, ensure_uuid(thread_id))
 
                 # Сохраняем сообщение менеджера как assistant с префиксом
                 await conn.execute("""
                     INSERT INTO messages (thread_id, role, content)
                     VALUES ($1, $2, $3)
-                """, uuid.UUID(thread_id), "assistant", prefixed_text)
+                """, ensure_uuid(thread_id), "assistant", prefixed_text)
 
         # Получаем токен бота для этого проекта
         bot_token = await self.projects.get_bot_token(project_id)
@@ -512,4 +513,3 @@ class OrchestratorService:
 
         logger.info("Manager reply sent successfully", extra={"thread_id": thread_id})
         return True
-

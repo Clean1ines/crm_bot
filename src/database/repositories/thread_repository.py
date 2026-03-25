@@ -3,6 +3,7 @@ import json
 from typing import List, Optional, Dict, Any
 from ..models import ThreadStatus
 from src.core.logging import get_logger
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -22,7 +23,7 @@ class ThreadRepository:
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (project_id, chat_id) DO UPDATE SET username = EXCLUDED.username
                 RETURNING id
-            """, uuid.UUID(project_id), chat_id, username, source)
+            """, ensure_uuid(project_id), chat_id, username, source)
             client_id = str(row['id'])
             logger.info(f"Client {client_id} ensured")
             return client_id
@@ -38,7 +39,7 @@ class ThreadRepository:
                 SELECT id FROM threads 
                 WHERE client_id = $1
                 ORDER BY updated_at DESC LIMIT 1
-            """, uuid.UUID(client_id))
+            """, ensure_uuid(client_id))
             if row:
                 thread_id = str(row['id'])
                 logger.debug(f"Thread found: {thread_id}")
@@ -52,7 +53,7 @@ class ThreadRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO threads (client_id, status) VALUES ($1, $2) RETURNING id
-            """, uuid.UUID(client_id), ThreadStatus.ACTIVE.value)
+            """, ensure_uuid(client_id), ThreadStatus.ACTIVE.value)
             thread_id = str(row['id'])
             logger.info(f"Thread {thread_id} created")
             return thread_id
@@ -64,9 +65,9 @@ class ThreadRepository:
             await conn.execute("""
                 INSERT INTO messages (thread_id, role, content)
                 VALUES ($1, $2, $3)
-            """, uuid.UUID(thread_id), role, content)
+            """, ensure_uuid(thread_id), role, content)
             # Обновляем timestamp треда, чтобы он был "свежим"
-            await conn.execute("UPDATE threads SET updated_at = NOW() WHERE id = $1", uuid.UUID(thread_id))
+            await conn.execute("UPDATE threads SET updated_at = NOW() WHERE id = $1", ensure_uuid(thread_id))
             logger.debug(f"Message added and thread updated")
 
     async def get_messages_for_langgraph(self, thread_id: str) -> List[Dict]:
@@ -76,7 +77,7 @@ class ThreadRepository:
             rows = await conn.fetch("""
                 SELECT role, content FROM messages 
                 WHERE thread_id = $1 ORDER BY created_at ASC
-            """, uuid.UUID(thread_id))
+            """, ensure_uuid(thread_id))
             messages = [dict(row) for row in rows]
             logger.debug(f"Retrieved {len(messages)} messages")
             return messages
@@ -89,7 +90,7 @@ class ThreadRepository:
                 UPDATE threads
                 SET status = $1, updated_at = NOW()
                 WHERE id = $2
-            """, status.value, uuid.UUID(thread_id))
+            """, status.value, ensure_uuid(thread_id))
 
     async def update_manager_chat(self, thread_id: str, manager_chat_id: str) -> None:
         """
@@ -102,7 +103,7 @@ class ThreadRepository:
                 UPDATE threads
                 SET manager_chat_id = $1, updated_at = NOW()
                 WHERE id = $2
-            """, manager_chat_id, uuid.UUID(thread_id))
+            """, manager_chat_id, ensure_uuid(thread_id))
 
     async def find_by_manager_chat(self, manager_chat_id: str) -> List[Dict]:
         """
@@ -135,7 +136,7 @@ class ThreadRepository:
                 FROM threads t
                 JOIN clients c ON t.client_id = c.id
                 WHERE t.id = $1
-            """, uuid.UUID(thread_id))
+            """, ensure_uuid(thread_id))
             if not row:
                 logger.warning(f"Thread {thread_id} not found")
                 return None
@@ -153,7 +154,7 @@ class ThreadRepository:
                 UPDATE threads
                 SET context_summary = $1, updated_at = NOW()
                 WHERE id = $2
-            """, summary, uuid.UUID(thread_id))
+            """, summary, ensure_uuid(thread_id))
             logger.debug("Summary updated")
 
     async def get_state_json(self, thread_id: str) -> Optional[Dict[str, Any]]:
@@ -165,7 +166,7 @@ class ThreadRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT state_json FROM threads WHERE id = $1
-            """, uuid.UUID(thread_id))
+            """, ensure_uuid(thread_id))
             if row and row["state_json"] is not None:
                 state = row["state_json"]
                 logger.debug(f"State_json retrieved for thread {thread_id}")
@@ -184,7 +185,7 @@ class ThreadRepository:
                 UPDATE threads
                 SET state_json = $1, updated_at = NOW()
                 WHERE id = $2
-            """, json.dumps(state, ensure_ascii=False), uuid.UUID(thread_id))
+            """, json.dumps(state, ensure_ascii=False), ensure_uuid(thread_id))
             logger.debug("State_json saved")
 
     async def update_analytics(
@@ -205,7 +206,7 @@ class ThreadRepository:
             cta: Тип призыва к действию (например, "request_demo").
             decision: Решение роутера (например, "RESPOND_KB").
         """
-        thread_uuid = uuid.UUID(thread_id)
+        thread_uuid = ensure_uuid(thread_id)
 
         # Build SET clause dynamically
         updates = []
@@ -264,7 +265,7 @@ class ThreadRepository:
                 SELECT intent, lifecycle, cta, decision
                 FROM threads
                 WHERE id = $1
-            """, uuid.UUID(thread_id))
+            """, ensure_uuid(thread_id))
             if not row:
                 logger.warning(f"Thread {thread_id} not found for analytics fetch")
                 return None
@@ -296,7 +297,7 @@ class ThreadRepository:
                     COUNT(CASE WHEN role = 'user' THEN 1 END) as manager  -- manager messages are 'user' role from manager bot
                 FROM messages
                 WHERE thread_id = $1
-            """, uuid.UUID(thread_id))
+            """, ensure_uuid(thread_id))
             return {
                 "total": row["total"] or 0,
                 "ai": row["ai"] or 0,
@@ -322,7 +323,7 @@ class ThreadRepository:
         
         # Build WHERE clause
         where_parts = ["c.project_id = $1"]
-        params = [uuid.UUID(project_id)]
+        params = [ensure_uuid(project_id)]
         param_idx = 2
         
         if status_filter:
@@ -416,7 +417,7 @@ class ThreadRepository:
                 WHERE thread_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            """, uuid.UUID(thread_id), limit, offset)
+            """, ensure_uuid(thread_id), limit, offset)
         
         messages = []
         for row in rows:
@@ -445,7 +446,7 @@ class ThreadRepository:
                 UPDATE threads
                 SET interaction_mode = $1, updated_at = NOW()
                 WHERE id = $2
-            """, mode, uuid.UUID(thread_id))
+            """, mode, ensure_uuid(thread_id))
 
     # В ThreadRepository:
 

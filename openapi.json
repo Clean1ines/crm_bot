@@ -1837,6 +1837,26 @@
           }
         }
       }
+    },
+    "/api/logs/frontend": {
+      "post": {
+        "tags": [
+          "logs"
+        ],
+        "summary": "Frontend Logs",
+        "description": "Receive structured logs from frontend and forward to backend logger.\nThis endpoint is used by the frontend in production to send logs to Render Log Drain.",
+        "operationId": "frontend_logs_api_logs_frontend_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

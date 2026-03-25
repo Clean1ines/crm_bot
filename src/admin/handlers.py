@@ -27,6 +27,7 @@ from src.admin.keyboards import (
     make_back_keyboard,
     make_token_help_keyboard,
 )
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -285,7 +286,7 @@ async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
     if text.strip().lower() == "да":
         try:
             async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM projects WHERE id = $1", uuid.UUID(project_id))
+                await conn.execute("DELETE FROM projects WHERE id = $1", ensure_uuid(project_id))
             logger.info("Project deleted", extra={"project_id": project_id, "name": project_name})
             await _clear_state(chat_id)
             return f"✅ Проект **«{project_name}»** ({project_id}) успешно удален.", None
@@ -403,7 +404,7 @@ async def handle_admin_callback(callback_data: str, chat_id: str, pool) -> Admin
         project_id = callback_data.split(":", 1)[1]
         # Fetch project name
         async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", uuid.UUID(project_id))
+            row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id))
             if not row:
                 return "❌ Проект не найден.", None
             pname = row["name"]
@@ -604,7 +605,7 @@ async def _show_project_menu(chat_id: str, project_id: str, pool) -> AdminRespon
 
     # Get project name
     async with pool.acquire() as conn:
-        name_row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", uuid.UUID(project_id))
+        name_row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id))
         if not name_row:
             return "❌ Проект не найден.", None
         project_name = name_row["name"]

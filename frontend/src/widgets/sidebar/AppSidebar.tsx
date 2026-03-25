@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects, Project } from '@entities/project';
 import { useAppStore } from '../../app/store';
@@ -18,6 +18,7 @@ import {
   User,
   ChevronDown,
 } from 'lucide-react';
+import frontendLogger from '@shared/lib/logger';
 
 interface NavItem {
   path: string;
@@ -66,7 +67,21 @@ export const AppSidebar: React.FC = () => {
   const isMobile = useMediaQuery('(max-width: 768px)');
   const [isOpen, setIsOpen] = useState(!isMobile);
 
+  // Log component mount
+  useEffect(() => {
+    frontendLogger.info('AppSidebar mounted', { urlProjectId, projectsCount: projects.length });
+    return () => {
+      frontendLogger.info('AppSidebar unmounted');
+    };
+  }, []);
+
+  // Log when urlProjectId or projects change
+  useEffect(() => {
+    frontendLogger.debug('AppSidebar state updated', { urlProjectId, projectsCount: projects.length });
+  }, [urlProjectId, projects]);
+
   const handleProjectSelect = (projectId: string) => {
+    frontendLogger.info('Project selected', { projectId, previousUrl: urlProjectId });
     setCurrentProjectId(projectId);
     setSelectedProjectId(projectId);
     navigate(`/projects/${projectId}/dialogs`);
@@ -74,6 +89,7 @@ export const AppSidebar: React.FC = () => {
   };
 
   const handleOpenEditModal = (project: Project) => {
+    frontendLogger.debug('Edit project modal opened', { projectId: project.id, projectName: project.name });
     setEditName(project.name);
     setEditDescription((project as any).description || '');
     openEditModal(project);
@@ -81,12 +97,14 @@ export const AppSidebar: React.FC = () => {
 
   const handleUpdate = async (name: string, description: string) => {
     if (editingProject) {
+      frontendLogger.info('Updating project', { projectId: editingProject.id, name });
       await updateProject({ id: editingProject.id, name, description } as any);
     }
   };
 
   const handleDelete = async () => {
     if (deletingProject) {
+      frontendLogger.warn('Deleting project', { projectId: deletingProject.id, projectName: deletingProject.name });
       await deleteProject(deletingProject.id);
     }
   };
@@ -188,6 +206,7 @@ export const AppSidebar: React.FC = () => {
         isOpen={isCreateOpen}
         onClose={closeModals}
         onCreate={async (name, description) => {
+          frontendLogger.info('Creating project', { name });
           await createProject({ name, description } as any);
         }}
         isPending={isCreating}

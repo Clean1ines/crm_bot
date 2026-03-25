@@ -55,7 +55,7 @@ const sendToLogDrain = async (entry: LogEntry): Promise<void> => {
   const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   try {
-    await fetch('/api/logs/frontend', {
+    const response = await fetch('/api/logs/frontend', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -65,6 +65,9 @@ const sendToLogDrain = async (entry: LogEntry): Promise<void> => {
       signal: controller.signal,
       keepalive: true,
     });
+    if (!response.ok) {
+      console.warn(`Failed to send log to drain: ${response.status} ${response.statusText}`);
+    }
   } catch (error) {
     console.warn('Failed to send log to drain:', error);
   } finally {
@@ -84,6 +87,10 @@ export const frontendLogger = {
       user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : 'test-agent',
       ...context,
     };
+    // Also log to console in production for debugging (can be removed later)
+    if (getIsProduction()) {
+      console.debug(`[DEBUG] ${message}`, entry);
+    }
     void sendToLogDrain(entry);
   },
 
@@ -97,6 +104,9 @@ export const frontendLogger = {
       user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : 'test-agent',
       ...context,
     };
+    if (getIsProduction()) {
+      console.info(`[INFO] ${message}`, entry);
+    }
     void sendToLogDrain(entry);
   },
 
@@ -110,6 +120,9 @@ export const frontendLogger = {
       user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : 'test-agent',
       ...context,
     };
+    if (getIsProduction()) {
+      console.warn(`[WARN] ${message}`, entry);
+    }
     void sendToLogDrain(entry);
   },
 
@@ -128,6 +141,9 @@ export const frontendLogger = {
       error: err,
       ...context,
     };
+    if (getIsProduction()) {
+      console.error(`[ERROR] ${message}`, entry);
+    }
     void sendToLogDrain(entry);
   },
 

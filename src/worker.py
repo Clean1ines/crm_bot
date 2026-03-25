@@ -20,6 +20,7 @@ from src.database.repositories.queue_repository import QueueRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.metrics_repository import MetricsRepository
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -179,7 +180,7 @@ async def _get_client_name(project_id: str, client_id: str, pool: asyncpg.Pool) 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT username, full_name FROM clients WHERE id = $1 AND project_id = $2",
-            uuid.UUID(client_id), uuid.UUID(project_id)
+            ensure_uuid(client_id), ensure_uuid(project_id)
         )
         if row:
             if row["full_name"]:

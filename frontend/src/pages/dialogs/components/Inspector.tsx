@@ -4,6 +4,7 @@ import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
 import type { MemoryEntry, TimelineEvent, ThreadState } from '../../../entities/thread/model/types';
 import { Edit2, Save, X, AlertCircle, ChevronDown } from 'lucide-react';
+import frontendLogger from '../../../shared/lib/logger';
 
 interface Tab {
   id: string;
@@ -37,10 +38,24 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   const [hasMoreTimeline, setHasMoreTimeline] = useState(true);
   const [showTabMenu, setShowTabMenu] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const requestIdRef = useRef(0);
   const isMountedRef = useRef(true);
 
   const isRequestValid = (id: number) => id === requestIdRef.current && isMountedRef.current;
+
+  // Component lifecycle logging
+  useEffect(() => {
+    frontendLogger.debug('Inspector mounted', { threadId, projectId });
+    return () => {
+      frontendLogger.debug('Inspector unmounted', { threadId, projectId });
+    };
+  }, [threadId, projectId]);
+
+  // Log active tab changes
+  useEffect(() => {
+    frontendLogger.debug('Inspector active tab changed', { inspectorActiveTab, threadId });
+  }, [inspectorActiveTab, threadId]);
 
   const renderSummary = () => {
     const state = threadState as ThreadState & {
@@ -202,10 +217,12 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
 
   // Data loading effect with request cancellation
   useEffect(() => {
+    frontendLogger.debug('Inspector data loading effect triggered', { threadId });
     isMountedRef.current = true;
     const currentRequestId = ++requestIdRef.current;
 
     if (!threadId) {
+      frontendLogger.debug('No threadId, clearing inspector state');
       setThreadState(null);
       setThreadTimeline([]);
       setThreadMemory([]);
@@ -217,41 +234,73 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     const loadState = async () => {
       try {
         const { data, error } = await api.threads.getState(threadId);
-        if (!isRequestValid(currentRequestId)) return;
+        if (!isRequestValid(currentRequestId)) {
+          frontendLogger.debug('State request outdated, ignoring', { requestId: currentRequestId });
+          return;
+        }
         if (!error && data && typeof data === 'object' && 'state' in data) {
           setThreadState(data.state as ThreadState);
+          frontendLogger.debug('State loaded successfully', { threadId });
+        } else if (error) {
+          frontendLogger.warn('State load error', { error });
         }
       } catch (err) {
-        if (isRequestValid(currentRequestId)) console.error('Failed to load thread state', err);
+        if (isRequestValid(currentRequestId)) {
+          frontendLogger.error('Failed to load thread state', err, { threadId });
+        }
       }
     };
 
     const loadMemory = async () => {
       try {
         const { data, error } = await api.threads.getMemory(threadId);
-        if (!isRequestValid(currentRequestId)) return;
+        if (!isRequestValid(currentRequestId)) {
+          frontendLogger.debug('Memory request outdated, ignoring', { requestId: currentRequestId });
+          return;
+        }
         if (!error && data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);
+          frontendLogger.debug('Memory loaded successfully', { threadId, count: data.memory.length });
+        } else if (error) {
+          frontendLogger.warn('Memory load error', { error });
         }
       } catch (err) {
-        if (isRequestValid(currentRequestId)) console.error('Failed to load memory', err);
+        if (isRequestValid(currentRequestId)) {
+          frontendLogger.error('Failed to load thread memory', err, { threadId });
+        }
       }
     };
 
     const loadTimeline = async () => {
-      if (!isRequestValid(currentRequestId)) return;
+      if (!isRequestValid(currentRequestId)) {
+        frontendLogger.debug('Timeline request cancelled before start', { requestId: currentRequestId });
+        return;
+      }
       setLoadingInspector(true);
+      frontendLogger.debug('Loading timeline', { threadId, timelineLimit });
       try {
         const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, 0);
-        if (!isRequestValid(currentRequestId)) return;
+        if (!isRequestValid(currentRequestId)) {
+          frontendLogger.debug('Timeline request outdated, ignoring', { requestId: currentRequestId });
+          return;
+        }
         if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
           setThreadTimeline(data.events as TimelineEvent[]);
           setHasMoreTimeline((data.events as TimelineEvent[]).length === timelineLimit);
+          frontendLogger.debug('Timeline loaded successfully', { threadId, count: data.events.length });
+        } else if (error) {
+          frontendLogger.warn('Timeline load error', { error });
         }
       } catch (err) {
-        if (isRequestValid(currentRequestId)) console.error('Failed to load timeline', err);
+        if (isRequestValid(currentRequestId)) {
+          frontendLogger.error('Failed to load timeline', err, { threadId });
+        }
       } finally {
-        if (isRequestValid(currentRequestId)) setLoadingInspector(false);
+        if (isRequestValid(currentRequestId)) {
+          setLoadingInspector(false);
+        } else {
+          frontendLogger.debug('Timeline loading finished but request invalid, not resetting loading state');
+        }
       }
     };
 
@@ -260,27 +309,43 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     loadTimeline();
 
     return () => {
+      frontendLogger.debug('Inspector data loading effect cleanup', { threadId, requestId: currentRequestId });
       isMountedRef.current = false;
     };
   }, [threadId, timelineLimit, setThreadState, setThreadMemory, setThreadTimeline, setLoadingInspector]);
 
   const loadMoreTimeline = async () => {
-    if (!threadId || !hasMoreTimeline) return;
+    if (!threadId || !hasMoreTimeline) {
+      frontendLogger.debug('loadMoreTimeline skipped', { threadId, hasMoreTimeline });
+      return;
+    }
     const currentRequestId = requestIdRef.current;
-    if (!isRequestValid(currentRequestId)) return;
+    if (!isRequestValid(currentRequestId)) {
+      frontendLogger.debug('loadMoreTimeline ignored due to stale request');
+      return;
+    }
 
     const newOffset = timelineOffset + timelineLimit;
+    frontendLogger.debug('Loading more timeline', { threadId, newOffset, limit: timelineLimit });
     try {
       const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, newOffset);
-      if (!isRequestValid(currentRequestId)) return;
+      if (!isRequestValid(currentRequestId)) {
+        frontendLogger.debug('loadMoreTimeline outdated, ignoring');
+        return;
+      }
       if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
         const newEvents = data.events as TimelineEvent[];
         setThreadTimeline([...threadTimeline, ...newEvents]);
         setTimelineOffset(newOffset);
         setHasMoreTimeline(newEvents.length === timelineLimit);
+        frontendLogger.debug('More timeline loaded', { threadId, newCount: newEvents.length });
+      } else if (error) {
+        frontendLogger.warn('loadMoreTimeline error', { error });
       }
     } catch (err) {
-      if (isRequestValid(currentRequestId)) console.error('Failed to load more timeline', err);
+      if (isRequestValid(currentRequestId)) {
+        frontendLogger.error('Failed to load more timeline', err, { threadId });
+      }
     }
   };
 
@@ -288,24 +353,29 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     if (!threadId) return;
     const currentRequestId = requestIdRef.current;
     if (!isRequestValid(currentRequestId)) return;
+    frontendLogger.debug('Updating memory', { threadId, key });
     try {
       const { error } = await api.threads.updateMemory(threadId, key, value);
       if (!isRequestValid(currentRequestId)) return;
       if (error) {
-        console.error('Failed to update memory', error);
+        frontendLogger.warn('Memory update error', { error });
       } else {
         const { data } = await api.threads.getMemory(threadId);
         if (!isRequestValid(currentRequestId)) return;
         if (data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);
+          frontendLogger.debug('Memory updated and reloaded', { threadId, key });
         }
       }
     } catch (err) {
-      if (isRequestValid(currentRequestId)) console.error('Error updating memory', err);
+      if (isRequestValid(currentRequestId)) {
+        frontendLogger.error('Failed to update memory', err, { threadId, key });
+      }
     }
   };
 
   const startEditMemory = (entry: MemoryEntry) => {
+    frontendLogger.debug('Start editing memory', { key: entry.key });
     setEditingMemoryKey(entry.key);
     setEditingMemoryValue(typeof entry.value === 'string' ? entry.value : JSON.stringify(entry.value));
   };
@@ -318,6 +388,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       } catch {
         parsedValue = editingMemoryValue;
       }
+      frontendLogger.debug('Saving memory edit', { key: editingMemoryKey });
       await updateMemory(editingMemoryKey, parsedValue);
       setEditingMemoryKey(null);
       setEditingMemoryValue('');
@@ -325,20 +396,32 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   };
 
   const cancelEditMemory = () => {
+    frontendLogger.debug('Cancel memory edit', { key: editingMemoryKey });
     setEditingMemoryKey(null);
     setEditingMemoryValue('');
   };
 
-  // Click outside to close dropdown
+  // Click outside to close dropdown – but ignore clicks inside the dropdown itself
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (moreButtonRef.current && !moreButtonRef.current.contains(event.target as Node)) {
-        setShowTabMenu(false);
+      const target = event.target as Node;
+      // If the click is on the toggle button, let the button handle toggling.
+      if (moreButtonRef.current && moreButtonRef.current.contains(target)) {
+        return;
       }
+      // If the click is inside the dropdown container, don't close.
+      if (dropdownRef.current && dropdownRef.current.contains(target)) {
+        return;
+      }
+      // Otherwise close the menu.
+      setShowTabMenu(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Force content re-render when tab changes by using a key
+  const contentKey = `${inspectorActiveTab}-${threadId}`;
 
   return (
     <div className="flex flex-col h-full bg-white shadow-sm">
@@ -353,11 +436,16 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
             <ChevronDown className="w-3 h-3" />
           </button>
           {showTabMenu && (
-            <div className="absolute left-0 mt-1 w-40 bg-white rounded-md shadow-lg border border-[var(--border-subtle)] z-10">
+            <div
+              ref={dropdownRef}
+              className="absolute left-0 mt-1 w-40 bg-white rounded-md shadow-lg border border-[var(--border-subtle)] z-20"
+            >
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => {
+                    console.log('Tab clicked from dropdown:', tab.id);
+                    frontendLogger.debug('Tab selected from dropdown', { tab: tab.id });
                     setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw');
                     setShowTabMenu(false);
                   }}
@@ -374,7 +462,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4" key={contentKey}>
         {isLoadingInspector && <div className="text-center text-[var(--text-muted)]">Загрузка...</div>}
         {!threadId && <div className="text-center text-[var(--text-muted)]">Выберите диалог</div>}
         {threadId && !isLoadingInspector && tabs.find(t => t.id === inspectorActiveTab)?.component()}

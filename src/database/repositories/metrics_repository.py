@@ -9,6 +9,7 @@ from datetime import datetime, date
 from typing import Optional, Dict, Any
 
 from src.core.logging import get_logger
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -51,7 +52,7 @@ class MetricsRepository:
             escalated: If True, set escalated = True (overwrites).
             resolution_time: Resolution time in seconds (sets the field).
         """
-        thread_uuid = uuid.UUID(thread_id)
+        thread_uuid = ensure_uuid(thread_id)
         # Build SET clause dynamically
         updates = []
         params = [thread_uuid]
@@ -122,7 +123,7 @@ class MetricsRepository:
                 SELECT total_threads, escalations, avg_messages_to_resolution, tokens_used
                 FROM project_metrics_daily
                 WHERE project_id = $1 AND date = $2
-            """, uuid.UUID(project_id), date)
+            """, ensure_uuid(project_id), date)
             
             if current:
                 new_total = current['total_threads'] + total_threads_delta
@@ -133,13 +134,13 @@ class MetricsRepository:
                     UPDATE project_metrics_daily
                     SET total_threads = $1, escalations = $2, avg_messages_to_resolution = $3, tokens_used = $4
                     WHERE project_id = $5 AND date = $6
-                """, new_total, new_escalations, new_avg, new_tokens, uuid.UUID(project_id), date)
+                """, new_total, new_escalations, new_avg, new_tokens, ensure_uuid(project_id), date)
             else:
                 # Insert new row with deltas as initial values
                 await conn.execute("""
                     INSERT INTO project_metrics_daily (project_id, date, total_threads, escalations, avg_messages_to_resolution, tokens_used)
                     VALUES ($1, $2, $3, $4, $5, $6)
-                """, uuid.UUID(project_id), date, total_threads_delta, escalations_delta, avg_messages_to_resolution, tokens_used_delta)
+                """, ensure_uuid(project_id), date, total_threads_delta, escalations_delta, avg_messages_to_resolution, tokens_used_delta)
         
         logger.debug("Project daily metrics updated", extra={"project_id": project_id, "date": date})
 

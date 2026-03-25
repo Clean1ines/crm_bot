@@ -92,10 +92,7 @@ class QueueRepository:
         async with self.pool.acquire() as conn:
             db_name = await conn.fetchval("SELECT current_database()")
             schema_name = await conn.fetchval("SELECT current_schema()")
-            logger.info(
-                "Worker connection info",
-                extra={"database": db_name, "schema": schema_name, "worker_id": worker_id}
-            )
+            
 
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""

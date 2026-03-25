@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 
 from src.core.logging import get_logger
 from src.services.embedding_service import embed_text, embed_batch
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -44,7 +45,7 @@ class KnowledgeRepository:
                 LIMIT $3
                 """,
                 query_embedding_str,
-                uuid.UUID(project_id),
+                ensure_uuid(project_id),
                 limit * 2,
             )
 
@@ -73,7 +74,7 @@ class KnowledgeRepository:
                 LIMIT $3
                 """,
                 query,
-                uuid.UUID(project_id),
+                ensure_uuid(project_id),
                 limit * 2,
             )
 
@@ -130,8 +131,8 @@ class KnowledgeRepository:
                         INSERT INTO knowledge_base (project_id, document_id, content, embedding)
                         VALUES ($1, $2, $3, $4::vector)
                         """,
-                        uuid.UUID(project_id),
-                        uuid.UUID(document_id) if document_id else None,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id) if document_id else None,
                         chunk["content"],
                         emb_str,
                     )
@@ -159,7 +160,7 @@ class KnowledgeRepository:
                 INSERT INTO knowledge_documents (project_id, file_name, file_size, uploaded_by)
                 VALUES ($1, $2, $3, $4)
                 RETURNING id
-            """, uuid.UUID(project_id), file_name, file_size, uploaded_by)
+            """, ensure_uuid(project_id), file_name, file_size, uploaded_by)
             doc_id = str(row["id"])
             logger.info("Document created", extra={"document_id": doc_id})
             return doc_id
@@ -181,7 +182,7 @@ class KnowledgeRepository:
                 WHERE project_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            """, uuid.UUID(project_id), limit, offset)
+            """, ensure_uuid(project_id), limit, offset)
         
         docs = []
         for row in rows:
@@ -208,7 +209,7 @@ class KnowledgeRepository:
                 SELECT id, project_id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
                 FROM knowledge_documents
                 WHERE id = $1
-            """, uuid.UUID(document_id))
+            """, ensure_uuid(document_id))
             if not row:
                 return None
             chunk_count = await conn.fetchval(
@@ -236,7 +237,7 @@ class KnowledgeRepository:
                 UPDATE knowledge_documents
                 SET status = $1, error = $2, updated_at = NOW()
                 WHERE id = $3
-            """, status, error, uuid.UUID(document_id))
+            """, status, error, ensure_uuid(document_id))
 
     async def delete_document(self, document_id: str) -> None:
         """
@@ -246,6 +247,6 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             # Chunks will be deleted automatically by ON DELETE CASCADE if foreign key is set correctly,
             # but we have ON DELETE SET NULL, so we need to delete them explicitly.
-            await conn.execute("DELETE FROM knowledge_base WHERE document_id = $1", uuid.UUID(document_id))
-            await conn.execute("DELETE FROM knowledge_documents WHERE id = $1", uuid.UUID(document_id))
+            await conn.execute("DELETE FROM knowledge_base WHERE document_id = $1", ensure_uuid(document_id))
+            await conn.execute("DELETE FROM knowledge_documents WHERE id = $1", ensure_uuid(document_id))
         logger.info("Document deleted", extra={"document_id": document_id})
