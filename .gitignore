@@ -37,3 +37,6 @@ package-lock.json
 openapi.json
 sync_api.sh
 check_compilation.py
+
+.coverage
+htmlcov/

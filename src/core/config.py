@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     VITE_API_URL: Optional[str] = Field(None, description="Frontend API URL (for CORS)")
     FRONTEND_URL: Optional[str] = Field(None, description="Frontend URL (for autologin)")
 
+    HF_MODEL_URL: str = "https://huggingface.co/intfloat/multilingual-e5-large"
+    HF_TOKEN: str = ""
+
     @field_validator("ADMIN_CHAT_ID")
     def validate_chat_id(cls, v: str) -> str:
         """Ensure chat ID is a valid integer string."""
