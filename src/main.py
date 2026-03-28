@@ -22,6 +22,7 @@ from src.api.bot import router as bot_router
 from src.api.metrics import router as metrics_router
 from src.api.clients import router as clients_router
 from src.api.logs import router as logs_router
+from src.api.limits import router as limits_router
 
 # Configure structured logging
 configure_logging()
@@ -68,6 +69,7 @@ app.include_router(chat_router)
 app.include_router(metrics_router)
 app.include_router(clients_router)
 app.include_router(logs_router)
+app.include_router(limits_router)
 
 if __name__ == "__main__":
     import uvicorn
