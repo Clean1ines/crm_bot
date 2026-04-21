@@ -32,9 +32,14 @@ logger = get_logger(__name__)
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
 
 # CORS configuration (allow frontend domain)
+origins = ["https://crm-bot-panel.onrender.com"]
+if settings.FRONTEND_URL:
+    if settings.FRONTEND_URL not in origins:
+        origins.append(settings.FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://crm-bot-panel.onrender.com"],  # замените на реальный домен фронтенда
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,7 +59,7 @@ async def global_exception_handler(request, exc):
             "traceback": traceback.format_exc(),
             "details": "Check Render logs for full info"
         },
-        headers={"Access-Control-Allow-Origin": "https://crm-bot-panel.onrender.com"}
+        headers={"Access-Control-Allow-Origin": settings.FRONTEND_URL if settings.FRONTEND_URL else "*"}
     )
 
 # Include routers

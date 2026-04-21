@@ -10,6 +10,9 @@ import { TelegramLoginPage } from '@pages/login/TelegramLoginPage';
 import { DialogsPage } from '@pages/dialogs/DialogsPage';
 import { ComingSoon } from '@pages/ComingSoon';
 import { ChannelSettingsPage } from '@pages/channels/ChannelSettingsPage';
+import { KnowledgePage } from '@pages/knowledge/KnowledgePage';
+import { ManagersPage } from '@pages/managers/ManagersPage';
+import { ClientsPage } from '@pages/clients/ClientsPage';
 import { Layout } from './Layout';
 import { getSessionToken } from '@shared/api/client';
 import { useProjects } from '@entities/project/api/useProjects';
@@ -23,10 +26,15 @@ const AuthGuard = ({ children }: { children: React.ReactNode }) => {
 };
 
 const RootRedirect: React.FC = () => {
+  const token = getSessionToken();
   const { projects, isLoading } = useProjects();
 
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
   if (isLoading) {
-    return <div className="flex items-center justify-center h-screen text-white">Загрузка...</div>;
+    return <div className="flex items-center justify-center h-screen bg-[#1E1E1E] text-[#E5E2DA]">Загрузка...</div>;
   }
 
   if (!projects || projects.length === 0) {
@@ -79,33 +87,34 @@ class ErrorBoundary extends React.Component<
 
 function App() {
   return (
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<TelegramLoginPage />} />
-            <Route path="/" element={<RootRedirect />} />
-            
-            <Route element={<AuthGuard><Layout /></AuthGuard>}>
-              <Route path="/chat/:projectId" element={<ClientChatPage />} />
-              <Route path="/projects/:projectId/dialogs" element={<DialogsPageWrapper />} />
-              <Route path="/projects/:projectId/clients" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/workflow" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/knowledge" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/analytics" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/channels" element={<ChannelSettingsPage />} />
-              <Route path="/projects/:projectId/tickets" element={<TicketsPage />} />
-              <Route path="/projects/:projectId/tickets/:threadId" element={<TicketDetailPage />} />
-              <Route path="/projects/:projectId/managers" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/billing" element={<ComingSoon />} />
-              <Route path="/projects/:projectId/settings" element={<ComingSoon />} />
-              <Route path="/channels" element={<ChannelSettingsPage />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-        <Toast />
-      </QueryClientProvider>
-    </ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<TelegramLoginPage />} />
+          <Route path="/" element={<RootRedirect />} />
+          
+          <Route element={<AuthGuard><Layout /></AuthGuard>}>
+            <Route path="/chat/:projectId" element={<ClientChatPage />} />
+            <Route path="/projects/:projectId/dialogs" element={<DialogsPageWrapper />} />
+            <Route 
+              path="/projects/:projectId/clients" 
+              element={<ErrorBoundary><ClientsPage /></ErrorBoundary>} 
+            />
+            <Route path="/projects/:projectId/workflow" element={<ComingSoon />} />
+            <Route path="/projects/:projectId/knowledge" element={<ErrorBoundary><KnowledgePage /></ErrorBoundary>} />
+            <Route path="/projects/:projectId/analytics" element={<ComingSoon />} />
+            <Route path="/projects/:projectId/channels" element={<ChannelSettingsPage />} />
+            <Route path="/projects/:projectId/tickets" element={<TicketsPage />} />
+            <Route path="/projects/:projectId/tickets/:threadId" element={<TicketDetailPage />} />
+            <Route path="/projects/:projectId/managers" element={<ErrorBoundary><ManagersPage /></ErrorBoundary>} />
+            <Route path="/projects/:projectId/billing" element={<ComingSoon />} />
+            <Route path="/projects/:projectId/settings" element={<ComingSoon />} />
+            <Route path="/channels" element={<ChannelSettingsPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+      <Toast />
+    </QueryClientProvider>
   );
 }
 

@@ -15,25 +15,11 @@ from src.database.repositories.event_repository import EventRepository
 from src.database.repositories.memory_repository import MemoryRepository
 from src.database.repositories.queue_repository import QueueRepository
 from src.database.models import ThreadStatus
+from src.agent.utils import coerce_int
 
 logger = get_logger(__name__)
 
 
-def _coerce_int(value: Any, default: int = 0) -> int:
-    """
-    Convert a value to int with a safe fallback.
-
-    Args:
-        value: Any value that may represent an integer.
-        default: Fallback value if conversion fails.
-
-    Returns:
-        Integer value or default.
-    """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _infer_topic_from_intent(intent: Optional[str]) -> Optional[str]:
@@ -79,9 +65,9 @@ def _normalize_dialog_state(state: AgentState) -> Dict[str, Any]:
         "last_intent": existing.get("last_intent") or state.get("intent"),
         "last_cta": existing.get("last_cta") or state.get("cta"),
         "last_topic": existing.get("last_topic") or state.get("topic") or _infer_topic_from_intent(state.get("intent")),
-        "repeat_count": _coerce_int(existing.get("repeat_count"), 0),
-        "lead_status": existing.get("lead_status") or state.get("lead_status") or state.get("lifecycle") or "cold",
-        "lifecycle": state.get("lifecycle") or existing.get("lifecycle") or state.get("lead_status") or "cold",
+        "repeat_count": coerce_int(existing.get("repeat_count"), 0),
+        "lead_status": existing.get("lead_status") or state.get("lead_status") or state.get("lifecycle") or "active_client",
+        "lifecycle": state.get("lifecycle") or existing.get("lifecycle") or state.get("lead_status") or "active_client",
     }
 
     if dialog_state["repeat_count"] <= 0 and dialog_state["last_intent"]:

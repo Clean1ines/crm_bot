@@ -11,6 +11,17 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
 
+class DialogState(TypedDict):
+    """
+    Structure for tracking dialog context across turns.
+    """
+    last_intent: Optional[str]
+    last_cta: Optional[str]
+    last_topic: Optional[str]
+    repeat_count: int
+    lead_status: str
+    lifecycle: str
+
 class AgentState(TypedDict):
     """
     State container for the LangGraph agent workflow.
@@ -49,10 +60,10 @@ class AgentState(TypedDict):
         features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
         
         # Runtime dialog state fields (loaded from user memory)
-        dialog_state: Optional[str]  # Current dialog state (e.g., "collecting_info", "answering")
-        topic: Optional[str]         # Current conversation topic
-        lead_status: Optional[str]   # Lead status (e.g., "new", "qualified", "lost")
-        repeat_count: Optional[int]  # Number of times user repeated a question
+        dialog_state: Optional[DialogState]  # Current dialog state snapshot
+        topic: Optional[str]                 # Current conversation topic
+        lead_status: Optional[str]           # Lead status (e.g., "new", "qualified", "lost")
+        repeat_count: Optional[int]          # Number of times user repeated a question
     """
     # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
@@ -71,6 +82,7 @@ class AgentState(TypedDict):
     tool_name: Optional[str]
     tool_args: Optional[Dict[str, Any]]
     tool_result: Optional[Any]
+    user_memory: Optional[Dict[str, Any]] # Added hidden field discovered during audit
     response_text: Optional[str]
     requires_human: bool
     confidence: Optional[float]
@@ -78,6 +90,7 @@ class AgentState(TypedDict):
     message_sent: Optional[bool]  # Flag indicating that the message was already sent by the graph
     trace_id: Optional[str]  # Unique trace identifier for observability
     client_id: Optional[str]  # UUID of the client for memory storage
+    close_ticket: Optional[bool] # Added hidden field discovered during audit
 
     # Analytics fields
     intent: Optional[str]  # Detected intent (e.g., "pricing", "support", "sales")
@@ -86,7 +99,7 @@ class AgentState(TypedDict):
     features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
     
     # Runtime dialog state fields (loaded from user memory)
-    dialog_state: Optional[str]  # Current dialog state (e.g., "collecting_info", "answering")
+    dialog_state: Optional[DialogState]  # Current dialog state snapshot
     topic: Optional[str]         # Current conversation topic
     lead_status: Optional[str]   # Lead status (e.g., "new", "qualified", "lost")
     repeat_count: Optional[int]  # Number of times user repeated a question

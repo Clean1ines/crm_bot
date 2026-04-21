@@ -332,7 +332,7 @@ class ThreadRepository:
             param_idx += 1
         
         if search:
-            where_parts.append(f"(c.full_name ILIKE $${param_idx} OR c.username ILIKE $${param_idx})")
+            where_parts.append(f"(c.full_name ILIKE ${param_idx} OR c.username ILIKE ${param_idx})")
             params.append(f"%{search}%")
             param_idx += 1
         
@@ -454,7 +454,7 @@ class ThreadRepository:
         """Возвращает все треды с указанным статусом."""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT t.*, c.name as client_name
+                SELECT t.*, c.full_name as client_name
                 FROM threads t
                 JOIN clients c ON t.client_id = c.id
                 WHERE t.status = $1

@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional, Tuple
 from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
 from src.database.repositories.event_repository import EventRepository
+from src.agent.utils import coerce_int, DEFAULT_DIALOG_STATE
 
 logger = get_logger(__name__)
 
@@ -126,30 +127,8 @@ TRANSITIONS = {
 DEFAULT_LIFECYCLE = "cold"
 DEFAULT_DECISION = "LLM_GENERATE"
 DEFAULT_CTA = "none"
-DEFAULT_DIALOG_STATE: Dict[str, Any] = {
-    "last_intent": None,
-    "last_cta": None,
-    "last_topic": None,
-    "repeat_count": 0,
-    "lead_status": DEFAULT_LIFECYCLE,
-}
 
 
-def _coerce_int(value: Any, default: int = 0) -> int:
-    """
-    Convert a value to int with a safe fallback.
-
-    Args:
-        value: Any value that may represent an integer.
-        default: Fallback value if conversion fails.
-
-    Returns:
-        Integer value or default.
-    """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _normalize_lifecycle(lifecycle: Optional[str]) -> str:
@@ -318,7 +297,7 @@ def _calculate_repeat_count(
     """
     prev_intent = str(previous_dialog_state.get("last_intent") or "").strip().lower()
     prev_topic = str(previous_dialog_state.get("last_topic") or "").strip().lower()
-    previous_count = _coerce_int(previous_dialog_state.get("repeat_count"), 0)
+    previous_count = coerce_int(previous_dialog_state.get("repeat_count"), 0)
 
     if not intent:
         return previous_count

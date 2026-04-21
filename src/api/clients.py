@@ -9,6 +9,7 @@ from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.memory_repository import MemoryRepository
 from src.core.logging import get_logger
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/clients", tags=["clients"])
@@ -62,7 +63,7 @@ async def list_clients(
                 "full_name": row["full_name"],
                 "chat_id": row["chat_id"],
                 "source": row["source"],
-                "created_at": row["created_at"]
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None
             })
         return {"clients": clients}
 
@@ -99,7 +100,7 @@ async def get_client(
             "full_name": row["full_name"],
             "chat_id": row["chat_id"],
             "source": row["source"],
-            "created_at": row["created_at"]
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None
         }
 
         # Get memory
@@ -107,7 +108,13 @@ async def get_client(
         client["memory"] = memory
 
         # Get threads
-        threads = await thread_repo.get_dialogs(project_id, client_id=client_id)
-        client["threads"] = threads
+        async with thread_repo.pool.acquire() as conn:
+            rows = await conn.fetch("SELECT id, status, interaction_mode, created_at, updated_at FROM threads WHERE client_id = $1 ORDER BY updated_at DESC", ensure_uuid(client_id))
+            client["threads"] = [dict(r) for r in rows]
+            # Serialize dates for threads
+            for t in client["threads"]:
+                if t.get("created_at"): t["created_at"] = t["created_at"].isoformat()
+                if t.get("updated_at"): t["updated_at"] = t["updated_at"].isoformat()
+                t["id"] = str(t["id"])
 
         return client

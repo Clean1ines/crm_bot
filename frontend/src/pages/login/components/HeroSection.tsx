@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button } from './Button';
 
 export const HeroSection: React.FC = () => {
   return (
@@ -10,10 +9,6 @@ export const HeroSection: React.FC = () => {
       <p className="text-lg text-[#6B6B6B]">
         Загрузи свои материалы — и он начнёт общаться как твой менеджер.
       </p>
-      <div className="flex flex-wrap gap-4 pt-2">
-        <Button variant="primary">Попробовать в чате</Button>
-        <Button variant="secondary">Подключить бизнес</Button>
-      </div>
     </div>
   );
 };

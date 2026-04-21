@@ -183,18 +183,22 @@ class KnowledgeRepository:
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
             """, ensure_uuid(project_id), limit, offset)
-        
-        docs = []
-        for row in rows:
-            # Also count chunks? optional
-            chunk_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
-                row["id"]
-            )
-            doc = dict(row)
-            doc["id"] = str(doc["id"])
-            doc["chunk_count"] = chunk_count
-            docs.append(doc)
+            
+            docs = []
+            for row in (rows or []):
+                chunk_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
+                    row["id"]
+                )
+                doc = dict(row)
+                doc["id"] = str(doc["id"])
+                doc["chunk_count"] = chunk_count or 0
+                
+                # Serialize dates
+                if doc.get("created_at"): doc["created_at"] = doc["created_at"].isoformat()
+                if doc.get("updated_at"): doc["updated_at"] = doc["updated_at"].isoformat()
+                
+                docs.append(doc)
         
         logger.debug(f"Retrieved {len(docs)} documents")
         return docs

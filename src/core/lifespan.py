@@ -146,30 +146,15 @@ async def lifespan(app: FastAPI):
     thread_repo = ThreadRepository(pool)
     queue_repo = QueueRepository(pool)
     
-    # Optional repositories (graceful degradation if migrations not applied)
-    event_repo = None
-    try:
-        from src.database.repositories.event_repository import EventRepository
-        event_repo = EventRepository(pool)
-        logger.info("EventRepository initialized")
-    except ImportError:
-        logger.debug("EventRepository not available (migration 008 not applied yet)")
+    from src.database.repositories.event_repository import EventRepository
+    from src.database.repositories.template_repository import TemplateRepository
+    from src.database.repositories.workflow_repository import WorkflowRepository
     
-    template_repo = None
-    try:
-        from src.database.repositories.template_repository import TemplateRepository
-        template_repo = TemplateRepository(pool)
-        logger.info("TemplateRepository initialized")
-    except ImportError:
-        logger.debug("TemplateRepository not available (migration 009 not applied yet)")
+    event_repo = EventRepository(pool)
+    template_repo = TemplateRepository(pool)
+    workflow_repo = WorkflowRepository(pool)
     
-    workflow_repo = None
-    try:
-        from src.database.repositories.workflow_repository import WorkflowRepository
-        workflow_repo = WorkflowRepository(pool)
-        logger.info("WorkflowRepository initialized")
-    except ImportError:
-        logger.debug("WorkflowRepository not available (migration 011 not applied yet)")
+    logger.info("Base repositories initialized (Event, Template, Workflow)")
     
     # Memory repository (always available after migration 027)
     memory_repo = MemoryRepository(pool)

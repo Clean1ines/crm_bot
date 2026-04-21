@@ -20,6 +20,7 @@ from src.database.repositories.queue_repository import QueueRepository
 from src.database.repositories.thread_repository import ThreadRepository
 from src.database.repositories.project_repository import ProjectRepository
 from src.database.repositories.metrics_repository import MetricsRepository
+from src.services.redis_client import get_redis_client
 from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
@@ -248,10 +249,9 @@ async def _handle_notify_manager(
 
     # If target_manager is specified (message from ongoing session), send only to that manager
     if target_manager:
-        manager_chat_ids = [target_manager]
         if target_manager not in manager_chat_ids:
             logger.warning("Target manager not in project managers list", extra={"manager": target_manager})
-            return False
+        manager_chat_ids = [target_manager]
 
     if not manager_chat_ids:
         logger.warning(
@@ -261,12 +261,16 @@ async def _handle_notify_manager(
         return False
 
     # Build inline keyboard markup: both Reply and Close buttons
-    reply_markup = {
-        "inline_keyboard": [
-            [{"text": "✏️ Ответить", "callback_data": f"reply:{thread_id}"}],
-            [{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}]
-        ]
-    }
+    # T-4: Hide "Reply" if thread is already being handled (exists in Redis)
+    redis = await get_redis_client()
+    is_claimed = await redis.exists(f"awaiting_reply_thread:{thread_id}")
+
+    buttons = []
+    if not is_claimed:
+        buttons.append([{"text": "✏️ Ответить", "callback_data": f"reply:{thread_id}"}])
+    buttons.append([{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}])
+
+    reply_markup = {"inline_keyboard": buttons}
 
     # Send notification to all managers
     success_count = 0

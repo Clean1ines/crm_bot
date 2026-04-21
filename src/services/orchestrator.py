@@ -34,7 +34,7 @@ def split_questions(text: str) -> List[str]:
     Возвращает список непустых строк.
     """
     # Разделяем по границам предложений (точка, вопросительный, восклицательный знак, перевод строки)
-    parts = re.split(r'[.?!\n]+', text)
+    parts = re.split(r'[?!\n]+', text)
     # Убираем пустые и обрезаем пробелы
     questions = [p.strip() for p in parts if p.strip()]
     return questions
@@ -337,9 +337,7 @@ class OrchestratorService:
                 if len(recent_messages) > self.RECENT_MESSAGES_LIMIT:
                     recent_messages = recent_messages[-self.RECENT_MESSAGES_LIMIT:]
                 
-                conversation_summary = None
-                if hasattr(self.threads, 'get_summary'):
-                    conversation_summary = await self.threads.get_summary(thread_id)
+                conversation_summary = ""
                 
                 saved_state = await self.threads.get_state_json(thread_id_str)
 
@@ -478,9 +476,10 @@ class OrchestratorService:
             raise RuntimeError(f"Project {project_id} has no bot token")
 
         # Получаем chat_id клиента
-        client = await self.threads.pool.fetchrow(
-            "SELECT chat_id FROM clients WHERE id = $1", thread["client_id"]
-        )
+        async with self.threads.pool.acquire() as conn:
+            client = await conn.fetchrow(
+                "SELECT chat_id FROM clients WHERE id = $1", thread["client_id"]
+            )
         if not client:
             raise RuntimeError(f"Client not found for thread {thread_id}")
 

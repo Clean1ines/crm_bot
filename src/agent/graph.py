@@ -34,7 +34,6 @@ def create_agent(
     queue_repo=None,
     event_repo=None,
     project_repo=None,
-    knowledge_repo=None,
     memory_repo=None
 ):
     """
@@ -46,8 +45,7 @@ def create_agent(
         queue_repo: QueueRepository instance.
         event_repo: Optional EventRepository for event sourcing.
         project_repo: Optional ProjectRepository (may be used by some nodes).
-        knowledge_repo: Optional KnowledgeRepository (may be used by kb_search node,
-                       but we use tool_registry for that).
+        project_repo: Optional ProjectRepository (may be used by some nodes).
         memory_repo: Optional MemoryRepository for long-term memory.
 
     Returns:
@@ -68,7 +66,6 @@ def create_agent(
     ticket_create_tool = tool_registry.get_tool("ticket.create")
     if ticket_create_tool is None:
         logger.warning("TicketCreateTool not found in registry, escalation will not create ticket")
-        ticket_create_tool = None
 
     escalate_node = create_escalate_node(thread_repo, queue_repo, ticket_create_tool)
     # Pass thread_repo to responder node so it can save assistant messages

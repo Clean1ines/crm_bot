@@ -1,0 +1,3834 @@
+=== PROJECT STRUCTURE ===
+total 72
+drwxr-xr-x 13 haku haku  4096 Mar 28 16:22 .
+drwxr-xr-x 15 haku haku  4096 Mar 29 16:17 ..
+-rw-r--r--  1 haku haku     0 Mar 16 10:41 __init__.py
+drwxr-xr-x  2 haku haku  4096 Mar 29 12:51 __pycache__
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 admin
+drwxr-xr-x  6 haku haku  4096 Mar 28 16:22 agent
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 api
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 clients
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 core
+drwxr-xr-x  4 haku haku  4096 Mar 28 16:22 database
+-rw-r--r--  1 haku haku  2666 Mar 28 16:22 main.py
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 managers
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 services
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 tools
+drwxr-xr-x  3 haku haku  4096 Mar 28 16:22 utils
+-rw-r--r--  1 haku haku 15004 Mar 28 16:22 worker.py
+
+=== AGENT GRAPH ===
+
+=== AGENT STATE ===
+
+=== POLICY ENGINE NODE ===
+
+=== ORCHESTRATOR SERVICE ===
+
+=== TOOL REGISTRY ===
+
+=== BUILT-IN TOOLS ===
+
+=== REPOSITORIES (database layer) ===
+--- File: src/database/repositories/__init__.py ---
+"""Repository package for database operations."""
+
+from .project_repository import ProjectRepository
+from .thread_repository import ThreadRepository
+from .event_repository import EventRepository
+from .memory_repository import MemoryRepository
+from .knowledge_repository import KnowledgeRepository
+from .metrics_repository import MetricsRepository
+from .user_repository import UserRepository
+from .queue_repository import QueueRepository
+from .template_repository import TemplateRepository
+from .workflow_repository import WorkflowRepository
+
+__all__ = [
+    "ProjectRepository",
+    "ThreadRepository",
+    "EventRepository",
+    "MemoryRepository",
+    "KnowledgeRepository",
+    "MetricsRepository",
+    "UserRepository",
+    "QueueRepository",
+    "TemplateRepository",
+    "WorkflowRepository",
+]
+
+--- File: src/database/repositories/event_repository.py ---
+"""
+Event Repository for Event-Sourced Agent Runtime.
+
+This module provides data access methods for the events table,
+which serves as the source of truth for all conversation state changes.
+"""
+
+import json
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+import asyncpg
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class EventRepository:
+    """
+    Repository for managing event store operations.
+    
+    The EventRepository handles appending events to the event stream
+    and retrieving events for state reconstruction. This follows the
+    Event Sourcing pattern where all state changes are recorded as
+    immutable events.
+    
+    Attributes:
+        pool: Asyncpg connection pool for database operations.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the EventRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("EventRepository initialized")
+    
+    async def append(
+        self,
+        stream_id: UUID,
+        project_id: UUID,
+        event_type: str,
+        payload: Dict[str, Any]
+    ) -> int:
+        """
+        Append a new event to the event stream.
+        
+        This method records a state-changing event in the event store.
+        Events are immutable and should never be updated or deleted.
+        
+        Args:
+            stream_id: The conversation/thread ID (groups events by dialogue).
+            project_id: The project ID for multi-tenant isolation.
+            event_type: Type of event (e.g., 'message_received', 'ai_replied').
+            payload: Event-specific data as a dictionary.
+        
+        Returns:
+            The ID of the newly created event.
+        
+        Example:
+            >>> await repo.append(
+            ...     stream_id=thread_id,
+            ...     project_id=project_id,
+            ...     event_type='message_received',
+            ...     payload={'user_id': 123, 'text': 'Hello'}
+            ... )
+        """
+        logger.debug(
+            "Appending event",
+            extra={
+                "stream_id": str(stream_id),
+                "project_id": str(project_id),
+                "event_type": event_type
+            }
+        )
+        
+        row = await self.pool.fetchrow(
+            """
+            INSERT INTO events (stream_id, project_id, event_type, payload)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            stream_id,
+            project_id,
+            event_type,
+            json.dumps(payload)
+        )
+        
+        event_id = row["id"]
+        logger.debug(
+            "Event appended successfully",
+            extra={"event_id": event_id, "event_type": event_type}
+        )
+        
+        return event_id
+    
+    async def get_stream(
+        self,
+        stream_id: UUID,
+        limit: int = 100,
+        after_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve events from a specific stream for state reconstruction.
+        
+        This method loads events in chronological order to rebuild
+        the conversation state. Supports pagination via after_id.
+        
+        Args:
+            stream_id: The conversation/thread ID to load events for.
+            limit: Maximum number of events to return (default: 100).
+            after_id: Only return events with ID greater than this value.
+        
+        Returns:
+            List of events with type, payload, and timestamp.
+        
+        Example:
+            >>> events = await repo.get_stream(thread_id, limit=50)
+            >>> for event in events:
+            ...     state = apply_event(state, event)
+        """
+        logger.debug(
+            "Loading event stream",
+            extra={
+                "stream_id": str(stream_id),
+                "limit": limit,
+                "after_id": after_id
+            }
+        )
+        
+        if after_id:
+            rows = await self.pool.fetch(
+                """
+                SELECT id, event_type, payload, created_at
+                FROM events
+                WHERE stream_id = $1 AND id > $2
+                ORDER BY created_at ASC
+                LIMIT $3
+                """,
+                stream_id,
+                after_id,
+                limit
+            )
+        else:
+            rows = await self.pool.fetch(
+                """
+                SELECT id, event_type, payload, created_at
+                FROM events
+                WHERE stream_id = $1
+                ORDER BY created_at ASC
+                LIMIT $2
+                """,
+                stream_id,
+                limit
+            )
+        
+        events = [
+            {
+                "id": row["id"],
+                "type": row["event_type"],
+                "payload": row["payload"],
+                "ts": row["created_at"]
+            }
+            for row in rows
+        ]
+        
+        logger.debug(
+            "Event stream loaded",
+            extra={"stream_id": str(stream_id), "event_count": len(events)}
+        )
+        
+        return events
+    
+    async def get_by_type(
+        self,
+        project_id: UUID,
+        event_type: str,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve events of a specific type for analytics.
+        
+        This method is useful for generating metrics and reports
+        based on event types (e.g., count of escalations).
+        
+        Args:
+            project_id: The project ID to filter events.
+            event_type: The type of events to retrieve.
+            limit: Maximum number of events to return.
+        
+        Returns:
+            List of events matching the criteria.
+        """
+        logger.debug(
+            "Loading events by type",
+            extra={
+
+--- File: src/database/repositories/knowledge_repository.py ---
+"""
+Knowledge repository for RAG with hybrid search (vector + FTS + scoring fusion).
+"""
+
+import uuid
+import asyncpg
+from typing import List, Dict, Any, Optional
+
+from src.core.logging import get_logger
+from src.services.embedding_service import embed_text, embed_batch
+from src.utils.uuid_utils import ensure_uuid
+
+logger = get_logger(__name__)
+
+
+class KnowledgeRepository:
+    def __init__(self, pool):
+        self.pool = pool
+
+    def _keyword_overlap(self, query: str, text: str) -> float:
+        q = set(query.lower().split())
+        t = set(text.lower().split())
+        if not q:
+            return 0.0
+        return len(q & t) / len(q)
+
+    async def search(
+        self,
+        project_id: str,
+        query: str,
+        limit: int = 10,
+        hybrid_fallback: bool = True,
+    ) -> List[Dict[str, Any]]:
+
+        query_embedding = await embed_text(query)
+        query_embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+
+        async with self.pool.acquire() as conn:
+            vector_results = await conn.fetch(
+                """
+                SELECT id, content, (1 - (embedding <=> $1)) AS score
+                FROM knowledge_base
+                WHERE project_id = $2
+                ORDER BY embedding <=> $1
+                LIMIT $3
+                """,
+                query_embedding_str,
+                ensure_uuid(project_id),
+                limit * 2,
+            )
+
+        vector_items = [
+            {
+                "id": str(r["id"]),
+                "content": r["content"],
+                "score": float(r["score"]),
+                "method": "vector",
+            }
+            for r in vector_results
+        ]
+
+        if not hybrid_fallback:
+            return vector_items[:limit]
+
+        async with self.pool.acquire() as conn:
+            fts_results = await conn.fetch(
+                """
+                SELECT id, content,
+                       ts_rank_cd(tsv, plainto_tsquery('russian', $1)) AS score
+                FROM knowledge_base
+                WHERE project_id = $2
+                  AND tsv @@ plainto_tsquery('russian', $1)
+                ORDER BY score DESC
+                LIMIT $3
+                """,
+                query,
+                ensure_uuid(project_id),
+                limit * 2,
+            )
+
+        merged: Dict[str, Dict[str, Any]] = {}
+
+        # VECTOR
+        for r in vector_items:
+            merged[r["id"]] = r
+
+        # FTS fusion
+        for r in fts_results:
+            rid = str(r["id"])
+            if rid in merged:
+                merged[rid]["score"] = merged[rid]["score"] * 0.7 + float(r["score"]) * 0.3
+                merged[rid]["method"] = "hybrid"
+            else:
+                merged[rid] = {
+                    "id": rid,
+                    "content": r["content"],
+                    "score": float(r["score"]) * 0.8,
+                    "method": "fts",
+                }
+
+        results = list(merged.values())
+
+        # light keyword boost
+        for r in results:
+            r["score"] += self._keyword_overlap(query, r["content"]) * 0.15
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+
+        return results[:limit]
+
+    async def add_knowledge_batch(
+        self,
+        project_id: str,
+        chunks: List[Dict[str, Any]],
+        document_id: Optional[str] = None,
+    ) -> int:
+
+        if not chunks:
+            return 0
+
+        texts = [c["content"] for c in chunks]
+        embeddings = await embed_batch(texts)
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for i, chunk in enumerate(chunks):
+                    emb_str = "[" + ",".join(str(x) for x in embeddings[i]) + "]"
+
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_base (project_id, document_id, content, embedding)
+                        VALUES ($1, $2, $3, $4::vector)
+                        """,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id) if document_id else None,
+                        chunk["content"],
+                        emb_str,
+                    )
+
+        return len(chunks)
+
+    # Document management methods
+
+    async def create_document(
+        self,
+        project_id: str,
+        file_name: str,
+        file_size: Optional[int] = None,
+        uploaded_by: Optional[str] = None,
+    ) -> str:
+        """
+        Create a new document record.
+        
+        Returns:
+            document_id as string.
+        """
+        logger.info("Creating knowledge document", extra={"project_id": project_id, "file_name": file_name})
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO knowledge_documents (project_id, file_name, file_size, uploaded_by)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id
+            """, ensure_uuid(project_id), file_name, file_size, uploaded_by)
+            doc_id = str(row["id"])
+            logger.info("Document created", extra={"document_id": doc_id})
+            return doc_id
+
+    async def get_documents(
+        self,
+        project_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        List documents for a project.
+        """
+        logger.debug("Fetching knowledge documents", extra={"project_id": project_id, "limit": limit, "offset": offset})
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
+                FROM knowledge_documents
+                WHERE project_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+            """, ensure_uuid(project_id), limit, offset)
+        
+        docs = []
+        for row in rows:
+            # Also count chunks? optional
+            chunk_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
+                row["id"]
+            )
+            doc = dict(row)
+            doc["id"] = str(doc["id"])
+            doc["chunk_count"] = chunk_count
+            docs.append(doc)
+        
+        logger.debug(f"Retrieved {len(docs)} documents")
+        return docs
+
+--- File: src/database/repositories/memory_repository.py ---
+"""
+Memory repository for long-term user memory.
+
+Stores facts, preferences, and issues per user for cross-conversation recall.
+"""
+
+from typing import List, Dict, Any, Optional, Union
+import uuid
+import asyncpg
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+def _ensure_uuid(value: Union[str, uuid.UUID]) -> uuid.UUID:
+    """
+    Convert a string or UUID object to a UUID object.
+    If the input is already a UUID, return it unchanged.
+    """
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(value)
+
+
+class MemoryRepository:
+    """
+    Repository for managing user memory (long-term facts).
+    
+    Each memory entry has a key (e.g., "preferred_discount"), value (JSON),
+    and a type for filtering.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the MemoryRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool.
+        """
+        self.pool = pool
+        logger.debug("MemoryRepository initialized")
+
+    async def get_for_user(
+        self,
+        project_id: Union[str, uuid.UUID],
+        client_id: Union[str, uuid.UUID],
+        *,
+        limit: int = 50,
+        types: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve memory entries for a specific user.
+
+        Args:
+            project_id: UUID of the project (string or UUID object).
+            client_id: UUID of the client (string or UUID object).
+            limit: Maximum number of entries to return.
+            types: Optional list of types to filter (e.g., ['preference', 'fact']).
+
+        Returns:
+            List of dicts with keys: id, key, value, type, created_at, updated_at.
+        """
+        project_uuid = _ensure_uuid(project_id)
+        client_uuid = _ensure_uuid(client_id)
+
+        query = """
+            SELECT id, key, value, type, created_at, updated_at
+            FROM user_memory
+            WHERE project_id = $1 AND client_id = $2
+        """
+        params = [project_uuid, client_uuid]
+
+        if types:
+            placeholders = [f"${i+3}" for i in range(len(types))]
+            query += f" AND type IN ({','.join(placeholders)})"
+            params.extend(types)
+
+        query += " ORDER BY updated_at DESC LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+
+        memories = [
+            {
+                "id": str(r["id"]),
+                "key": r["key"],
+                "value": r["value"],
+                "type": r["type"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"]
+            }
+            for r in rows
+        ]
+        logger.debug(
+            "Loaded %d memory entries for user",
+            len(memories),
+            extra={"project_id": str(project_id), "client_id": str(client_id)}
+        )
+        return memories
+
+    async def set(
+        self,
+        project_id: Union[str, uuid.UUID],
+        client_id: Union[str, uuid.UUID],
+        key: str,
+        value: Any,
+        type_: str
+    ) -> None:
+        """
+        Insert or update a memory entry for a user.
+
+        Uses UPSERT: if a memory with same project_id, client_id, key exists,
+        it updates the value and updated_at; otherwise inserts.
+
+        Args:
+            project_id: UUID of the project (string or UUID object).
+            client_id: UUID of the client (string or UUID object).
+            key: Memory key (e.g., "preferred_contact").
+            value: Any JSON-serializable value.
+            type_: Type of memory (e.g., "preference", "fact").
+        """
+        project_uuid = _ensure_uuid(project_id)
+        client_uuid = _ensure_uuid(client_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO user_memory (project_id, client_id, key, value, type, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (project_id, client_id, key) DO UPDATE
+                SET value = EXCLUDED.value,
+                    type = EXCLUDED.type,
+                    updated_at = NOW()
+            """, project_uuid, client_uuid, key, value, type_)
+
+        logger.debug(
+            "Memory set",
+            extra={"project_id": str(project_id), "client_id": str(client_id), "key": key, "type": type_}
+        )
+
+    async def delete(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID], key: str) -> bool:
+        """
+        Delete a specific memory entry.
+
+        Args:
+            project_id: UUID of the project (string or UUID object).
+            client_id: UUID of the client (string or UUID object).
+            key: Memory key to delete.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        project_uuid = _ensure_uuid(project_id)
+        client_uuid = _ensure_uuid(client_id)
+
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                DELETE FROM user_memory
+                WHERE project_id = $1 AND client_id = $2 AND key = $3
+            """, project_uuid, client_uuid, key)
+            deleted = result == "DELETE 1"
+            if deleted:
+                logger.debug(
+                    "Memory deleted",
+                    extra={"project_id": str(project_id), "client_id": str(client_id), "key": key}
+                )
+            return deleted
+
+    async def clear_for_user(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID]) -> None:
+        """
+        Delete all memory for a user (e.g., if user requests data deletion).
+
+        Args:
+            project_id: UUID of the project (string or UUID object).
+            client_id: UUID of the client (string or UUID object).
+        """
+        project_uuid = _ensure_uuid(project_id)
+        client_uuid = _ensure_uuid(client_id)
+
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                DELETE FROM user_memory
+                WHERE project_id = $1 AND client_id = $2
+            """, project_uuid, client_uuid)
+        logger.info(
+            "All memory cleared for user",
+            extra={"project_id": str(project_id), "client_id": str(client_id)}
+        )
+
+    async def get_lifecycle(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID]) -> Optional[str]:
+        """
+        Retrieve the current lifecycle stage for a user from long-term memory.
+
+        Args:
+            project_id: UUID of the project (string or UUID object).
+            client_id: UUID of the client (string or UUID object).
+
+        Returns:
+            Lifecycle stage string (e.g., "cold", "warm", "hot") or None if not set.
+
+--- File: src/database/repositories/metrics_repository.py ---
+"""
+Metrics Repository for aggregating thread and project metrics.
+Provides methods to update thread_metrics and project_metrics_daily tables.
+"""
+
+import uuid
+import asyncpg
+from datetime import datetime, date
+from typing import Optional, Dict, Any
+
+from src.core.logging import get_logger
+from src.utils.uuid_utils import ensure_uuid
+
+logger = get_logger(__name__)
+
+
+class MetricsRepository:
+    """
+    Repository for managing thread and project metrics.
+    
+    This repository handles incremental updates to thread_metrics and
+    daily aggregates in project_metrics_daily.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the MetricsRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("MetricsRepository initialized")
+
+    async def update_thread_metrics(
+        self,
+        thread_id: str,
+        total_messages: Optional[int] = None,
+        ai_messages: Optional[int] = None,
+        manager_messages: Optional[int] = None,
+        escalated: Optional[bool] = None,
+        resolution_time: Optional[float] = None  # in seconds
+    ) -> None:
+        """
+        Update thread_metrics for a given thread. Uses ON CONFLICT to handle upsert.
+        
+        Args:
+            thread_id: UUID of the thread.
+            total_messages: Increment total messages by this amount.
+            ai_messages: Increment AI messages by this amount.
+            manager_messages: Increment manager messages by this amount.
+            escalated: If True, set escalated = True (overwrites).
+            resolution_time: Resolution time in seconds (sets the field).
+        """
+        thread_uuid = ensure_uuid(thread_id)
+        # Build SET clause dynamically
+        updates = []
+        params = [thread_uuid]
+        param_idx = 2
+        
+        if total_messages is not None:
+            updates.append(f"total_messages = COALESCE(total_messages, 0) + ${param_idx}")
+            params.append(total_messages)
+            param_idx += 1
+        if ai_messages is not None:
+            updates.append(f"ai_messages = COALESCE(ai_messages, 0) + ${param_idx}")
+            params.append(ai_messages)
+            param_idx += 1
+        if manager_messages is not None:
+            updates.append(f"manager_messages = COALESCE(manager_messages, 0) + ${param_idx}")
+            params.append(manager_messages)
+            param_idx += 1
+        if escalated is not None:
+            updates.append(f"escalated = ${param_idx}")
+            params.append(escalated)
+            param_idx += 1
+        if resolution_time is not None:
+            updates.append(f"resolution_time = ${param_idx} * interval '1 second'")
+            params.append(resolution_time)
+            param_idx += 1
+        
+        # Always update updated_at
+        updates.append(f"updated_at = NOW()")
+        
+        if not updates:
+            logger.debug("No updates to apply for thread_metrics", extra={"thread_id": thread_id})
+            return
+        
+        query = f"""
+            INSERT INTO thread_metrics (thread_id, total_messages, ai_messages, manager_messages, escalated, resolution_time, updated_at)
+            VALUES ($1, 0, 0, 0, false, NULL, NOW())
+            ON CONFLICT (thread_id) DO UPDATE SET
+            {', '.join(updates)}
+        """
+        
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, *params)
+        logger.debug("Thread metrics updated", extra={"thread_id": thread_id})
+
+    async def update_project_daily_metrics(
+        self,
+        project_id: str,
+        date: date,
+        total_threads_delta: int = 0,
+        escalations_delta: int = 0,
+        tokens_used_delta: int = 0,
+        avg_messages_to_resolution: Optional[float] = None
+    ) -> None:
+        """
+        Update project_metrics_daily for a given project and date.
+        
+        Args:
+            project_id: UUID of the project.
+            date: The date for which to update.
+            total_threads_delta: Number to add to total_threads.
+            escalations_delta: Number to add to escalations.
+            tokens_used_delta: Number to add to tokens_used.
+            avg_messages_to_resolution: Overwrites avg_messages_to_resolution (optional).
+        """
+        async with self.pool.acquire() as conn:
+            # First, get current values (if any)
+            current = await conn.fetchrow("""
+                SELECT total_threads, escalations, avg_messages_to_resolution, tokens_used
+                FROM project_metrics_daily
+                WHERE project_id = $1 AND date = $2
+            """, ensure_uuid(project_id), date)
+            
+            if current:
+                new_total = current['total_threads'] + total_threads_delta
+                new_escalations = current['escalations'] + escalations_delta
+                new_tokens = current['tokens_used'] + tokens_used_delta
+                new_avg = avg_messages_to_resolution if avg_messages_to_resolution is not None else current['avg_messages_to_resolution']
+                await conn.execute("""
+                    UPDATE project_metrics_daily
+                    SET total_threads = $1, escalations = $2, avg_messages_to_resolution = $3, tokens_used = $4
+                    WHERE project_id = $5 AND date = $6
+                """, new_total, new_escalations, new_avg, new_tokens, ensure_uuid(project_id), date)
+            else:
+                # Insert new row with deltas as initial values
+                await conn.execute("""
+                    INSERT INTO project_metrics_daily (project_id, date, total_threads, escalations, avg_messages_to_resolution, tokens_used)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                """, ensure_uuid(project_id), date, total_threads_delta, escalations_delta, avg_messages_to_resolution, tokens_used_delta)
+        
+        logger.debug("Project daily metrics updated", extra={"project_id": project_id, "date": date})
+
+    async def aggregate_for_date(self, target_date: date) -> None:
+        """
+        Recalculate all project_metrics_daily for a specific date from events.
+        This is an idempotent operation that can be used to fix discrepancies.
+        
+        Args:
+            target_date: The date to aggregate.
+        """
+        logger.info("Aggregating metrics for date", extra={"date": target_date})
+        # Implementation depends on event structure. We'll compute:
+        # - total_threads: count of threads created on that date
+        # - escalations: count of ticket_created events on that date
+        # - avg_messages_to_resolution: for threads closed on that date, average messages before resolution
+        # - tokens_used: not available from events currently; we can skip or set to 0
+        async with self.pool.acquire() as conn:
+            # Get threads created on this date
+            rows = await conn.fetch("""
+                SELECT t.id, t.created_at, c.project_id
+                FROM threads t
+                JOIN clients c ON t.client_id = c.id
+                WHERE t.created_at::date = $1
+            """, target_date)
+            thread_counts = {}
+            for row in rows:
+                pid = row['project_id']
+                thread_counts[pid] = thread_counts.get(pid, 0) + 1
+            
+            # Get escalations on this date
+            escalations = await conn.fetch("""
+                SELECT project_id, COUNT(*) as count
+                FROM events
+                WHERE event_type = 'ticket_created' AND created_at::date = $1
+                GROUP BY project_id
+            """, target_date)
+            escal_counts = {row['project_id']: row['count'] for row in escalations}
+            
+            # For each project, update the daily metrics
+            # We'll first delete existing rows for this date to avoid double counting
+            await conn.execute("DELETE FROM project_metrics_daily WHERE date = $1", target_date)
+            
+            all_projects = set(thread_counts.keys()) | set(escal_counts.keys())
+            for pid in all_projects:
+                total = thread_counts.get(pid, 0)
+                esc = escal_counts.get(pid, 0)
+                await conn.execute("""
+                    INSERT INTO project_metrics_daily (project_id, date, total_threads, escalations, avg_messages_to_resolution, tokens_used)
+                    VALUES ($1, $2, $3, $4, NULL, 0)
+                """, pid, target_date, total, esc)
+        
+        logger.info("Metrics aggregated", extra={"date": target_date})
+
+--- File: src/database/repositories/project_repository.py ---
+"""
+Project Repository for multi-tenant bot platform.
+
+This module provides data access methods for project configuration,
+including bot tokens, manager settings, and workflow template tracking.
+"""
+
+import uuid
+import asyncpg
+import httpx
+from typing import Optional, Dict, Any, List, Union
+
+from src.core.logging import get_logger
+from src.utils.encryption import encrypt_token, decrypt_token
+from src.core.config import settings
+
+logger = get_logger(__name__)
+
+
+def _ensure_uuid(project_id: Union[str, uuid.UUID]) -> uuid.UUID:
+    """
+    Convert project_id to UUID object if it's a string, return as is if already UUID.
+    """
+    if isinstance(project_id, uuid.UUID):
+        return project_id
+    return uuid.UUID(project_id)
+
+
+class ProjectRepository:
+    """
+    Repository for managing project-level data and configuration.
+    
+    Handles encrypted storage of bot tokens, manager assignments,
+    and workflow template tracking for multi-tenant isolation.
+    
+    Attributes:
+        pool: Asyncpg connection pool for database operations.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the ProjectRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("ProjectRepository initialized")
+    
+    # ------------------------------------------------------------------
+    # Private helpers to encrypt/decrypt token fields
+    # ------------------------------------------------------------------
+    def _encrypt_if_present(self, token: Optional[str]) -> Optional[str]:
+        """
+        Encrypt a token if it is present, otherwise return None.
+        
+        Args:
+            token: The token string to encrypt.
+        
+        Returns:
+            Encrypted token or None.
+        """
+        return encrypt_token(token) if token else None
+
+    def _decrypt_if_present(self, encrypted: Optional[str]) -> Optional[str]:
+        """
+        Decrypt a token if it is present, otherwise return None.
+        
+        Args:
+            encrypted: The encrypted token string.
+        
+        Returns:
+            Decrypted token or None.
+        """
+        return decrypt_token(encrypted) if encrypted else None
+
+    async def _get_bot_username(self, token: str) -> Optional[str]:
+        """
+        Get bot username from Telegram API using the token.
+        
+        Args:
+            token: Bot token (unencrypted).
+        
+        Returns:
+            Username of the bot (without @) or None if request fails.
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=5.0
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    return resp.json()["result"]["username"]
+        except Exception as e:
+            logger.warning("Failed to fetch bot username", extra={"error": str(e)})
+        return None
+
+    # ------------------------------------------------------------------
+    # Public methods - Core project settings
+    # ------------------------------------------------------------------
+    async def get_project_settings(self, project_id: Union[str, uuid.UUID]) -> Dict[str, Any]:
+        """
+        Возвращает настройки проекта: system_prompt, bot_token, webhook_url,
+        manager_bot_token, webhook_secret и список manager_chat_ids.
+        Если проект не найден, возвращает пустой словарь.
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+        
+        Returns:
+            Dict с настройками проекта или пустой dict если проект не найден.
+        """
+        logger.info("Fetching project settings", extra={"project_id": str(project_id)})
+        async with self.pool.acquire() as conn:
+            # Получаем основные поля проекта
+            row = await conn.fetchrow("""
+                SELECT system_prompt, bot_token, webhook_url, manager_bot_token, 
+                       webhook_secret, template_slug, is_pro_mode,
+                       client_bot_username, manager_bot_username
+                FROM projects
+                WHERE id = $1
+            """, _ensure_uuid(project_id))
+            if not row:
+                logger.warning("Project not found", extra={"project_id": str(project_id)})
+                return {}
+
+            settings = dict(row)
+            # Decrypt tokens
+            settings["bot_token"] = self._decrypt_if_present(settings["bot_token"])
+            settings["manager_bot_token"] = self._decrypt_if_present(settings["manager_bot_token"])
+
+            # Получаем список manager_chat_ids из таблицы project_managers
+            manager_rows = await conn.fetch("""
+                SELECT manager_chat_id FROM project_managers
+                WHERE project_id = $1
+            """, _ensure_uuid(project_id))
+            settings["manager_chat_ids"] = [r["manager_chat_id"] for r in manager_rows]
+
+            logger.info("Project settings retrieved", extra={"project_id": str(project_id)})
+            return settings
+
+    async def get_bot_token(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
+        """
+        Возвращает только bot_token для проекта (расшифрованный).
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+        
+        Returns:
+            Расшифрованный токен бота или None.
+        """
+        logger.info("Fetching bot token", extra={"project_id": str(project_id)})
+        async with self.pool.acquire() as conn:
+            encrypted = await conn.fetchval("""
+                SELECT bot_token FROM projects WHERE id = $1
+            """, _ensure_uuid(project_id))
+            token = self._decrypt_if_present(encrypted)
+            if token:
+                logger.info("Bot token found", extra={"project_id": str(project_id)})
+            else:
+                logger.warning("No bot token found", extra={"project_id": str(project_id)})
+            return token
+
+    async def set_bot_token(self, project_id: Union[str, uuid.UUID], token: Optional[str]) -> None:
+        """
+        Устанавливает bot_token для проекта (шифрует перед сохранением).
+        Также обновляет client_bot_username, получая его из Telegram API.
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+            token: Токен бота для шифрования и сохранения (None для удаления).
+        """
+        logger.info("Setting bot token", extra={"project_id": str(project_id)})
+        encrypted = self._encrypt_if_present(token)
+        username = None
+        if token:
+            username = await self._get_bot_username(token)
+            if username:
+                logger.info("Bot username resolved", extra={"username": username})
+            else:
+                logger.warning("Could not fetch bot username from token")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE projects 
+                SET bot_token = $1, client_bot_username = $2, updated_at = NOW()
+                WHERE id = $3
+            """, encrypted, username, _ensure_uuid(project_id))
+
+    async def get_manager_bot_token(self, project_id: Union[str, uuid.UUID]) -> Optional[str]:
+        """
+        Возвращает manager_bot_token для проекта (расшифрованный).
+        
+        Args:
+            project_id: UUID проекта в строковом формате или объект UUID.
+        
+        Returns:
+            Расшифрованный токен менеджерского бота или None.
+        """
+        logger.info("Fetching manager bot token", extra={"project_id": str(project_id)})
+
+--- File: src/database/repositories/queue_repository.py ---
+"""
+Queue Repository for background task management.
+
+This module provides data access methods for the execution_queue table,
+supporting reliable task processing with retry logic and worker tracking.
+"""
+
+import uuid
+import json
+import asyncpg
+from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+
+from src.core.logging import get_logger
+from src.core.config import settings
+
+logger = get_logger(__name__)
+
+
+class QueueRepository:
+    """
+    Repository for managing background job queue operations.
+    
+    Supports reliable task processing with atomic claim, retry logic,
+    timeout handling, and worker tracking for horizontal scaling.
+    
+    Attributes:
+        pool: Asyncpg connection pool for database operations.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the QueueRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("QueueRepository initialized")
+
+    async def enqueue(
+        self, 
+        task_type: str, 
+        payload: Optional[Dict[str, Any]] = None,
+        max_attempts: int = 3
+    ) -> str:
+        """
+        Добавляет задачу в очередь.
+        Возвращает ID созданной задачи.
+        
+        Args:
+            task_type: Тип задачи (например, 'notify_manager').
+            payload: Данные задачи в виде словаря.
+            max_attempts: Максимальное количество попыток выполнения.
+        
+        Returns:
+            UUID новой задачи в строковом формате.
+        """
+        logger.info(
+            "Enqueuing job",
+            extra={"task_type": task_type, "payload_keys": list(payload.keys()) if payload else None}
+        )
+        async with self.pool.acquire() as conn:
+            payload_json = json.dumps(payload) if payload else None
+            row = await conn.fetchrow("""
+                INSERT INTO public.execution_queue (
+                    id, task_type, payload, status, 
+                    attempts, max_attempts, created_at, updated_at
+                )
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
+                RETURNING id
+            """, task_type, payload_json, max_attempts)
+            job_id = str(row['id'])
+            logger.info("Job enqueued successfully", extra={"job_id": job_id})
+            return job_id
+
+    async def claim_job(self, worker_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Захватывает одну задачу из очереди для обработки.
+        Возвращает словарь с данными задачи или None, если задач нет.
+        
+        Использует `FOR UPDATE SKIP LOCKED` для защиты от гонок
+        между воркерами и устанавливает `locked_at` для timeout detection.
+        
+        Args:
+            worker_id: Уникальный идентификатор воркера.
+        
+        Returns:
+            Dict с данными задачи или None если задач нет.
+        """
+        # Log connection info to debug schema issues
+        async with self.pool.acquire() as conn:
+            db_name = await conn.fetchval("SELECT current_database()")
+            schema_name = await conn.fetchval("SELECT current_schema()")
+            
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE public.execution_queue
+                SET 
+                    status = 'processing',
+                    updated_at = NOW(),
+                    locked_at = NOW(),
+                    worker_id = $1
+                WHERE id = (
+                    SELECT id
+                    FROM public.execution_queue
+                    WHERE status = 'pending'
+                    AND (attempts < max_attempts OR max_attempts IS NULL)
+                    ORDER BY created_at ASC
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING id, task_type, payload, attempts, max_attempts, created_at
+            """, worker_id)
+            
+            if not row:
+                #logger.debug("No pending jobs available", extra={"worker_id": worker_id})
+                return None
+            
+            job = dict(row)
+            job['id'] = str(job['id'])
+            if job['payload'] and isinstance(job['payload'], str):
+                try:
+                    job['payload'] = json.loads(job['payload'])
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        "Failed to parse job payload",
+                        extra={"job_id": job['id'], "error": str(e)}
+                    )
+                    job['payload'] = {}
+            
+            logger.info(
+                "Job claimed successfully",
+                extra={"job_id": job['id'], "task_type": job['task_type'], "worker_id": worker_id}
+            )
+            return job
+
+    async def complete_job(self, job_id: str, success: bool, error: Optional[str] = None) -> None:
+        """
+        Помечает задачу как выполненную (status = 'done') или неудавшуюся (status = 'failed').
+        
+        Args:
+            job_id: UUID задачи в строковом формате.
+            success: True если задача выполнена успешно, False если нет.
+            error: Сообщение об ошибке при неудачном выполнении.
+        """
+        new_status = 'done' if success else 'failed'
+        logger.info(
+            "Completing job",
+            extra={"job_id": job_id, "status": new_status, "error": error}
+        )
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE public.execution_queue
+                SET 
+                    status = $1, 
+                    updated_at = NOW(),
+                    locked_at = NULL,
+                    worker_id = NULL,
+                    error = $2
+                WHERE id = $3
+            """, new_status, error, job_id)
+
+    async def release_job(self, job_id: str, reason: str = "timeout") -> bool:
+        """
+        Освобождает заблокированную задачу для повторной обработки.
+        
+        Используется для recovery задач, которые зависли у воркера
+        (например, при падении процесса или сетевой ошибке).
+        
+        Args:
+            job_id: UUID задачи в строковом формате.
+            reason: Причина освобождения (для логирования).
+        
+        Returns:
+            True если задача была освобождена, False если не найдена.
+        """
+        logger.info(
+            "Releasing job",
+            extra={"job_id": job_id, "reason": reason}
+        )
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("""
+                UPDATE public.execution_queue
+                SET 
+                    status = 'pending',
+                    updated_at = NOW(),
+                    locked_at = NULL,
+                    worker_id = NULL
+                WHERE id = $1 AND status = 'processing'
+            """, job_id)
+            
+            released = result == "UPDATE 1"
+            if released:
+                logger.info("Job released successfully", extra={"job_id": job_id})
+            else:
+                logger.warning(
+                    "Job release failed - not found or not processing",
+                    extra={"job_id": job_id}
+
+--- File: src/database/repositories/template_repository.py ---
+"""
+Template Repository for Workflow Templates.
+
+This module provides data access methods for workflow templates,
+which are pre-built graph configurations for quick project setup.
+"""
+
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+import asyncpg
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class TemplateRepository:
+    """
+    Repository for managing workflow template operations.
+    
+    The TemplateRepository handles CRUD operations for workflow
+    templates, which allow users to quickly set up projects with
+    pre-configured graph structures.
+    
+    Attributes:
+        pool: Asyncpg connection pool for database operations.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the TemplateRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("TemplateRepository initialized")
+    
+    async def get_active_templates(self) -> List[Dict[str, Any]]:
+        """
+        Retrieve all active workflow templates.
+        
+        Returns only templates that are marked as active, suitable
+        for presentation to users during project creation.
+        
+        Returns:
+            List of active templates with id, slug, name, description.
+        
+        Example:
+            >>> templates = await repo.get_active_templates()
+            >>> for template in templates:
+            ...     print(f"{template['slug']}: {template['name']}")
+        """
+        logger.debug("Loading active workflow templates")
+        
+        rows = await self.pool.fetch(
+            """
+            SELECT id, slug, name, graph_json
+            FROM workflow_templates
+            WHERE is_active = true
+            ORDER BY name
+            """
+        )
+        
+        templates = [
+            {
+                "id": str(row["id"]),
+                "slug": row["slug"],
+                "name": row["name"],
+                "graph_json": row["graph_json"]
+            }
+            for row in rows
+        ]
+        
+        logger.debug(
+            "Active templates loaded",
+            extra={"template_count": len(templates)}
+        )
+        
+        return templates
+    
+    async def get_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a specific template by its slug.
+        
+        This method is used when applying a template to a project
+        during creation or configuration.
+        
+        Args:
+            slug: The unique slug identifier for the template.
+        
+        Returns:
+            Template data if found, None otherwise.
+        
+        Example:
+            >>> template = await repo.get_by_slug('support')
+            >>> if template:
+            ...     apply_template_to_project(template)
+        """
+        logger.debug(
+            "Loading template by slug",
+            extra={"slug": slug}
+        )
+        
+        row = await self.pool.fetchrow(
+            """
+            SELECT id, slug, name, graph_json
+            FROM workflow_templates
+            WHERE slug = $1 AND is_active = true
+            """,
+            slug
+        )
+        
+        if row is None:
+            logger.warning("Template not found", extra={"slug": slug})
+            return None
+        
+        template = {
+            "id": str(row["id"]),
+            "slug": row["slug"],
+            "name": row["name"],
+            "graph_json": row["graph_json"]
+        }
+        
+        logger.debug(
+            "Template loaded",
+            extra={"slug": slug, "template_id": template["id"]}
+        )
+        
+        return template
+    
+    async def get_by_id(self, template_id: UUID) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a specific template by its UUID.
+        
+        Args:
+            template_id: The UUID of the template to retrieve.
+        
+        Returns:
+            Template data if found, None otherwise.
+        """
+        logger.debug(
+            "Loading template by ID",
+            extra={"template_id": str(template_id)}
+        )
+        
+        row = await self.pool.fetchrow(
+            """
+            SELECT id, slug, name, graph_json
+            FROM workflow_templates
+            WHERE id = $1 AND is_active = true
+            """,
+            template_id
+        )
+        
+        if row is None:
+            logger.warning(
+                "Template not found",
+                extra={"template_id": str(template_id)}
+            )
+            return None
+        
+        template = {
+            "id": str(row["id"]),
+            "slug": row["slug"],
+            "name": row["name"],
+            "graph_json": row["graph_json"]
+        }
+        
+        return template
+
+--- File: src/database/repositories/thread_repository.py ---
+import uuid
+import json
+from typing import List, Optional, Dict, Any
+from ..models import ThreadStatus
+from src.core.logging import get_logger
+from src.utils.uuid_utils import ensure_uuid
+
+logger = get_logger(__name__)
+
+class ThreadRepository:
+    def __init__(self, pool):
+        """
+        Принимает пул соединений asyncpg.
+        """
+        self.pool = pool
+
+    async def get_or_create_client(self, project_id: str, chat_id: int, username: str = None, source: str = "telegram") -> str:
+        """Возвращает UUID клиента, создавая его при необходимости."""
+        logger.info(f"Getting or creating client for project {project_id}, chat {chat_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO clients (project_id, chat_id, username, source)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (project_id, chat_id) DO UPDATE SET username = EXCLUDED.username
+                RETURNING id
+            """, ensure_uuid(project_id), chat_id, username, source)
+            client_id = str(row['id'])
+            logger.info(f"Client {client_id} ensured")
+            return client_id
+
+    async def get_active_thread(self, client_id: str) -> Optional[str]:
+        """
+        Ищет последний тред клиента (независимо от статуса), чтобы не создавать новый при наличии ручного.
+        Возвращает ID последнего треда по updated_at.
+        """
+        logger.debug(f"Looking for thread for client {client_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id FROM threads 
+                WHERE client_id = $1
+                ORDER BY updated_at DESC LIMIT 1
+            """, ensure_uuid(client_id))
+            if row:
+                thread_id = str(row['id'])
+                logger.debug(f"Thread found: {thread_id}")
+                return thread_id
+            logger.debug("No thread found")
+            return None
+
+    async def create_thread(self, client_id: str) -> str:
+        """Создает новый тред со статусом ACTIVE."""
+        logger.info(f"Creating new thread for client {client_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO threads (client_id, status) VALUES ($1, $2) RETURNING id
+            """, ensure_uuid(client_id), ThreadStatus.ACTIVE.value)
+            thread_id = str(row['id'])
+            logger.info(f"Thread {thread_id} created")
+            return thread_id
+
+    async def add_message(self, thread_id: str, role: str, content: str):
+        """Сохраняет сообщение в базу."""
+        logger.info(f"Adding message to thread {thread_id}, role {role}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO messages (thread_id, role, content)
+                VALUES ($1, $2, $3)
+            """, ensure_uuid(thread_id), role, content)
+            # Обновляем timestamp треда, чтобы он был "свежим"
+            await conn.execute("UPDATE threads SET updated_at = NOW() WHERE id = $1", ensure_uuid(thread_id))
+            logger.debug(f"Message added and thread updated")
+
+    async def get_messages_for_langgraph(self, thread_id: str) -> List[Dict]:
+        """Загружает историю для LangGraph."""
+        logger.debug(f"Fetching messages for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT role, content FROM messages 
+                WHERE thread_id = $1 ORDER BY created_at ASC
+            """, ensure_uuid(thread_id))
+            messages = [dict(row) for row in rows]
+            logger.debug(f"Retrieved {len(messages)} messages")
+            return messages
+
+    async def update_status(self, thread_id: str, status: ThreadStatus) -> None:
+        """Обновляет статус треда."""
+        logger.info(f"Updating thread {thread_id} status to {status.value}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET status = $1, updated_at = NOW()
+                WHERE id = $2
+            """, status.value, ensure_uuid(thread_id))
+
+    async def update_manager_chat(self, thread_id: str, manager_chat_id: str) -> None:
+        """
+        Сохраняет идентификатор менеджера (Telegram chat_id), назначенного для ответа на этот тред.
+        Обычно вызывается при эскалации.
+        """
+        logger.info(f"Assigning manager {manager_chat_id} to thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET manager_chat_id = $1, updated_at = NOW()
+                WHERE id = $2
+            """, manager_chat_id, ensure_uuid(thread_id))
+
+    async def find_by_manager_chat(self, manager_chat_id: str) -> List[Dict]:
+        """
+        Возвращает список активных тредов (status = 'manual'), ожидающих ответа от указанного менеджера.
+        """
+        logger.info(f"Finding active threads for manager {manager_chat_id}")
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, client_id, status, manager_chat_id, created_at, updated_at
+                FROM threads
+                WHERE manager_chat_id = $1 AND status = 'manual'
+                ORDER BY updated_at DESC
+            """, manager_chat_id)
+            threads = [dict(row) for row in rows]
+            logger.info(f"Found {len(threads)} active threads for manager")
+            return threads
+
+    async def get_thread_with_project(self, thread_id: str) -> Optional[Dict]:
+        """
+        Возвращает информацию о треде вместе с project_id клиента.
+        Выполняет JOIN с таблицей clients для получения project_id.
+        """
+        logger.debug(f"Fetching thread with project for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT 
+                    t.id, t.client_id, t.status, t.manager_chat_id, 
+                    t.context_summary, t.created_at, t.updated_at,
+                    c.project_id
+                FROM threads t
+                JOIN clients c ON t.client_id = c.id
+                WHERE t.id = $1
+            """, ensure_uuid(thread_id))
+            if not row:
+                logger.warning(f"Thread {thread_id} not found")
+                return None
+            data = dict(row)
+            logger.debug(f"Thread data retrieved for {thread_id}")
+            return data
+
+    async def update_summary(self, thread_id: str, summary: str) -> None:
+        """
+        Обновляет поле context_summary (краткое содержание диалога) для указанного треда.
+        """
+        logger.info(f"Updating summary for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET context_summary = $1, updated_at = NOW()
+                WHERE id = $2
+            """, summary, ensure_uuid(thread_id))
+            logger.debug("Summary updated")
+
+    async def get_state_json(self, thread_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Возвращает сохранённое состояние графа (state_json) для указанного треда.
+        Если состояние отсутствует, возвращает None.
+        """
+        logger.debug(f"Fetching state_json for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT state_json FROM threads WHERE id = $1
+            """, ensure_uuid(thread_id))
+            if row and row["state_json"] is not None:
+                state = row["state_json"]
+                logger.debug(f"State_json retrieved for thread {thread_id}")
+                return state
+            logger.debug(f"No state_json found for thread {thread_id}")
+            return None
+
+    async def save_state_json(self, thread_id: str, state: Dict[str, Any]) -> None:
+        """
+        Сохраняет состояние графа (state_json) для указанного треда.
+        Перезаписывает существующее состояние.
+        """
+        logger.info(f"Saving state_json for thread {thread_id}")
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE threads
+                SET state_json = $1, updated_at = NOW()
+                WHERE id = $2
+            """, json.dumps(state, ensure_ascii=False), ensure_uuid(thread_id))
+            logger.debug("State_json saved")
+
+    async def update_analytics(
+        self,
+        thread_id: str,
+        intent: Optional[str] = None,
+        lifecycle: Optional[str] = None,
+        cta: Optional[str] = None,
+        decision: Optional[str] = None
+    ) -> None:
+        """
+        Обновляет аналитические поля треда: intent, lifecycle, cta, decision.
+
+--- File: src/database/repositories/user_repository.py ---
+"""
+User Repository for managing platform users and authentication identities.
+
+This module provides data access methods for users and auth_identities tables,
+supporting multi-provider authentication and user management.
+"""
+
+import uuid
+import json
+import asyncpg
+from typing import Optional, Dict, Any, Tuple
+
+from src.core.logging import get_logger
+from src.core.config import settings
+
+logger = get_logger(__name__)
+
+
+class UserRepository:
+    """
+    Repository for managing user accounts and authentication identities.
+    
+    Supports creating users, linking identities, and retrieving users
+    by various identifiers (telegram, email, etc.).
+    
+    Attributes:
+        pool: Asyncpg connection pool for database operations.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the UserRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("UserRepository initialized")
+
+    async def get_or_create_by_telegram(
+        self,
+        telegram_id: int,
+        first_name: str,
+        username: Optional[str] = None
+    ) -> Tuple[str, bool]:
+        """
+        Get or create a user by Telegram ID.
+        
+        If the user already exists (by auth_identity or users.telegram_id),
+        returns the existing user ID. Otherwise, creates a new user and
+        adds a Telegram identity.
+        
+        Args:
+            telegram_id: Telegram chat ID.
+            first_name: User's first name from Telegram.
+            username: Telegram username (optional).
+        
+        Returns:
+            Tuple of (user_id (str), created (bool)).
+        """
+        logger.info(
+            "Getting or creating user by telegram",
+            extra={"telegram_id": telegram_id}
+        )
+        
+        async with self.pool.acquire() as conn:
+            # Try to find existing identity
+            row = await conn.fetchrow("""
+                SELECT user_id
+                FROM auth_identities
+                WHERE provider = 'telegram' AND provider_id = $1
+            """, str(telegram_id))
+            
+            if row:
+                user_id = str(row['user_id'])
+                logger.debug("Existing user found via identity", extra={"user_id": user_id})
+                return user_id, False
+            
+            # Check legacy users table (telegram_id column)
+            row = await conn.fetchrow("""
+                SELECT id FROM users WHERE telegram_id = $1
+            """, telegram_id)
+            
+            if row:
+                user_id = str(row['id'])
+                # Migrate to new identity system
+                await conn.execute("""
+                    INSERT INTO auth_identities (user_id, provider, provider_id)
+                    VALUES ($1, 'telegram', $2)
+                    ON CONFLICT (provider, provider_id) DO NOTHING
+                """, user_id, str(telegram_id))
+                logger.info("Migrated legacy user to auth_identities", extra={"user_id": user_id})
+                return user_id, False
+            
+            # Create new user
+            full_name = first_name
+            # Optionally append last_name if available, but we don't have it here
+            user_id = await conn.fetchval("""
+                INSERT INTO users (id, telegram_id, username, full_name)
+                VALUES (gen_random_uuid(), $1, $2, $3)
+                RETURNING id
+            """, telegram_id, username, full_name)
+            user_id = str(user_id)
+            
+            # Create identity
+            await conn.execute("""
+                INSERT INTO auth_identities (user_id, provider, provider_id)
+                VALUES ($1, 'telegram', $2)
+            """, user_id, str(telegram_id))
+            
+            logger.info("New user created", extra={"user_id": user_id, "telegram_id": telegram_id})
+            return user_id, True
+
+    async def add_identity(
+        self,
+        user_id: str,
+        provider: str,
+        provider_id: str
+    ) -> None:
+        """
+        Add an authentication identity for an existing user.
+        
+        Args:
+            user_id: UUID of the user.
+            provider: Provider name (e.g., 'telegram', 'email', 'google').
+            provider_id: Unique identifier from the provider.
+        """
+        logger.info(
+            "Adding identity",
+            extra={"user_id": user_id, "provider": provider, "provider_id": provider_id}
+        )
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO auth_identities (user_id, provider, provider_id)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (provider, provider_id) DO NOTHING
+            """, user_id, provider, provider_id)
+
+    async def get_user_by_telegram(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a user by Telegram ID using auth_identities.
+        
+        Args:
+            telegram_id: Telegram chat ID.
+        
+        Returns:
+            User record as dict, or None if not found.
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT u.*
+                FROM users u
+                JOIN auth_identities ai ON ai.user_id = u.id
+                WHERE ai.provider = 'telegram' AND ai.provider_id = $1
+            """, str(telegram_id))
+            
+            if not row:
+                return None
+            
+            return dict(row)
+
+    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a user by UUID.
+        
+        Args:
+            user_id: User UUID (string).
+        
+        Returns:
+            User record as dict, or None if not found.
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+            if not row:
+                return None
+            return dict(row)
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a user by email address.
+        
+        Args:
+            email: User's email address.
+        
+        Returns:
+            User record as dict, or None if not found.
+        """
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
+            if not row:
+                return None
+            return dict(row)
+
+    async def update_user(self, user_id: str, data: Dict[str, Any]) -> bool:
+        """
+        Update user fields.
+        
+        Args:
+            user_id: User UUID.
+            data: Dictionary of fields to update (e.g., {'full_name': 'New Name'}).
+
+--- File: src/database/repositories/workflow_repository.py ---
+"""
+Workflow Repository for Custom Workflow Storage.
+
+This module provides data access methods for custom workflows,
+which are user-created graph configurations for Pro mode projects.
+"""
+
+import json
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+import asyncpg
+
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class WorkflowRepository:
+    """
+    Repository for managing custom workflow operations.
+    
+    The WorkflowRepository handles CRUD operations for custom
+    workflows, allowing Pro mode users to create and manage
+    their own graph configurations.
+    
+    Attributes:
+        pool: Asyncpg connection pool for database operations.
+    """
+    
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """
+        Initialize the WorkflowRepository with a database connection pool.
+        
+        Args:
+            pool: Asyncpg connection pool for database operations.
+        """
+        self.pool = pool
+        logger.debug("WorkflowRepository initialized")
+    
+    async def get_for_project(
+        self,
+        project_id: UUID,
+        active_only: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve all workflows for a specific project.
+        
+        Args:
+            project_id: The project ID to filter workflows.
+            active_only: If True, only return active workflows.
+        
+        Returns:
+            List of workflows with metadata (excluding graph_json for listing).
+        
+        Example:
+            >>> workflows = await repo.get_for_project(project_id)
+            >>> for workflow in workflows:
+            ...     print(f"v{workflow['version']}: {workflow['name']}")
+        """
+        logger.debug(
+            "Loading workflows for project",
+            extra={"project_id": str(project_id), "active_only": active_only}
+        )
+        
+        if active_only:
+            rows = await self.pool.fetch(
+                """
+                SELECT id, name, description, version, created_at, updated_at
+                FROM workflows
+                WHERE project_id = $1 AND is_active = true
+                ORDER BY version DESC
+                """,
+                project_id
+            )
+        else:
+            rows = await self.pool.fetch(
+                """
+                SELECT id, name, description, version, created_at, updated_at
+                FROM workflows
+                WHERE project_id = $1
+                ORDER BY version DESC
+                """,
+                project_id
+            )
+        
+        workflows = [
+            {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "description": row["description"],
+                "version": row["version"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"]
+            }
+            for row in rows
+        ]
+        
+        logger.debug(
+            "Workflows loaded",
+            extra={"project_id": str(project_id), "workflow_count": len(workflows)}
+        )
+        
+        return workflows
+    
+    async def get_by_id(
+        self,
+        workflow_id: UUID,
+        include_graph: bool = True
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a specific workflow by its UUID.
+        
+        Args:
+            workflow_id: The UUID of the workflow to retrieve.
+            include_graph: If True, include graph_json in result.
+        
+        Returns:
+            Workflow data if found, None otherwise.
+        """
+        logger.debug(
+            "Loading workflow by ID",
+            extra={"workflow_id": str(workflow_id), "include_graph": include_graph}
+        )
+        
+        if include_graph:
+            row = await self.pool.fetchrow(
+                """
+                SELECT id, project_id, name, description, graph_json, version, is_active
+                FROM workflows
+                WHERE id = $1
+                """,
+                workflow_id
+            )
+        else:
+            row = await self.pool.fetchrow(
+                """
+                SELECT id, project_id, name, description, version, is_active
+                FROM workflows
+                WHERE id = $1
+                """,
+                workflow_id
+            )
+        
+        if row is None:
+            logger.warning(
+                "Workflow not found",
+                extra={"workflow_id": str(workflow_id)}
+            )
+            return None
+        
+        workflow = {
+            "id": str(row["id"]),
+            "project_id": str(row["project_id"]),
+            "name": row["name"],
+            "description": row["description"],
+            "version": row["version"],
+            "is_active": row["is_active"]
+        }
+        
+        if include_graph:
+            workflow["graph_json"] = row["graph_json"]
+        
+        return workflow
+    
+    async def save(
+        self,
+        project_id: UUID,
+        name: str,
+        graph_json: Dict[str, Any],
+        description: Optional[str] = None,
+        workflow_id: Optional[UUID] = None
+    ) -> UUID:
+        """
+        Save a workflow (create new or update existing).
+        
+        If workflow_id is provided, updates the existing workflow
+        and increments the version. Otherwise creates a new workflow.
+        
+        Args:
+            project_id: The project ID this workflow belongs to.
+            name: Human-readable name for the workflow.
+            graph_json: The graph definition from canvas.
+            description: Optional description of the workflow.
+            workflow_id: Optional ID for update (None for create).
+        
+        Returns:
+            The UUID of the saved workflow.
+        
+        Raises:
+            ValueError: If workflow not found when updating.
+        """
+        if workflow_id:
+            logger.info(
+                "Updating workflow",
+                extra={"workflow_id": str(workflow_id), "project_id": str(project_id)}
+            )
+            
+            # Increment version on update
+            row = await self.pool.fetchrow(
+
+=== EXISTING DATABASE TABLES (from migrations) ===
+CREATE TABLE IF NOT EXISTS public.projects (
+CREATE TABLE IF NOT EXISTS public.clients (
+CREATE TABLE IF NOT EXISTS public.threads (
+CREATE TABLE IF NOT EXISTS public.messages (
+CREATE TABLE IF NOT EXISTS public.knowledge_base (
+CREATE TABLE IF NOT EXISTS execution_queue (
+CREATE TABLE IF NOT EXISTS project_managers (
+CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE IF NOT EXISTS workflow_templates (
+CREATE TABLE IF NOT EXISTS workflows (
+CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE IF NOT EXISTS user_memory (
+CREATE TABLE auth_identities (
+CREATE TABLE channels (
+CREATE TABLE features (
+CREATE TABLE thread_metrics (
+CREATE TABLE project_metrics_daily (
+CREATE TABLE knowledge_documents (
+
+=== LIFESPAN (startup/shutdown) ===
+
+=== CONFIGURATION (settings) ===
+"""
+Configuration management for the application.
+Uses Pydantic Settings to load and validate environment variables.
+"""
+from typing import Optional
+from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+import uuid
+
+class Settings(BaseSettings):
+    """
+    Application settings loaded from environment variables.
+    All variables are validated and typed.
+    """
+    # Database
+    DATABASE_URL: str = Field(..., description="PostgreSQL connection string")
+    
+    # Database pool settings
+    DB_POOL_MIN_SIZE: int = Field(1, ge=1, le=10, description="Minimum database pool connections")
+    DB_POOL_MAX_SIZE: int = Field(10, ge=1, le=50, description="Maximum database pool connections")
+    DB_COMMAND_TIMEOUT: float = Field(60.0, gt=0, description="Database command timeout in seconds")
+
+    # Admin bot
+    ADMIN_CHAT_ID: str = Field(..., description="Telegram chat ID of the platform administrator")
+    ADMIN_BOT_TOKEN: str = Field("", description="Token of the admin bot (used for first project creation)")
+    ADMIN_PROJECT_ID: Optional[str] = Field(None, description="ID of the admin project (excluded from user lists)")
+
+    # External URLs
+    RENDER_EXTERNAL_URL: str = Field("", description="Public URL of the service (set by Render)")
+    PUBLIC_URL: str = Field("", description="Alternative public URL if not using Render")
+
+    # Groq
+    GROQ_API_KEY: str = Field(..., description="API key for Groq LLM")
+    GROQ_MODEL: str = Field("llama-3.3-70b-versatile", description="Default Groq model for agent")
+
+    # Optional Redis (for future use)
+    REDIS_URL: str = Field("", description="Redis connection string (optional)")
+
+    # Encryption key for bot tokens (must be a valid Fernet key)
+    TOKEN_ENCRYPTION_KEY: str = Field(..., description="Fernet key for encrypting bot tokens")
+
+    # API token for admin panel endpoints
+    ADMIN_API_TOKEN: str = Field(..., description="Bearer token for accessing admin API endpoints")
+
+    # Other settings
+    PROJECT_NAME: str = "MRAK-OS CRM Bot"
+    DEBUG: bool = Field(False, description="Enable debug mode")
+        # Новые поля из .env
+    CANVAS_ENABLED: bool = False
+    EVENT_STORE_ENABLED: bool = False
+    EVENT_TTL_DAYS: int = 90
+    PRO_MODE_ENABLED: bool = False
+    RATE_LIMIT_BURST: int = 10
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
+    TOOL_HTTP_ALLOWED_DOMAINS: Optional[str] = None
+    TOOL_N8N_ALLOWED_WEBHOOKS: Optional[str] = None
+
+    # Model and rate limit configuration
+    GROQ_MODEL: str = Field("llama-3.3-70b-versatile", description="Default Groq model")
+    MODEL_CONFIG_PATH: str = Field("models.yaml", description="Path to YAML file with model definitions")
+    DEFAULT_MODEL: str = Field("llama-3.1-8b-instant", description="Fallback model when preferred ones are rate-limited")
+    MODEL_SELECTION_STRATEGY: str = Field("priority", description="Strategy for model selection: priority, round-robin, etc.")
+    RATE_LIMIT_REDIS_PREFIX: str = Field("ratelimit:", description="Redis key prefix for rate limit tracking")
+
+    # JWT for web authentication
+    JWT_SECRET_KEY: str = Field(..., description="Secret key for signing JWT tokens (used for web auth)")
+
+    VITE_API_URL: Optional[str] = Field(None, description="Frontend API URL (for CORS)")
+    FRONTEND_URL: Optional[str] = Field(None, description="Frontend URL (for autologin)")
+
+    HF_MODEL_URL: str = "https://huggingface.co/intfloat/multilingual-e5-large"
+    HF_TOKEN: str = ""
+
+    @field_validator("ADMIN_CHAT_ID")
+    def validate_chat_id(cls, v: str) -> str:
+        """Ensure chat ID is a valid integer string."""
+        try:
+            int(v)
+        except ValueError:
+            raise ValueError("ADMIN_CHAT_ID must be a numeric string (Telegram chat ID)")
+        return v
+
+    @field_validator("TOKEN_ENCRYPTION_KEY")
+    def validate_encryption_key(cls, v: str) -> str:
+        """Basic length check for Fernet key (should be 32 base64 bytes)."""
+        if len(v) < 20:
+            raise ValueError("TOKEN_ENCRYPTION_KEY must be a valid Fernet key (minimum length 20)")
+        return v
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+# Global instance for easy import
+settings = Settings()
+
+=== EVENT REPOSITORY (for auditing) ===
+
+=== EXISTING TESTS (agent nodes, tools) ===
+--- File: tests/agent/router/test_prompt_builder.py ---
+import pytest
+from unittest.mock import MagicMock, patch, mock_open
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+from src.agent.router.prompt_builder import (
+    _load_prompt_template,
+    format_kb_results,
+    format_history,
+    infer_routing_mode,
+    _format_memory,
+    _format_features,
+    build_intent_prompt,
+    build_response_prompt,
+)
+# FIXED: import global variables to reset them in tests
+import src.agent.router.prompt_builder as prompt_builder_module
+
+
+class TestLoadPromptTemplate:
+    def test_load_success(self):
+        with patch("pathlib.Path.read_text", return_value="template content"):
+            result = _load_prompt_template("test.txt")
+            assert result == "template content"
+
+    def test_load_failure_logs_error(self):
+        with patch("pathlib.Path.read_text", side_effect=Exception("File not found")):
+            with patch("src.agent.router.prompt_builder.logger") as mock_logger:
+                result = _load_prompt_template("missing.txt")
+                assert result == ""
+                mock_logger.error.assert_called_once()
+                assert "Failed to load prompt template" in mock_logger.error.call_args[0][0]
+
+
+class TestFormatKbResults:
+    def test_empty_results(self):
+        result, top_score, count = format_kb_results([])
+        assert result == "[]"
+        assert top_score == 0.0
+        assert count == 0
+
+    def test_single_result(self):
+        kb_results = [{"score": 0.95, "content": "Test answer"}]
+        result, top_score, count = format_kb_results(kb_results)
+        assert "1. score=0.950" in result
+        assert "text=Test answer" in result
+        assert top_score == 0.95
+        assert count == 1
+
+    def test_multiple_results_with_question_and_method(self):
+        kb_results = [
+
+--- File: tests/agent/router/test_utils.py ---
+import pytest
+from src.agent.router.utils import (
+    compact_whitespace,
+    truncate_text,
+    safe_json_dumps,
+    extract_kb_text,
+    count_question_signals,
+    has_sensitive_or_urgent_intent,
+    has_complex_intent,
+    extract_model_id,
+)
+
+
+class TestCompactWhitespace:
+    def test_removes_extra_spaces(self):
+        assert compact_whitespace("hello   world") == "hello world"
+        assert compact_whitespace("  leading and trailing  ") == "leading and trailing"
+        assert compact_whitespace("line1\nline2\tline3") == "line1 line2 line3"
+
+    def test_empty_string(self):
+        assert compact_whitespace("") == ""
+
+    def test_none_input_returns_empty_string(self):
+        # FIXED: function handles None gracefully, returns empty string
+        assert compact_whitespace(None) == ""
+
+
+class TestTruncateText:
+    def test_shorter_than_limit(self):
+        text = "short"
+        assert truncate_text(text, 10) == "short"
+
+    def test_exact_limit(self):
+        text = "1234567890"
+        assert truncate_text(text, 10) == "1234567890"
+
+    def test_longer_than_limit(self):
+        text = "a" * 300
+        result = truncate_text(text, 280)
+        assert len(result) == 280
+        assert result.endswith("…")
+        assert result == "a" * 279 + "…"
+
+    def test_empty_string(self):
+        assert truncate_text("") == ""
+
+    def test_normalizes_whitespace_before_truncation(self):
+        text = "   " + "x" * 300 + "   "
+        result = truncate_text(text, 280)
+        assert result.startswith("x")
+
+--- File: tests/agent/router/test_output_parser.py ---
+import pytest
+import json
+from pydantic import ValidationError
+
+from src.agent.router.output_parser import (
+    clean_response_content,
+    validate_router_output,
+    parse_router_output,
+    validate_intent_output,
+    parse_intent_output,
+    build_fallback_response_from_kb,
+)
+from src.agent.schemas import RouterOutput, IntentOutput
+
+
+class TestCleanResponseContent:
+    def test_removes_json_code_fences(self):
+        content = "```json\n{\"decision\": \"LLM_GENERATE\"}\n```"
+        result = clean_response_content(content)
+        assert result == "{\"decision\": \"LLM_GENERATE\"}"
+
+    def test_removes_code_fences_without_json_label(self):
+        content = "```\n{\"decision\": \"LLM_GENERATE\"}\n```"
+        result = clean_response_content(content)
+        assert result == "{\"decision\": \"LLM_GENERATE\"}"
+
+    def test_extracts_json_from_curly_braces(self):
+        content = "Some text {\"decision\": \"LLM_GENERATE\"} and more"
+        result = clean_response_content(content)
+        assert result == "{\"decision\": \"LLM_GENERATE\"}"
+
+    def test_returns_original_string_if_no_json_found(self):
+        content = "Just plain text without braces"
+        result = clean_response_content(content)
+        assert result == "Just plain text without braces"
+
+    def test_handles_empty_string(self):
+        result = clean_response_content("")
+        assert result == ""
+
+    def test_handles_none(self):
+        result = clean_response_content(None)
+        assert result == ""
+
+
+class TestValidateRouterOutput:
+    def test_valid_data(self):
+        data = {
+            "decision": "LLM_GENERATE",
+            "response": "Hello",
+
+--- File: tests/agent/nodes/test_tool_executor.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from src.agent.state import AgentState
+from src.agent.nodes.tool_executor import create_tool_executor_node
+
+
+@pytest.fixture
+def mock_tool_registry():
+    """Mock ToolRegistry."""
+    registry = AsyncMock()
+    registry.execute = AsyncMock()
+    return registry
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.tool_executor.logger") as mock:
+        yield mock
+
+
+@pytest.mark.asyncio
+async def test_success(mock_tool_registry, mock_logger):
+    """Успешное выполнение инструмента."""
+    state = AgentState(
+        messages=[],
+        project_id="proj-123",
+        thread_id="thread-456",
+        escalation_requested=False,
+        tool_name="test_tool",
+        tool_args={"arg1": "value1"},
+    )
+    expected_result = {"result": "success"}
+    mock_tool_registry.execute.return_value = expected_result
+
+    node = create_tool_executor_node(tool_registry=mock_tool_registry)
+    result = await node(state)
+
+    assert result == {"tool_result": expected_result, "requires_human": False}
+    # FIXED: third argument is positional, not named
+    mock_tool_registry.execute.assert_awaited_once_with(
+        "test_tool",
+        {"arg1": "value1"},
+        {"project_id": "proj-123", "thread_id": "thread-456"}
+    )
+    mock_logger.info.assert_called_once()
+    mock_logger.debug.assert_called_once()
+    mock_logger.exception.assert_not_called()
+
+
+
+--- File: tests/agent/nodes/test_intent_extractor.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.intent_extractor import create_intent_extractor_node
+
+
+@pytest.fixture
+def mock_llm():
+    """Mock ChatGroq instance."""
+    mock = AsyncMock()
+    mock.ainvoke = AsyncMock()
+    return mock
+
+
+@pytest.fixture
+def mock_build_intent_prompt():
+    """Mock build_intent_prompt to return a fixed prompt string."""
+    with patch("src.agent.nodes.intent_extractor.build_intent_prompt") as mock:
+        mock.return_value = "test prompt"
+        yield mock
+
+
+class TestIntentExtractorNode:
+    @pytest.mark.asyncio
+    async def test_success(self, mock_llm, mock_build_intent_prompt):
+        """Успешное извлечение намерения."""
+        state = AgentState(
+            messages=[],
+            project_id="proj123",
+            thread_id="thread456",
+            escalation_requested=False,
+            tool_calls=None,
+            user_input="хочу купить",
+            conversation_summary="summary",
+            history=[{"role": "user", "content": "hello"}],
+            user_memory={"preferences": [{"key": "lang", "value": "ru"}]},
+            # other fields default to None
+        )
+        # Mock LLM response with valid JSON inside code fences
+        mock_llm.ainvoke.return_value = MagicMock(
+            content="```json\n{\"intent\": \"pricing\", \"cta\": \"request_demo\", \"features\": {\"auto_reply\": 0.9}, \"topic\": \"pricing\", \"cta_hint\": \"show demo\", \"emotion\": \"positive\", \"is_repeat_like\": false}\n```"
+        )
+
+        node = create_intent_extractor_node(llm=mock_llm)
+        result = await node(state)
+
+        assert result["intent"] == "pricing"
+        assert result["cta"] == "request_demo"
+
+--- File: tests/agent/nodes/test_persist.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from datetime import datetime
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.persist import create_persist_node
+from src.database.models import ThreadStatus
+
+
+@pytest.fixture
+def mock_thread_repo():
+    """Mock ThreadRepository."""
+    repo = AsyncMock()
+    repo.add_message = AsyncMock()
+    repo.save_state_json = AsyncMock()
+    repo.update_analytics = AsyncMock()
+    repo.get_message_counts = AsyncMock()
+    repo.get_thread_with_project = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_event_repo():
+    """Mock EventRepository."""
+    repo = AsyncMock()
+    repo.append = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_memory_repo():
+    """Mock MemoryRepository."""
+    repo = AsyncMock()
+    repo.set = AsyncMock()
+    repo.get_lifecycle = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_queue_repo():
+    """Mock QueueRepository."""
+    repo = AsyncMock()
+    repo.enqueue = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+
+--- File: tests/agent/nodes/test_response_generator.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.response_generator import create_response_generator_node
+
+
+@pytest.fixture
+def mock_llm():
+    """Mock ChatGroq instance."""
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock()
+    return llm
+
+
+@pytest.fixture
+def mock_build_prompt():
+    """Mock build_response_prompt to return a fixed prompt string."""
+    with patch("src.agent.nodes.response_generator.build_response_prompt") as mock:
+        mock.return_value = "test prompt"
+        yield mock
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.response_generator.logger") as mock:
+        yield mock
+
+
+class TestResponseGeneratorNode:
+    @pytest.mark.asyncio
+    async def test_success_generation(self, mock_llm, mock_build_prompt, mock_logger):
+        """Успешная генерация ответа с decision=LLM_GENERATE."""
+        state = AgentState(
+            messages=[],
+            project_id="proj",
+            thread_id="thread",
+            escalation_requested=False,
+            decision="LLM_GENERATE",
+            user_input="Привет",
+            conversation_summary="summary",
+            history=[{"role": "user", "content": "previous message"}],
+            knowledge_chunks=[{"content": "chunk1", "score": 0.9}],
+            user_memory={"preferences": [{"key": "lang", "value": "ru"}]},
+            dialog_state={"last_intent": "greeting"},
+            features={"topic": "general"}
+        )
+        mock_llm.ainvoke.return_value = MagicMock(content="Generated response")
+
+--- File: tests/agent/nodes/test_kb_search.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.kb_search import create_kb_search_node
+
+
+@pytest.fixture
+def mock_tool_registry():
+    """Mock ToolRegistry."""
+    registry = AsyncMock()
+    registry.execute = AsyncMock()
+    return registry
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.kb_search.logger") as mock:
+        yield mock
+
+
+class TestKBSearchNode:
+    @pytest.mark.asyncio
+    async def test_success(self, mock_tool_registry, mock_logger):
+        """Успешный поиск: инструмент возвращает чанки, узел нормализует их."""
+        state = AgentState(
+            messages=[],
+            project_id="proj-123",
+            thread_id="thread-456",
+            escalation_requested=False,
+            user_input="Что такое ваш продукт?",
+            # other fields optional
+        )
+        # FIXED: make first chunk content longer than 150 to test truncation
+        long_text = "x" * 200
+        mock_tool_registry.execute.return_value = {
+            "results": [
+                {"id": "chunk1", "score": 0.95, "content": long_text},
+                {"id": "chunk2", "score": 0.85, "content": "Короткий текст."},
+                {"id": "chunk3", "score": None, "content": "Чанк без оценки."}
+            ]
+        }
+
+        node = create_kb_search_node(tool_registry=mock_tool_registry)
+        result = await node(state)
+
+        # Check result structure
+        assert "knowledge_chunks" in result
+
+--- File: tests/agent/nodes/test_escalate.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.escalate import create_escalate_node
+
+
+@pytest.fixture
+def mock_thread_repo():
+    """Mock ThreadRepository (not used in current implementation)."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_queue_repo():
+    """Mock QueueRepository."""
+    repo = AsyncMock()
+    repo.enqueue = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_ticket_create_tool():
+    """Mock TicketCreateTool."""
+    tool = AsyncMock()
+    tool.run = AsyncMock(return_value={"ticket_id": "mock-ticket-id"})
+    return tool
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.escalate.logger") as mock:
+        yield mock
+
+
+class TestEscalateNode:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        mock_thread_repo,
+        mock_queue_repo,
+        mock_ticket_create_tool,
+        mock_logger
+    ):
+        """Успешная эскалация: создание тикета, постановка задач."""
+        state = AgentState(
+            messages=[],
+            project_id="proj-123",
+
+--- File: tests/agent/nodes/test_responder.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.responder import create_responder_node
+
+
+@pytest.fixture
+def mock_tool_registry():
+    """Mock ToolRegistry."""
+    registry = AsyncMock()
+    registry.execute = AsyncMock()
+    return registry
+
+
+@pytest.fixture
+def mock_thread_repo():
+    """Mock ThreadRepository."""
+    repo = AsyncMock()
+    repo.add_message = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.responder.logger") as mock:
+        yield mock
+
+
+class TestResponderNode:
+    @pytest.mark.asyncio
+    async def test_success_with_thread_repo(self, mock_tool_registry, mock_thread_repo, mock_logger):
+        """Успешная отправка сообщения с сохранением в БД."""
+        state = AgentState(
+            messages=[],
+            project_id="proj-123",
+            thread_id="thread-456",
+            escalation_requested=False,
+            chat_id=12345,
+            response_text="Test response"
+        )
+        mock_tool_registry.execute.return_value = {"ok": True}
+
+        node = create_responder_node(
+            tool_registry=mock_tool_registry,
+            thread_repo=mock_thread_repo
+        )
+        result = await node(state)
+
+--- File: tests/agent/nodes/test_rules.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from src.agent.state import AgentState
+from src.agent.nodes.rules import rules_node
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.rules.logger") as mock:
+        yield mock
+
+
+@pytest.mark.asyncio
+async def test_empty_user_input(mock_logger):
+    """user_input пуст -> PROCEED_TO_LLM."""
+    state = AgentState(
+        messages=[],
+        project_id="proj",
+        thread_id="thread",
+        escalation_requested=False,
+        user_input=""
+    )
+    result = await rules_node(state)
+    assert result == {"decision": "PROCEED_TO_LLM"}
+    mock_logger.warning.assert_called_once()
+    assert "rules_node called with empty user_input" in mock_logger.warning.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_keyword_detection(mock_logger):
+    """Обнаружение ключевого слова -> ESCALATE."""
+    keywords = ["бесит", "развод", "жалоба"]
+    for kw in keywords:
+        state = AgentState(
+            messages=[],
+            project_id="proj",
+            thread_id="thread",
+            escalation_requested=False,
+            user_input=f"Это просто {kw}!"
+        )
+        result = await rules_node(state)
+        assert result["decision"] == "ESCALATE"
+        assert result["requires_human"] is True
+        assert "Извините за неудобства" in result["response_text"]
+        mock_logger.info.assert_called()
+    assert mock_logger.info.call_count >= len(keywords)
+
+
+@pytest.mark.asyncio
+
+--- File: tests/agent/nodes/test_policy_engine.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.policy_engine import create_policy_engine_node
+
+
+@pytest.fixture
+def mock_event_repo():
+    """Mock EventRepository."""
+    repo = AsyncMock()
+    repo.append = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.policy_engine.logger") as mock:
+        yield mock
+
+
+class TestPolicyEngineNode:
+    @pytest.mark.asyncio
+    async def test_basic_transition_cold_pricing(self, mock_event_repo, mock_logger):
+        """cold lifecycle + pricing intent -> interested, LLM_GENERATE, request_demo."""
+        state = AgentState(
+            messages=[],
+            project_id="proj",
+            thread_id="thread",
+            escalation_requested=False,
+            lifecycle="cold",
+            intent="pricing"
+        )
+        node = create_policy_engine_node(event_repo=mock_event_repo)
+        result = await node(state)
+
+        assert result["decision"] == "LLM_GENERATE"
+        assert result["cta"] == "request_demo"
+        assert result["topic"] == "pricing"
+        assert result["lead_status"] == "interested"
+        assert result["lifecycle"] == "interested"
+        assert "dialog_state" in result
+        dialog = result["dialog_state"]
+        assert dialog["last_intent"] == "pricing"
+        assert dialog["last_cta"] == "request_demo"
+        assert dialog["last_topic"] == "pricing"
+        assert dialog["repeat_count"] == 1
+        assert dialog["lead_status"] == "interested"
+
+--- File: tests/agent/nodes/test_load_state.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Dict, Any
+
+from src.agent.state import AgentState
+from src.agent.nodes.load_state import create_load_state_node
+
+
+@pytest.fixture
+def mock_thread_repo():
+    """Mock ThreadRepository."""
+    repo = AsyncMock()
+    repo.get_thread_with_project = AsyncMock()
+    repo.get_analytics = AsyncMock(return_value=None)  # default to None to avoid coroutine warnings
+    repo.get_messages_for_langgraph = AsyncMock()
+    repo.get_state_json = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_project_repo():
+    """Mock ProjectRepository (not used in current implementation)."""
+    return AsyncMock()
+
+
+@pytest.fixture
+def mock_memory_repo():
+    """Mock MemoryRepository."""
+    repo = AsyncMock()
+    repo.get_for_user = AsyncMock()
+    repo.get_lifecycle = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_logger():
+    """Mock logger to capture log calls."""
+    with patch("src.agent.nodes.load_state.logger") as mock:
+        yield mock
+
+
+class TestLoadStateNode:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        mock_thread_repo,
+        mock_project_repo,
+        mock_memory_repo,
+        mock_logger
+    ):
+
+--- File: tests/api/test_threads.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import (
+    get_current_user_id,
+    get_thread_repo,
+    get_project_repo,
+    get_event_repo,
+    get_memory_repository,
+    get_orchestrator,
+    get_user_repository,
+)
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan_pool():
+    """Мокаем глобальный пул соединений, чтобы избежать RuntimeError."""
+    with patch("src.core.lifespan.pool", MagicMock()):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def reset_dependency_overrides():
+    """После каждого теста сбрасываем переопределения зависимостей."""
+    original_overrides = app.dependency_overrides.copy()
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(original_overrides)
+
+
+@pytest.fixture(autouse=True)
+def mock_orchestrator():
+    """Мокаем get_orchestrator, чтобы избежать ошибок инициализации."""
+    mock = AsyncMock()
+    app.dependency_overrides[get_orchestrator] = lambda: mock
+    yield
+    # Очистка будет выполнена reset_dependency_overrides
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestThreadsAPI:
+    # ------------------------------------------------------------------
+    # Helpers for auth override
+
+--- File: tests/api/test_webhooks.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import get_pool, get_orchestrator, get_project_repo
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan_pool():
+    """Мокаем глобальный пул соединений, чтобы избежать RuntimeError."""
+    with patch("src.core.lifespan.pool", MagicMock()):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def mock_dependencies():
+    """
+    Мокаем get_pool и get_orchestrator для всех тестов.
+    Это необходимо, потому что зависимости вычисляются до тела функции,
+    даже если в коде они не используются (например, при 401).
+    """
+    mock_pool = MagicMock()
+    mock_orchestrator = MagicMock()
+    app.dependency_overrides[get_pool] = lambda: mock_pool
+    app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
+    yield
+    # Очистка будет выполнена в reset_dependency_overrides
+
+
+@pytest.fixture(autouse=True)
+def reset_dependency_overrides():
+    """После каждого теста сбрасываем переопределения зависимостей."""
+    original_overrides = app.dependency_overrides.copy()
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(original_overrides)
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestWebhooks:
+    # ------------------------------------------------------------------
+    # POST /webhook/{project_id}
+    # ------------------------------------------------------------------
+    def test_webhook_client_success(self, client):
+
+--- File: tests/api/test_limits.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import verify_admin_token
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan():
+    with patch("asyncpg.create_pool") as mock_pool:
+        mock_pool.return_value = AsyncMock()
+        yield
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestRateLimitsAPI:
+    """Тесты для GET /limits"""
+
+    def test_get_rate_limits_success(self, client):
+        """Успешное получение лимитов"""
+        # Мокируем ModelRegistry и RateLimitTracker
+        mock_models = [
+            {"id": "model1", "name": "Model One"},
+            {"id": "model2", "name": "Model Two"}
+        ]
+        mock_limits = {
+            "model1": {
+                "requests_remaining": "100",
+                "requests_reset": "1m30s",
+                "tokens_remaining": "5000",
+                "tokens_reset": "45s",
+                "last_update": "1712345678.123"
+            },
+            "model2": {
+                "requests_remaining": "50",
+                "requests_reset": "2m",
+                "tokens_remaining": "2500",
+                "tokens_reset": "60s",
+                "last_update": "1712345679.456"
+            }
+        }
+
+        with patch("src.api.limits.ModelRegistry") as MockRegistry:
+            mock_registry = MockRegistry.return_value
+
+--- File: tests/api/test_logs.py ---
+import pytest
+from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan():
+    with patch("asyncpg.create_pool") as mock_pool:
+        mock_pool.return_value = MagicMock()
+        yield
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestFrontendLogs:
+    """Тесты для POST /api/logs/frontend"""
+
+    def test_frontend_logs_minimal(self, client):
+        """Пустой JSON — дефолтные level='info', message=''"""
+        with patch("src.api.logs.logger") as mock_logger:
+            response = client.post("/api/logs/frontend", json={})
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+        mock_logger.info.assert_called_once_with("", extra={})
+
+    def test_frontend_logs_with_level_and_message(self, client):
+        """Переданы level='error' и message"""
+        payload = {"level": "error", "message": "Test error message"}
+        with patch("src.api.logs.logger") as mock_logger:
+            response = client.post("/api/logs/frontend", json=payload)
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+        mock_logger.error.assert_called_once_with("Test error message", extra={})
+
+    def test_frontend_logs_with_extra_fields(self, client):
+        """Дополнительные поля попадают в extra (кроме level, message, timestamp)"""
+        payload = {
+            "level": "warn",
+            "message": "Warning message",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "user_id": "123",
+            "context": {"page": "dashboard"}
+
+--- File: tests/api/test_dependencies.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi import HTTPException
+import jwt
+from uuid import uuid4
+
+from src.api.dependencies import (
+    get_current_user_id,
+    verify_admin_token,
+    verify_pro_mode_access,
+    get_pool,
+    get_orchestrator,
+    get_project_repo,
+    get_thread_repo,
+    get_memory_repository,
+    get_tool_registry,
+    get_redis,
+)
+from src.core.config import settings
+from src.core.lifespan import pool as lifespan_pool, orchestrator as lifespan_orchestrator
+from src.database.repositories.project_repository import ProjectRepository
+from src.database.repositories.thread_repository import ThreadRepository
+from src.database.repositories.memory_repository import MemoryRepository
+from src.services.redis_client import get_redis_client
+
+
+class TestGetCurrentUserId:
+    @pytest.mark.asyncio
+    async def test_success(self):
+        user_id = str(uuid4())
+        token = "valid.token"
+        payload = {"sub": user_id}
+        with patch("src.api.dependencies.jwt.decode") as mock_decode:
+            mock_decode.return_value = payload
+            with patch("src.api.dependencies.settings") as mock_settings:
+                mock_settings.JWT_SECRET_KEY = "secret"
+                result = await get_current_user_id(authorization=f"Bearer {token}")
+        assert result == user_id
+        mock_decode.assert_called_once_with(token, "secret", algorithms=["HS256"])
+
+    @pytest.mark.asyncio
+    async def test_missing_authorization_header(self):
+        with pytest.raises(HTTPException) as exc:
+            await get_current_user_id(authorization=None)
+        assert exc.value.status_code == 401
+        assert exc.value.detail == "Authorization header required"
+
+    @pytest.mark.asyncio
+    async def test_invalid_token_format(self):
+        with pytest.raises(HTTPException) as exc:
+
+--- File: tests/api/test_clients.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import (
+    get_current_user_id,
+    get_thread_repo,
+    get_project_repo,
+    get_memory_repository,
+)
+
+
+@pytest.fixture
+def mock_current_user_id():
+    return "test-user-id"
+
+
+@pytest.fixture
+def mock_project_repo():
+    repo = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_memory_repo():
+    repo = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_thread_repo():
+    repo = AsyncMock()
+    # Mock pool.acquire context manager
+    mock_conn = AsyncMock()
+    mock_cm = MagicMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    repo.pool = MagicMock()
+    repo.pool.acquire = MagicMock(return_value=mock_cm)
+    # Mock get_dialogs method
+    repo.get_dialogs = AsyncMock()
+    return repo
+
+
+@pytest.fixture(autouse=True)
+def override_dependencies(
+    mock_current_user_id, mock_project_repo, mock_thread_repo, mock_memory_repo
+):
+
+--- File: tests/api/test_metrics.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import verify_admin_token
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestMetricsAggregate:
+    """Тесты для POST /api/admin/metrics/aggregate"""
+
+    def _override_auth(self):
+        """Временно отключаем проверку админ-токена."""
+        async def dummy_auth():
+            pass
+        self._original_auth = app.dependency_overrides.get(verify_admin_token)
+        app.dependency_overrides[verify_admin_token] = dummy_auth
+
+    def _restore_auth(self):
+        """Восстанавливаем оригинальную зависимость."""
+        if self._original_auth is not None:
+            app.dependency_overrides[verify_admin_token] = self._original_auth
+        else:
+            app.dependency_overrides.pop(verify_admin_token, None)
+
+    # -------- Успешные сценарии (с моками) ----------
+    def test_aggregate_metrics_success(self, client):
+        self._override_auth()
+        try:
+            # Подменяем глобальный пул в lifespan
+            with patch("src.core.lifespan.pool", MagicMock()):
+                # Мокаем QueueRepository по полному пути
+                with patch("src.database.repositories.queue_repository.QueueRepository") as MockQueueRepo:
+                    mock_queue = AsyncMock()
+                    MockQueueRepo.return_value = mock_queue
+                    mock_queue.enqueue = AsyncMock(return_value=str(uuid4()))
+
+                    payload = {"date": "2025-01-15"}
+                    response = client.post("/api/admin/metrics/aggregate", json=payload)
+
+            assert response.status_code == 202
+            data = response.json()
+            assert data["status"] == "accepted"
+            assert data["message"] == "Aggregation for 2025-01-15 enqueued."
+
+--- File: tests/api/test_knowledge.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+import io
+
+from src.main import app
+from src.api.dependencies import get_project_repo, get_pool
+
+
+@pytest.fixture
+def mock_project_repo():
+    repo = AsyncMock()
+    repo.project_exists = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = MagicMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    return pool
+
+
+@pytest.fixture(autouse=True)
+def override_dependencies(mock_project_repo, mock_pool):
+    original_overrides = app.dependency_overrides.copy()
+    app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
+    app.dependency_overrides[get_pool] = lambda: mock_pool
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(original_overrides)
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestKnowledgeUpload:
+    """Тесты для POST /api/projects/{project_id}/knowledge"""
+
+    def test_upload_success_txt(self, client, mock_project_repo, mock_pool):
+        """Успешная загрузка .txt файла"""
+        project_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+--- File: tests/api/test_bot.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+import httpx
+
+from src.main import app
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan():
+    with patch("asyncpg.create_pool") as mock_pool:
+        mock_pool.return_value = AsyncMock()
+        yield
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestBotAPI:
+
+    def test_get_bot_username_success(self, client):
+        """Успешное получение username бота."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "ok": True,
+            "result": {
+                "username": "test_bot",
+                "id": 123456789
+            }
+        }
+
+        with patch("src.api.bot.settings") as mock_settings:
+            mock_settings.ADMIN_BOT_TOKEN = "test_token"
+            with patch("httpx.AsyncClient") as mock_client_class:
+                mock_client = AsyncMock()
+                mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client_class.return_value = mock_client
+
+                response = client.get("/api/bot/username")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["username"] == "test_bot"
+        assert data["id"] == 123456789
+
+    def test_get_bot_username_missing_token(self, client):
+        """Отсутствует токен бота."""
+
+--- File: tests/api/test_auth.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import get_user_repository
+
+
+@pytest.fixture
+def mock_user_repo():
+    return AsyncMock()
+
+
+@pytest.fixture(autouse=True)
+def override_dependencies(mock_user_repo):
+    original_get_user_repo = app.dependency_overrides.get(get_user_repository)
+
+    app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+
+    yield
+
+    if original_get_user_repo is not None:
+        app.dependency_overrides[get_user_repository] = original_get_user_repo
+    else:
+        app.dependency_overrides.pop(get_user_repository, None)
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan():
+    with patch("asyncpg.create_pool") as mock_pool:
+        mock_pool.return_value = AsyncMock()
+        yield
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestAuthAPI:
+
+    def test_telegram_auth_new_user(self, client, mock_user_repo):
+        user_id = str(uuid4())
+        mock_user_repo.get_or_create_by_telegram = AsyncMock(return_value=(user_id, True))
+
+        with patch("src.api.auth.verify") as mock_verify:
+            mock_verify.return_value = True
+            request_data = {
+                "id": 12345,
+
+--- File: tests/api/test_projects.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from fastapi.testclient import TestClient
+from uuid import uuid4
+
+from src.main import app
+from src.api.dependencies import get_current_user_id, get_project_repo
+from src.database.repositories.project_repository import ProjectRepository
+
+
+@pytest.fixture(autouse=True)
+def mock_lifespan_pool():
+    """Mock global pool to avoid RuntimeError."""
+    with patch("src.core.lifespan.pool", MagicMock()):
+        yield
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+class TestProjectsAPI:
+    # ------------------------------------------------------------------
+    # Helpers for auth override
+    # ------------------------------------------------------------------
+    def _override_auth(self, user_id: str):
+        async def override():
+            return user_id
+        self._original_auth = app.dependency_overrides.get(get_current_user_id)
+        app.dependency_overrides[get_current_user_id] = override
+
+    def _restore_auth(self):
+        if self._original_auth is not None:
+            app.dependency_overrides[get_current_user_id] = self._original_auth
+        else:
+            app.dependency_overrides.pop(get_current_user_id, None)
+
+    # ------------------------------------------------------------------
+    # GET /api/projects
+    # ------------------------------------------------------------------
+    def test_list_projects_success(self, client):
+        user_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.get_projects_by_user_id = AsyncMock(return_value=[
+                {"id": str(uuid4()), "name": "Proj1", "is_pro_mode": False, "template_slug": None,
+                 "user_id": user_id, "client_bot_username": None, "manager_bot_username": None},
+                {"id": str(uuid4()), "name": "Proj2", "is_pro_mode": True, "template_slug": "support",
+
+--- File: tests/database/repositories/test_queue_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from uuid import uuid4
+import json
+import asyncpg
+
+from src.database.repositories.queue_repository import QueueRepository
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def queue_repo(mock_pool):
+    return QueueRepository(mock_pool)
+
+
+class TestQueueRepository:
+    def test_init(self, queue_repo, mock_pool):
+        assert queue_repo.pool is mock_pool
+
+    # ------------------------------------------------------------------
+    # enqueue
+    # ------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_enqueue_success(self, queue_repo, mock_pool):
+        task_type = "notify_manager"
+        payload = {"thread_id": "123", "message": "Hello"}
+        max_attempts = 3
+        expected_job_id = uuid4()
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"id": expected_job_id})
+
+        result = await queue_repo.enqueue(task_type, payload, max_attempts)
+
+        expected_sql = """
+                INSERT INTO public.execution_queue (
+                    id, task_type, payload, status, 
+                    attempts, max_attempts, created_at, updated_at
+                )
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
+                RETURNING id
+
+--- File: tests/database/repositories/test_event_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
+from datetime import datetime
+import asyncpg
+
+from src.database.repositories.event_repository import EventRepository
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    # acquire должен быть обычным моком (не AsyncMock), т.к. в asyncpg это не корутина
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def event_repo(mock_pool):
+    return EventRepository(mock_pool)
+
+
+class TestEventRepository:
+    def test_init(self, event_repo, mock_pool):
+        assert event_repo.pool is mock_pool
+
+    @pytest.mark.asyncio
+    async def test_append_success(self, event_repo, mock_pool):
+        stream_id = uuid4()
+        project_id = uuid4()
+        event_type = "message_received"
+        payload = {"text": "Hello"}
+        expected_id = 123
+        mock_pool.fetchrow = AsyncMock(return_value={"id": expected_id})
+
+        result = await event_repo.append(stream_id, project_id, event_type, payload)
+
+        expected_sql = """
+            INSERT INTO events (stream_id, project_id, event_type, payload)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """
+        mock_pool.fetchrow.assert_awaited_once_with(
+            expected_sql, stream_id, project_id, event_type, '{"text": "Hello"}'
+        )
+
+--- File: tests/database/repositories/test_thread_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, call, ANY
+from uuid import UUID, uuid4
+from datetime import datetime
+import asyncpg
+
+from src.database.repositories.thread_repository import ThreadRepository
+from src.database.models import ThreadStatus
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def thread_repo(mock_pool):
+    return ThreadRepository(mock_pool)
+
+
+class TestThreadRepository:
+    def test_init(self, thread_repo, mock_pool):
+        assert thread_repo.pool is mock_pool
+
+    # ------------------------------------------------------------------
+    # get_or_create_client
+    # ------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_get_or_create_client_insert(self, thread_repo, mock_pool):
+        project_id = str(uuid4())
+        chat_id = 12345
+        username = "testuser"
+        source = "telegram"
+        expected_id = uuid4()
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"id": expected_id})
+
+        result = await thread_repo.get_or_create_client(project_id, chat_id, username, source)
+
+        expected_sql = """
+                INSERT INTO clients (project_id, chat_id, username, source)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (project_id, chat_id) DO UPDATE SET username = EXCLUDED.username
+                RETURNING id
+
+--- File: tests/database/repositories/test_project_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from uuid import UUID, uuid4
+from datetime import datetime
+import asyncpg
+
+from src.database.repositories.project_repository import ProjectRepository
+from src.utils.encryption import encrypt_token, decrypt_token
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def project_repo(mock_pool):
+    return ProjectRepository(mock_pool)
+
+
+class TestProjectRepository:
+    def test_init(self, project_repo, mock_pool):
+        assert project_repo.pool is mock_pool
+
+    # ------------------------------------------------------------------
+    # get_project_settings
+    # ------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_get_project_settings_success(self, project_repo, mock_pool):
+        project_id = str(uuid4())
+        row = {
+            "system_prompt": "prompt",
+            "bot_token": "encrypted_token",
+            "webhook_url": "https://example.com",
+            "manager_bot_token": "encrypted_manager_token",
+            "webhook_secret": "secret",
+            "template_slug": "support",
+            "is_pro_mode": True,
+            "client_bot_username": "client_bot",
+            "manager_bot_username": "manager_bot",
+        }
+        manager_rows = [{"manager_chat_id": "123"}, {"manager_chat_id": "456"}]
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
+
+--- File: tests/database/repositories/test_memory_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from uuid import UUID, uuid4
+import asyncpg
+
+from src.database.repositories.memory_repository import MemoryRepository
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def memory_repo(mock_pool):
+    return MemoryRepository(mock_pool)
+
+
+class TestMemoryRepository:
+    def test_init(self, memory_repo, mock_pool):
+        assert memory_repo.pool is mock_pool
+
+    # --------------------------------------------------------------------------
+    # get_for_user
+    # --------------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_get_for_user_success_without_types(self, memory_repo, mock_pool):
+        project_id = str(uuid4())
+        client_id = str(uuid4())
+        limit = 10
+        rows = [
+            {"id": uuid4(), "key": "a", "value": 1, "type": "preference", "created_at": "2021-01-01", "updated_at": "2021-01-01"},
+            {"id": uuid4(), "key": "b", "value": 2, "type": "fact", "created_at": "2021-01-02", "updated_at": "2021-01-02"},
+        ]
+        mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
+
+        result = await memory_repo.get_for_user(project_id, client_id, limit=limit)
+
+        assert mock_pool.acquire.call_count == 1
+        expected_sql = """
+            SELECT id, key, value, type, created_at, updated_at
+            FROM user_memory
+            WHERE project_id = $1 AND client_id = $2
+
+--- File: tests/database/repositories/test_knowledge_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, ANY, call
+from uuid import uuid4, UUID
+import asyncpg
+
+from src.database.repositories.knowledge_repository import KnowledgeRepository
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def knowledge_repo(mock_pool):
+    return KnowledgeRepository(mock_pool)
+
+
+class TestKnowledgeRepository:
+    def test_init(self, knowledge_repo, mock_pool):
+        assert knowledge_repo.pool is mock_pool
+
+    # --------------------------------------------------------------------------
+    # search
+    # --------------------------------------------------------------------------
+    @pytest.mark.asyncio
+    @patch("src.database.repositories.knowledge_repository.embed_text")
+    async def test_search_success_hybrid_true(self, mock_embed_text, knowledge_repo, mock_pool):
+        project_id = str(uuid4())
+        query = "test query"
+        limit = 10
+        mock_embed_text.return_value = [0.1, 0.2, 0.3]  # dummy embedding
+
+        # Mock vector results
+        vector_rows = [
+            {"id": uuid4(), "content": "vector chunk 1", "score": 0.9},
+            {"id": uuid4(), "content": "vector chunk 2", "score": 0.8},
+        ]
+        # Mock FTS results
+        fts_rows = [
+            {"id": vector_rows[0]["id"], "content": "vector chunk 1", "score": 0.85},
+            {"id": uuid4(), "content": "fts only chunk", "score": 0.7},
+        ]
+
+--- File: tests/database/repositories/test_user_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, call
+from uuid import uuid4
+import asyncpg
+
+from src.database.repositories.user_repository import UserRepository
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def user_repo(mock_pool):
+    return UserRepository(mock_pool)
+
+
+class TestUserRepository:
+    def test_init(self, user_repo, mock_pool):
+        assert user_repo.pool is mock_pool
+
+    # ------------------------------------------------------------------
+    # get_or_create_by_telegram
+    # ------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_get_or_create_by_telegram_existing_via_identity(self, user_repo, mock_pool):
+        telegram_id = 12345
+        first_name = "John"
+        username = "johndoe"
+        existing_user_id = uuid4()
+
+        # First query: auth_identities returns a row
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"user_id": existing_user_id})
+
+        result = await user_repo.get_or_create_by_telegram(telegram_id, first_name, username)
+
+        expected_sql = """
+                SELECT user_id
+                FROM auth_identities
+                WHERE provider = 'telegram' AND provider_id = $1
+            """
+        mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, str(telegram_id))
+
+--- File: tests/database/repositories/test_metrics_repository.py ---
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from uuid import UUID, uuid4
+from datetime import date, datetime
+import asyncpg
+
+from src.database.repositories.metrics_repository import MetricsRepository
+from src.utils.uuid_utils import ensure_uuid
+
+
+@pytest.fixture
+def mock_pool():
+    pool = AsyncMock()
+    mock_conn = AsyncMock()
+    mock_cm = AsyncMock()
+    mock_cm.__aenter__.return_value = mock_conn
+    mock_cm.__aexit__.return_value = None
+    pool.acquire = MagicMock(return_value=mock_cm)
+    pool.mock_conn = mock_conn
+    return pool
+
+
+@pytest.fixture
+def metrics_repo(mock_pool):
+    return MetricsRepository(mock_pool)
+
+
+class TestMetricsRepository:
+    def test_init(self, metrics_repo, mock_pool):
+        assert metrics_repo.pool is mock_pool
+
+    # --------------------------------------------------------------------------
+    # update_thread_metrics
+    # --------------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_update_thread_metrics_all_fields(self, metrics_repo, mock_pool):
+        thread_id = str(uuid4())
+        total_messages = 5
+        ai_messages = 3
+        manager_messages = 2
+        escalated = True
+        resolution_time = 120.5
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        await metrics_repo.update_thread_metrics(
+            thread_id=thread_id,
+            total_messages=total_messages,
+            ai_messages=ai_messages,
+            manager_messages=manager_messages,
+            escalated=escalated,
+
+=== Done ===

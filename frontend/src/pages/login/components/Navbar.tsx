@@ -14,7 +14,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onLoginClick }) => {
       </div>
       <div className="flex items-center gap-3">
         <Button variant="secondary" onClick={onLoginClick}>Войти</Button>
-        <Button variant="primary">Начать бесплатно</Button>
       </div>
     </nav>
   );

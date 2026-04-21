@@ -28,12 +28,11 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { path: 'dialogs', label: 'Диалоги', icon: <MessageSquare className="w-4 h-4" /> },
-  { path: 'clients', label: 'Клиенты', icon: <Users className="w-4 h-4" /> },
-  { path: 'workflow', label: 'Логика ассистента', icon: <Settings className="w-4 h-4" /> },
-  { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" /> },
-  { path: 'analytics', label: 'Аналитика', icon: <BarChart3 className="w-4 h-4" /> },
-  { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" /> },
   { path: 'tickets', label: 'Тикеты', icon: <UserCog className="w-4 h-4" /> },
+  { path: 'clients', label: 'Клиенты', icon: <Users className="w-4 h-4" /> },
+  { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" /> },
+  { path: 'managers', label: 'Менеджеры', icon: <User className="w-4 h-4" /> },
+  { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" /> },
 ];
 
 export const AppSidebar: React.FC = () => {

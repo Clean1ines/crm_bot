@@ -2,9 +2,9 @@ import React from 'react';
 import { MessageBubble } from './MessageBubble';
 
 const staticMessages = [
-  { role: 'assistant', content: 'Привет! Чем вы занимаетесь?' },
-  { role: 'user', content: 'Здравствуйте! Мы создаём ассистентов для бизнеса' },
-  { role: 'assistant', content: 'Сколько это стоит?' },
+  { role: 'user', content: 'Привет! Чем вы занимаетесь?' },
+  { role: 'assistant', content: 'Здравствуйте! Мы создаём ассистентов для бизнеса' },
+  { role: 'user', content: 'Сколько это стоит?' },
   { role: 'assistant', content: 'Стоимость зависит от ваших задач. Могу рассказать подробнее!' },
 ];
 
