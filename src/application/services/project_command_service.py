@@ -38,6 +38,13 @@ class ProjectCommandService:
             raise InternalServiceError("Project operation failed")
         return ProjectSummaryDto.from_record(project.to_record()).to_dict()
 
+    @staticmethod
+    def _normalize_bot_token(token: str) -> str:
+        normalized = (token or "").strip()
+        if not normalized:
+            raise ValidationError("Bot token is required")
+        return normalized
+
     async def _require_existing_project(self, project_id: str) -> None:
         if not await self.repo.project_exists(project_id):
             raise NotFoundError("Project not found")
@@ -64,6 +71,7 @@ class ProjectCommandService:
     async def set_client_bot_token(self, project_id: str, current_user_id: str, token: str):
         await self._require_existing_project(project_id)
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        token = self._normalize_bot_token(token)
         await self.repo.set_bot_token(project_id, token)
         await self.repo.upsert_project_channel(
             project_id,
@@ -77,6 +85,7 @@ class ProjectCommandService:
     async def set_manager_bot_token(self, project_id: str, current_user_id: str, token: str):
         await self._require_existing_project(project_id)
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        token = self._normalize_bot_token(token)
         await self.repo.set_manager_bot_token(project_id, token)
         await self.repo.upsert_project_channel(
             project_id,
@@ -125,6 +134,7 @@ class ProjectCommandService:
     async def connect_bot(self, project_id: str, current_user_id: str, token: str, bot_type: str):
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
         if bot_type == CHANNEL_CLIENT:
+            token = self._normalize_bot_token(token)
             await self.repo.set_bot_token(project_id, token)
             await self.repo.upsert_project_channel(
                 project_id,
@@ -134,6 +144,7 @@ class ProjectCommandService:
                 config_json={"token_configured": True},
             )
         elif bot_type == CHANNEL_MANAGER:
+            token = self._normalize_bot_token(token)
             await self.repo.set_manager_bot_token(project_id, token)
             await self.repo.upsert_project_channel(
                 project_id,

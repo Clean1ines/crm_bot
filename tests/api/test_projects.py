@@ -534,6 +534,90 @@ class TestProjectsAPI:
         finally:
             self._restore_auth()
 
+    def test_set_manager_token_rejects_empty_token(self, client):
+        user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.project_exists = AsyncMock(return_value=True)
+            mock_repo.get_project_view = AsyncMock(return_value=_project_view(project_id, user_id))
+            mock_repo.set_manager_bot_token = AsyncMock()
+            mock_repo.upsert_project_channel = AsyncMock()
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.post(f"/api/projects/{project_id}/manager-token", json={"token": "   "})
+            assert response.status_code == 400
+            assert response.json()["detail"] == "Bot token is required"
+
+            mock_repo.set_manager_bot_token.assert_not_awaited()
+            mock_repo.upsert_project_channel.assert_not_awaited()
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
+    def test_clear_bot_token_success(self, client):
+        user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.project_exists = AsyncMock(return_value=True)
+            mock_repo.get_project_view = AsyncMock(return_value=_project_view(project_id, user_id))
+            mock_repo.set_bot_token = AsyncMock()
+            mock_repo.upsert_project_channel = AsyncMock()
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.delete(f"/api/projects/{project_id}/bot-token")
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok", "type": "client"}
+
+            mock_repo.set_bot_token.assert_awaited_once_with(project_id, None)
+            mock_repo.upsert_project_channel.assert_awaited_once_with(
+                project_id,
+                kind="client",
+                provider="telegram",
+                status="disabled",
+                config_json={"token_configured": False},
+            )
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
+    def test_clear_manager_token_success(self, client):
+        user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.project_exists = AsyncMock(return_value=True)
+            mock_repo.get_project_view = AsyncMock(return_value=_project_view(project_id, user_id))
+            mock_repo.set_manager_bot_token = AsyncMock()
+            mock_repo.upsert_project_channel = AsyncMock()
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.delete(f"/api/projects/{project_id}/manager-token")
+            assert response.status_code == 200
+            assert response.json() == {"status": "ok", "type": "manager"}
+
+            mock_repo.set_manager_bot_token.assert_awaited_once_with(project_id, None)
+            mock_repo.upsert_project_channel.assert_awaited_once_with(
+                project_id,
+                kind="manager",
+                provider="telegram",
+                status="disabled",
+                config_json={"token_configured": False},
+            )
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
     # ------------------------------------------------------------------
     # GET /api/projects/{project_id}/managers
     # ------------------------------------------------------------------
