@@ -9,14 +9,11 @@ import sys
 import time
 import uuid
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Mapping
 
 import structlog
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from src.agent.state import AgentState
-
 
 def configure_logging():
     """Configure structlog for JSON output with timestamps and levels."""
@@ -73,10 +70,10 @@ def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
 
 async def log_node_execution(
     node_name: str,
-    func: Callable[[AgentState], Any],
-    state: AgentState,
+    func: Callable[[Mapping[str, Any]], Any],
+    state: Mapping[str, Any],
     *,
-    get_input_size: Optional[Callable[[AgentState], int]] = None,
+    get_input_size: Optional[Callable[[Mapping[str, Any]], int]] = None,
     get_output_size: Optional[Callable[[Any], int]] = None,
 ) -> Any:
     """

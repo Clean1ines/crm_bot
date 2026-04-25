@@ -121,3 +121,26 @@ def test_agent_tools_do_not_access_db_or_settings_directly():
     assert "asyncpg.connect" not in source
     assert ".connect(" not in source
 
+
+def test_infrastructure_layer_does_not_import_agent_runtime():
+    """Infrastructure must stay generic and must not depend on agent internals."""
+    import ast
+    from pathlib import Path
+
+    violations: list[str] = []
+
+    for path in Path("src/infrastructure").rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module == "src.agent" or module.startswith("src.agent."):
+                    violations.append(f"{path}:{node.lineno} imports from {module}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.name
+                    if name == "src.agent" or name.startswith("src.agent."):
+                        violations.append(f"{path}:{node.lineno} imports {name}")
+
+    assert violations == []
+
