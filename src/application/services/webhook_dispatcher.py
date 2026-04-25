@@ -97,9 +97,15 @@ class WebhookDispatcher:
             logger.warning("No chat_id in update", extra={"update": update, "project_id": project_id})
             return WebhookAckDto()
 
-        managers = await project_members.get_manager_notification_targets(project_id)
-        if str(chat_id) not in [str(m) for m in managers]:
-            logger.info("Unauthorized access attempt", extra={"chat_id": chat_id, "project_id": project_id})
+        manager_user_id = await project_members.resolve_manager_user_id_by_telegram(
+            project_id,
+            str(chat_id),
+        )
+        if not manager_user_id:
+            logger.info(
+                "Unauthorized manager surface access attempt",
+                extra={"chat_id": chat_id, "project_id": project_id},
+            )
             await self.telegram_client.post_json(
                 manager_bot_token,
                 "sendMessage",
@@ -108,5 +114,13 @@ class WebhookDispatcher:
             return WebhookAckDto()
 
         update["_bot_token"] = manager_bot_token
-        logger.debug("Authorized manager update", extra={"project_id": project_id, "chat_id": chat_id})
+        update["_manager_user_id"] = manager_user_id
+        logger.debug(
+            "Authorized manager update",
+            extra={
+                "project_id": project_id,
+                "manager_user_id": manager_user_id,
+                "has_manager_chat_id": bool(chat_id),
+            },
+        )
         return await process_manager_update(update, project_id, orchestrator, manager_bot_token)

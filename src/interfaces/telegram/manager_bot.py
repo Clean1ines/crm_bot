@@ -23,6 +23,7 @@ async def process_manager_update(
     """
     redis = await get_redis_client()
     service = ManagerBotService(orchestrator, redis, bot_token, project_id)
+    manager_user_id = update.get("_manager_user_id")
 
     if "callback_query" in update:
         callback = update["callback_query"]
@@ -36,6 +37,7 @@ async def process_manager_update(
                 callback_id=callback_id,
                 thread_id=thread_id,
                 manager_chat_id=manager_chat_id,
+                manager_user_id=manager_user_id,
             ).to_dict()
 
         if data.startswith("close:"):
@@ -44,6 +46,7 @@ async def process_manager_update(
                 callback_id=callback_id,
                 thread_id=thread_id,
                 manager_chat_id=manager_chat_id,
+                manager_user_id=manager_user_id,
             ).to_dict()
 
         return WebhookAckDto().to_dict()
@@ -54,6 +57,12 @@ async def process_manager_update(
         text = message.get("text")
         if not text:
             return WebhookAckDto().to_dict()
-        return (await service.reply_from_manager(manager_chat_id=manager_chat_id, text=text)).to_dict()
+        return (
+            await service.reply_from_manager(
+                manager_chat_id=manager_chat_id,
+                text=text,
+                manager_user_id=manager_user_id,
+            )
+        ).to_dict()
 
     return WebhookAckDto().to_dict()

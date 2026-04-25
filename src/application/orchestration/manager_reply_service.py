@@ -39,6 +39,14 @@ class ManagerReplyService:
         manager_chat_id: Optional[str],
         manager_user_id: Optional[str],
     ) -> str:
+        if manager_user_id:
+            try:
+                platform_name = await self.projects.get_user_display_name(manager_user_id)
+                if platform_name:
+                    return platform_name
+            except Exception as exc:
+                self.logger.warning("Failed to fetch manager name from platform profile", extra={"error": str(exc)})
+
         if manager_chat_id:
             try:
                 manager_bot_token = await self.projects.get_manager_bot_token(project_id)
@@ -55,14 +63,6 @@ class ManagerReplyService:
                             return telegram_name
             except Exception as exc:
                 self.logger.warning("Failed to fetch manager name from Telegram", extra={"error": str(exc)})
-
-        if manager_user_id:
-            try:
-                platform_name = await self.projects.get_user_display_name(manager_user_id)
-                if platform_name:
-                    return platform_name
-            except Exception as exc:
-                self.logger.warning("Failed to fetch manager name from platform profile", extra={"error": str(exc)})
 
         return "Manager"
 
@@ -94,10 +94,19 @@ class ManagerReplyService:
         if not project_id:
             raise RuntimeError(f"Project id not found for thread {thread_id}")
 
+        resolved_manager_user_id = manager_user_id or thread_snapshot.manager_user_id
+        if not resolved_manager_user_id and manager_chat_id:
+            resolved_manager_user_id = await self.resolve_manager_user_id_by_telegram(
+                project_id,
+                manager_chat_id,
+            )
+        if not resolved_manager_user_id:
+            raise PermissionError("Canonical manager_user_id is required for manager replies")
+
         manager_name = await self.resolve_manager_display_name(
             project_id=project_id,
             manager_chat_id=manager_chat_id,
-            manager_user_id=manager_user_id,
+            manager_user_id=resolved_manager_user_id,
         )
         prefixed_text = f"[{manager_name}]: {manager_text}"
 
@@ -133,7 +142,7 @@ class ManagerReplyService:
             payload={
                 "text": manager_text,
                 **build_manager_audit_payload(
-                    manager_user_id=manager_user_id,
+                    manager_user_id=resolved_manager_user_id,
                     manager_chat_id=manager_chat_id,
                 ),
             },

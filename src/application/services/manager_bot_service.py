@@ -53,8 +53,9 @@ class ManagerBotService:
         callback_id: str,
         thread_id: str,
         manager_chat_id: str,
+        manager_user_id: str | None = None,
     ) -> WebhookAckDto:
-        manager_user_id = await self.orchestrator.resolve_manager_user_id_by_telegram(
+        manager_user_id = manager_user_id or await self.orchestrator.resolve_manager_user_id_by_telegram(
             self.project_id,
             manager_chat_id,
         )
@@ -112,8 +113,9 @@ class ManagerBotService:
         callback_id: str,
         thread_id: str,
         manager_chat_id: str,
+        manager_user_id: str | None = None,
     ) -> WebhookAckDto:
-        manager_user_id = await self.orchestrator.resolve_manager_user_id_by_telegram(
+        manager_user_id = manager_user_id or await self.orchestrator.resolve_manager_user_id_by_telegram(
             self.project_id,
             manager_chat_id,
         )
@@ -175,8 +177,14 @@ class ManagerBotService:
         )
         return WebhookAckDto()
 
-    async def reply_from_manager(self, *, manager_chat_id: str, text: str) -> WebhookAckDto:
-        manager_user_id = await self.orchestrator.resolve_manager_user_id_by_telegram(
+    async def reply_from_manager(
+        self,
+        *,
+        manager_chat_id: str,
+        text: str,
+        manager_user_id: str | None = None,
+    ) -> WebhookAckDto:
+        manager_user_id = manager_user_id or await self.orchestrator.resolve_manager_user_id_by_telegram(
             self.project_id,
             manager_chat_id,
         )

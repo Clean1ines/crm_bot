@@ -28,6 +28,7 @@ class ProjectTokenRepository(ProjectRepositoryBase):
                 WHERE id = $3
             """, encrypted, username, ensure_uuid(project_id))
 
+
     async def get_manager_bot_token(self, project_id: ProjectId) -> Optional[str]:
         logger.info("Fetching manager bot token", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
@@ -47,6 +48,7 @@ class ProjectTokenRepository(ProjectRepositoryBase):
                 SET manager_bot_token = $1, manager_bot_username = $2, updated_at = NOW()
                 WHERE id = $3
             """, encrypted, username, ensure_uuid(project_id))
+
 
     async def get_webhook_secret(self, project_id: ProjectId) -> Optional[str]:
         async with self.pool.acquire() as conn:

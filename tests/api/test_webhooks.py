@@ -90,6 +90,7 @@ class TestWebhooks:
         update = {"message": {"from": {"id": manager_chat_id}, "chat": {"id": manager_chat_id}, "text": "reply"}}
         expected_update = update.copy()
         expected_update["_bot_token"] = manager_bot_token
+        expected_update["_manager_user_id"] = "11111111-1111-1111-1111-111111111111"
 
         with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
             with patch("src.interfaces.http.webhooks.ProjectMemberRepository") as MockMembers:
@@ -100,6 +101,7 @@ class TestWebhooks:
 
                 members = AsyncMock()
                 members.get_manager_notification_targets = AsyncMock(return_value=[str(manager_chat_id)])
+                members.resolve_manager_user_id_by_telegram = AsyncMock(return_value="11111111-1111-1111-1111-111111111111")
                 MockMembers.return_value = members
 
                 with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
@@ -222,6 +224,7 @@ class TestWebhooks:
         update = {"message": {"from": {"id": manager_chat_id}, "chat": {"id": manager_chat_id}, "text": "reply"}}
         expected_update = update.copy()
         expected_update["_bot_token"] = manager_bot_token
+        expected_update["_manager_user_id"] = "11111111-1111-1111-1111-111111111111"
 
         with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
             with patch("src.interfaces.http.webhooks.ProjectMemberRepository") as MockMembers:
@@ -232,6 +235,7 @@ class TestWebhooks:
 
                 members = AsyncMock()
                 members.get_manager_notification_targets = AsyncMock(return_value=[str(manager_chat_id)])
+                members.resolve_manager_user_id_by_telegram = AsyncMock(return_value="11111111-1111-1111-1111-111111111111")
                 MockMembers.return_value = members
 
                 with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
@@ -301,6 +305,7 @@ class TestWebhooks:
 
                 members = AsyncMock()
                 members.get_manager_notification_targets = AsyncMock(return_value=["99999"])
+                members.resolve_manager_user_id_by_telegram = AsyncMock(return_value=None)
                 MockMembers.return_value = members
 
                 with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
