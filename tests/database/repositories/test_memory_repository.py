@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
 from uuid import UUID, uuid4
 import asyncpg
 
-from src.database.repositories.memory_repository import MemoryRepository
+from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 
 
 @pytest.fixture
@@ -41,7 +41,7 @@ class TestMemoryRepository:
         ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
-        result = await memory_repo.get_for_user(project_id, client_id, limit=limit)
+        result = await memory_repo.get_for_user_view(project_id, client_id, limit=limit)
 
         assert mock_pool.acquire.call_count == 1
         expected_sql = """
@@ -55,10 +55,10 @@ class TestMemoryRepository:
         )
         assert len(result) == len(rows)
         for i, r in enumerate(result):
-            assert r["id"] == str(rows[i]["id"])
-            assert r["key"] == rows[i]["key"]
-            assert r["value"] == rows[i]["value"]
-            assert r["type"] == rows[i]["type"]
+            assert r.id == str(rows[i]["id"])
+            assert r.key == rows[i]["key"]
+            assert r.value == rows[i]["value"]
+            assert r.type == rows[i]["type"]
 
     @pytest.mark.asyncio
     async def test_get_for_user_success_with_types(self, memory_repo, mock_pool):
@@ -69,7 +69,7 @@ class TestMemoryRepository:
         rows = [{"id": uuid4(), "key": "a", "value": 1, "type": "preference", "created_at": "2021-01-01", "updated_at": "2021-01-01"}]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
-        result = await memory_repo.get_for_user(project_id, client_id, limit=limit, types=types)
+        result = await memory_repo.get_for_user_view(project_id, client_id, limit=limit, types=types)
 
         expected_sql = """
             SELECT id, key, value, type, created_at, updated_at
@@ -85,20 +85,20 @@ class TestMemoryRepository:
     async def test_get_for_user_limit_zero(self, memory_repo, mock_pool):
         mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
-            await memory_repo.get_for_user(str(uuid4()), str(uuid4()), limit=0)
+            await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()), limit=0)
 
     @pytest.mark.asyncio
     async def test_get_for_user_empty_result(self, memory_repo, mock_pool):
         mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
-        result = await memory_repo.get_for_user(str(uuid4()), str(uuid4()))
+        result = await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()))
         assert result == []
 
     @pytest.mark.asyncio
     async def test_get_for_user_type_error_none_id(self, memory_repo):
         with pytest.raises(TypeError):
-            await memory_repo.get_for_user(None, str(uuid4()))
+            await memory_repo.get_for_user_view(None, str(uuid4()))
         with pytest.raises(TypeError):
-            await memory_repo.get_for_user(str(uuid4()), None)
+            await memory_repo.get_for_user_view(str(uuid4()), None)
 
     # --------------------------------------------------------------------------
     # set
@@ -401,10 +401,10 @@ class TestMemoryRepository:
     async def test_connection_error(self, memory_repo, mock_pool):
         mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-            await memory_repo.get_for_user(str(uuid4()), str(uuid4()))
+            await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()))
 
     @pytest.mark.asyncio
     async def test_undefined_table_error(self, memory_repo, mock_pool):
         mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.UndefinedTableError("no table"))
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
-            await memory_repo.get_for_user(str(uuid4()), str(uuid4()))
+            await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()))

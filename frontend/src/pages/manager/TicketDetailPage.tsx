@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../shared/api/client';
 import { useAppStore } from '../../app/store';
-import type { Message } from '../../entities/thread/model/types';
+import type { Message, Client } from '../../entities/thread/model/types';
+import { getClientDisplayName } from '../../shared/lib/clients';
 
 export const TicketDetailPage: React.FC = () => {
   const { threadId } = useParams<{ threadId: string }>();
@@ -43,9 +44,7 @@ export const TicketDetailPage: React.FC = () => {
     enabled: !!selectedProjectId && !!threadId,
   });
 
-  const clientName = (ticketInfo?.client as unknown as { full_name?: string; username?: string })?.full_name ||
-                     (ticketInfo?.client as unknown as { full_name?: string; username?: string })?.username ||
-                     'Клиент';
+  const clientName = getClientDisplayName(ticketInfo?.client as unknown as Client | undefined, 'Клиент');
 
   const replyMutation = useMutation({
     mutationFn: (message: string) => api.threads.reply(threadId!, message),

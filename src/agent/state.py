@@ -1,5 +1,5 @@
 """
-Agent state definition for LangGraph workflow.
+Agent state definition for the LangGraph runtime.
 
 Defines the TypedDict structure that carries conversation state
 through the agent graph, including messages, context, and flags.
@@ -9,22 +9,19 @@ from typing import Annotated, Sequence, List, Dict, Any, Optional, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-
-
-class DialogState(TypedDict):
-    """
-    Structure for tracking dialog context across turns.
-    """
-    last_intent: Optional[str]
-    last_cta: Optional[str]
-    last_topic: Optional[str]
-    repeat_count: int
-    lead_status: str
-    lifecycle: str
+from src.domain.runtime.dialog_state import DialogState
+from src.domain.runtime.state_contracts import (
+    ClientProfileState,
+    HistoryMessage,
+    KnowledgeChunkState,
+    ProjectRuntimeConfigurationState,
+    ToolArguments,
+    ToolCallRecord,
+)
 
 class AgentState(TypedDict):
     """
-    State container for the LangGraph agent workflow.
+    State container for the LangGraph agent runtime.
     
     This TypedDict defines all fields that flow through the agent graph,
     enabling state persistence, event reconstruction, and tool execution tracking.
@@ -52,10 +49,11 @@ class AgentState(TypedDict):
         confidence: Confidence score of the decision (0-1).
         trace_id: Unique identifier for tracing the entire graph execution.
         client_id: UUID of the client (string format) for user memory.
+        project_configuration: Explicit project settings/policies/integrations/limits.
         
         # Analytics fields
         intent: Optional[str]  # Detected intent (e.g., "pricing", "support", "sales")
-        cta: Optional[str]     # Call-to-action type (e.g., "request_demo", "call_manager")
+        cta: Optional[str]     # Call-to-action type (e.g., "call_manager")
         lifecycle: Optional[str]  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
         features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
         
@@ -70,17 +68,17 @@ class AgentState(TypedDict):
     project_id: str
     thread_id: str
     escalation_requested: bool
-    tool_calls: Optional[List[Dict[str, Any]]]
+    tool_calls: Optional[List[ToolCallRecord]]
 
     # New pipeline fields (all optional for backward compatibility)
     user_input: Optional[str]
-    client_profile: Optional[Dict[str, Any]]
+    client_profile: Optional[ClientProfileState]
     conversation_summary: Optional[str]
-    history: Optional[List[Dict[str, Any]]]
-    knowledge_chunks: Optional[List[Dict[str, Any]]]
+    history: Optional[List[HistoryMessage]]
+    knowledge_chunks: Optional[List[KnowledgeChunkState]]
     decision: Optional[str]  # e.g., "RESPOND", "TOOL", "ESCALATE", "COLLECT"
     tool_name: Optional[str]
-    tool_args: Optional[Dict[str, Any]]
+    tool_args: Optional[ToolArguments]
     tool_result: Optional[Any]
     user_memory: Optional[Dict[str, Any]] # Added hidden field discovered during audit
     response_text: Optional[str]
@@ -90,13 +88,14 @@ class AgentState(TypedDict):
     message_sent: Optional[bool]  # Flag indicating that the message was already sent by the graph
     trace_id: Optional[str]  # Unique trace identifier for observability
     client_id: Optional[str]  # UUID of the client for memory storage
+    project_configuration: Optional[ProjectRuntimeConfigurationState]  # Explicit project personalization config
     close_ticket: Optional[bool] # Added hidden field discovered during audit
 
     # Analytics fields
     intent: Optional[str]  # Detected intent (e.g., "pricing", "support", "sales")
-    cta: Optional[str]     # Call-to-action type (e.g., "request_demo", "call_manager")
+    cta: Optional[str]     # Call-to-action type (e.g., "call_manager")
     lifecycle: Optional[str]  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
-    features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
+    features: Optional[Dict[str, Any]]  # Tracked feature interest (e.g., {"auto_reply": True})
     
     # Runtime dialog state fields (loaded from user memory)
     dialog_state: Optional[DialogState]  # Current dialog state snapshot

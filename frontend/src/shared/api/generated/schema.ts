@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/webhooks/platform": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Platform Webhook
+         * @description Global control-plane webhook for the platform bot.
+         */
+        post: operations["platform_webhook_webhooks_platform_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhook/{project_id}": {
         parameters: {
             query?: never;
@@ -15,8 +35,7 @@ export interface paths {
         put?: never;
         /**
          * Telegram Webhook
-         * @description Gateway for Client and Admin bots.
-         *     Routes based on token comparison with ADMIN_BOT_TOKEN.
+         * @description Legacy project client-bot webhook.
          */
         post: operations["telegram_webhook_webhook__project_id__post"];
         delete?: never;
@@ -226,43 +245,6 @@ export interface paths {
          * @description Универсальный эндпоинт для подключения ботов (как в ТГ боте).
          */
         post: operations["connect_bot_api_projects__project_id__connect_bot_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Templates */
-        get: operations["list_templates_api_templates_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/templates/projects/{project_id}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply Template
-         * @description Применяет шаблон к проекту.
-         */
-        post: operations["apply_template_api_templates_projects__project_id__apply_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -528,11 +510,6 @@ export interface components {
             /** Date */
             date: string;
         };
-        /** ApplyTemplateRequest */
-        ApplyTemplateRequest: {
-            /** Template Slug */
-            template_slug: string;
-        };
         /** Body_upload_knowledge_api_projects__project_id__knowledge_post */
         Body_upload_knowledge_api_projects__project_id__knowledge_post: {
             /** File */
@@ -556,6 +533,12 @@ export interface components {
             message: string;
             /** Model */
             model?: string | null;
+            /** Visitor Id */
+            visitor_id?: string | null;
+            /** Username */
+            username?: string | null;
+            /** Full Name */
+            full_name?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -580,10 +563,6 @@ export interface components {
             name: string;
             /** Is Pro Mode */
             is_pro_mode: boolean;
-            /** Template Slug */
-            template_slug: string | null;
-            /** Managers */
-            managers: number[];
             /** User Id */
             user_id: string | null;
             /** Client Bot Username */
@@ -617,21 +596,6 @@ export interface components {
             hash: string;
         } & {
             [key: string]: unknown;
-        };
-        /** TemplateResponse */
-        TemplateResponse: {
-            /** Id */
-            id: string;
-            /** Slug */
-            slug: string;
-            /** Name */
-            name: string;
-            /** Description */
-            description: string | null;
-            /** Version */
-            version: number;
-            /** Is Active */
-            is_active: boolean;
         };
         /** ThreadResponse */
         ThreadResponse: {
@@ -685,6 +649,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    platform_webhook_webhooks_platform_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     telegram_webhook_webhook__project_id__post: {
         parameters: {
             query?: never;
@@ -1183,74 +1167,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BotConnectRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_templates_api_templates_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TemplateResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_template_api_templates_projects__project_id__apply_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ApplyTemplateRequest"];
             };
         };
         responses: {

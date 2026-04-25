@@ -2,7 +2,7 @@
 HTTP Tool for making external API requests.
 
 This tool provides a generic interface for calling external HTTP APIs
-from canvas workflows. It supports all HTTP methods, custom headers,
+from agent tool calls. It supports all HTTP methods, custom headers,
 JSON bodies, and response parsing.
 
 Security considerations:
@@ -10,7 +10,7 @@ Security considerations:
 - Timeout is enforced to prevent hanging requests
 - Response size is limited to prevent memory issues
 
-Usage in canvas:
+Usage:
 {
     "type": "tool_call",
     "tool_name": "http_request",
@@ -28,8 +28,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from src.core.logging import get_logger
-from src.core.config import settings
+from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.config.settings import settings
 from src.tools.registry import Tool, ToolExecutionError
 
 logger = get_logger(__name__)

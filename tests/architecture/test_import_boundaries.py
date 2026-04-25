@@ -1,0 +1,95 @@
+import ast
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "src"
+
+LEGACY_FACADE_PREFIXES = {
+    "src/api/",
+    "src/database/",
+    "src/core/",
+    "src/services/",
+    "src/worker.py",
+    "src/main.py",
+    "src/admin/",
+    "src/clients/",
+    "src/managers/",
+}
+
+FORBIDDEN_IMPORTS = (
+    "src.database.",
+    "src.api.",
+    "src.admin.router",
+    "src.admin.handlers",
+    "src.admin.keyboards",
+    "src.admin.knowledge_upload",
+    "src.clients.router",
+    "src.managers.router",
+    "src.core.config",
+    "src.core.logging",
+    "src.core.lifespan",
+    "src.core.model_registry",
+    "src.services.orchestrator",
+    "src.services.project_runtime_guards",
+    "src.services.redis_client",
+    "src.services.lock",
+    "src.services.chunker",
+    "src.services.embedding_service",
+    "src.services.rag_service",
+    "src.services.rate_limit_tracker",
+    "src.services.model_selector",
+    "src.worker",
+    "src.main",
+)
+
+def _is_legacy_facade(path: Path) -> bool:
+    rel = path.relative_to(ROOT).as_posix()
+    return any(rel == prefix or rel.startswith(prefix) for prefix in LEGACY_FACADE_PREFIXES)
+
+
+def test_production_code_does_not_import_legacy_facades() -> None:
+    offenders: list[str] = []
+
+    for path in SRC.rglob("*.py"):
+        if "__pycache__" in path.parts or _is_legacy_facade(path):
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        for forbidden in FORBIDDEN_IMPORTS:
+            if forbidden in text:
+                rel = path.relative_to(ROOT).as_posix()
+                offenders.append(f"{rel}: {forbidden}")
+
+    assert offenders == []
+
+
+def test_legacy_facade_paths_are_absent() -> None:
+    leftovers = [prefix for prefix in LEGACY_FACADE_PREFIXES if (ROOT / prefix).exists()]
+    assert leftovers == []
+
+
+def test_application_and_domain_do_not_import_http_framework_primitives() -> None:
+    offenders: list[str] = []
+
+    for root in (SRC / "application", SRC / "domain"):
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text)
+            rel = path.relative_to(ROOT).as_posix()
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name in {"fastapi", "starlette"}:
+                            offenders.append(f"{rel}: import {alias.name}")
+                elif isinstance(node, ast.ImportFrom):
+                    module = node.module or ""
+                    if module.startswith("fastapi") or module.startswith("starlette"):
+                        imported_names = ", ".join(alias.name for alias in node.names)
+                        offenders.append(f"{rel}: from {module} import {imported_names}")
+
+    assert offenders == []

@@ -1,0 +1,39 @@
+"""
+Project channel operations.
+"""
+
+from typing import Optional
+
+from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid
+
+
+class ProjectChannelRepository(ProjectRepositoryBase):
+    async def upsert_project_channel(
+        self,
+        project_id: ProjectId,
+        kind: str,
+        provider: str,
+        status: str,
+        config_json: Optional[JsonMap] = None,
+    ) -> JsonMap:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO project_channels (
+                    project_id, kind, provider, status, config_json
+                )
+                VALUES ($1, $2, $3, $4, COALESCE($5, '{}'::jsonb))
+                ON CONFLICT (project_id, kind, provider)
+                DO UPDATE SET
+                    status = EXCLUDED.status,
+                    config_json = EXCLUDED.config_json,
+                    updated_at = NOW()
+                RETURNING id, project_id, kind, provider, status, config_json, created_at, updated_at
+            """,
+                ensure_uuid(project_id),
+                kind,
+                provider,
+                status,
+                config_json or {},
+            )
+
+        return self._normalize_record(row)

@@ -1,18 +1,6 @@
-"""
-Shared utilities and constants for the agent pipeline.
-"""
+"""Shared utilities for the agent pipeline."""
 
 from typing import Any, Dict, Optional
-
-# Default dialog state to reset after ticket closure or first interaction
-DEFAULT_DIALOG_STATE: Dict[str, Any] = {
-    "last_intent": None,
-    "last_cta": None,
-    "last_topic": None,
-    "repeat_count": 0,
-    "lead_status": "active_client",
-    "lifecycle": "active_client",
-}
 
 
 def coerce_int(value: Any, default: int = 0) -> int:

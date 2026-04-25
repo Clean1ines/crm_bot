@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from datetime import datetime
 import asyncpg
 
-from src.database.repositories.event_repository import EventRepository
+from src.infrastructure.db.repositories.event_repository import EventRepository
 
 
 @pytest.fixture

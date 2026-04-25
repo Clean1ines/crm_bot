@@ -1,58 +1,73 @@
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@shared/api/client';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
 import { useNotification } from '@/shared/lib/notification/useNotifications';
+import { useProjectManagers } from '@entities/project/api/useCrmData';
+import { api, getErrorMessage } from '@shared/api/client';
+
+const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
 
 export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => {
   const queryClient = useQueryClient();
   const { showNotification } = useNotification();
-  const [newManagerId, setNewManagerId] = useState('');
+  const [newMemberUserId, setNewMemberUserId] = useState('');
+  const [newMemberRole, setNewMemberRole] = useState<(typeof ROLE_OPTIONS)[number]>('manager');
 
-  const { data: managers, isLoading } = useQuery({
-    queryKey: ['managers', projectId],
-    queryFn: () => api.projects.getManagers(projectId).then(res => res.data || []),
-  });
+  const { data: managers = [], isLoading } = useProjectManagers(projectId);
+
+  const invalidateManagers = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['members', projectId] });
+  };
 
   const addMutation = useMutation({
-    mutationFn: (chatId: number) => api.projects.addManager(projectId, chatId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['managers', projectId] });
-      setNewManagerId('');
-      showNotification('Менеджер добавлен', 'success');
+    mutationFn: async () => {
+      const normalizedUserId = newMemberUserId.trim();
+      if (!normalizedUserId) {
+        throw new Error('Введите user_id участника платформы');
+      }
+
+      await api.members.upsert(projectId, {
+        user_id: normalizedUserId,
+        role: newMemberRole,
+      });
     },
-    onError: () => showNotification('Ошибка добавления', 'error'),
+    onSuccess: async () => {
+      await invalidateManagers();
+      setNewMemberUserId('');
+      setNewMemberRole('manager');
+      showNotification('Участник проекта сохранён', 'success');
+    },
+    onError: (error) => showNotification(getErrorMessage(error), 'error'),
   });
 
   const removeMutation = useMutation({
-    mutationFn: (chatId: number) => api.projects.removeManager(projectId, chatId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['managers', projectId] });
-      showNotification('Менеджер удалён', 'success');
+    mutationFn: async (memberUserId: string) => {
+      await api.members.remove(projectId, memberUserId);
     },
-    onError: () => showNotification('Ошибка удаления', 'error'),
+    onSuccess: async () => {
+      await invalidateManagers();
+      showNotification('Участник проекта удалён', 'success');
+    },
+    onError: (error) => showNotification(getErrorMessage(error), 'error'),
   });
 
-  const handleAdd = () => {
-    const chatId = parseInt(newManagerId, 10);
-    if (isNaN(chatId)) {
-      showNotification('Введите корректный chat_id', 'error');
-      return;
-    }
-    addMutation.mutate(chatId);
-  };
-
-  if (isLoading) return <div>Загрузка...</div>;
+  if (isLoading) {
+    return <div>Загрузка...</div>;
+  }
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-lg font-medium">Менеджеры</h3>
+        <h3 className="text-lg font-medium">Команда проекта</h3>
         <ul>
-          {managers?.map(m => (
-            <li key={m} className="flex justify-between items-center py-1">
-              <span>{m}</span>
+          {managers.map((manager) => (
+            <li key={manager.user_id} className="flex items-center justify-between py-1">
+              <span>
+                {manager.full_name || manager.username || manager.email || manager.user_id}
+                <span className="ml-2 text-xs text-gray-500">({manager.role})</span>
+              </span>
               <button
-                onClick={() => removeMutation.mutate(m)}
+                onClick={() => removeMutation.mutate(manager.user_id)}
                 className="text-red-600 hover:underline"
               >
                 Удалить
@@ -61,15 +76,29 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           ))}
         </ul>
       </div>
-      <div>
+      <div className="flex flex-wrap gap-2">
         <input
-          type="number"
-          value={newManagerId}
-          onChange={e => setNewManagerId(e.target.value)}
-          placeholder="chat_id"
-          className="border rounded p-1"
+          type="text"
+          value={newMemberUserId}
+          onChange={(e) => setNewMemberUserId(e.target.value)}
+          placeholder="user_id участника"
+          className="rounded border p-1"
         />
-        <button onClick={handleAdd} className="ml-2 bg-green-600 text-white px-3 py-1 rounded">
+        <select
+          value={newMemberRole}
+          onChange={(e) => setNewMemberRole(e.target.value as (typeof ROLE_OPTIONS)[number])}
+          className="rounded border p-1"
+        >
+          {ROLE_OPTIONS.map((role) => (
+            <option key={role} value={role}>
+              {role}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => addMutation.mutate()}
+          className="rounded bg-green-600 px-3 py-1 text-white"
+        >
           Добавить
         </button>
       </div>

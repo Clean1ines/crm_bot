@@ -3,10 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from uuid import uuid4
 
-from src.main import app
-from src.api.dependencies import (
+from src.domain.project_plane.client_views import ClientDetailView, ClientListItemView, ClientListView
+from src.domain.project_plane.memory_views import MemoryEntryView
+from src.interfaces.http.app import app
+from src.interfaces.http.dependencies import (
     get_current_user_id,
     get_thread_repo,
+    get_client_repo,
     get_project_repo,
     get_memory_repository,
 )
@@ -32,21 +35,18 @@ def mock_memory_repo():
 @pytest.fixture
 def mock_thread_repo():
     repo = AsyncMock()
-    # Mock pool.acquire context manager
-    mock_conn = AsyncMock()
-    mock_cm = MagicMock()
-    mock_cm.__aenter__.return_value = mock_conn
-    mock_cm.__aexit__.return_value = None
-    repo.pool = MagicMock()
-    repo.pool.acquire = MagicMock(return_value=mock_cm)
-    # Mock get_dialogs method
     repo.get_dialogs = AsyncMock()
     return repo
 
 
+@pytest.fixture
+def mock_client_repo():
+    return AsyncMock()
+
+
 @pytest.fixture(autouse=True)
 def override_dependencies(
-    mock_current_user_id, mock_project_repo, mock_thread_repo, mock_memory_repo
+    mock_current_user_id, mock_project_repo, mock_thread_repo, mock_client_repo, mock_memory_repo
 ):
     # Save original overrides
     original_overrides = app.dependency_overrides.copy()
@@ -55,6 +55,7 @@ def override_dependencies(
     app.dependency_overrides[get_current_user_id] = lambda: mock_current_user_id
     app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
     app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+    app.dependency_overrides[get_client_repo] = lambda: mock_client_repo
     app.dependency_overrides[get_memory_repository] = lambda: mock_memory_repo
 
     yield
@@ -81,26 +82,26 @@ class TestClientsAPI:
 
     # ==================== GET /api/clients ====================
 
-    def test_list_clients_success(self, client, mock_project_repo, mock_thread_repo):
+    def test_list_clients_success(self, client, mock_project_repo, mock_client_repo):
         project_id = str(uuid4())
-        mock_project_repo.get_project_by_id.return_value = {
-            "id": project_id,
-            "user_id": "test-user-id",
-        }
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        # Mock connection and fetch result
-        mock_conn = mock_thread_repo.pool.acquire.return_value.__aenter__.return_value
-        mock_rows = [
-            {
-                "id": uuid4(),
-                "username": "client1",
-                "full_name": "Client One",
-                "chat_id": 12345,
-                "source": "telegram",
-                "created_at": "2025-01-01T00:00:00",
-            }
-        ]
-        mock_conn.fetch.return_value = mock_rows
+        client_id = str(uuid4())
+        mock_client_repo.list_for_project_view.return_value = ClientListView(
+            clients=[
+                ClientListItemView(
+                    id=client_id,
+                    username="client1",
+                    full_name="Client One",
+                    chat_id=12345,
+                    source="telegram",
+                    created_at="2025-01-01T00:00:00",
+                )
+            ],
+            total_clients=1,
+            new_clients_7d=1,
+            active_dialogs=0,
+        )
 
         response = client.get(f"/api/clients?project_id={project_id}&limit=10&offset=0")
 
@@ -111,9 +112,16 @@ class TestClientsAPI:
         client_data = data["clients"][0]
         assert client_data["username"] == "client1"
         assert client_data["full_name"] == "Client One"
+        mock_client_repo.list_for_project_view.assert_awaited_once_with(
+            project_id,
+            limit=10,
+            offset=0,
+            search=None,
+        )
 
     def test_list_clients_forbidden_project_not_found(self, client, mock_project_repo):
-        mock_project_repo.get_project_by_id.return_value = None
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
+        mock_project_repo.get_project_view = AsyncMock(return_value=None)
         project_id = str(uuid4())
         response = client.get(f"/api/clients?project_id={project_id}")
         assert response.status_code == 403
@@ -121,10 +129,8 @@ class TestClientsAPI:
 
     def test_list_clients_forbidden_wrong_user(self, client, mock_project_repo):
         project_id = str(uuid4())
-        mock_project_repo.get_project_by_id.return_value = {
-            "id": project_id,
-            "user_id": "different-user",
-        }
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
+        mock_project_repo.get_project_view = AsyncMock(return_value=None)
         response = client.get(f"/api/clients?project_id={project_id}")
         assert response.status_code == 403
         assert response.json()["detail"] == "Access denied"
@@ -159,28 +165,25 @@ class TestClientsAPI:
     # ==================== GET /api/clients/{client_id} ====================
 
     def test_get_client_success(
-        self, client, mock_project_repo, mock_thread_repo, mock_memory_repo
+        self, client, mock_project_repo, mock_client_repo, mock_thread_repo, mock_memory_repo
     ):
         project_id = str(uuid4())
         client_id = str(uuid4())
-        mock_project_repo.get_project_by_id.return_value = {
-            "id": project_id,
-            "user_id": "test-user-id",
-        }
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        # Mock connection fetchrow for client
-        mock_conn = mock_thread_repo.pool.acquire.return_value.__aenter__.return_value
-        mock_conn.fetchrow.return_value = {
-            "id": client_id,
-            "username": "client1",
-            "full_name": "Client One",
-            "chat_id": 12345,
-            "source": "telegram",
-            "created_at": "2025-01-01T00:00:00",
-        }
+        mock_client_repo.get_by_id_view.return_value = ClientDetailView(
+            id=client_id,
+            username="client1",
+            full_name="Client One",
+            chat_id=12345,
+            source="telegram",
+            created_at="2025-01-01T00:00:00",
+        )
 
         # Mock memory and threads
-        mock_memory_repo.get_for_user.return_value = [{"key": "preference", "value": "test"}]
+        mock_memory_repo.get_for_user_view.return_value = [
+            MemoryEntryView(id=str(uuid4()), key="preference", value="test", type="user_edited")
+        ]
         mock_thread_repo.get_dialogs.return_value = [{"thread_id": "thread-1"}]
 
         response = client.get(f"/api/clients/{client_id}?project_id={project_id}")
@@ -191,11 +194,12 @@ class TestClientsAPI:
         assert data["username"] == "client1"
         assert "memory" in data
         assert "threads" in data
-        mock_memory_repo.get_for_user.assert_called_once_with(project_id, client_id, limit=100)
+        mock_memory_repo.get_for_user_view.assert_called_once_with(project_id, client_id, limit=100)
         mock_thread_repo.get_dialogs.assert_called_once_with(project_id, client_id=client_id)
 
     def test_get_client_forbidden_project_not_found(self, client, mock_project_repo):
-        mock_project_repo.get_project_by_id.return_value = None
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
+        mock_project_repo.get_project_view = AsyncMock(return_value=None)
         project_id = str(uuid4())
         client_id = str(uuid4())
         response = client.get(f"/api/clients/{client_id}?project_id={project_id}")
@@ -205,25 +209,18 @@ class TestClientsAPI:
     def test_get_client_forbidden_wrong_user(self, client, mock_project_repo):
         project_id = str(uuid4())
         client_id = str(uuid4())
-        mock_project_repo.get_project_by_id.return_value = {
-            "id": project_id,
-            "user_id": "different-user",
-        }
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
+        mock_project_repo.get_project_view = AsyncMock(return_value=None)
         response = client.get(f"/api/clients/{client_id}?project_id={project_id}")
         assert response.status_code == 403
         assert response.json()["detail"] == "Access denied"
 
-    def test_get_client_not_found(self, client, mock_project_repo, mock_thread_repo):
+    def test_get_client_not_found(self, client, mock_project_repo, mock_client_repo):
         project_id = str(uuid4())
         client_id = str(uuid4())
-        mock_project_repo.get_project_by_id.return_value = {
-            "id": project_id,
-            "user_id": "test-user-id",
-        }
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        # Mock connection fetchrow returns None (client not found)
-        mock_conn = mock_thread_repo.pool.acquire.return_value.__aenter__.return_value
-        mock_conn.fetchrow.return_value = None
+        mock_client_repo.get_by_id_view.return_value = None
 
         response = client.get(f"/api/clients/{client_id}?project_id={project_id}")
         assert response.status_code == 404

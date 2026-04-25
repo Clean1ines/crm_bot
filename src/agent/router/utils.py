@@ -7,8 +7,8 @@ import re
 import json
 from typing import Any, Optional, Sequence
 
-from src.core.config import settings
-from src.core.logging import get_logger
+from src.infrastructure.config.settings import settings
+from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -34,7 +34,6 @@ COMPLEXITY_KEYWORDS = (
     "postgres",
     "crm",
     "webhook",
-    "n8n",
     "google sheets",
     "автоматизац",
     "oauth",

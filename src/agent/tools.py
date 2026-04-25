@@ -2,13 +2,13 @@
 LangChain tools for the CRM bot.
 
 This module provides both legacy function-based tools for backward compatibility
-and Tool-registry-compatible wrappers for dynamic execution from canvas workflows.
+and Tool-registry-compatible wrappers for dynamic execution from agent tool calls.
 
 Tools:
 - search_knowledge_base: RAG search over project knowledge base
 - escalate_to_manager: Create ticket and notify human manager
 
-For new workflows, use tool_registry.execute() instead of direct calls.
+Use tool_registry.execute() instead of direct calls.
 """
 
 import asyncpg
@@ -16,10 +16,10 @@ from typing import Any, Dict, Optional
 
 from langchain_core.tools import tool
 
-from src.core.config import settings
-from src.core.logging import get_logger
-from src.database.repositories.knowledge_repository import KnowledgeRepository
-from src.services.embedding_service import embed_text
+from src.infrastructure.config.settings import settings
+from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
+from src.infrastructure.llm.embedding_service import embed_text
 
 logger = get_logger(__name__)
 
@@ -130,7 +130,7 @@ async def escalate_to_manager() -> str:
 
 # ----------------------------------------------------------------------
 # Tool-registry compatible wrappers (for dynamic execution)
-# These are used by canvas workflows via tool_registry.execute()
+# These are used by agent tool calls via tool_registry.execute()
 # ----------------------------------------------------------------------
 
 def _get_lazy_registry() -> Any:

@@ -13,7 +13,7 @@ Usage:
     # Register a tool (typically done in lifespan.py)
     tool_registry.register(SearchKnowledgeTool(knowledge_repo))
     
-    # Execute a tool from agent or workflow
+    # Execute a tool from the agent
     result = await tool_registry.execute(
         "search_knowledge",
         {"query": "What are your hours?"},
@@ -21,7 +21,7 @@ Usage:
     )
 """
 
-from src.core.logging import get_logger
+from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import Tool, ToolRegistry, ToolExecutionError, tool_registry
 
 logger = get_logger(__name__)
@@ -35,15 +35,14 @@ __all__ = [
     "SearchKnowledgeTool",
     "EscalateTool",
     "HTTPTool",
-    "N8NTool",
-]
+    ]
 
 # Lazy import built-in tools to avoid circular dependencies
 def _register_builtin_tools(
     knowledge_repo=None,
     thread_repo=None,
     queue_repo=None,
-    project_repo=None
+    project_members=None
 ) -> None:
     """
     Register built-in tools in the global registry.
@@ -55,19 +54,19 @@ def _register_builtin_tools(
         knowledge_repo: KnowledgeRepository instance for search tool.
         thread_repo: ThreadRepository instance for escalation tool.
         queue_repo: QueueRepository instance for escalation tool.
-        project_repo: ProjectRepository instance for escalation tool.
+        project_members: ProjectMemberRepository instance for escalation tool.
     """
     if knowledge_repo:
         from src.tools.builtins import SearchKnowledgeTool
         tool_registry.register(SearchKnowledgeTool(knowledge_repo))
         logger.info("Registered SearchKnowledgeTool")
     
-    if thread_repo and queue_repo and project_repo:
+    if thread_repo and queue_repo and project_members:
         from src.tools.builtins import EscalateTool
         tool_registry.register(EscalateTool(
             thread_repository=thread_repo,
             queue_repository=queue_repo,
-            project_repository=project_repo
+            project_members=project_members
         ))
         logger.info("Registered EscalateTool")
     
@@ -75,8 +74,6 @@ def _register_builtin_tools(
     from src.tools.http_tool import HTTPTool
     tool_registry.register(HTTPTool())
     logger.info("Registered HTTPTool")
-    
-    from src.tools.n8n_tool import N8NTool
     tool_registry.register(N8NTool())
     logger.info("Registered N8NTool")
 
@@ -84,7 +81,7 @@ def _register_builtin_tools(
 # Convenience function for getting all tool metadata
 def get_tool_catalog(public_only: bool = False) -> list[dict]:
     """
-    Get a catalog of registered tools for canvas UI or API docs.
+    Get a catalog of registered tools for API docs.
     
     Args:
         public_only: If True, only return tools marked as public.

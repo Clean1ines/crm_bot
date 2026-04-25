@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 from uuid import uuid4
 import asyncpg
 
-from src.database.repositories.user_repository import UserRepository
+from src.infrastructure.db.repositories.user_repository import UserRepository
 
 
 @pytest.fixture
@@ -157,7 +157,8 @@ class TestUserRepository:
     async def test_add_identity_success(self, user_repo, mock_pool):
         user_id = str(uuid4())
         provider = "email"
-        provider_id = "test@example.com"
+        provider_id = f"{uuid4().hex}@example.com"
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
         mock_pool.mock_conn.execute = AsyncMock()
 
         await user_repo.add_identity(user_id, provider, provider_id)
@@ -165,35 +166,35 @@ class TestUserRepository:
         expected_sql = """
                 INSERT INTO auth_identities (user_id, provider, provider_id)
                 VALUES ($1, $2, $3)
-                ON CONFLICT (provider, provider_id) DO NOTHING
             """
         mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, user_id, provider, provider_id)
 
     @pytest.mark.asyncio
     async def test_add_identity_duplicate(self, user_repo, mock_pool):
-        # ON CONFLICT DO NOTHING, no error
         user_id = str(uuid4())
         provider = "email"
-        provider_id = "test@example.com"
-        # FIXED: removed side effect; the real code would not raise an error
+        provider_id = f"{uuid4().hex}@example.com"
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"user_id": user_id})
         mock_pool.mock_conn.execute = AsyncMock()
 
-        # Should not raise, just ignore
+        # Same provider identity already linked to this user is idempotent.
         await user_repo.add_identity(user_id, provider, provider_id)
-        mock_pool.mock_conn.execute.assert_awaited_once()
+        mock_pool.mock_conn.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_add_identity_fk_error(self, user_repo, mock_pool):
         user_id = str(uuid4())
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
         mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk"))
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
-            await user_repo.add_identity(user_id, "telegram", "123")
+            await user_repo.add_identity(user_id, "telegram", str(uuid4().int))
 
     @pytest.mark.asyncio
     async def test_add_identity_not_null_error(self, user_repo, mock_pool):
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
         mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.NotNullViolationError("null"))
         with pytest.raises(asyncpg.exceptions.NotNullViolationError):
-            await user_repo.add_identity(str(uuid4()), None, "123")
+            await user_repo.add_identity(str(uuid4()), None, str(uuid4().int))
 
     # ------------------------------------------------------------------
     # get_user_by_telegram
@@ -204,7 +205,7 @@ class TestUserRepository:
         row = {"id": uuid4(), "telegram_id": 12345, "username": "john", "full_name": "John Doe"}
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
 
-        result = await user_repo.get_user_by_telegram(telegram_id)
+        result = await user_repo.get_user_by_telegram_view(telegram_id)
 
         expected_sql = """
                 SELECT u.*
@@ -213,12 +214,15 @@ class TestUserRepository:
                 WHERE ai.provider = 'telegram' AND ai.provider_id = $1
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, str(telegram_id))
-        assert result == dict(row)
+        assert result.id == str(row['id'])
+        assert result.username == row.get('username')
+        assert result.email == row.get('email')
+        assert result.full_name == row.get('full_name')
 
     @pytest.mark.asyncio
     async def test_get_user_by_telegram_not_found(self, user_repo, mock_pool):
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
-        result = await user_repo.get_user_by_telegram(99999)
+        result = await user_repo.get_user_by_telegram_view(99999)
         assert result is None
 
     # ------------------------------------------------------------------
@@ -230,16 +234,19 @@ class TestUserRepository:
         row = {"id": user_id, "username": "john"}
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
 
-        result = await user_repo.get_user_by_id(user_id)
+        result = await user_repo.get_user_by_id_view(user_id)
 
         expected_sql = "SELECT * FROM users WHERE id = $1"
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, user_id)
-        assert result == dict(row)
+        assert result.id == str(row['id'])
+        assert result.username == row.get('username')
+        assert result.email == row.get('email')
+        assert result.full_name == row.get('full_name')
 
     @pytest.mark.asyncio
     async def test_get_user_by_id_not_found(self, user_repo, mock_pool):
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
-        result = await user_repo.get_user_by_id(str(uuid4()))
+        result = await user_repo.get_user_by_id_view(str(uuid4()))
         assert result is None
 
     # ------------------------------------------------------------------
@@ -251,16 +258,19 @@ class TestUserRepository:
         row = {"id": uuid4(), "email": email}
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
 
-        result = await user_repo.get_user_by_email(email)
+        result = await user_repo.get_user_by_email_view(email)
 
         expected_sql = "SELECT * FROM users WHERE email = $1"
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, email)
-        assert result == dict(row)
+        assert result.id == str(row['id'])
+        assert result.username == row.get('username')
+        assert result.email == row.get('email')
+        assert result.full_name == row.get('full_name')
 
     @pytest.mark.asyncio
     async def test_get_user_by_email_not_found(self, user_repo, mock_pool):
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
-        result = await user_repo.get_user_by_email("nonexistent@example.com")
+        result = await user_repo.get_user_by_email_view("nonexistent@example.com")
         assert result is None
 
     # ------------------------------------------------------------------
@@ -322,10 +332,10 @@ class TestUserRepository:
     async def test_connection_error(self, user_repo, mock_pool):
         mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-            await user_repo.get_user_by_id(str(uuid4()))
+            await user_repo.get_user_by_id_view(str(uuid4()))
 
     @pytest.mark.asyncio
     async def test_undefined_table_error(self, user_repo, mock_pool):
         mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.UndefinedTableError("no table"))
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
-            await user_repo.get_user_by_id(str(uuid4()))
+            await user_repo.get_user_by_id_view(str(uuid4()))

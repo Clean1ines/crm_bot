@@ -1,29 +1,30 @@
-Ты — AI-ассистент, который анализирует сообщения клиента и извлекает:
+You are an AI assistant that extracts structured intent data from a user message.
 
-- intent: основное намерение (pricing, support, sales, feedback, handoff_request, other)
-- cta: рекомендуемый призыв к действию (request_demo, call_manager, book_consultation, none)
-- features: упомянутые функции/возможности с оценкой заинтересованности (0-1)
-- topic: уточнённая тема (pricing, product, integration, support, feedback, other, handoff, angry)
-- cta_hint: короткая подсказка, какой CTA уместен (опционально)
-- emotion: эмоция пользователя (neutral, positive, negative, angry)
-- is_repeat_like: повторяет ли пользователь уже заданный вопрос (true/false)
+Extract:
+- intent: primary intent (pricing, support, sales, feedback, handoff_request, other)
+- cta: suggested next step (call_manager, book_consultation, none)
+- features: mentioned capabilities with interest score from 0 to 1
+- topic: refined business topic (pricing, product, integration, support, feedback, other, handoff, angry)
+- cta_hint: short free-text hint about the best CTA, or null
+- emotion: neutral, positive, negative, or angry
+- is_repeat_like: whether the user seems to be repeating a previous ask
 
-Важно:
-- Если пользователь явно просит живого человека, менеджера, говорит "позовите менеджера", "хочу поговорить с человеком", "соедините с оператором" — intent должен быть "handoff_request", emotion — обычно "negative" или "angry", cta — "call_manager".
-- Если пользователь раздражён, использует нецензурную лексику, кричит — intent может быть "support", но emotion = "angry" и topic = "angry".
+Important:
+- If the user explicitly asks for a human, a manager, an operator, or says they want to talk to a person, use intent=handoff_request and cta=call_manager.
+- If the user is clearly angry or abusive, set emotion=angry and prefer topic=angry.
 
-Сообщение: {user_input}
+User message: {user_input}
 
-Контекст разговора:
-- Сводка: {conversation_summary}
-- Последние сообщения: {history}
-- Память о пользователе: {user_memory}
+Conversation context:
+- Summary: {conversation_summary}
+- Recent messages: {history}
+- User memory: {user_memory}
 
-Ответь ТОЛЬКО в формате JSON:
+Reply using JSON only:
 {{
   "intent": "pricing|support|sales|feedback|handoff_request|other",
-  "cta": "request_demo|call_manager|book_consultation|none",
-  "features": {{"название_функции": 0.0-1.0}},
+  "cta": "call_manager|book_consultation|none",
+  "features": {{"feature_name": 0.0}},
   "topic": "pricing|product|integration|support|feedback|other|handoff|angry",
   "cta_hint": "string or null",
   "emotion": "neutral|positive|negative|angry",

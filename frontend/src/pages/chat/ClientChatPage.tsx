@@ -8,6 +8,7 @@ export const ClientChatPage: React.FC = () => {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const visitorIdRef = useRef<string | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -16,6 +17,18 @@ export const ClientChatPage: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    const key = `crm_bot_widget_visitor:${projectId ?? 'unknown'}`;
+    const existing = window.localStorage.getItem(key);
+    if (existing) {
+      visitorIdRef.current = existing;
+      return;
+    }
+    const next = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+    window.localStorage.setItem(key, next);
+    visitorIdRef.current = next;
+  }, [projectId]);
 
   const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
@@ -32,7 +45,7 @@ export const ClientChatPage: React.FC = () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({ message: userMessage, visitor_id: visitorIdRef.current }),
       },
       (chunk) => {
         assistantContent += chunk;

@@ -1,7 +1,8 @@
 import asyncpg
 import pytest
-from src.core.config import Settings
-from src.database.repositories import ProjectRepository, ThreadRepository
+from src.infrastructure.config.settings import Settings
+from src.infrastructure.db.repositories import ProjectRepository, ThreadRepository
+from src.infrastructure.db.repositories.user_repository import UserRepository
 import uuid
 
 settings = Settings(_env_file=".env.test")
@@ -23,10 +24,12 @@ async def thread_repo(db_pool):
 
 @pytest.fixture
 async def test_project(project_repo):
-    owner_id = f"test_owner_{uuid.uuid4().hex[:8]}"
-    project_id = await project_repo.create_project(
-        owner_id=owner_id,
-        name=f"Test Project {owner_id}"
+    owner_name = f"test_owner_{uuid.uuid4().hex[:8]}"
+    user_repo = UserRepository(project_repo.pool)
+    user_id = await user_repo.create_user(full_name=owner_name)
+    project_id = await project_repo.create_project_with_user_id(
+        user_id=user_id,
+        name=f"Test Project {owner_name}"
     )
     yield project_id
     # Очистка после теста

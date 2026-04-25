@@ -7,15 +7,15 @@ as Tool instances that can be registered in the ToolRegistry:
 - EscalateTool: Create ticket and notify managers
 
 These tools wrap existing repository functions while conforming to the
-Tool interface for dynamic execution from canvas workflows.
+Tool interface for dynamic execution from agent tool calls.
 """
 
 import httpx
 from typing import Any, Dict, Optional
 
-from src.core.logging import get_logger
+from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import Tool, ToolExecutionError
-from src.services.rag_service import RAGService
+from src.infrastructure.llm.rag_service import RAGService
 
 logger = get_logger(__name__)
 
@@ -30,7 +30,7 @@ class SearchKnowledgeTool(Tool):
     - Multi-query vector + FTS search
     - Result merging and ranking
     
-    Usage in canvas:
+    Usage:
     {
         "type": "tool_call",
         "tool_name": "search_knowledge",
@@ -132,7 +132,7 @@ class SearchKnowledgeTool(Tool):
                 final_limit=limit
             )
             
-            # Format results for canvas/agent consumption
+            # Format results for agent consumption
             formatted_results = [
                 {
                     "content": r.get("content", ""),
@@ -181,9 +181,9 @@ class EscalateTool(Tool):
     
     This tool creates a ticket and notifies managers via the execution queue.
     It wraps the existing escalation logic while providing a clean interface
-    for canvas workflows.
+    for agent tool calls.
     
-    Usage in canvas:
+    Usage:
     {
         "type": "tool_call",
         "tool_name": "escalate_to_manager",
@@ -228,7 +228,7 @@ class EscalateTool(Tool):
         self,
         thread_repository,
         queue_repository,
-        project_repository
+        project_members
     ) -> None:
         """
         Initialize the EscalateTool with required repositories.
@@ -236,11 +236,11 @@ class EscalateTool(Tool):
         Args:
             thread_repository: ThreadRepository for status updates.
             queue_repository: QueueRepository for notification tasks.
-            project_repository: ProjectRepository for manager lookup.
+            project_members: ProjectMemberRepository for manager lookup.
         """
         self._thread_repo = thread_repository
         self._queue_repo = queue_repository
-        self._project_repo = project_repository
+        self._project_members = project_members
         logger.debug("EscalateTool initialized")
     
     async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -288,7 +288,7 @@ class EscalateTool(Tool):
             )
             
             # Get managers for this project
-            managers = await self._project_repo.get_managers(str(project_id))
+            managers = await self._project_members.get_manager_notification_targets(str(project_id))
             
             if not managers:
                 logger.warning(
@@ -353,7 +353,7 @@ class EscalateTool(Tool):
 
 class CRMGetUserTool(Tool):
     """
-    Tool to retrieve user information from the CRM (users table) by telegram_id or email.
+    Tool to retrieve project-scoped contact information from the CRM by telegram_id or email.
     
     Usage:
     {
@@ -374,6 +374,7 @@ class CRMGetUserTool(Tool):
         "found": true,
         "user": {
             "id": "uuid",
+            "user_id": "optional-platform-user-uuid",
             "telegram_id": 123456789,
             "username": "john_doe",
             "full_name": "John Doe",
@@ -387,7 +388,7 @@ class CRMGetUserTool(Tool):
     """
     
     name = "crm.get_user"
-    description = "Retrieve user information from CRM by telegram_id or email."
+    description = "Retrieve project-scoped CRM contact information by telegram_id or email."
     input_schema = {
         "type": "object",
         "properties": {
@@ -414,14 +415,38 @@ class CRMGetUserTool(Tool):
         async with self._pool.acquire() as conn:
             if telegram_id:
                 row = await conn.fetchrow(
-                    "SELECT id, telegram_id, username, full_name, email, company, phone, metadata "
-                    "FROM users WHERE project_id = $1 AND telegram_id = $2",
-                    project_id, telegram_id
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        chat_id AS telegram_id,
+                        username,
+                        full_name,
+                        email,
+                        company,
+                        phone,
+                        metadata
+                    FROM clients
+                    WHERE project_id = $1 AND chat_id = $2
+                    """,
+                    project_id, str(telegram_id)
                 )
             else:
                 row = await conn.fetchrow(
-                    "SELECT id, telegram_id, username, full_name, email, company, phone, metadata "
-                    "FROM users WHERE project_id = $1 AND email = $2",
+                    """
+                    SELECT
+                        id,
+                        user_id,
+                        chat_id AS telegram_id,
+                        username,
+                        full_name,
+                        email,
+                        company,
+                        phone,
+                        metadata
+                    FROM clients
+                    WHERE project_id = $1 AND email = $2
+                    """,
                     project_id, email
                 )
         
@@ -430,12 +455,13 @@ class CRMGetUserTool(Tool):
         
         user = dict(row)
         user["id"] = str(user["id"])  # UUID to string
+        user["user_id"] = str(user["user_id"]) if user.get("user_id") else None
         return {"found": True, "user": user}
 
 
 class CRMCreateUserTool(Tool):
     """
-    Tool to create a new user record in the CRM (users table).
+    Tool to create a new project-scoped contact record in the CRM (clients table).
     
     Usage:
     {
@@ -458,12 +484,12 @@ class CRMCreateUserTool(Tool):
     Returns:
     {
         "success": true,
-        "user_id": "uuid"
+        "client_id": "uuid"
     }
     """
     
     name = "crm.create_user"
-    description = "Create a new user/lead in the CRM."
+    description = "Create a new project-scoped CRM contact/lead."
     input_schema = {
         "type": "object",
         "properties": {
@@ -498,22 +524,36 @@ class CRMCreateUserTool(Tool):
         metadata = args.get("metadata", {})
         
         async with self._pool.acquire() as conn:
-            # Check if user already exists
+            # Check if contact already exists inside this project context.
             existing = await conn.fetchval(
-                "SELECT id FROM users WHERE project_id = $1 AND telegram_id = $2",
-                project_id, telegram_id
+                "SELECT id FROM clients WHERE project_id = $1 AND chat_id = $2",
+                project_id, str(telegram_id)
             )
             if existing:
-                return {"success": False, "error": "User already exists", "user_id": str(existing)}
+                return {
+                    "success": False,
+                    "error": "Contact already exists",
+                    "client_id": str(existing),
+                    "user_id": str(existing),
+                }
             
-            # Insert new user
-            user_id = await conn.fetchval("""
-                INSERT INTO users (project_id, telegram_id, username, full_name, email, company, phone, metadata)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            client_id = await conn.fetchval("""
+                INSERT INTO clients (
+                    project_id,
+                    chat_id,
+                    username,
+                    full_name,
+                    email,
+                    company,
+                    phone,
+                    metadata,
+                    source
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'tool')
                 RETURNING id
-            """, project_id, telegram_id, username, full_name, email, company, phone, metadata)
+            """, project_id, str(telegram_id), username, full_name, email, company, phone, metadata)
             
-            return {"success": True, "user_id": str(user_id)}
+            return {"success": True, "client_id": str(client_id), "user_id": str(client_id)}
 
 
 class CRMCollectProfileTool(Tool):
@@ -658,8 +698,8 @@ class TelegramSendMessageTool(Tool):
         "additionalProperties": False
     }
     
-    def __init__(self, project_repo):
-        self._project_repo = project_repo
+    def __init__(self, project_tokens):
+        self._project_tokens = project_tokens
         logger.debug("TelegramSendMessageTool initialized")
     
     async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
@@ -670,7 +710,7 @@ class TelegramSendMessageTool(Tool):
         parse_mode = args.get("parse_mode")  # default None, we handle manually
         
         # Fetch bot token
-        bot_token = await self._project_repo.get_bot_token(project_id)
+        bot_token = await self._project_tokens.get_bot_token(project_id)
         if not bot_token:
             raise ToolExecutionError(self.name, "No bot token configured for project")
         

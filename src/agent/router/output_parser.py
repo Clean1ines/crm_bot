@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from pydantic import ValidationError
 
 from src.agent.schemas import RouterOutput, IntentOutput
-from src.core.logging import get_logger
+from src.infrastructure.logging.logger import get_logger
 from src.agent.router.utils import truncate_text, extract_kb_text, count_question_signals
 
 logger = get_logger(__name__)

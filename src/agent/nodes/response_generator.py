@@ -1,247 +1,163 @@
 """
-Response generator node for LangGraph pipeline.
+Response generator node for the LangGraph pipeline.
 
-Uses a stronger LLM to craft the final answer based on decision, context,
-knowledge, memory, and dialog_state.
+Uses the configured LLM to craft the final answer from decision, history,
+knowledge, memory, and project runtime configuration.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_groq import ChatGroq
 
-from src.core.config import settings
-from src.core.logging import get_logger, log_node_execution
-from src.agent.state import AgentState
 from src.agent.router.prompt_builder import build_response_prompt
+from src.agent.state import AgentState
+from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
+from src.domain.runtime.response_generation import (
+    ResponseGenerationContext,
+    ResponseGenerationResult,
+)
+from src.infrastructure.config.settings import settings
+from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
 
 
 def _merge_dialog_state_into_user_memory(
-    user_memory: Optional[Dict[str, List[Dict[str, Any]]]],
-    dialog_state: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-    """
-    Merge dialog_state into the memory block passed to the prompt builder.
-
-    Args:
-        user_memory: Existing grouped memory dictionary.
-        dialog_state: Current dialog state snapshot.
-
-    Returns:
-        A merged memory dictionary, or the original memory if dialog_state is empty.
-    """
+    user_memory: dict[str, list[dict[str, Any]]] | None,
+    dialog_state: dict[str, Any] | None,
+) -> dict[str, list[dict[str, Any]]] | None:
     if not dialog_state:
         return user_memory
 
-    merged: Dict[str, List[Dict[str, Any]]] = {}
-
+    merged: dict[str, list[dict[str, Any]]] = {}
     if user_memory:
         for memory_type, items in user_memory.items():
+            normalized_items: list[dict[str, Any]] = []
             if isinstance(items, list):
-                normalized_items: List[Dict[str, Any]] = []
                 for item in items:
                     if isinstance(item, dict):
                         normalized_items.append(dict(item))
                     else:
                         normalized_items.append({"key": "value", "value": item})
-                merged[memory_type] = normalized_items
-            else:
-                merged[memory_type] = []
+            merged[memory_type] = normalized_items
 
-    merged["dialog_state"] = [
-        {
-            "key": "dialog_state",
-            "value": dialog_state,
-        }
-    ]
-
+    merged["dialog_state"] = [{"key": "dialog_state", "value": dialog_state}]
     return merged
 
 
-def _build_explanation(decision: str, intent: str, lifecycle: str, cta: str) -> str:
-    """
-    Build a human-readable explanation for the bot's response in demo mode.
-
-    Args:
-        decision: The decision made by policy engine.
-        intent: The detected intent.
-        lifecycle: Current lifecycle stage.
-        cta: Call-to-action.
-
-    Returns:
-        A string explaining why the bot responded that way.
-    """
-    parts = []
-    if intent:
-        parts.append(f"Я распознал намерение: {intent}")
-    if decision == "LLM_GENERATE":
-        parts.append("Я сгенерировал ответ на основе вашего вопроса и базы знаний.")
-    elif decision == "ESCALATE_TO_HUMAN":
-        parts.append("Я бы передал вопрос менеджеру, так как он требует человеческого вмешательства.")
-    if lifecycle:
-        parts.append(f"На основе нашего разговора я определил стадию: {lifecycle}.")
-    if cta and cta != "none":
-        parts.append(f"Следующим шагом я предлагаю: {cta}.")
-
-    if not parts:
-        return "Ответ сгенерирован на основе вашего сообщения."
-    return " ".join(parts)
+def _resolve_response_model_name(state: AgentState, default_model: str) -> str:
+    profile = ProjectRuntimeProfile.from_configuration(state.get("project_configuration"))
+    return profile.fallback_model or default_model
 
 
 def create_response_generator_node(
-    llm: Optional[ChatGroq] = None,
-    model_name: Optional[str] = None,
+    llm: ChatGroq | None = None,
+    model_name: str | None = None,
 ):
     """
-    Factory function that creates a response generator node.
+    Create the response-generator graph node.
 
     Args:
-        llm: Optional pre-configured ChatGroq instance. If None, creates one using settings.
-        model_name: Optional model name (defaults to settings.GROQ_MODEL).
+        llm: Optional pre-configured base LLM client.
+        model_name: Optional base model override.
 
     Returns:
-        An async function that takes an AgentState dict and returns a dict
-        with updates to the state (response_text).
+        Async LangGraph node that emits a response_text state patch.
     """
+
+    base_model = model_name or settings.GROQ_MODEL
     if llm is None:
-        model = model_name or settings.GROQ_MODEL
         llm = ChatGroq(
-            model=model,
+            model=base_model,
             temperature=0.3,
             max_tokens=500,
             api_key=settings.GROQ_API_KEY,
         )
 
-    async def _response_generator_node_impl(state: AgentState) -> Dict[str, Any]:
-        """
-        Generate the final response using LLM.
-
-        Expected state fields:
-          - decision: str
-          - user_input: str
-          - conversation_summary: Optional[str]
-          - history: Optional[List[Dict]]
-          - knowledge_chunks: Optional[List[Dict]]
-          - user_memory: Optional[Dict]
-          - dialog_state: Optional[Dict]
-          - features: Optional[Dict]
-          - demo_mode: Optional[bool]
-
-        Returns:
-            Dict with response_text and optionally metadata (explanation).
-        """
-        decision = state.get("decision", "LLM_GENERATE")
-        if decision not in ["LLM_GENERATE", "RESPOND_KB", "RESPOND_TEMPLATE"]:
+    async def _response_generator_node_impl(state: AgentState) -> dict[str, Any]:
+        context = ResponseGenerationContext.from_state(state)
+        if context.decision not in {"LLM_GENERATE", "RESPOND_KB", "RESPOND_TEMPLATE"}:
             logger.debug(
                 "Skipping response generation, decision not generative",
-                extra={"decision": decision},
+                extra={"decision": context.decision},
             )
             return {}
 
         merged_memory = _merge_dialog_state_into_user_memory(
-            state.get("user_memory"),
-            state.get("dialog_state"),
+            context.user_memory,
+            context.dialog_state,
+        )
+        logger.debug(
+            "Preparing response prompt",
+            extra={
+                "decision": context.decision,
+                "history_count": len(context.history),
+                "knowledge_chunk_count": len(context.knowledge_chunks),
+                "has_dialog_state": bool(context.dialog_state),
+            },
         )
 
-        # ===== DEBUG OUTPUT =====
-        print("\n==== KB CHUNKS ====")
-        for c in state.get("knowledge_chunks", []):
-            print(c.get("content"))
-        print("==== END ====\n")
-
-        print("==== HISTORY ====")
-        for msg in state.get("history", []):
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            print(f"- {role}: {content}")
-        print("==== END ====\n")
-        # =======================
-
         prompt = build_response_prompt(
-            decision=decision,
-            user_input=state.get("user_input", ""),
-            conversation_summary=state.get("conversation_summary"),
-            history=state.get("history"),
-            knowledge_chunks=state.get("knowledge_chunks"),
+            decision=context.decision,
+            user_input=context.user_input,
+            conversation_summary=context.conversation_summary,
+            history=context.history,
+            knowledge_chunks=context.knowledge_chunks,
             user_memory=merged_memory,
-            features=state.get("features"),
+            features=context.features,
+            project_configuration=context.project_configuration,
         )
 
         try:
-            response = await llm.ainvoke([("human", prompt)])
+            selected_model = _resolve_response_model_name(state, base_model)
+            llm_for_request = llm
+            if selected_model != base_model:
+                llm_for_request = ChatGroq(
+                    model=selected_model,
+                    temperature=0.3,
+                    max_tokens=500,
+                    api_key=settings.GROQ_API_KEY,
+                )
+
+            response = await llm_for_request.ainvoke([("human", prompt)])
             response_text = (response.content or "").strip()
+
+            metadata: dict[str, Any] = {}
 
             logger.debug(
                 "Response generated",
                 extra={
                     "response_length": len(response_text),
-                    "decision": decision,
+                    "decision": context.decision,
+                    "model": selected_model,
                 },
             )
-
-            # Prepare metadata
-            metadata: Dict[str, Any] = {}
-            # In demo mode, add explanation
-            if state.get("demo_mode"):
-                explanation = _build_explanation(
-                    decision=decision,
-                    intent=state.get("intent", ""),
-                    lifecycle=state.get("lifecycle", ""),
-                    cta=state.get("cta", ""),
-                )
-                metadata["explanation"] = explanation
-                logger.debug("Added explanation to metadata", extra={"explanation": explanation})
-
-            return {"response_text": response_text, "metadata": metadata}
-
+            return ResponseGenerationResult(
+                response_text=response_text,
+                metadata=metadata,
+            ).to_state_patch()
         except Exception:
-            logger.exception("Response generation failed", extra={"decision": decision})
-            return {
-                "response_text": "Извините, произошла ошибка при формировании ответа. Попробуйте позже."
-            }
+            logger.exception("Response generation failed", extra={"decision": context.decision})
+            return ResponseGenerationResult(
+                response_text="Sorry, something went wrong while generating the response. Please try again later.",
+            ).to_state_patch()
 
     def _get_response_input_size(state: AgentState) -> int:
-        """
-        Estimate response generator input size.
-
-        Args:
-            state: Current agent state.
-
-        Returns:
-            Approximate input size.
-        """
+        context = ResponseGenerationContext.from_state(state)
         return (
-            len(state.get("user_input") or "") +
-            len(state.get("conversation_summary") or "") +
-            len(str(state.get("history") or [])) +
-            len(str(state.get("knowledge_chunks") or [])) +
-            len(str(state.get("user_memory") or {})) +
-            len(str(state.get("dialog_state") or {}))
+            len(context.user_input)
+            + len(context.conversation_summary or "")
+            + len(str(context.history))
+            + len(str(context.knowledge_chunks))
+            + len(str(context.user_memory or {}))
+            + len(str(context.project_configuration or {}))
+            + len(str(context.dialog_state or {}))
         )
 
-    def _get_response_output_size(result: Dict[str, Any]) -> int:
-        """
-        Estimate response generator output size.
-
-        Args:
-            result: Node result.
-
-        Returns:
-            Response text length.
-        """
+    def _get_response_output_size(result: dict[str, Any]) -> int:
         return len(result.get("response_text", ""))
 
-    async def response_generator_node(state: AgentState) -> Dict[str, Any]:
-        """
-        Execute response generation with tracing.
-
-        Args:
-            state: Current agent state.
-
-        Returns:
-            Dictionary of state updates.
-        """
+    async def response_generator_node(state: AgentState) -> dict[str, Any]:
         return await log_node_execution(
             "response_generator",
             _response_generator_node_impl,

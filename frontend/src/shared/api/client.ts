@@ -23,10 +23,62 @@ type ProjectCreate = components['schemas']['ProjectCreate'];
 type ProjectUpdate = components['schemas']['ProjectUpdate'];
 type BotTokenRequest = components['schemas']['BotTokenRequest'];
 type ManagerAddRequest = components['schemas']['ManagerAddRequest'];
-type ApplyTemplateRequest = components['schemas']['ApplyTemplateRequest'];
 type ReplyRequest = components['schemas']['ReplyRequest'];
 type ChatMessageRequest = components['schemas']['ChatMessageRequest'];
 type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
+export type ProjectSettingsUpdate = {
+  brand_name?: string;
+  industry?: string;
+  tone_of_voice?: string;
+  default_language?: string;
+  default_timezone?: string;
+  system_prompt_override?: string;
+};
+export type ProjectPoliciesUpdate = {
+  escalation_policy_json?: Record<string, unknown>;
+  routing_policy_json?: Record<string, unknown>;
+  crm_policy_json?: Record<string, unknown>;
+  response_policy_json?: Record<string, unknown>;
+  privacy_policy_json?: Record<string, unknown>;
+};
+export type ProjectLimitProfileUpdate = {
+  monthly_token_limit?: number;
+  requests_per_minute?: number;
+  max_concurrent_threads?: number;
+  priority?: number;
+  fallback_model?: string;
+};
+export type ProjectIntegrationUpsert = {
+  provider: string;
+  status?: string;
+  config_json?: Record<string, unknown>;
+  credentials_encrypted?: string;
+};
+export type ProjectChannelUpsert = {
+  kind: 'platform' | 'client' | 'manager' | 'widget';
+  provider: string;
+  status?: string;
+  config_json?: Record<string, unknown>;
+};
+
+async function authedJsonRequest<TBody>(
+  path: string,
+  options: { method: string; body?: TBody }
+) {
+  const token = getSessionToken();
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: options.method,
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw data;
+  return { data, response };
+}
 
 // ---------- Error Message Extraction ----------
 export const getErrorMessage = (error: unknown): string => {
@@ -148,10 +200,46 @@ export const api = Object.assign(client, {
     addManager: (projectId: string, chat_id: number) => client.POST('/api/projects/{project_id}/managers', { params: { path: { project_id: projectId } }, body: { chat_id } as ManagerAddRequest }),
     removeManager: (projectId: string, chat_id: number) => client.DELETE('/api/projects/{project_id}/managers/{chat_id}', { params: { path: { project_id: projectId, chat_id } } }),
     connectBot: (projectId: string, token: string, type: 'client' | 'manager') => client.POST('/api/projects/{project_id}/connect-bot', { params: { path: { project_id: projectId } }, body: { token, type } }),
+    getConfiguration: (projectId: string) =>
+      authedJsonRequest(`/api/projects/${projectId}/configuration`, { method: 'GET' }),
+    updateSettings: (projectId: string, body: ProjectSettingsUpdate) =>
+      authedJsonRequest(`/api/projects/${projectId}/settings`, { method: 'PATCH', body }),
+    updatePolicies: (projectId: string, body: ProjectPoliciesUpdate) =>
+      authedJsonRequest(`/api/projects/${projectId}/policies`, { method: 'PATCH', body }),
+    updateLimits: (projectId: string, body: ProjectLimitProfileUpdate) =>
+      authedJsonRequest(`/api/projects/${projectId}/limits`, { method: 'PATCH', body }),
+    listIntegrations: (projectId: string) =>
+      authedJsonRequest(`/api/projects/${projectId}/integrations`, { method: 'GET' }),
+    upsertIntegration: (projectId: string, body: ProjectIntegrationUpsert) =>
+      authedJsonRequest(`/api/projects/${projectId}/integrations`, { method: 'POST', body }),
+    listChannels: (projectId: string) =>
+      authedJsonRequest(`/api/projects/${projectId}/channels`, { method: 'GET' }),
+    upsertChannel: (projectId: string, body: ProjectChannelUpsert) =>
+      authedJsonRequest(`/api/projects/${projectId}/channels`, { method: 'POST', body }),
   },
-  templates: {
-    list: () => client.GET('/api/templates'),
-    apply: (projectId: string, template_slug: string) => client.POST('/api/templates/projects/{project_id}/apply', { params: { path: { project_id: projectId } }, body: { template_slug } as ApplyTemplateRequest }),
+  members: {
+    list: async (projectId: string) => {
+      return authedJsonRequest(`/api/projects/${projectId}/members`, { method: 'GET' });
+    },
+    upsert: async (projectId: string, body: { user_id: string; role: string }) => {
+      return authedJsonRequest(`/api/projects/${projectId}/members`, { method: 'POST', body });
+    },
+    remove: async (projectId: string, memberUserId: string) => {
+      const token = getSessionToken();
+      const headers = new Headers({ 'Content-Type': 'application/json' });
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/members/${memberUserId}`, {
+        method: 'DELETE',
+        headers,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw data;
+      }
+      return { data: null, response };
+    },
   },
   threads: {
     list: (params: { project_id: string; limit?: number; offset?: number; status_filter?: string | null; search?: string | null }) =>
@@ -172,19 +260,25 @@ export const api = Object.assign(client, {
       client.POST('/api/threads/{thread_id}/demo', { params: { path: { thread_id: threadId } } }),
   },
   chat: {
-    sendStream: (projectId: string, message: string, model?: string) =>
+    sendStream: (projectId: string, message: string, model?: string, visitorId?: string) =>
       fetch(`${API_BASE_URL}/api/chat/projects/${projectId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, model } as ChatMessageRequest),
+        body: JSON.stringify({ message, model, visitor_id: visitorId } as ChatMessageRequest),
       }),
   },
   knowledge: {
     upload: (projectId: string, file: File) => {
       const formData = new FormData();
       formData.append('file', file);
+      const token = getSessionToken();
+      const headers = new Headers();
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
       return fetch(`${API_BASE_URL}/api/projects/${projectId}/knowledge`, {
         method: 'POST',
+        headers,
         body: formData,
       });
     },
@@ -200,6 +294,34 @@ export const api = Object.assign(client, {
       if (!response.ok) throw data;
       return { data, response };
     },
+    emailRegister: async (body: { email: string; password: string; full_name?: string }) =>
+      authedJsonRequest('/api/auth/email/register', { method: 'POST', body }),
+    emailLogin: async (body: { email: string; password: string }) =>
+      authedJsonRequest('/api/auth/email/login', { method: 'POST', body }),
+    linkEmail: async (body: { email: string; password: string }) =>
+      authedJsonRequest('/api/auth/link/email', { method: 'POST', body }),
+    requestEmailVerification: async () =>
+      authedJsonRequest('/api/auth/email/verification/request', { method: 'POST' }),
+    confirmEmailVerification: async (body: { token: string }) =>
+      authedJsonRequest('/api/auth/email/verification/confirm', { method: 'POST', body }),
+    googleLogin: async (body: { provider_subject: string; email?: string; full_name?: string }) =>
+      authedJsonRequest('/api/auth/google/login', { method: 'POST', body }),
+    googleLoginWithIdToken: async (body: { id_token: string }) =>
+      authedJsonRequest('/api/auth/google/login/id-token', { method: 'POST', body }),
+    linkGoogle: async (body: { provider_subject: string; email?: string }) =>
+      authedJsonRequest('/api/auth/link/google', { method: 'POST', body }),
+    linkGoogleWithIdToken: async (body: { id_token: string }) =>
+      authedJsonRequest('/api/auth/link/google/id-token', { method: 'POST', body }),
+    changePassword: async (body: { new_password: string; current_password?: string }) =>
+      authedJsonRequest('/api/auth/password/change', { method: 'POST', body }),
+    requestPasswordReset: async (body: { email: string }) =>
+      authedJsonRequest('/api/auth/password/reset/request', { method: 'POST', body }),
+    confirmPasswordReset: async (body: { token: string; new_password: string }) =>
+      authedJsonRequest('/api/auth/password/reset/confirm', { method: 'POST', body }),
+    unlinkMethod: async (provider: 'telegram' | 'email' | 'google') =>
+      authedJsonRequest(`/api/auth/methods/${provider}`, { method: 'DELETE' }),
+    me: async () => authedJsonRequest('/api/auth/me', { method: 'GET' }),
+    methods: async () => authedJsonRequest('/api/auth/methods', { method: 'GET' }),
   },
   clients: {
     list: (params: { project_id: string; limit?: number; offset?: number; search?: string | null }) =>

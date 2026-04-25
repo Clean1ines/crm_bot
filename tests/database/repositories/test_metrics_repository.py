@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 from datetime import date, datetime
 import asyncpg
 
-from src.database.repositories.metrics_repository import MetricsRepository
+from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.utils.uuid_utils import ensure_uuid
 
 

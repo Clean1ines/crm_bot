@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from uuid import uuid4
 
-from src.main import app
+from src.interfaces.http.app import app
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ class TestFrontendLogs:
 
     def test_frontend_logs_minimal(self, client):
         """Пустой JSON — дефолтные level='info', message=''"""
-        with patch("src.api.logs.logger") as mock_logger:
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json={})
 
         assert response.status_code == 200
@@ -33,7 +33,7 @@ class TestFrontendLogs:
     def test_frontend_logs_with_level_and_message(self, client):
         """Переданы level='error' и message"""
         payload = {"level": "error", "message": "Test error message"}
-        with patch("src.api.logs.logger") as mock_logger:
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json=payload)
 
         assert response.status_code == 200
@@ -49,7 +49,7 @@ class TestFrontendLogs:
             "user_id": "123",
             "context": {"page": "dashboard"}
         }
-        with patch("src.api.logs.logger") as mock_logger:
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json=payload)
 
         assert response.status_code == 200
@@ -69,7 +69,7 @@ class TestFrontendLogs:
     def test_frontend_logs_unknown_level_fallback_to_info(self, client):
         """Неизвестный уровень — fallback на info"""
         payload = {"level": "critical", "message": "Unknown level message"}
-        with patch("src.api.logs.logger") as mock_logger:
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json=payload)
 
         assert response.status_code == 200
@@ -79,7 +79,7 @@ class TestFrontendLogs:
     def test_frontend_logs_debug_level(self, client):
         """Уровень debug"""
         payload = {"level": "debug", "message": "Debug message"}
-        with patch("src.api.logs.logger") as mock_logger:
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json=payload)
 
         assert response.status_code == 200
@@ -88,7 +88,7 @@ class TestFrontendLogs:
     def test_frontend_logs_missing_message(self, client):
         """Отсутствует поле message — дефолт ''"""
         payload = {"level": "info"}
-        with patch("src.api.logs.logger") as mock_logger:
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json=payload)
 
         assert response.status_code == 200

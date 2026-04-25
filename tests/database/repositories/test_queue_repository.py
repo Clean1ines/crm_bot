@@ -4,7 +4,7 @@ from uuid import uuid4
 import json
 import asyncpg
 
-from src.database.repositories.queue_repository import QueueRepository
+from src.infrastructure.db.repositories.queue_repository import QueueRepository
 
 
 @pytest.fixture

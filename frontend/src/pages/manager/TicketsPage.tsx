@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../shared/api/client';
 import { useAppStore } from '../../app/store';
 import type { Thread, Client, LastMessage } from '../../entities/thread/model/types';
+import { getClientDisplayName } from '../../shared/lib/clients';
 
 export const TicketsPage: React.FC = () => {
   const { selectedProjectId } = useAppStore();
@@ -35,6 +36,7 @@ export const TicketsPage: React.FC = () => {
         {data.map((ticket: Thread) => {
           const client = ticket.client as unknown as Client;
           const lastMsg = ticket.last_message as unknown as LastMessage | null;
+          const clientName = getClientDisplayName(client, 'Клиент');
           return (
             <div
               key={ticket.thread_id}
@@ -44,7 +46,7 @@ export const TicketsPage: React.FC = () => {
                 to={`/projects/${selectedProjectId}/tickets/${ticket.thread_id}`}
                 className="text-[var(--accent-primary)] font-medium hover:underline"
               >
-                Тикет #{ticket.thread_id.slice(0, 8)} - {client?.full_name || client?.username || 'Клиент'}
+                Тикет #{ticket.thread_id.slice(0, 8)} - {clientName}
               </Link>
               <p className="text-sm text-[var(--text-secondary)] mt-1 line-clamp-2">
                 {lastMsg?.content || 'Нет сообщений'}

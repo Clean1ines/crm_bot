@@ -3,6 +3,7 @@ import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
 import type { Thread, Client, LastMessage } from '../../../entities/thread/model/types';
 import { Search, Circle } from 'lucide-react';
+import { getClientDisplayName } from '../../../shared/lib/clients';
 
 interface DialogListProps {
   projectId: string;
@@ -119,6 +120,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
           const isActive = selectedThreadId === thread.thread_id;
           const lastMsgRole = getLastMessageRole(thread);
           const bubbleBg = getMessageBackground(lastMsgRole);
+          const clientName = getClientDisplayName(client, 'Клиент');
           return (
             <div
               key={thread.thread_id}
@@ -137,7 +139,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
                     <span className="font-medium text-[var(--text-primary)] truncate">
-                      {client?.full_name || client?.username || 'Клиент'}
+                      {clientName}
                     </span>
                     <span className="text-xs text-[var(--text-muted)] ml-2 flex-shrink-0">
                       {lastMsg?.created_at

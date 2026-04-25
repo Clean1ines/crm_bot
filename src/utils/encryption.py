@@ -4,8 +4,8 @@ Uses Fernet symmetric encryption from the cryptography library.
 """
 
 from cryptography.fernet import Fernet, InvalidToken
-from src.core.config import settings
-from src.core.logging import get_logger
+from src.infrastructure.config.settings import settings
+from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 

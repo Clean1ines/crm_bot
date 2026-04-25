@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 import httpx
 
-from src.main import app
+from src.interfaces.http.app import app
 
 
 @pytest.fixture(autouse=True)
@@ -32,7 +32,7 @@ class TestBotAPI:
             }
         }
 
-        with patch("src.api.bot.settings") as mock_settings:
+        with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
@@ -48,9 +48,9 @@ class TestBotAPI:
 
     def test_get_bot_username_missing_token(self, client):
         """Отсутствует токен бота."""
-        with patch("src.api.bot.settings") as mock_settings:
+        with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = ""
-            with patch("src.api.bot.logger") as mock_logger:
+            with patch("src.interfaces.http.bot.logger") as mock_logger:
                 response = client.get("/api/bot/username")
 
         assert response.status_code == 500
@@ -66,13 +66,13 @@ class TestBotAPI:
             "description": "Not Found"
         }
 
-        with patch("src.api.bot.settings") as mock_settings:
+        with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "invalid_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
                 mock_client_class.return_value = mock_client
-                with patch("src.api.bot.logger") as mock_logger:
+                with patch("src.interfaces.http.bot.logger") as mock_logger:
                     response = client.get("/api/bot/username")
 
         assert response.status_code == 500
@@ -80,7 +80,7 @@ class TestBotAPI:
 
     def test_get_bot_username_network_error(self, client):
         """Сетевая ошибка при запросе к Telegram."""
-        with patch("src.api.bot.settings") as mock_settings:
+        with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
@@ -88,7 +88,7 @@ class TestBotAPI:
                     side_effect=httpx.RequestError("Connection failed", request=MagicMock())
                 )
                 mock_client_class.return_value = mock_client
-                with patch("src.main.logger") as mock_global_logger:
+                with patch("src.interfaces.http.app.logger") as mock_global_logger:
                     # Вызываем эндпоинт, ожидаем, что исключение не будет перехвачено
                     try:
                         client.get("/api/bot/username")
@@ -105,13 +105,13 @@ class TestBotAPI:
         mock_response.status_code = 200
         mock_response.json.side_effect = ValueError("Invalid JSON")
 
-        with patch("src.api.bot.settings") as mock_settings:
+        with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
                 mock_client_class.return_value = mock_client
-                with patch("src.main.logger") as mock_global_logger:
+                with patch("src.interfaces.http.app.logger") as mock_global_logger:
                     try:
                         client.get("/api/bot/username")
                     except Exception:
@@ -129,13 +129,13 @@ class TestBotAPI:
             # нет поля result
         }
 
-        with patch("src.api.bot.settings") as mock_settings:
+        with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
                 mock_client_class.return_value = mock_client
-                with patch("src.main.logger") as mock_global_logger:
+                with patch("src.interfaces.http.app.logger") as mock_global_logger:
                     try:
                         client.get("/api/bot/username")
                     except Exception:

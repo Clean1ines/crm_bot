@@ -8,7 +8,7 @@ This module defines the core abstraction for tools in the MRAK-OS platform:
 - Sandbox support for public/untrusted tool execution
 
 The registry enables:
-- Dynamic tool resolution from canvas workflows
+- Dynamic tool resolution from agent tool calls
 - Multi-tenant isolation via context dict
 - Event emission for audit and debugging
 - Marketplace-ready architecture for third-party tools
@@ -24,8 +24,8 @@ from uuid import UUID
 import jsonschema
 from jsonschema import ValidationError as SchemaValidationError
 
-from src.core.logging import get_logger
-from src.core.config import settings
+from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -55,8 +55,8 @@ class Tool(ABC):
     Tools are executed within a multi-tenant context and must respect isolation.
     
     Attributes:
-        name: Unique identifier for the tool (used in canvas and API).
-        description: Human-readable description for canvas UI.
+        name: Unique identifier for the tool (used by agent and API).
+        description: Human-readable description for API docs.
         input_schema: JSON Schema defining valid input arguments.
         is_public: Whether this tool can be used by untrusted users (Marketplace).
         timeout_seconds: Maximum execution time for this tool (None = no limit).
@@ -144,7 +144,7 @@ class ToolRegistry:
     - Registration of tools by unique name
     - Input validation before execution
     - Context isolation for multi-tenant safety
-    - Optional sandbox execution for public tools
+    - Optional execution controls for public tools
     - Event emission hooks for audit logging
     
     Usage:
@@ -171,7 +171,7 @@ class ToolRegistry:
         
         Args:
             tool: Tool instance to register.
-            public: If True, tool will be available in Marketplace (requires sandbox).
+            public: If True, tool will be available in Marketplace (requires explicit approval).
         
         Raises:
             ValueError: If tool name is already registered.
@@ -228,7 +228,7 @@ class ToolRegistry:
         
         This is the main entry point for tool execution from:
         - LangGraph agent nodes
-        - Canvas workflow runtime
+        - Agent tool call runtime
         - API endpoints
         
         Args:
@@ -364,7 +364,7 @@ class ToolRegistry:
     
     def list_tools(self, public_only: bool = False) -> List[Dict[str, Any]]:
         """
-        List registered tools for canvas UI or API documentation.
+        List registered tools for API documentation.
         
         Args:
             public_only: If True, only return tools marked as public.

@@ -1,141 +1,99 @@
 """
-Escalation node for LangGraph pipeline.
+Escalation node for the LangGraph pipeline.
 
-Creates a ticket in the tasks table, enqueues manager notification,
-and updates the state to indicate human escalation.
+Creates escalation side effects and returns a typed human-handoff state patch.
 """
 
-from typing import Dict, Any
+from typing import Any
 
-from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
-from src.database.models import ThreadStatus
-from src.database.repositories.thread_repository import ThreadRepository
-from src.database.repositories.queue_repository import QueueRepository
+from src.domain.runtime.escalation import EscalationContext, EscalationResult
+from src.infrastructure.db.repositories.queue_repository import QueueRepository
+from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.builtins import TicketCreateTool
 
 logger = get_logger(__name__)
+
+MISSING_THREAD_TEXT = (
+    "Escalation could not be completed because the conversation identifier is missing. "
+    "Please contact support."
+)
 
 
 def create_escalate_node(
     thread_repo: ThreadRepository,
     queue_repo: QueueRepository,
-    ticket_create_tool: TicketCreateTool
+    ticket_create_tool: TicketCreateTool,
 ):
     """
-    Factory function that creates an escalate node with injected repository dependencies.
-
-    Args:
-        thread_repo: ThreadRepository instance for updating thread status.
-        queue_repo: QueueRepository instance for enqueueing manager notification.
-        ticket_create_tool: TicketCreateTool instance for creating ticket record.
-
-    Returns:
-        An async function that takes an AgentState dict and returns a dict
-        with updates to the state (requires_human=True, response_text).
+    Create the escalation node with injected dependencies.
     """
-    async def _escalate_node_impl(state: AgentState) -> Dict[str, Any]:
-        """
-        Escalate the conversation to a human manager.
 
-        Expected state fields:
-          - thread_id: str
-          - project_id: str (optional, used for logging)
-          - user_input: str (optional, used for notification)
-          - client_profile: optional (used for ticket creation)
-
-        Actions:
-          1. Create a ticket in the tasks table.
-          2. Enqueue a 'notify_manager' task with relevant payload.
-          3. Enqueue a 'update_metrics' task with escalated=True.
-          4. Set requires_human=True and a standard response text in the state.
-
-        Returns a dict with updates to the state.
-        """
-        thread_id = state.get("thread_id")
-        project_id = state.get("project_id")
-        user_input = state.get("user_input", "")
-        client_id = None
-        if state.get("client_profile") and isinstance(state.get("client_profile"), dict):
-            client_id = state["client_profile"].get("id")
-
-        if not thread_id:
+    async def _escalate_node_impl(state: AgentState) -> dict[str, Any]:
+        context = EscalationContext.from_state(state)
+        if not context.thread_id:
             logger.error("escalate_node called with no thread_id")
-            return {
-                "requires_human": True,
-                "response_text": "Ошибка эскалации: отсутствует идентификатор диалога. Пожалуйста, обратитесь к поддержке."
-            }
+            return EscalationResult(response_text=MISSING_THREAD_TEXT).to_state_patch()
 
-        logger.info("Escalating thread", extra={"thread_id": thread_id, "project_id": project_id, "user_input": user_input[:50]})
+        logger.info(
+            "Escalating thread",
+            extra={
+                "thread_id": context.thread_id,
+                "project_id": context.project_id,
+                "user_input": context.user_input[:50],
+            },
+        )
 
-        # 1. Create ticket record
         try:
-            # Build title and description
-            title = "Escalation: user requested human help"
-            description = f"User message: {user_input[:500]}"
-            priority = "normal"
-            # Use TicketCreateTool to insert into tasks table
             result = await ticket_create_tool.run(
-                args={"title": title, "description": description, "priority": priority},
+                args=context.ticket_payload(),
                 context={
-                    "project_id": project_id,
-                    "thread_id": thread_id,
-                    "user_id": client_id
-                }
+                    "project_id": context.project_id,
+                    "thread_id": context.thread_id,
+                    "user_id": context.client_id,
+                },
             )
-            ticket_id = result.get("ticket_id")
-            logger.info("Ticket created", extra={"ticket_id": ticket_id, "thread_id": thread_id})
-        except Exception as e:
-            logger.exception("Failed to create ticket", extra={"thread_id": thread_id})
-            # Continue anyway, but log error
+            logger.info(
+                "Ticket created",
+                extra={"ticket_id": result.get("ticket_id"), "thread_id": context.thread_id},
+            )
+        except Exception:
+            logger.exception("Failed to create ticket", extra={"thread_id": context.thread_id})
 
-        # 2. Enqueue manager notification task
+        try:
+            await queue_repo.enqueue("notify_manager", context.notification_payload())
+            logger.debug("Manager notification enqueued", extra={"thread_id": context.thread_id})
+        except Exception:
+            logger.exception(
+                "Failed to enqueue manager notification",
+                extra={"thread_id": context.thread_id},
+            )
+
         try:
             await queue_repo.enqueue(
-                task_type="notify_manager",
-                payload={
-                    "thread_id": thread_id,
-                    "project_id": project_id,
-                    "message": user_input[:200]  # rename user_input to message for worker
-                }
+                "update_metrics",
+                {"thread_id": context.thread_id, "escalated": True},
             )
-            logger.debug("Manager notification enqueued", extra={"thread_id": thread_id})
-        except Exception as e:
-            logger.exception("Failed to enqueue manager notification", extra={"thread_id": thread_id})
+            logger.debug("Metrics update enqueued", extra={"thread_id": context.thread_id})
+        except Exception:
+            logger.exception("Failed to enqueue metrics update", extra={"thread_id": context.thread_id})
 
-        # 3. Enqueue metrics update task
-        try:
-            await queue_repo.enqueue(
-                task_type="update_metrics",
-                payload={
-                    "thread_id": thread_id,
-                    "escalated": True
-                }
-            )
-            logger.debug("Metrics update enqueued", extra={"thread_id": thread_id})
-        except Exception as e:
-            logger.exception("Failed to enqueue metrics update", extra={"thread_id": thread_id})
-
-        # 4. Return updates to state
-        return {
-            "requires_human": True,
-            "response_text": "Ваш вопрос передан менеджеру. Ожидайте ответа в ближайшее время.",
-            "tool_result": None  # ensure no leftover tool result
-        }
+        return EscalationResult().to_state_patch()
 
     def _get_escalate_input_size(state: AgentState) -> int:
-        return len(state.get("user_input", ""))
+        return len(str(state.get("user_input") or ""))
 
-    def _get_escalate_output_size(result: Dict[str, Any]) -> int:
-        return len(result.get("response_text", ""))
+    def _get_escalate_output_size(result: dict[str, Any]) -> int:
+        return len(str(result.get("response_text") or ""))
 
-    async def escalate_node(state: AgentState) -> Dict[str, Any]:
+    async def escalate_node(state: AgentState) -> dict[str, Any]:
         return await log_node_execution(
             "escalate",
             _escalate_node_impl,
             state,
             get_input_size=_get_escalate_input_size,
-            get_output_size=_get_escalate_output_size
+            get_output_size=_get_escalate_output_size,
         )
 
     return escalate_node

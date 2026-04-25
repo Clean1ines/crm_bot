@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, ANY, call
 from uuid import uuid4, UUID
 import asyncpg
 
-from src.database.repositories.knowledge_repository import KnowledgeRepository
+from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ class TestKnowledgeRepository:
     # search
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_text")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_success_hybrid_true(self, mock_embed_text, knowledge_repo, mock_pool):
         project_id = str(uuid4())
         query = "test query"
@@ -92,7 +92,7 @@ class TestKnowledgeRepository:
             assert "method" in item
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_text")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_success_hybrid_false(self, mock_embed_text, knowledge_repo, mock_pool):
         project_id = str(uuid4())
         query = "test"
@@ -116,7 +116,7 @@ class TestKnowledgeRepository:
             assert item["method"] == "vector"
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_text")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_limit_zero(self, mock_embed_text, knowledge_repo, mock_pool):
         mock_embed_text.return_value = [0.1]
         mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
@@ -124,7 +124,7 @@ class TestKnowledgeRepository:
             await knowledge_repo.search(str(uuid4()), "q", limit=0)
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_text")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_empty_vector_results(self, mock_embed_text, knowledge_repo, mock_pool):
         mock_embed_text.return_value = [0.1]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
@@ -132,7 +132,7 @@ class TestKnowledgeRepository:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_text")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_embed_text_error(self, mock_embed_text, knowledge_repo, mock_pool):
         mock_embed_text.side_effect = TypeError("embed failed")
         with pytest.raises(TypeError):
@@ -142,7 +142,7 @@ class TestKnowledgeRepository:
     # add_knowledge_batch
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_batch")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
     async def test_add_knowledge_batch_success(self, mock_embed_batch, knowledge_repo, mock_pool):
         project_id = str(uuid4())
         chunks = [{"content": "chunk1"}, {"content": "chunk2"}]
@@ -184,14 +184,14 @@ class TestKnowledgeRepository:
         assert result == 0
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_batch")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
     async def test_add_knowledge_batch_embed_batch_error(self, mock_embed_batch, knowledge_repo):
         mock_embed_batch.side_effect = ValueError("embed batch failed")
         with pytest.raises(ValueError):
             await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "x"}])
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_batch")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
     async def test_add_knowledge_batch_foreign_key_error(self, mock_embed_batch, knowledge_repo, mock_pool):
         mock_embed_batch.return_value = [[0.1]]
         mock_transaction = AsyncMock()
@@ -203,7 +203,7 @@ class TestKnowledgeRepository:
             await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "x"}])
 
     @pytest.mark.asyncio
-    @patch("src.database.repositories.knowledge_repository.embed_batch")
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
     async def test_add_knowledge_batch_not_null_error(self, mock_embed_batch, knowledge_repo, mock_pool):
         mock_embed_batch.return_value = [[0.1]]
         mock_transaction = AsyncMock()

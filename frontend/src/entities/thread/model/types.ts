@@ -9,8 +9,13 @@ export type Thread = components['schemas']['ThreadResponse'];
 
 export interface Client {
   id: string;
+  user_id?: string | null;
   full_name?: string | null;
   username?: string | null;
+  email?: string | null;
+  company?: string | null;
+  phone?: string | null;
+  metadata?: Record<string, unknown>;
   chat_id: number;
 }
 
@@ -49,5 +54,10 @@ export interface MemoryEntry {
 }
 
 export interface ThreadState {
+  client?: Client | null;
+  status?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  interaction_mode?: string | null;
   [key: string]: unknown;
 }

@@ -1,0 +1,47 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from src.agent.nodes.load_state import create_load_state_node
+
+
+@pytest.mark.asyncio
+async def test_load_state_node_uses_thread_runtime_snapshots():
+    thread_repo = MagicMock()
+    thread_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+            "chat_id": 123,
+        }
+    )
+    thread_repo.get_analytics_view = AsyncMock(
+        return_value=SimpleNamespace(
+            to_record=lambda: {
+                "intent": "pricing",
+                "lifecycle": "warm",
+                "cta": None,
+                "decision": "RESPOND",
+            }
+        )
+    )
+    thread_repo.get_messages_for_langgraph = AsyncMock(
+        return_value=[{"role": "user", "content": "hello"}]
+    )
+    thread_repo.get_state_json = AsyncMock(return_value={"ignored": True})
+
+    node = create_load_state_node(thread_repo, project_repo=MagicMock(), memory_repo=None)
+
+    result = await node({"thread_id": "thread-1", "project_id": "project-1"})
+
+    assert result["conversation_summary"] == "summary"
+    assert result["client_id"] == "client-1"
+    assert result["history"] == [{"role": "user", "content": "hello"}]
+    assert result["intent"] == "pricing"
+    assert result["lifecycle"] == "warm"
+    assert result["decision"] == "RESPOND"
+    assert result["user_memory"] == {}

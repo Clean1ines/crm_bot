@@ -5,6 +5,7 @@ import { api } from '../../../shared/api/client';
 import type { MemoryEntry, TimelineEvent, ThreadState } from '../../../entities/thread/model/types';
 import { Edit2, Save, X, AlertCircle, ChevronDown } from 'lucide-react';
 import frontendLogger from '../../../shared/lib/logger';
+import { getClientDisplayName } from '../../../shared/lib/clients';
 
 interface Tab {
   id: string;
@@ -66,6 +67,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       updated_at?: string;
       interaction_mode?: string;
     };
+    const clientName = getClientDisplayName(state?.client, 'Клиент');
     const isDemo = state?.interaction_mode === 'demo';
     return (
       <div className="space-y-3">
@@ -77,7 +79,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
         <div className="grid grid-cols-1 gap-3">
           <div className="bg-white rounded-lg shadow-sm p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Клиент</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{threadId ? threadId.slice(0, 8) : '—'}</div>
+            <div className="text-sm font-medium text-[var(--text-primary)]">{clientName}</div>
           </div>
           <div className="bg-white rounded-lg shadow-sm p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Статус</div>

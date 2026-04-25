@@ -4,7 +4,7 @@
   "description": "Monorepo for MRAK-OS backend and frontend",
   "scripts": {
     "dev:frontend": "cd frontend && npm run dev",
-    "dev:backend": "python -m uvicorn src.main:app --reload --port 8000",
+    "dev:backend": "python -m uvicorn src.interfaces.http.app:app --reload --port 8000",
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\""
   },
   "devDependencies": {

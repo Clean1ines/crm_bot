@@ -1,176 +1,111 @@
 """
-Knowledge base search node for LangGraph pipeline.
+Knowledge-search node for the LangGraph pipeline.
 
-Performs semantic search using the search_knowledge tool and stores results in state.
+Performs project-scoped knowledge retrieval through the tool registry and
+stores normalized chunks in graph state.
 """
 
-from typing import Dict, Any, List
-import hashlib
+from typing import Any
 
-from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
+from src.domain.runtime.knowledge_search import KnowledgeSearchContext, KnowledgeSearchResult
+from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
 
-def _hash_query(query: str) -> str:
-    return hashlib.md5(query.encode("utf-8")).hexdigest()
-
-
 def create_kb_search_node(tool_registry: ToolRegistry):
+    """
+    Create the knowledge-search node with an injected tool registry.
+    """
 
-    async def _kb_search_node_impl(state: AgentState) -> Dict[str, Any]:
-
-        project_id = state.get("project_id")
-        query = state.get("user_input", "")
-
-        if not project_id or not query:
+    async def _kb_search_node_impl(state: AgentState) -> dict[str, Any]:
+        context = KnowledgeSearchContext.from_state(state)
+        if not context.project_id or not context.query:
             logger.warning(
-                "KB SEARCH SKIPPED",
-                extra={
-                    "project_id": project_id,
-                    "query": query
-                }
+                "KB search skipped",
+                extra={"project_id": context.project_id, "query": context.query},
             )
-            return {"knowledge_chunks": []}
+            return KnowledgeSearchResult().to_state_patch()
 
-        query_hash = _hash_query(query)
-
-        # =========================
-        # TRACE INPUT
-        # =========================
         logger.info(
-            "KB SEARCH START",
+            "KB search start",
             extra={
-                "project_id": project_id,
-                "query": query,
-                "query_hash": query_hash,
-                "query_len": len(query),
-            }
+                "project_id": context.project_id,
+                "query": context.query,
+                "query_hash": context.query_hash,
+                "query_len": len(context.query),
+            },
         )
 
         try:
-
-            # =========================
-            # RETRIEVAL CALL (SINGLE SOURCE OF TRUTH)
-            # =========================
-            result = await tool_registry.execute(
+            payload = await tool_registry.execute(
                 "search_knowledge",
-                {
-                    "query": query,
-                    "limit": 10
+                {"query": context.query, "limit": 10},
+                context={"project_id": context.project_id},
+            )
+            result = KnowledgeSearchResult.from_tool_payload(payload)
+
+            logger.info(
+                "KB search result",
+                extra={
+                    "project_id": context.project_id,
+                    "query_hash": context.query_hash,
+                    "chunks_count": len(result.chunks),
+                    "chunk_ids": result.ids(),
+                    "scores": result.scores(),
                 },
-                context={"project_id": project_id}
             )
-
-            chunks = result.get("results", [])
-
-            # =========================
-            # NORMALIZATION
-            # =========================
-            chunk_ids = []
-            chunk_scores = []
-            normalized_chunks = []
-
-            for i, c in enumerate(chunks):
-                chunk_id = c.get("id", f"no-id-{i}")
-                score = c.get("score")
-
-                chunk_ids.append(chunk_id)
-                chunk_scores.append(score)
-
-                normalized_chunks.append({
-                    "id": chunk_id,
-                    "score": score,
-                    "content": (c.get("content") or "")[:150]   # <-- fix: use 'content' instead of 'answer'
-                })
-
-            # =========================
-            # TRACE OUTPUT
-            # =========================
             logger.info(
-                "KB SEARCH RESULT",
+                "KB order signature",
                 extra={
-                    "project_id": project_id,
-                    "query_hash": query_hash,
-                    "chunks_count": len(chunks),
-                    "chunk_ids": chunk_ids,
-                    "scores": chunk_scores,
-                }
+                    "query_hash": context.query_hash,
+                    "order": "|".join(result.ids()),
+                },
             )
 
-            # =========================
-            # STABILITY DEBUG (CRITICAL)
-            # =========================
-            order_signature = "|".join(chunk_ids)
-
-            logger.info(
-                "KB ORDER SIGNATURE",
-                extra={
-                    "query_hash": query_hash,
-                    "order": order_signature
-                }
-            )
-
-            # =========================
-            # ANOMALY DETECTION
-            # =========================
-
-            if len(chunks) == 0:
+            if not result.chunks:
                 logger.warning(
-                    "KB EMPTY RESULT",
+                    "KB empty result",
                     extra={
-                        "project_id": project_id,
-                        "query": query,
-                        "query_hash": query_hash
-                    }
+                        "project_id": context.project_id,
+                        "query": context.query,
+                        "query_hash": context.query_hash,
+                    },
                 )
 
-            if len(set(chunk_ids)) != len(chunk_ids):
-                logger.error(
-                    "KB DUPLICATE IDS DETECTED",
-                    extra={
-                        "chunk_ids": chunk_ids
-                    }
-                )
+            if len(set(result.ids())) != len(result.ids()):
+                logger.error("KB duplicate ids detected", extra={"chunk_ids": result.ids()})
 
-            if len(chunks) > 0 and any(s is None for s in chunk_scores):
-                logger.warning(
-                    "KB MISSING SCORES DETECTED",
-                    extra={
-                        "chunk_scores": chunk_scores
-                    }
-                )
+            if result.chunks and any(score is None for score in result.scores()):
+                logger.warning("KB missing scores detected", extra={"chunk_scores": result.scores()})
 
-            return {
-                "knowledge_chunks": normalized_chunks
-            }
-
-        except Exception as e:
+            return result.to_state_patch()
+        except Exception as exc:
             logger.exception(
-                "KB SEARCH FAILED",
+                "KB search failed",
                 extra={
-                    "project_id": project_id,
-                    "query": query,
-                    "error": str(e)
-                }
+                    "project_id": context.project_id,
+                    "query": context.query,
+                    "error": str(exc),
+                },
             )
-            return {"knowledge_chunks": []}
+            return KnowledgeSearchResult().to_state_patch()
 
     def _get_kb_search_input_size(state: AgentState) -> int:
-        return len(state.get("user_input", ""))
+        return len(str(state.get("user_input") or ""))
 
-    def _get_kb_search_output_size(result: Dict[str, Any]) -> int:
+    def _get_kb_search_output_size(result: dict[str, Any]) -> int:
         return len(result.get("knowledge_chunks", []))
 
-    async def kb_search_node(state: AgentState) -> Dict[str, Any]:
+    async def kb_search_node(state: AgentState) -> dict[str, Any]:
         return await log_node_execution(
             "kb_search",
             _kb_search_node_impl,
             state,
             get_input_size=_get_kb_search_input_size,
-            get_output_size=_get_kb_search_output_size
+            get_output_size=_get_kb_search_output_size,
         )
 
     return kb_search_node

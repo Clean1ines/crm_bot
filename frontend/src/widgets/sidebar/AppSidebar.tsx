@@ -33,6 +33,7 @@ const navItems: NavItem[] = [
   { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" /> },
   { path: 'managers', label: 'Менеджеры', icon: <User className="w-4 h-4" /> },
   { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" /> },
+  { path: 'settings', label: 'Настройки', icon: <Settings className="w-4 h-4" /> },
 ];
 
 export const AppSidebar: React.FC = () => {
@@ -183,15 +184,19 @@ export const AppSidebar: React.FC = () => {
       </nav>
 
       <div className="p-4 space-y-2">
-        <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => navigate('/profile')}
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white"
+        >
           <div className="w-8 h-8 rounded-full bg-[var(--accent-muted)] flex items-center justify-center text-[var(--accent-primary)] font-medium shadow-sm">
             <User className="w-4 h-4" />
           </div>
           <div className="flex-1">
             <div className="text-sm font-medium text-[var(--text-primary)]">Администратор</div>
-            <div className="text-xs text-[var(--text-muted)]">user@example.com</div>
+            <div className="text-xs text-[var(--text-muted)]">Профиль и вход</div>
           </div>
-        </div>
+        </button>
         <button
           onClick={openCreateModal}
           className="w-full text-sm text-[var(--accent-primary)] hover:bg-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 justify-center"

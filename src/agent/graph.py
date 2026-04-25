@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 
 from langgraph.graph import StateGraph, END
 
-from src.core.config import settings
-from src.core.logging import get_logger
+from src.infrastructure.config.settings import settings
+from src.infrastructure.logging.logger import get_logger
 from .state import AgentState
 from .nodes.load_state import create_load_state_node
 from .nodes.rules import rules_node
@@ -49,7 +49,7 @@ def create_agent(
         memory_repo: Optional MemoryRepository for long-term memory.
 
     Returns:
-        Compiled LangGraph workflow.
+        Compiled LangGraph runtime graph.
     """
     logger.info("Creating state machine agent")
 
@@ -73,25 +73,25 @@ def create_agent(
     persist_node = create_persist_node(thread_repo, event_repo, memory_repo)
 
     # Build graph
-    workflow = StateGraph(AgentState)
+    graph_builder = StateGraph(AgentState)
 
     # Add all nodes
-    workflow.add_node("load_state", load_state_node)
-    workflow.add_node("rules_check", rules_node)
-    workflow.add_node("kb_search", kb_search_node)
-    workflow.add_node("intent_extractor", intent_extractor_node)
-    workflow.add_node("policy_engine", policy_engine_node)
-    workflow.add_node("tool_executor", tool_executor_node)
-    workflow.add_node("escalate", escalate_node)
-    workflow.add_node("response_generator", response_generator_node)
-    workflow.add_node("responder", responder_node)
-    workflow.add_node("persist", persist_node)
+    graph_builder.add_node("load_state", load_state_node)
+    graph_builder.add_node("rules_check", rules_node)
+    graph_builder.add_node("kb_search", kb_search_node)
+    graph_builder.add_node("intent_extractor", intent_extractor_node)
+    graph_builder.add_node("policy_engine", policy_engine_node)
+    graph_builder.add_node("tool_executor", tool_executor_node)
+    graph_builder.add_node("escalate", escalate_node)
+    graph_builder.add_node("response_generator", response_generator_node)
+    graph_builder.add_node("responder", responder_node)
+    graph_builder.add_node("persist", persist_node)
 
     # Set entry point
-    workflow.set_entry_point("load_state")
+    graph_builder.set_entry_point("load_state")
 
     # Edges
-    workflow.add_edge("load_state", "rules_check")
+    graph_builder.add_edge("load_state", "rules_check")
 
     # Conditional edges from rules_check
     def route_from_rules(state: AgentState) -> str:
@@ -99,7 +99,7 @@ def create_agent(
         logger.info(f"Rules check decision: {decision}")
         return decision
 
-    workflow.add_conditional_edges(
+    graph_builder.add_conditional_edges(
         "rules_check",
         route_from_rules,
         {
@@ -110,7 +110,7 @@ def create_agent(
     )
 
     # Intent extraction then policy engine (no kb_search before)
-    workflow.add_edge("intent_extractor", "policy_engine")
+    graph_builder.add_edge("intent_extractor", "policy_engine")
 
     # Conditional edges from policy_engine
     def route_from_policy(state: AgentState) -> str:
@@ -118,7 +118,7 @@ def create_agent(
         logger.info(f"Policy engine decision: {decision}")
         return decision
 
-    workflow.add_conditional_edges(
+    graph_builder.add_conditional_edges(
         "policy_engine",
         route_from_policy,
         {
@@ -130,10 +130,10 @@ def create_agent(
     )
 
     # After kb_search, generate response
-    workflow.add_edge("kb_search", "response_generator")
+    graph_builder.add_edge("kb_search", "response_generator")
 
     # Edges from tool_executor
-    workflow.add_conditional_edges(
+    graph_builder.add_conditional_edges(
         "tool_executor",
         lambda state: "response_generator" if not state.get("requires_human") else "escalate",
         {
@@ -143,17 +143,17 @@ def create_agent(
     )
 
     # Edges from escalate
-    workflow.add_edge("escalate", "responder")
+    graph_builder.add_edge("escalate", "responder")
 
     # After response generation, go to responder
-    workflow.add_edge("response_generator", "responder")
+    graph_builder.add_edge("response_generator", "responder")
 
     # Edge from responder to persist
-    workflow.add_edge("responder", "persist")
+    graph_builder.add_edge("responder", "persist")
 
     # Edge from persist to END
-    workflow.add_edge("persist", END)
+    graph_builder.add_edge("persist", END)
 
-    compiled = workflow.compile()
+    compiled = graph_builder.compile()
     logger.info("State machine agent compiled successfully")
     return compiled

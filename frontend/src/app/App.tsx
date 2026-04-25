@@ -13,6 +13,8 @@ import { ChannelSettingsPage } from '@pages/channels/ChannelSettingsPage';
 import { KnowledgePage } from '@pages/knowledge/KnowledgePage';
 import { ManagersPage } from '@pages/managers/ManagersPage';
 import { ClientsPage } from '@pages/clients/ClientsPage';
+import { ProjectSettingsPage } from '@pages/settings/ProjectSettingsPage';
+import { ProfilePage } from '@pages/profile/ProfilePage';
 import { Layout } from './Layout';
 import { getSessionToken } from '@shared/api/client';
 import { useProjects } from '@entities/project/api/useProjects';
@@ -108,7 +110,8 @@ function App() {
             <Route path="/projects/:projectId/tickets/:threadId" element={<TicketDetailPage />} />
             <Route path="/projects/:projectId/managers" element={<ErrorBoundary><ManagersPage /></ErrorBoundary>} />
             <Route path="/projects/:projectId/billing" element={<ComingSoon />} />
-            <Route path="/projects/:projectId/settings" element={<ComingSoon />} />
+            <Route path="/projects/:projectId/settings" element={<ErrorBoundary><ProjectSettingsPage /></ErrorBoundary>} />
+            <Route path="/profile" element={<ErrorBoundary><ProfilePage /></ErrorBoundary>} />
             <Route path="/channels" element={<ChannelSettingsPage />} />
           </Route>
         </Routes>

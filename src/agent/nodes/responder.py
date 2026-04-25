@@ -1,126 +1,112 @@
 """
-Responder node for LangGraph pipeline.
+Responder node for the LangGraph pipeline.
 
-Sends the final response to the user via Telegram.
-Saves the assistant message to the database for context in future interactions.
+Delivers the final response through the transport adapter and reports the
+delivery outcome back into graph state.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any
 
-from src.core.logging import get_logger, log_node_execution
 from src.agent.state import AgentState
+from src.domain.runtime.delivery import ResponseDeliveryContext, ResponseDeliveryResult
+from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
+MISSING_CHAT_ID_TEXT = (
+    "Failed to deliver the response because the chat identifier is missing. "
+    "Please contact support."
+)
+SEND_FAILED_TEXT = (
+    "The response could not be delivered right now. Please try again later or contact a manager."
+)
+SEND_EXCEPTION_TEXT = (
+    "A technical error occurred while delivering the response. We are already looking into it."
+)
+
 
 def create_responder_node(tool_registry: ToolRegistry, thread_repo=None):
     """
-    Factory function that creates a responder node with injected ToolRegistry and ThreadRepository.
-
-    Args:
-        tool_registry: ToolRegistry instance for sending messages.
-        thread_repo: Optional ThreadRepository for saving assistant messages to history.
-
-    Returns:
-        An async function that takes an AgentState dict and returns updates.
+    Create the delivery node with injected tool registry and optional thread repo.
     """
-    async def _responder_node_impl(state: AgentState) -> Dict[str, Any]:
-        """
-        Send the final response to the user and save it to history.
 
-        Expected state fields:
-          - chat_id: int (Telegram chat ID)
-          - tool_result: optional, if present and has a 'text' field, use it.
-          - response_text: optional fallback text.
-          - project_id: str (for logging)
-          - thread_id: str (for saving message)
-
-        Returns a dict with updates to the state:
-          - on success: {"message_sent": True, "response_text": None}
-          - if sending fails: {"requires_human": True, "response_text": fallback message}
-        """
-        chat_id = state.get("chat_id")
-        if not chat_id:
+    async def _responder_node_impl(state: AgentState) -> dict[str, Any]:
+        context = ResponseDeliveryContext.from_state(state)
+        if not context.chat_id:
             logger.error("responder_node called with no chat_id")
-            return {
-                "requires_human": True,
-                "response_text": "Ошибка отправки ответа: отсутствует идентификатор чата. Пожалуйста, обратитесь к поддержке."
-            }
+            return ResponseDeliveryResult(
+                message_sent=False,
+                requires_human=True,
+                response_text=MISSING_CHAT_ID_TEXT,
+            ).to_state_patch()
 
-        # Determine final response text
-        response_text = None
-        tool_result = state.get("tool_result")
-        if tool_result and isinstance(tool_result, dict) and tool_result.get("text"):
-            response_text = tool_result["text"]
-        elif state.get("response_text"):
-            response_text = state["response_text"]
-        else:
-            response_text = "Извините, не удалось сформировать ответ."
+        response_text = context.resolve_response_text()
+        logger.debug(
+            "Sending response",
+            extra={
+                "chat_id": context.chat_id,
+                "project_id": context.project_id,
+                "thread_id": context.thread_id,
+                "response_preview": response_text[:50],
+            },
+        )
 
-        logger.debug("Sending response",
-                     extra={"chat_id": chat_id,
-                            "project_id": state.get("project_id"),
-                            "thread_id": state.get("thread_id"),
-                            "response_preview": response_text[:50]})
-
-        # Call telegram.send_message tool
         try:
             result = await tool_registry.execute(
                 "telegram.send_message",
-                {
-                    "chat_id": chat_id,
-                    "text": response_text
-                },
-                context={
-                    "project_id": state.get("project_id"),
-                    "thread_id": state.get("thread_id")
-                }
+                {"chat_id": context.chat_id, "text": response_text},
+                context={"project_id": context.project_id, "thread_id": context.thread_id},
             )
             if result.get("ok"):
-                logger.info("Message sent successfully", extra={"chat_id": chat_id})
-
-                # Save assistant message to database if repo available
-                thread_id = state.get("thread_id")
-                if thread_id and thread_repo:
+                logger.info("Message sent successfully", extra={"chat_id": context.chat_id})
+                if context.thread_id and thread_repo:
                     try:
                         await thread_repo.add_message(
-                            thread_id=thread_id,
+                            thread_id=context.thread_id,
                             role="assistant",
                             content=response_text,
                         )
-                        logger.debug("Assistant message saved", extra={"thread_id": thread_id})
-                    except Exception as e:
-                        logger.exception("Failed to save assistant message", extra={"thread_id": thread_id})
+                        logger.debug("Assistant message saved", extra={"thread_id": context.thread_id})
+                    except Exception:
+                        logger.exception(
+                            "Failed to save assistant message",
+                            extra={"thread_id": context.thread_id},
+                        )
 
-                # Message sent, clear response_text to avoid double-send
-                return {"message_sent": True, "response_text": None}
-            else:
-                logger.error("Telegram send failed", extra={"chat_id": chat_id, "result": result})
-                return {
-                    "requires_human": True,
-                    "response_text": "Не удалось отправить ответ. Пожалуйста, попробуйте позже или обратитесь к менеджеру."
-                }
-        except Exception as e:
-            logger.exception("Exception while sending message", extra={"chat_id": chat_id})
-            return {
-                "requires_human": True,
-                "response_text": "Произошла техническая ошибка при отправке ответа. Мы уже работаем над её устранением."
-            }
+                return ResponseDeliveryResult(
+                    message_sent=True,
+                    response_text=None,
+                ).to_state_patch()
+
+            logger.error("Telegram send failed", extra={"chat_id": context.chat_id, "result": result})
+            return ResponseDeliveryResult(
+                message_sent=False,
+                requires_human=True,
+                response_text=SEND_FAILED_TEXT,
+            ).to_state_patch()
+        except Exception:
+            logger.exception("Exception while sending message", extra={"chat_id": context.chat_id})
+            return ResponseDeliveryResult(
+                message_sent=False,
+                requires_human=True,
+                response_text=SEND_EXCEPTION_TEXT,
+            ).to_state_patch()
 
     def _get_responder_input_size(state: AgentState) -> int:
-        return len(state.get("response_text", "")) + (len(str(state.get("tool_result", {}))) if state.get("tool_result") else 0)
+        context = ResponseDeliveryContext.from_state(state)
+        return len(context.resolve_response_text())
 
-    def _get_responder_output_size(result: Dict[str, Any]) -> int:
-        return 1  # success/failure flag
+    def _get_responder_output_size(result: dict[str, Any]) -> int:
+        return 1
 
-    async def responder_node(state: AgentState) -> Dict[str, Any]:
+    async def responder_node(state: AgentState) -> dict[str, Any]:
         return await log_node_execution(
             "responder",
             _responder_node_impl,
             state,
             get_input_size=_get_responder_input_size,
-            get_output_size=_get_responder_output_size
+            get_output_size=_get_responder_output_size,
         )
 
     return responder_node
