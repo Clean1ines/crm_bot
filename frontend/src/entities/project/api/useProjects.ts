@@ -56,21 +56,17 @@ export const useProjects = () => {
   const updateBotTokenMutation = useMutation({
     mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
       if (token === null) {
-        // Revoke: set empty token (or use delete? For now set empty)
-        const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
-          params: { path: { project_id: projectId } },
-          body: { token: '' }
-        });
-        if (error) throw error;
-        return data;
-      } else {
-        const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
-          params: { path: { project_id: projectId } },
-          body: { token }
-        });
+        const { data, error } = await api.projects.clearBotToken(projectId);
         if (error) throw error;
         return data;
       }
+
+      const { data, error } = await api.POST('/api/projects/{project_id}/bot-token', {
+        params: { path: { project_id: projectId } },
+        body: { token }
+      });
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -81,20 +77,17 @@ export const useProjects = () => {
   const updateManagerBotTokenMutation = useMutation({
     mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
       if (token === null) {
-        const { data, error } = await api.POST('/api/projects/{project_id}/manager-token', {
-          params: { path: { project_id: projectId } },
-          body: { token: '' }
-        });
-        if (error) throw error;
-        return data;
-      } else {
-        const { data, error } = await api.POST('/api/projects/{project_id}/manager-token', {
-          params: { path: { project_id: projectId } },
-          body: { token }
-        });
+        const { data, error } = await api.projects.clearManagerToken(projectId);
         if (error) throw error;
         return data;
       }
+
+      const { data, error } = await api.POST('/api/projects/{project_id}/manager-token', {
+        params: { path: { project_id: projectId } },
+        body: { token }
+      });
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });

@@ -453,7 +453,8 @@ export interface paths {
         put?: never;
         /** Set Bot Token */
         post: operations["set_bot_token_api_projects__project_id__bot_token_post"];
-        delete?: never;
+        /** Clear Bot Token */
+        delete: operations["clear_bot_token_api_projects__project_id__bot_token_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -470,7 +471,8 @@ export interface paths {
         put?: never;
         /** Set Manager Token */
         post: operations["set_manager_token_api_projects__project_id__manager_token_post"];
-        delete?: never;
+        /** Clear Manager Token */
+        delete: operations["clear_manager_token_api_projects__project_id__manager_token_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2156,6 +2158,39 @@ export interface operations {
             };
         };
     };
+    clear_bot_token_api_projects__project_id__bot_token_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_manager_token_api_projects__project_id__manager_token_post: {
         parameters: {
             query?: never;
@@ -2172,6 +2207,39 @@ export interface operations {
                 "application/json": components["schemas"]["BotTokenRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_manager_token_api_projects__project_id__manager_token_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

@@ -155,6 +155,24 @@ async def set_manager_token(
     return (await project_commands.set_manager_bot_token(project_id, current_user_id, data.token)).to_dict()
 
 
+@router.delete("/{project_id}/bot-token")
+async def clear_bot_token(
+    project_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    project_commands: ProjectCommandService = Depends(get_project_command_service),
+):
+    return (await project_commands.clear_client_bot_token(project_id, current_user_id)).to_dict()
+
+
+@router.delete("/{project_id}/manager-token")
+async def clear_manager_token(
+    project_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    project_commands: ProjectCommandService = Depends(get_project_command_service),
+):
+    return (await project_commands.clear_manager_bot_token(project_id, current_user_id)).to_dict()
+
+
 @router.get("/{project_id}/managers", response_model=List[int])
 async def get_managers(
     project_id: str,

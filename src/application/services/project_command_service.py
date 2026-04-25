@@ -87,6 +87,32 @@ class ProjectCommandService:
         )
         return ProjectMutationResultDto.create(status="ok")
 
+    async def clear_client_bot_token(self, project_id: str, current_user_id: str):
+        await self._require_existing_project(project_id)
+        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.repo.set_bot_token(project_id, None)
+        await self.repo.upsert_project_channel(
+            project_id,
+            kind=CHANNEL_CLIENT,
+            provider="telegram",
+            status="disabled",
+            config_json={"token_configured": False},
+        )
+        return ProjectMutationResultDto.create(status="ok", type=CHANNEL_CLIENT)
+
+    async def clear_manager_bot_token(self, project_id: str, current_user_id: str):
+        await self._require_existing_project(project_id)
+        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.repo.set_manager_bot_token(project_id, None)
+        await self.repo.upsert_project_channel(
+            project_id,
+            kind=CHANNEL_MANAGER,
+            provider="telegram",
+            status="disabled",
+            config_json={"token_configured": False},
+        )
+        return ProjectMutationResultDto.create(status="ok", type=CHANNEL_MANAGER)
+
     async def add_manager(self, project_id: str, current_user_id: str, chat_id: int):
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
         result = await self.repo.add_manager_by_telegram_identity(project_id, str(chat_id))
