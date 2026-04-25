@@ -22,7 +22,9 @@ export const setSessionToken = (token: string): void => localStorage.setItem('mr
 export const clearSessionToken = (): void => localStorage.removeItem('mrak_token');
 
 // ---------- Centralized Unauthorized Handling ----------
-export const handleUnauthorizedResponse = (): void => {
+export const handleUnauthorizedResponse = (): boolean => {
+  const hadSession = getSessionToken() !== null;
+
   clearSessionToken();
 
   try {
@@ -34,15 +36,16 @@ export const handleUnauthorizedResponse = (): void => {
   window.dispatchEvent(new Event(AUTH_CLEARED_EVENT));
 
   if (window.location.pathname === LOGIN_PATH) {
-    return;
+    return hadSession;
   }
 
   if (window.__isRedirectingToLogin) {
-    return;
+    return hadSession;
   }
 
   window.__isRedirectingToLogin = true;
   window.location.replace(LOGIN_PATH);
+  return hadSession;
 };
 
 const isUnauthorized = (response: Response): boolean => response.status === 401;
@@ -162,8 +165,10 @@ client.use({
 client.use({
   onResponse({ response }) {
     if (isUnauthorized(response)) {
-      handleUnauthorizedResponse();
-      showErrorToast('Сессия истекла. Войдите снова.');
+      const hadSession = handleUnauthorizedResponse();
+      if (hadSession) {
+        showErrorToast('Сессия истекла. Войдите снова.');
+      }
       return response;
     }
 

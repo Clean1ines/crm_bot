@@ -27,13 +27,8 @@ const AuthGuard = ({ children }: { children: React.ReactNode }) => {
   return <>{children}</>;
 };
 
-const RootRedirect: React.FC = () => {
-  const token = getSessionToken();
+const AuthenticatedRootRedirect: React.FC = () => {
   const { projects, isLoading } = useProjects();
-
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-screen bg-[#1E1E1E] text-[#E5E2DA]">Загрузка...</div>;
@@ -45,6 +40,16 @@ const RootRedirect: React.FC = () => {
 
   const firstProjectId = projects[0].id;
   return <Navigate to={`/projects/${firstProjectId}/dialogs`} replace />;
+};
+
+const RootRedirect: React.FC = () => {
+  const token = getSessionToken();
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <AuthenticatedRootRedirect />;
 };
 
 // Обёртка для DialogsPage, которая пересоздаёт компонент при изменении projectId

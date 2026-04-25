@@ -12,7 +12,8 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 export const TelegramLoginPage: React.FC = () => {
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [showLoginWidget, setShowLoginWidget] = useState(false);
+  const [showAuthPanel, setShowAuthPanel] = useState(false);
+  const [showTelegramWidget, setShowTelegramWidget] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
@@ -105,9 +106,9 @@ export const TelegramLoginPage: React.FC = () => {
       });
   }, []);
 
-  // Inject Telegram widget when showLoginWidget becomes true
+  // Inject Telegram widget only after the Telegram auth option is selected.
   useEffect(() => {
-    if (!showLoginWidget) return;
+    if (!showTelegramWidget) return;
     if (!botUsername) return;
 
     const container = widgetContainerRef.current;
@@ -131,10 +132,14 @@ export const TelegramLoginPage: React.FC = () => {
       container.innerHTML = '<p class="text-red-600">Ошибка загрузки виджета. Попробуйте позже.</p>';
     };
     container.appendChild(script);
-  }, [showLoginWidget, botUsername]);
+  }, [showTelegramWidget, botUsername]);
 
   const handleLoginClick = () => {
-    setShowLoginWidget(true);
+    setShowAuthPanel(true);
+  };
+
+  const handleTelegramLoginClick = () => {
+    setShowTelegramWidget(true);
   };
 
   const handleEmailAuth = async (event: React.FormEvent) => {
@@ -219,16 +224,16 @@ export const TelegramLoginPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
+    <div className="h-screen overflow-hidden bg-[var(--bg-primary)]">
       <Navbar onLoginClick={handleLoginClick} />
-      <main className="max-w-7xl mx-auto px-6 md:px-12 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+      <main className="mx-auto h-[calc(100vh-80px)] max-w-7xl overflow-hidden px-6 py-8 md:px-12">
+        <div className="grid h-full grid-cols-1 items-center gap-8 md:grid-cols-2">
           <HeroSection />
-          <div className="relative">
-            {!showLoginWidget ? (
-              <div className="space-y-5">
-                <ChatWidget />
-                <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5 shadow-xl">
+          <div className="relative max-h-full overflow-hidden">
+            {!showAuthPanel ? (
+              <ChatWidget />
+            ) : (
+              <div className="max-h-[calc(100vh-120px)] overflow-y-auto rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5 shadow-xl">
                   <div className="mb-4 flex rounded-full bg-[var(--surface-secondary)] p-1">
                     <button
                       type="button"
@@ -321,11 +326,17 @@ export const TelegramLoginPage: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={handleLoginClick}
+                    onClick={handleTelegramLoginClick}
                     className="mt-3 w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm font-medium text-[var(--text-primary)]"
                   >
                     Войти через Telegram
                   </button>
+                  {showTelegramWidget ? (
+                    <div
+                      ref={widgetContainerRef}
+                      className="mt-3 flex w-full justify-center"
+                    />
+                  ) : null}
                   <div className="mt-3 space-y-2">
                     <GoogleAuthButton
                       text="continue_with"
@@ -333,13 +344,7 @@ export const TelegramLoginPage: React.FC = () => {
                       onError={setAuthError}
                     />
                   </div>
-                </div>
               </div>
-            ) : (
-              <div
-                ref={widgetContainerRef}
-                className="flex justify-center w-full"
-              />
             )}
           </div>
         </div>
