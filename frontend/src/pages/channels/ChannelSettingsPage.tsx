@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjects } from '@entities/project/api/useProjects';
 import { useAppStore } from '@app/store';
@@ -14,6 +14,7 @@ export const ChannelSettingsPage: React.FC = () => {
     isUpdatingBotToken,
     isUpdatingManagerBotToken,
     openCreateModal,
+    error: projectsError,
   } = useProjects();
   const { selectedProjectId, setSelectedProjectId } = useAppStore();
   const { setCurrentProjectId } = useProjectStore();
@@ -23,24 +24,26 @@ export const ChannelSettingsPage: React.FC = () => {
   const [showClientToken, setShowClientToken] = useState(false);
   const [showManagerToken, setShowManagerToken] = useState(false);
 
-  const currentProject = projects.find(p => p.id === selectedProjectId);
+  const safeProjects = useMemo(() => (Array.isArray(projects) ? projects : []), [projects]);
+  const currentProject = safeProjects.find(p => p.id === selectedProjectId);
 
   // Если проектов нет, открыть модалку создания
   useEffect(() => {
-    if (!projectsLoading && projects.length === 0) {
+    if (!projectsLoading && safeProjects.length === 0) {
       openCreateModal();
     }
-  }, [projectsLoading, projects.length, openCreateModal]);
+  }, [projectsLoading, safeProjects.length, openCreateModal]);
 
   // Если выбранный проект null, но проекты есть, выбрать первый
   useEffect(() => {
-    if (!projectsLoading && projects.length > 0 && !selectedProjectId) {
-      const firstProject = projects[0];
+    if (!projectsLoading && safeProjects.length > 0 && !selectedProjectId) {
+      const firstProject = safeProjects[0];
+      if (!firstProject) return;
       setSelectedProjectId(firstProject.id);
       setCurrentProjectId(firstProject.id);
       navigate(`/projects/${firstProject.id}/channels`);
     }
-  }, [projectsLoading, projects, selectedProjectId, setSelectedProjectId, setCurrentProjectId, navigate]);
+  }, [projectsLoading, safeProjects, selectedProjectId, setSelectedProjectId, setCurrentProjectId, navigate]);
 
   const handleSaveClientToken = async () => {
     if (!selectedProjectId) {
@@ -112,7 +115,17 @@ export const ChannelSettingsPage: React.FC = () => {
     );
   }
 
-  if (!currentProject && projects.length === 0) {
+  if (projectsError) {
+    return (
+      <div className="p-8">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+          Не удалось загрузить проекты.
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentProject && safeProjects.length === 0) {
     return (
       <div className="p-8 text-center">
         <p>Нет проектов. Создайте первый проект через боковое меню.</p>

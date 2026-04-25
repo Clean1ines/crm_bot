@@ -11,14 +11,16 @@ export const useProjects = () => {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 
-  const { data: projects = [], isLoading, error } = useQuery({
+  const { data: projects = [], isLoading, error } = useQuery<Project[]>({
     queryKey: ['projects'],
     queryFn: async () => {
       const { data, error } = await api.GET('/api/projects');
       if (error) throw error;
-      return data;
+      return Array.isArray(data) ? data : [];
     },
   });
+
+  const safeProjects = Array.isArray(projects) ? projects : [];
 
   const createMutation = useMutation({
     mutationFn: async (name: string) => {
@@ -29,7 +31,9 @@ export const useProjects = () => {
       return data;
     },
     onSuccess: (newProject) => {
-      addProject(newProject);
+      if (newProject) {
+        addProject(newProject);
+      }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       setIsCreateOpen(false);
     },
@@ -52,7 +56,6 @@ export const useProjects = () => {
     },
   });
 
-  // Клиентский бот
   const updateBotTokenMutation = useMutation({
     mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
       if (token === null) {
@@ -73,7 +76,6 @@ export const useProjects = () => {
     },
   });
 
-  // Менеджерский бот
   const updateManagerBotTokenMutation = useMutation({
     mutationFn: async ({ projectId, token }: { projectId: string; token: string | null }) => {
       if (token === null) {
@@ -95,7 +97,7 @@ export const useProjects = () => {
   });
 
   return {
-    projects,
+    projects: safeProjects,
     isLoading,
     error,
     isCreateOpen,

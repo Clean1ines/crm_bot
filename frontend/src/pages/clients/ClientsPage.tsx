@@ -3,6 +3,7 @@ import { Search, MessageSquare, Calendar, Filter } from 'lucide-react';
 import { Button } from '@shared/ui';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjectClients } from '@entities/project/api/useCrmData';
+import { getErrorMessage } from '@shared/api/client';
 import { getClientDisplayName, getClientInitials, getClientSecondaryText } from '@shared/lib/clients';
 
 export const ClientsPage: React.FC = () => {
@@ -10,8 +11,8 @@ export const ClientsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data, isLoading } = useProjectClients(projectId, searchQuery);
-  const clients = data?.clients ?? [];
+  const { data, isLoading, isError, error } = useProjectClients(projectId, searchQuery);
+  const clients = Array.isArray(data?.clients) ? data.clients : [];
   const stats = data?.stats ?? { total_clients: 0, new_clients_7d: 0, active_dialogs: 0 };
 
   const openDialogs = (threadId?: string | null) => {
@@ -21,6 +22,14 @@ export const ClientsPage: React.FC = () => {
 
   if (isLoading) {
     return <div className="p-8 flex justify-center text-[#6B6B6B]">Загрузка клиентов...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-[#6B6B6B]">
+        Не удалось загрузить клиентов: {getErrorMessage(error)}
+      </div>
+    );
   }
 
   return (

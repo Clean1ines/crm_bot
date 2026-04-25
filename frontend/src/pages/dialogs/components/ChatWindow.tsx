@@ -21,6 +21,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
 
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [limit] = useState(50);
   const [offset] = useState(0);
@@ -28,27 +29,36 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
   useEffect(() => {
     if (!threadId) {
       clearMessages();
+      setLoadingMessages(false);
+      setLoadError(null);
       return;
     }
     const loadMessages = async () => {
       setLoadingMessages(true);
+      setLoadError(null);
       try {
         const { data, error } = await api.threads.getMessages(threadId, limit, offset);
         if (error) {
           console.error('Failed to load messages', error);
+          setLoadError('Не удалось загрузить сообщения');
+          setMessages([]);
           return;
         }
         if (data && typeof data === 'object' && 'messages' in data && Array.isArray(data.messages)) {
           setMessages(data.messages as Message[]);
+        } else {
+          setMessages([]);
         }
       } catch (err) {
         console.error('Error loading messages', err);
+        setLoadError('Не удалось загрузить сообщения');
+        setMessages([]);
       } finally {
         setLoadingMessages(false);
       }
     };
     loadMessages();
-  }, [threadId, limit, offset, setMessages, setLoadingMessages]);
+  }, [threadId, limit, offset, setMessages, setLoadingMessages, clearMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -100,7 +110,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6 max-h-[calc(100vh-180px)]">
             {isLoadingMessages && <div className="text-center text-[var(--text-muted)]">Загрузка сообщений...</div>}
-            {messages.map((msg, idx) => {
+            {loadError && <div className="text-center text-sm text-red-600">{loadError}</div>}
+            {!isLoadingMessages && !loadError && threadId && (!Array.isArray(messages) || messages.length === 0) && (
+              <div className="text-center text-sm text-[var(--text-muted)]">Сообщений пока нет</div>
+            )}
+            {(Array.isArray(messages) ? messages : []).map((msg, idx) => {
               let bubbleClasses = '';
               if (msg.role === 'user') {
                 bubbleClasses = 'bg-white shadow-sm text-[var(--text-primary)]';

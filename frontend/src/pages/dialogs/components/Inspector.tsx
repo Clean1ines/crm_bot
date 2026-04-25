@@ -44,6 +44,8 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   const isMountedRef = useRef(true);
 
   const isRequestValid = (id: number) => id === requestIdRef.current && isMountedRef.current;
+  const safeThreadMemory = Array.isArray(threadMemory) ? threadMemory : [];
+  const safeThreadTimeline = Array.isArray(threadTimeline) ? threadTimeline : [];
 
   // Component lifecycle logging
   useEffect(() => {
@@ -102,7 +104,10 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
 
   const renderMemory = () => (
     <div className="space-y-2">
-      {threadMemory.map((entry) => (
+      {safeThreadMemory.length === 0 && (
+        <div className="text-sm text-[var(--text-muted)]">Память пока пуста</div>
+      )}
+      {safeThreadMemory.map((entry) => (
         <div key={entry.id} className="rounded-lg p-2 shadow-sm hover:shadow-md transition-all bg-white">
           {editingMemoryKey === entry.key ? (
             <div>
@@ -135,12 +140,14 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   );
 
   const renderDecisionTrace = () => {
-    const policyEvents = threadTimeline.filter(e => e.type === 'policy_decision');
+    const policyEvents = safeThreadTimeline.filter(e => e.type === 'policy_decision');
     return (
       <div className="space-y-3">
         {policyEvents.length === 0 && <div className="text-sm text-[var(--text-muted)]">Нет записей решений</div>}
         {policyEvents.map((event) => {
-          const payload = event.payload;
+          const payload = event.payload && typeof event.payload === 'object'
+            ? event.payload as Record<string, unknown>
+            : {};
           const decision = typeof payload.decision === 'string' ? payload.decision : '—';
           const intent = typeof payload.intent === 'string' ? payload.intent : '—';
           const lifecycle = typeof payload.lifecycle === 'string' ? payload.lifecycle : '—';
@@ -171,7 +178,10 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
 
   const renderTimeline = () => (
     <div className="space-y-3">
-      {threadTimeline.map((event) => {
+      {safeThreadTimeline.length === 0 && (
+        <div className="text-sm text-[var(--text-muted)]">Событий пока нет</div>
+      )}
+      {safeThreadTimeline.map((event) => {
         const isEscalation = event.type === 'ticket_created';
         return (
           <div
@@ -184,7 +194,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
             </div>
             <div className="text-sm font-mono">{event.type}</div>
             <div className="text-xs text-[var(--text-secondary)] break-all mt-1">
-              {JSON.stringify(event.payload).slice(0, 100)}
+              {JSON.stringify(event.payload ?? {}).slice(0, 100)}
             </div>
           </div>
         );
@@ -224,6 +234,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       setThreadMemory([]);
       setTimelineOffset(0);
       setHasMoreTimeline(true);
+      setLoadingInspector(false);
       return;
     }
 
@@ -331,7 +342,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       }
       if (!error && data && typeof data === 'object' && 'events' in data && Array.isArray(data.events)) {
         const newEvents = data.events as TimelineEvent[];
-        setThreadTimeline([...threadTimeline, ...newEvents]);
+        setThreadTimeline([...safeThreadTimeline, ...newEvents]);
         setTimelineOffset(newOffset);
         setHasMoreTimeline(newEvents.length === timelineLimit);
         frontendLogger.debug('More timeline loaded', { threadId, newCount: newEvents.length });

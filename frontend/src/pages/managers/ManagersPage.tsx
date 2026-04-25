@@ -20,7 +20,8 @@ export const ManagersPage: React.FC = () => {
   const [newMemberUserId, setNewMemberUserId] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<(typeof ROLE_OPTIONS)[number]>('manager');
 
-  const { data: managers = [], isLoading } = useProjectManagers(projectId);
+  const { data: managers = [], isLoading, isError, error } = useProjectManagers(projectId);
+  const safeManagers = Array.isArray(managers) ? managers : [];
 
   const invalidateMembers = async () => {
     await queryClient.invalidateQueries({ queryKey: ['members', projectId] });
@@ -69,7 +70,7 @@ export const ManagersPage: React.FC = () => {
     },
   });
 
-  const filteredManagers = managers.filter((manager) => {
+  const filteredManagers = safeManagers.filter((manager) => {
     if (!searchQuery.trim()) {
       return true;
     }
@@ -95,6 +96,14 @@ export const ManagersPage: React.FC = () => {
 
   if (isLoading) {
     return <div className="p-8 flex justify-center text-[#6B6B6B]">Загрузка участников проекта...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="p-8 text-center text-[#6B6B6B]">
+        Не удалось загрузить участников проекта: {getErrorMessage(error)}
+      </div>
+    );
   }
 
   return (

@@ -9,7 +9,7 @@ import { api, getErrorMessage } from '@shared/api/client';
 export const ProjectSettingsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const { data: configuration, isLoading } = useProjectConfiguration(projectId);
+  const { data: configuration, isLoading, isError, error } = useProjectConfiguration(projectId);
 
   const [brandName, setBrandName] = useState('');
   const [toneOfVoice, setToneOfVoice] = useState('');
@@ -24,7 +24,8 @@ export const ProjectSettingsPage: React.FC = () => {
   useEffect(() => {
     const settings = configuration?.settings || {};
     const limits = configuration?.limit_profile || {};
-    const widgetChannel = configuration?.channels.find((channel) => (
+    const channels = Array.isArray(configuration?.channels) ? configuration.channels : [];
+    const widgetChannel = channels.find((channel) => (
       channel.kind === 'widget' && channel.provider === 'web'
     ));
     const widgetConfig = widgetChannel?.config_json && typeof widgetChannel.config_json === 'object'
@@ -101,6 +102,16 @@ export const ProjectSettingsPage: React.FC = () => {
   if (isLoading) {
     return <div className="p-8 text-[var(--text-muted)]">Загрузка настроек...</div>;
   }
+
+  if (isError) {
+    return (
+      <div className="p-8 text-[var(--text-muted)]">
+        Не удалось загрузить настройки проекта: {getErrorMessage(error)}
+      </div>
+    );
+  }
+
+  const channels = Array.isArray(configuration?.channels) ? configuration.channels : [];
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 p-8">
@@ -235,9 +246,9 @@ export const ProjectSettingsPage: React.FC = () => {
         >
           {saveWidgetChannelMutation.isPending ? 'Сохранение...' : 'Сохранить канал виджета'}
         </button>
-        {configuration?.channels?.length ? (
+        {channels.length ? (
           <div className="mt-5 overflow-hidden rounded-lg border border-[var(--border-subtle)]">
-            {configuration.channels.map((channel, index) => (
+            {channels.map((channel, index) => (
               <div
                 key={`${channel.kind}-${channel.provider}-${index}`}
                 className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3 last:border-b-0"

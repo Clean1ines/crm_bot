@@ -48,24 +48,50 @@ export interface ProjectConfiguration {
   prompt_versions: Array<Record<string, unknown>>;
 }
 
+const emptyConfiguration = (): ProjectConfiguration => ({
+  project_id: '',
+  settings: {},
+  policies: {},
+  limit_profile: {},
+  integrations: [],
+  channels: [],
+  prompt_versions: [],
+});
+
+const asRecord = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
+const asArray = <T>(value: unknown): T[] => (
+  Array.isArray(value) ? value as T[] : []
+);
+
+const normalizeProjectConfiguration = (payload: unknown): ProjectConfiguration => {
+  const record = asRecord(payload);
+
+  return {
+    project_id: String(record.project_id ?? ''),
+    settings: asRecord(record.settings),
+    policies: asRecord(record.policies),
+    limit_profile: asRecord(record.limit_profile),
+    integrations: asArray<Record<string, unknown>>(record.integrations),
+    channels: asArray<Record<string, unknown>>(record.channels),
+    prompt_versions: asArray<Record<string, unknown>>(record.prompt_versions),
+  };
+};
+
 export const useProjectConfiguration = (projectId: string | undefined) => {
   return useQuery<ProjectConfiguration>({
     queryKey: ['project-configuration', projectId],
     queryFn: async () => {
       if (!projectId) {
-        return {
-          project_id: '',
-          settings: {},
-          policies: {},
-          limit_profile: {},
-          integrations: [],
-          channels: [],
-          prompt_versions: [],
-        };
+        return emptyConfiguration();
       }
 
       const { data } = await api.projects.getConfiguration(projectId);
-      return data as ProjectConfiguration;
+      return normalizeProjectConfiguration(data);
     },
     enabled: !!projectId,
   });
@@ -84,15 +110,22 @@ export const useProjectMembers = (
     queryFn: async () => {
       if (!projectId) return [];
       const { data } = await api.members.list(projectId);
-      const list = Array.isArray(data) ? data : ((data as any)?.items || []);
-      const normalized = (list as any[]).map((item) => ({
-        user_id: String(item.user_id ?? item.id ?? ''),
-        role: String(item.role ?? ''),
-        full_name: item.full_name ?? null,
-        username: item.username ?? null,
-        email: item.email ?? null,
-        created_at: item.created_at ?? null,
-      })) as ProjectMember[];
+
+      const record = asRecord(data);
+      const list = Array.isArray(data) ? data : asArray<unknown>(record.items);
+      const normalized = list.map((item) => {
+        const member = asRecord(item);
+
+        return {
+          user_id: String(member.user_id ?? member.id ?? ''),
+          role: String(member.role ?? ''),
+          full_name: typeof member.full_name === 'string' ? member.full_name : null,
+          username: typeof member.username === 'string' ? member.username : null,
+          email: typeof member.email === 'string' ? member.email : null,
+          created_at: typeof member.created_at === 'string' ? member.created_at : null,
+        };
+      }).filter((member) => member.user_id) as ProjectMember[];
+
       return roles?.length ? normalized.filter((member) => roles.includes(member.role)) : normalized;
     },
     enabled: !!projectId,
@@ -112,17 +145,15 @@ export const useProjectClients = (projectId: string | undefined, search?: string
       const { data, error } = await api.clients.list({ project_id: projectId, search });
       if (error) throw error;
 
-      const payload = data as {
-        clients?: ProjectClient[];
-        stats?: Partial<ProjectClientsStats>;
-      } | undefined;
+      const payload = asRecord(data);
+      const stats = asRecord(payload.stats);
 
       return {
-        clients: payload?.clients || [],
+        clients: asArray<ProjectClient>(payload.clients),
         stats: {
-          total_clients: payload?.stats?.total_clients ?? 0,
-          new_clients_7d: payload?.stats?.new_clients_7d ?? 0,
-          active_dialogs: payload?.stats?.active_dialogs ?? 0,
+          total_clients: Number(stats.total_clients ?? 0),
+          new_clients_7d: Number(stats.new_clients_7d ?? 0),
+          active_dialogs: Number(stats.active_dialogs ?? 0),
         },
       };
     },

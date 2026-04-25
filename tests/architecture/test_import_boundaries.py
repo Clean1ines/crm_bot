@@ -144,3 +144,15 @@ def test_infrastructure_layer_does_not_import_agent_runtime():
 
     assert violations == []
 
+
+
+def test_infrastructure_does_not_import_agent_runtime():
+    forbidden = ("from src.agent", "import src.agent")
+    root = Path("src/infrastructure")
+    offenders = []
+    for path in root.rglob("*.py"):
+        text = path.read_text()
+        for marker in forbidden:
+            if marker in text:
+                offenders.append(f"{path}: contains {marker!r}")
+    assert not offenders, "\n".join(offenders)

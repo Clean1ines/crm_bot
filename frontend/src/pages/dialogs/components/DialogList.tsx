@@ -18,48 +18,58 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
   const [limit] = useState(20);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const fetchThreads = useCallback(async (reset = false) => {
+  const fetchThreads = useCallback(async (nextOffset: number, reset = false) => {
     if (!projectId) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const { data, error } = await api.threads.list({
         project_id: projectId,
         limit,
-        offset: reset ? 0 : offset,
+        offset: nextOffset,
         status_filter: statusFilter,
         search: search || null,
       });
       if (error) {
         console.error('Failed to fetch threads', error);
+        setLoadError('Не удалось загрузить диалоги');
+        if (reset) {
+          setThreads([]);
+          setHasMore(false);
+        }
         return;
       }
-      if (data) {
-        if (reset) {
-          setThreads(data);
-          setOffset(limit);
-          setHasMore(data.length === limit);
-        } else {
-          setThreads((prev) => [...prev, ...data]);
-          setOffset(offset + limit);
-          setHasMore(data.length === limit);
-        }
+
+      const nextThreads = Array.isArray(data) ? data : [];
+      if (reset) {
+        setThreads(nextThreads);
+      } else {
+        setThreads((prev) => [...prev, ...nextThreads]);
       }
+      setOffset(nextOffset + limit);
+      setHasMore(nextThreads.length === limit);
     } catch (err) {
       console.error('Error fetching threads', err);
+      setLoadError('Не удалось загрузить диалоги');
+      if (reset) {
+        setThreads([]);
+        setHasMore(false);
+      }
     } finally {
       setLoading(false);
     }
-  }, [projectId, limit, offset, statusFilter, search]);
+  }, [projectId, limit, statusFilter, search]);
 
   useEffect(() => {
     setOffset(0);
-    fetchThreads(true);
-  }, [projectId, statusFilter, search]);
+    void fetchThreads(0, true);
+  }, [fetchThreads]);
 
   const loadMore = () => {
     if (!loading && hasMore) {
-      fetchThreads();
+      void fetchThreads(offset, false);
     }
   };
 
@@ -113,6 +123,16 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {loadError && (
+          <div className="m-3 rounded-lg bg-red-50 p-3 text-sm text-red-600">
+            {loadError}
+          </div>
+        )}
+        {!loadError && !loading && threads.length === 0 && (
+          <div className="p-4 text-center text-sm text-[var(--text-muted)]">
+            Диалоги не найдены
+          </div>
+        )}
         {threads.map((thread) => {
           const client = thread.client as unknown as Client;
           const lastMsg = thread.last_message as unknown as LastMessage | null;
@@ -134,7 +154,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-[var(--accent-primary)] rounded-full" />
               )}
               <div className="flex items-center gap-2">
-                <Circle className={`w-2 h-2 fill-current ${getStatusColor(thread.status)}`} />
+                <Circle className={`w-2 h-2 fill-current ${getStatusColor(thread.status || 'active')}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
                     <span className="font-medium text-[var(--text-primary)] truncate">
