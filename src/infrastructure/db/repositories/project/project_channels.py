@@ -2,6 +2,7 @@
 Project channel operations.
 """
 
+import json
 from typing import Optional
 
 from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid
@@ -33,7 +34,7 @@ class ProjectChannelRepository(ProjectRepositoryBase):
                 kind,
                 provider,
                 status,
-                config_json or {},
+                json.dumps(config_json or {}),
             )
 
         return self._normalize_record(row)
