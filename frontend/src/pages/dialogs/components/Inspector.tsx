@@ -68,14 +68,8 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       interaction_mode?: string;
     };
     const clientName = getClientDisplayName(state?.client, 'Клиент');
-    const isDemo = state?.interaction_mode === 'demo';
     return (
       <div className="space-y-3">
-        {isDemo && (
-          <div className="bg-[var(--accent-muted)] text-[var(--accent-primary)] px-2 py-1 rounded-md text-xs inline-block shadow-sm">
-            Демо-режим
-          </div>
-        )}
         <div className="grid grid-cols-1 gap-3">
           <div className="bg-white rounded-lg shadow-sm p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Клиент</div>

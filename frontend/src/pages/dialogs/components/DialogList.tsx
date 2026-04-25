@@ -63,13 +63,12 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
     }
   };
 
-  const getStatusColor = (status: string, interactionMode: string) => {
+  const getStatusColor = (status: string) => {
     if (status === 'manual') return 'text-[var(--accent-danger)]';
-    if (interactionMode === 'demo') return 'text-[var(--accent-warning)]';
     return 'text-[var(--accent-success)]';
   };
 
-  const getLastMessageRole = (thread: Thread) => {
+  const getLastMessageRole = () => {
     return 'assistant';
   };
 
@@ -118,7 +117,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
           const client = thread.client as unknown as Client;
           const lastMsg = thread.last_message as unknown as LastMessage | null;
           const isActive = selectedThreadId === thread.thread_id;
-          const lastMsgRole = getLastMessageRole(thread);
+          const lastMsgRole = getLastMessageRole();
           const bubbleBg = getMessageBackground(lastMsgRole);
           const clientName = getClientDisplayName(client, 'Клиент');
           return (
@@ -135,7 +134,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-[var(--accent-primary)] rounded-full" />
               )}
               <div className="flex items-center gap-2">
-                <Circle className={`w-2 h-2 fill-current ${getStatusColor(thread.status, thread.interaction_mode)}`} />
+                <Circle className={`w-2 h-2 fill-current ${getStatusColor(thread.status)}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
                     <span className="font-medium text-[var(--text-primary)] truncate">

@@ -2,13 +2,17 @@ import createClient from 'openapi-fetch';
 import toast from 'react-hot-toast';
 import type { paths, components } from './generated/schema';
 import { createTimeoutMiddleware } from './fetchWithTimeout';
+import { queryClient } from './queryClient';
 
 // ---------- Base URL for API (from environment) ----------
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
+const LOGIN_PATH = '/login';
+const AUTH_CLEARED_EVENT = 'mrak-auth-cleared';
 
 declare global {
   interface Window {
     __lastToast: string | null;
+    __isRedirectingToLogin?: boolean;
   }
 }
 
@@ -16,6 +20,32 @@ declare global {
 export const getSessionToken = (): string | null => localStorage.getItem('mrak_token');
 export const setSessionToken = (token: string): void => localStorage.setItem('mrak_token', token);
 export const clearSessionToken = (): void => localStorage.removeItem('mrak_token');
+
+// ---------- Centralized Unauthorized Handling ----------
+export const handleUnauthorizedResponse = (): void => {
+  clearSessionToken();
+
+  try {
+    queryClient.clear();
+  } catch {
+    // Query cache cleanup is best-effort. Auth cleanup and redirect must still happen.
+  }
+
+  window.dispatchEvent(new Event(AUTH_CLEARED_EVENT));
+
+  if (window.location.pathname === LOGIN_PATH) {
+    return;
+  }
+
+  if (window.__isRedirectingToLogin) {
+    return;
+  }
+
+  window.__isRedirectingToLogin = true;
+  window.location.replace(LOGIN_PATH);
+};
+
+const isUnauthorized = (response: Response): boolean => response.status === 401;
 
 // ---------- Types ----------
 export type ProjectResponse = components['schemas']['ProjectResponse'];
@@ -75,7 +105,13 @@ async function authedJsonRequest<TBody>(
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
+
   const data = await response.json().catch(() => null);
+
+  if (isUnauthorized(response)) {
+    handleUnauthorizedResponse();
+  }
+
   if (!response.ok) throw data;
   return { data, response };
 }
@@ -83,6 +119,7 @@ async function authedJsonRequest<TBody>(
 // ---------- Error Message Extraction ----------
 export const getErrorMessage = (error: unknown): string => {
   if (error && typeof error === 'object') {
+    if ('detail' in error && typeof error.detail === 'string') return error.detail;
     if ('error' in error && typeof error.error === 'string') return error.error;
     if ('detail' in error && Array.isArray(error.detail)) {
       const details = error.detail as Array<{ msg?: string }>;
@@ -120,9 +157,15 @@ client.use({
   },
 });
 
-// Response middleware: handles errors
+// Response middleware: handles errors and expired sessions centrally
 client.use({
   onResponse({ response }) {
+    if (isUnauthorized(response)) {
+      handleUnauthorizedResponse();
+      showErrorToast('Сессия истекла. Войдите снова.');
+      return response;
+    }
+
     if (!response.ok) {
       return response
         .clone()
@@ -165,6 +208,11 @@ export async function streamFetch(
     headers.set('Content-Type', 'application/json');
 
     const response = await fetch(fullUrl, { ...options, headers });
+
+    if (isUnauthorized(response)) {
+      handleUnauthorizedResponse();
+    }
+
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
       throw new Error(getErrorMessage(errData) || `HTTP ${response.status}`);
@@ -234,6 +282,9 @@ export const api = Object.assign(client, {
         method: 'DELETE',
         headers,
       });
+      if (isUnauthorized(response)) {
+        handleUnauthorizedResponse();
+      }
       if (!response.ok) {
         const data = await response.json().catch(() => null);
         throw data;
@@ -256,8 +307,6 @@ export const api = Object.assign(client, {
       client.PATCH('/api/threads/{thread_id}/memory', { params: { path: { thread_id: threadId } }, body: { key, value: JSON.stringify(value) } as UpdateMemoryRequest }),
     getState: (threadId: string) =>
       client.GET('/api/threads/{thread_id}/state', { params: { path: { thread_id: threadId } } }),
-    enableDemo: (threadId: string) =>
-      client.POST('/api/threads/{thread_id}/demo', { params: { path: { thread_id: threadId } } }),
   },
   chat: {
     sendStream: (projectId: string, message: string, model?: string, visitorId?: string) =>
@@ -268,7 +317,7 @@ export const api = Object.assign(client, {
       }),
   },
   knowledge: {
-    upload: (projectId: string, file: File) => {
+    upload: async (projectId: string, file: File) => {
       const formData = new FormData();
       formData.append('file', file);
       const token = getSessionToken();
@@ -276,11 +325,15 @@ export const api = Object.assign(client, {
       if (token) {
         headers.set('Authorization', `Bearer ${token}`);
       }
-      return fetch(`${API_BASE_URL}/api/projects/${projectId}/knowledge`, {
+      const response = await fetch(`${API_BASE_URL}/api/projects/${projectId}/knowledge`, {
         method: 'POST',
         headers,
         body: formData,
       });
+      if (isUnauthorized(response)) {
+        handleUnauthorizedResponse();
+      }
+      return response;
     },
   },
   auth: {
@@ -291,6 +344,9 @@ export const api = Object.assign(client, {
         body: JSON.stringify(body),
       });
       const data = await response.json();
+      if (isUnauthorized(response)) {
+        handleUnauthorizedResponse();
+      }
       if (!response.ok) throw data;
       return { data, response };
     },

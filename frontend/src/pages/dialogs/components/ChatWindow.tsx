@@ -2,29 +2,25 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../../app/store';
 import { api } from '../../../shared/api/client';
 import type { Message } from '../../../entities/thread/model/types';
-import { Send, Sparkles } from 'lucide-react';
+import { Send } from 'lucide-react';
 
 interface ChatWindowProps {
   threadId: string | null;
   projectId: string;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) => {
+export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
   const {
     messages,
-    addMessage,
     setMessages,
     clearMessages,
     isLoadingMessages,
     setLoadingMessages,
     setInspectorActiveTab,
-    threadState,
-    setThreadState,
   } = useAppStore();
 
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [isEnablingDemo, setIsEnablingDemo] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [limit] = useState(50);
   const [offset] = useState(0);
@@ -81,25 +77,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     }
   };
 
-  const enableDemoMode = async () => {
-    if (!threadId || isEnablingDemo) return;
-    setIsEnablingDemo(true);
-    try {
-      const { error } = await api.threads.enableDemo(threadId);
-      if (error) {
-        console.error('Failed to enable demo mode', error);
-      } else {
-        const { data } = await api.threads.getState(threadId);
-        if (data && typeof data === 'object' && 'state' in data) {
-          setThreadState(data.state as Record<string, unknown>);
-        }
-      }
-    } catch (err) {
-      console.error('Error enabling demo mode', err);
-    } finally {
-      setIsEnablingDemo(false);
-    }
-  };
 
   const onMessageClick = (message: Message) => {
     if (message.role === 'assistant' && message.metadata?.explanation) {
@@ -107,7 +84,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
     }
   };
 
-  const showDemoButton = threadId && threadState && (threadState.interaction_mode !== 'demo');
 
   return (
     <div className="flex flex-col h-full items-center justify-center bg-transparent">
@@ -118,16 +94,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId, projectId }) =
               {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
             </div>
             <div className="flex items-center gap-2">
-              {showDemoButton && (
-                <button
-                  onClick={enableDemoMode}
-                  disabled={isEnablingDemo}
-                  className="px-2 py-1 text-xs bg-[var(--accent-muted)] text-[var(--accent-primary)] rounded-md hover:bg-[var(--accent-primary)] hover:text-white transition-all disabled:opacity-50 flex items-center gap-1"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span className="hover:text-white">{isEnablingDemo ? 'Включение...' : 'Попробовать демо'}</span>
-                </button>
-              )}
               {/* WebSocket индикатор удалён */}
             </div>
           </div>
