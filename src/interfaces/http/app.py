@@ -2,9 +2,7 @@
 Canonical FastAPI application assembly for the HTTP interface layer.
 """
 
-import traceback
-
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -44,26 +42,65 @@ app.add_middleware(
 app.add_middleware(CorrelationIdMiddleware)
 
 
+def _cors_headers() -> dict[str, str]:
+    return {"Access-Control-Allow-Origin": settings.FRONTEND_URL if settings.FRONTEND_URL else "*"}
+
+
+def _request_id_from_request(request: Request) -> str:
+    """
+    Return the correlation/request ID bound by CorrelationIdMiddleware.
+
+    The fallback to the incoming header keeps the error response useful even if
+    middleware state is unavailable for some reason.
+    """
+    return str(
+        getattr(request.state, "correlation_id", None)
+        or request.headers.get("X-Request-ID")
+        or "unknown"
+    )
+
+
 @app.exception_handler(ApplicationError)
-async def application_error_handler(request, exc: ApplicationError):
+async def application_error_handler(request: Request, exc: ApplicationError):
+    request_id = _request_id_from_request(request)
+    headers = _cors_headers()
+    headers["X-Request-ID"] = request_id
+
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail},
-        headers={"Access-Control-Allow-Origin": settings.FRONTEND_URL if settings.FRONTEND_URL else "*"},
+        content={"detail": exc.detail, "request_id": request_id},
+        headers=headers,
     )
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    logger.error(f"GLOBAL ERROR: {str(exc)}\n{traceback.format_exc()}")
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Handle unexpected errors without leaking internals to clients.
+
+    Exception details stay in structured logs via exc_info=True.
+    The HTTP response intentionally contains no exception string or stack details.
+    """
+    request_id = _request_id_from_request(request)
+
+    logger.error(
+        f"Unhandled HTTP exception: {exc}",
+        request_id=request_id,
+        method=request.method,
+        path=str(request.url.path),
+        exc_info=True,
+    )
+
+    headers = _cors_headers()
+    headers["X-Request-ID"] = request_id
+
     return JSONResponse(
         status_code=500,
         content={
-            "error": str(exc),
-            "traceback": traceback.format_exc(),
-            "details": "Check Render logs for full info",
+            "detail": "Internal server error",
+            "request_id": request_id,
         },
-        headers={"Access-Control-Allow-Origin": settings.FRONTEND_URL if settings.FRONTEND_URL else "*"},
+        headers=headers,
     )
 
 

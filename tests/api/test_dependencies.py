@@ -1,9 +1,11 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 import jwt
 from uuid import uuid4
 
+from src.interfaces.http.app import app
 from src.interfaces.http.dependencies import (
     get_current_user_id,
     require_platform_admin,
@@ -16,12 +18,9 @@ from src.interfaces.http.dependencies import (
     get_tool_registry,
     get_redis,
 )
-from src.infrastructure.config.settings import settings
-from src.infrastructure.app.lifespan import pool as lifespan_pool, orchestrator as lifespan_orchestrator
 from src.infrastructure.db.repositories.project import ProjectRepository
 from src.infrastructure.db.repositories.thread_repository import ThreadRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
-from src.infrastructure.redis.client import get_redis_client
 
 
 class TestGetCurrentUserId:
@@ -88,7 +87,7 @@ class TestGetCurrentUserId:
     @pytest.mark.asyncio
     async def test_missing_sub_claim(self):
         token = "valid.token"
-        payload = {}  # no sub
+        payload = {}
         with patch("src.interfaces.http.dependencies.jwt.decode") as mock_decode:
             mock_decode.return_value = payload
             with patch("src.interfaces.http.dependencies.settings") as mock_settings:
@@ -210,3 +209,31 @@ class TestGetRedis:
             result = await get_redis()
             assert result is mock_client
             mock_get.assert_awaited_once()
+
+
+class TestGlobalExceptionHandler:
+    def test_500_response_does_not_leak_traceback_or_exception_text(self):
+        route_path = "/__test_global_exception_handler_safe_500"
+
+        if not any(route.path == route_path for route in app.routes):
+            @app.get(route_path)
+            async def _raise_unhandled_error():
+                raise RuntimeError("secret internal database failure")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get(route_path, headers={"X-Request-ID": "test-request-id"})
+
+        assert response.status_code == 500
+        assert response.headers["X-Request-ID"] == "test-request-id"
+
+        body = response.json()
+        assert body == {
+            "detail": "Internal server error",
+            "request_id": "test-request-id",
+        }
+
+        serialized_body = str(body).lower()
+        assert "traceback" not in body
+        assert "traceback" not in serialized_body
+        assert "secret internal database failure" not in serialized_body
+        assert "runtimeerror" not in serialized_body
