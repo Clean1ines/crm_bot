@@ -216,7 +216,7 @@ export const TelegramLoginPage: React.FC = () => {
     setAuthError('');
     setResetMessage('');
     try {
-      if (!resetToken.trim()) throw new Error('Укажите reset token');
+      if (!resetToken.trim()) throw new Error('Укажите код сброса пароля');
       if (!resetNewPassword.trim()) throw new Error('Укажите новый пароль');
       await api.auth.confirmPasswordReset({
         token: resetToken.trim(),
@@ -236,7 +236,7 @@ export const TelegramLoginPage: React.FC = () => {
       <div className="min-h-screen w-screen flex items-center justify-center bg-[var(--bg-primary)]">
         <div className="flex flex-col items-center gap-4">
           <div className="spinner"></div>
-          <span className="text-[var(--text-secondary)] font-medium">Verifying Telegram session...</span>
+          <span className="text-[var(--text-secondary)] font-medium">Проверяем вход через Telegram...</span>
         </div>
       </div>
     );
@@ -324,14 +324,14 @@ export const TelegramLoginPage: React.FC = () => {
                     <input
                       value={resetToken}
                       onChange={(event) => setResetToken(event.target.value)}
-                      placeholder="Reset token"
+                      placeholder="Код сброса пароля"
                       className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
                     />
                     <input
                       type="password"
                       value={resetNewPassword}
                       onChange={(event) => setResetNewPassword(event.target.value)}
-                      placeholder="Новый пароль после reset"
+                      placeholder="Новый пароль"
                       className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
                     />
                     <button

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
@@ -6,39 +6,53 @@ import { useParams } from 'react-router-dom';
 import { useProjectConfiguration } from '@entities/project/api/useCrmData';
 import { api, getErrorMessage } from '@shared/api/client';
 
+type SettingsDraft = {
+  brandName?: string;
+  toneOfVoice?: string;
+  defaultLanguage?: string;
+  defaultTimezone?: string;
+  requestsPerMinute?: string;
+  fallbackModel?: string;
+  integrationProvider?: string;
+  integrationUrl?: string;
+  widgetOrigin?: string;
+};
+
+const getConfigObject = (value: unknown): Record<string, unknown> => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+);
+
 export const ProjectSettingsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
   const { data: configuration, isLoading, isError, error } = useProjectConfiguration(projectId);
 
-  const [brandName, setBrandName] = useState('');
-  const [toneOfVoice, setToneOfVoice] = useState('');
-  const [defaultLanguage, setDefaultLanguage] = useState('');
-  const [defaultTimezone, setDefaultTimezone] = useState('');
-  const [requestsPerMinute, setRequestsPerMinute] = useState('');
-  const [fallbackModel, setFallbackModel] = useState('');
-  const [integrationProvider, setIntegrationProvider] = useState('custom_webhook');
-  const [integrationUrl, setIntegrationUrl] = useState('');
-  const [widgetOrigin, setWidgetOrigin] = useState('');
+  const [draft, setDraft] = useState<SettingsDraft>({});
 
-  useEffect(() => {
-    const settings = configuration?.settings || {};
-    const limits = configuration?.limit_profile || {};
-    const channels = Array.isArray(configuration?.channels) ? configuration.channels : [];
-    const widgetChannel = channels.find((channel) => (
-      channel.kind === 'widget' && channel.provider === 'web'
-    ));
-    const widgetConfig = widgetChannel?.config_json && typeof widgetChannel.config_json === 'object'
-      ? widgetChannel.config_json as Record<string, unknown>
-      : {};
-    setBrandName(String(settings.brand_name ?? ''));
-    setToneOfVoice(String(settings.tone_of_voice ?? ''));
-    setDefaultLanguage(String(settings.default_language ?? ''));
-    setDefaultTimezone(String(settings.default_timezone ?? ''));
-    setRequestsPerMinute(limits.requests_per_minute == null ? '' : String(limits.requests_per_minute));
-    setFallbackModel(String(limits.fallback_model ?? ''));
-    setWidgetOrigin(String(widgetConfig.allowed_origin ?? ''));
-  }, [configuration]);
+  const settings = getConfigObject(configuration?.settings);
+  const limits = getConfigObject(configuration?.limit_profile);
+  const channels = Array.isArray(configuration?.channels) ? configuration.channels : [];
+  const widgetChannel = channels.find((channel) => (
+    channel.kind === 'widget' && channel.provider === 'web'
+  ));
+  const widgetConfig = getConfigObject(widgetChannel?.config_json);
+
+  const brandName = draft.brandName ?? String(settings.brand_name ?? '');
+  const toneOfVoice = draft.toneOfVoice ?? String(settings.tone_of_voice ?? '');
+  const defaultLanguage = draft.defaultLanguage ?? String(settings.default_language ?? '');
+  const defaultTimezone = draft.defaultTimezone ?? String(settings.default_timezone ?? '');
+  const requestsPerMinute = draft.requestsPerMinute
+    ?? (limits.requests_per_minute == null ? '' : String(limits.requests_per_minute));
+  const fallbackModel = draft.fallbackModel ?? String(limits.fallback_model ?? '');
+  const integrationProvider = draft.integrationProvider ?? 'custom_webhook';
+  const integrationUrl = draft.integrationUrl ?? '';
+  const widgetOrigin = draft.widgetOrigin ?? String(widgetConfig.allowed_origin ?? '');
+
+  const updateDraft = (patch: SettingsDraft) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
 
   const invalidateConfiguration = async () => {
     await queryClient.invalidateQueries({ queryKey: ['project-configuration', projectId] });
@@ -60,6 +74,7 @@ export const ProjectSettingsPage: React.FC = () => {
     },
     onSuccess: async () => {
       await invalidateConfiguration();
+      setDraft({});
       toast.success('Настройки проекта сохранены');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -68,7 +83,7 @@ export const ProjectSettingsPage: React.FC = () => {
   const saveIntegrationMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) throw new Error('Project is not selected');
-      if (!integrationProvider.trim()) throw new Error('Укажите provider интеграции');
+      if (!integrationProvider.trim()) throw new Error('Укажите поставщика интеграции');
       await api.projects.upsertIntegration(projectId, {
         provider: integrationProvider.trim(),
         status: integrationUrl.trim() ? 'enabled' : 'disabled',
@@ -77,6 +92,7 @@ export const ProjectSettingsPage: React.FC = () => {
     },
     onSuccess: async () => {
       await invalidateConfiguration();
+      setDraft((current) => ({ ...current, integrationUrl: '' }));
       toast.success('Интеграция сохранена');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -94,6 +110,7 @@ export const ProjectSettingsPage: React.FC = () => {
     },
     onSuccess: async () => {
       await invalidateConfiguration();
+      setDraft((current) => ({ ...current, widgetOrigin: undefined }));
       toast.success('Канал веб-виджета сохранен');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
@@ -111,8 +128,6 @@ export const ProjectSettingsPage: React.FC = () => {
     );
   }
 
-  const channels = Array.isArray(configuration?.channels) ? configuration.channels : [];
-
   return (
     <div className="mx-auto max-w-5xl space-y-8 p-8">
       <div>
@@ -129,15 +144,15 @@ export const ProjectSettingsPage: React.FC = () => {
             <span className="text-[var(--text-muted)]">Бренд</span>
             <input
               value={brandName}
-              onChange={(event) => setBrandName(event.target.value)}
+              onChange={(event) => updateDraft({ brandName: event.target.value })}
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Tone of voice</span>
+            <span className="text-[var(--text-muted)]">Стиль общения</span>
             <input
               value={toneOfVoice}
-              onChange={(event) => setToneOfVoice(event.target.value)}
+              onChange={(event) => updateDraft({ toneOfVoice: event.target.value })}
               placeholder="friendly, expert, concise"
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
@@ -146,7 +161,7 @@ export const ProjectSettingsPage: React.FC = () => {
             <span className="text-[var(--text-muted)]">Язык по умолчанию</span>
             <input
               value={defaultLanguage}
-              onChange={(event) => setDefaultLanguage(event.target.value)}
+              onChange={(event) => updateDraft({ defaultLanguage: event.target.value })}
               placeholder="ru"
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
@@ -155,7 +170,7 @@ export const ProjectSettingsPage: React.FC = () => {
             <span className="text-[var(--text-muted)]">Timezone</span>
             <input
               value={defaultTimezone}
-              onChange={(event) => setDefaultTimezone(event.target.value)}
+              onChange={(event) => updateDraft({ defaultTimezone: event.target.value })}
               placeholder="Europe/Moscow"
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
@@ -167,19 +182,19 @@ export const ProjectSettingsPage: React.FC = () => {
         <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Лимиты</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Requests per minute</span>
+            <span className="text-[var(--text-muted)]">Запросов в минуту</span>
             <input
               type="number"
               value={requestsPerMinute}
-              onChange={(event) => setRequestsPerMinute(event.target.value)}
+              onChange={(event) => updateDraft({ requestsPerMinute: event.target.value })}
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Fallback model</span>
+            <span className="text-[var(--text-muted)]">Резервная модель</span>
             <input
               value={fallbackModel}
-              onChange={(event) => setFallbackModel(event.target.value)}
+              onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
               placeholder="llama-3.1-8b-instant"
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
@@ -198,18 +213,18 @@ export const ProjectSettingsPage: React.FC = () => {
         <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Интеграции</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Provider</span>
+            <span className="text-[var(--text-muted)]">Поставщик</span>
             <input
               value={integrationProvider}
-              onChange={(event) => setIntegrationProvider(event.target.value)}
+              onChange={(event) => updateDraft({ integrationProvider: event.target.value })}
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Webhook URL</span>
+            <span className="text-[var(--text-muted)]">Адрес webhook</span>
             <input
               value={integrationUrl}
-              onChange={(event) => setIntegrationUrl(event.target.value)}
+              onChange={(event) => updateDraft({ integrationUrl: event.target.value })}
               placeholder="https://example.com/webhook"
               className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
             />
@@ -227,14 +242,13 @@ export const ProjectSettingsPage: React.FC = () => {
       <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-sm">
         <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Каналы проекта</h2>
         <p className="mb-4 text-sm text-[var(--text-muted)]">
-          Канал описывает поверхность входа в проект: Telegram-бот клиента, бот менеджера,
-          платформенный бот или веб-виджет. Роли людей при этом остаются в участниках проекта.
+          Каналы определяют, где клиенты и менеджеры взаимодействуют с проектом: Telegram-боты, платформенный бот или веб-виджет.
         </p>
         <label className="block max-w-xl space-y-1 text-sm">
-          <span className="text-[var(--text-muted)]">Allowed origin для веб-виджета</span>
+          <span className="text-[var(--text-muted)]">Разрешённый сайт для веб-виджета</span>
           <input
             value={widgetOrigin}
-            onChange={(event) => setWidgetOrigin(event.target.value)}
+            onChange={(event) => updateDraft({ widgetOrigin: event.target.value })}
             placeholder="https://client-site.example"
             className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
           />

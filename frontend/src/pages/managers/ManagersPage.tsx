@@ -35,7 +35,7 @@ export const ManagersPage: React.FC = () => {
 
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error('Укажите user_id участника платформы');
+        throw new Error('Укажите ID участника');
       }
 
       await api.members.upsert(projectId, {
@@ -112,7 +112,7 @@ export const ManagersPage: React.FC = () => {
         <div>
           <h1 className="mb-2 text-3xl font-bold text-[#1E1E1E]">Команда проекта</h1>
           <p className="text-[#6B6B6B]">
-            Канонический список участников control-plane с ролями owner, admin и manager.
+            Список участников проекта с ролями владельца, администратора и менеджера.
           </p>
         </div>
         <div className="flex gap-3">
@@ -128,7 +128,7 @@ export const ManagersPage: React.FC = () => {
           </div>
           <input
             type="text"
-            placeholder="user_id участника"
+            placeholder="ID участника"
             value={newMemberUserId}
             onChange={(e) => setNewMemberUserId(e.target.value)}
             className="w-52 rounded-lg border border-[#E5E2DA] bg-white px-3 py-2 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[#B87333]/20"
@@ -179,7 +179,7 @@ export const ManagersPage: React.FC = () => {
                         {manager.full_name || manager.username || manager.email || manager.user_id}
                       </div>
                       <div className="text-xs text-[#6B6B6B]">
-                        {manager.username ? `@${manager.username}` : manager.email || 'Пользователь платформы'}
+                        {manager.username ? `@${manager.username}` : manager.email || 'Участник проекта'}
                       </div>
                     </div>
                   </div>
@@ -215,7 +215,7 @@ export const ManagersPage: React.FC = () => {
             {filteredManagers.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-6 py-8 text-center text-sm text-[#6B6B6B]">
-                  Участники с ролями manager/admin/owner пока не найдены.
+                  Участники проекта пока не найдены.
                 </td>
               </tr>
             )}
