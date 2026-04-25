@@ -55,6 +55,7 @@ type BotTokenRequest = components['schemas']['BotTokenRequest'];
 type ManagerAddRequest = components['schemas']['ManagerAddRequest'];
 type ReplyRequest = components['schemas']['ReplyRequest'];
 type ChatMessageRequest = components['schemas']['ChatMessageRequest'];
+type TelegramAuthData = components['schemas']['TelegramAuthData'];
 type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
 export type ProjectSettingsUpdate = {
   brand_name?: string;
@@ -337,7 +338,7 @@ export const api = Object.assign(client, {
     },
   },
   auth: {
-    telegram: async (body: { init_data: string }) => {
+    telegram: async (body: TelegramAuthData) => {
       const response = await fetch(`${API_BASE_URL}/api/auth/telegram`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
