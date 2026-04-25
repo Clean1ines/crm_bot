@@ -9,6 +9,25 @@ import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
+type TelegramAuthTokenResponse = {
+  access_token: string;
+};
+
+const isTelegramAuthTokenResponse = (data: unknown): data is TelegramAuthTokenResponse => (
+  data !== null &&
+  typeof data === 'object' &&
+  'access_token' in data &&
+  typeof data.access_token === 'string'
+);
+
+const getAccessTokenFromAuthResponse = (data: unknown): string => {
+  if (isTelegramAuthTokenResponse(data)) {
+    return data.access_token;
+  }
+
+  throw new Error('Auth response does not contain access token');
+};
+
 export const TelegramLoginPage: React.FC = () => {
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -154,7 +173,7 @@ export const TelegramLoginPage: React.FC = () => {
           full_name: fullName || undefined,
         })
         : await api.auth.emailLogin({ email, password });
-      setSessionToken(result.data.access_token);
+      setSessionToken(getAccessTokenFromAuthResponse(result.data));
       navigate('/', { replace: true });
     } catch (error) {
       setAuthError(getErrorMessage(error));
@@ -167,7 +186,7 @@ export const TelegramLoginPage: React.FC = () => {
     setAuthError('');
     try {
       const result = await api.auth.googleLoginWithIdToken({ id_token: idToken });
-      setSessionToken(result.data.access_token);
+      setSessionToken(getAccessTokenFromAuthResponse(result.data));
       navigate('/', { replace: true });
     } catch (error) {
       setAuthError(getErrorMessage(error));

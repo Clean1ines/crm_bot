@@ -1040,6 +1040,19 @@ export interface components {
             /** Email */
             email: string;
         };
+        /** ProjectChannelResponse */
+        ProjectChannelResponse: {
+            /** Kind */
+            kind: string;
+            /** Provider */
+            provider: string;
+            /** Status */
+            status?: string | null;
+            /** Config Json */
+            config_json?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** ProjectChannelUpsert */
         ProjectChannelUpsert: {
             /** Kind */
@@ -1056,10 +1069,46 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** ProjectConfigurationResponse */
+        ProjectConfigurationResponse: {
+            /** Project Id */
+            project_id: string;
+            /** Settings */
+            settings: {
+                [key: string]: unknown;
+            };
+            /** Policies */
+            policies: {
+                [key: string]: unknown;
+            };
+            /** Limit Profile */
+            limit_profile: {
+                [key: string]: unknown;
+            };
+            /** Integrations */
+            integrations: components["schemas"]["ProjectIntegrationResponse"][];
+            /** Channels */
+            channels: components["schemas"]["ProjectChannelResponse"][];
+            /** Prompt Versions */
+            prompt_versions: components["schemas"]["ProjectPromptVersionResponse"][];
+        };
         /** ProjectCreate */
         ProjectCreate: {
             /** Name */
             name: string;
+        };
+        /** ProjectIntegrationResponse */
+        ProjectIntegrationResponse: {
+            /** Provider */
+            provider: string;
+            /** Status */
+            status?: string | null;
+            /** Config Json */
+            config_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Credentials Encrypted */
+            credentials_encrypted?: string | null;
         };
         /** ProjectIntegrationUpsert */
         ProjectIntegrationUpsert: {
@@ -1119,6 +1168,19 @@ export interface components {
             privacy_policy_json?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /** ProjectPromptVersionResponse */
+        ProjectPromptVersionResponse: {
+            /** Version */
+            version?: number | null;
+            /** Prompt Bundle */
+            prompt_bundle?: {
+                [key: string]: unknown;
+            } | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Created At */
+            created_at?: string | null;
         };
         /** ProjectResponse */
         ProjectResponse: {
@@ -2521,7 +2583,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectConfigurationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2558,7 +2620,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectConfigurationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2595,7 +2657,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectConfigurationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2632,7 +2694,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectConfigurationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2665,7 +2727,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectIntegrationResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -2702,7 +2764,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectIntegrationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2735,7 +2797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectChannelResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -2772,7 +2834,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ProjectChannelResponse"];
                 };
             };
             /** @description Validation Error */

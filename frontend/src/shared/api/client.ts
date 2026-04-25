@@ -52,6 +52,9 @@ const isUnauthorized = (response: Response): boolean => response.status === 401;
 
 // ---------- Types ----------
 export type ProjectResponse = components['schemas']['ProjectResponse'];
+export type ProjectConfigurationResponse = components['schemas']['ProjectConfigurationResponse'];
+export type ProjectIntegrationResponse = components['schemas']['ProjectIntegrationResponse'];
+export type ProjectChannelResponse = components['schemas']['ProjectChannelResponse'];
 type ProjectCreate = components['schemas']['ProjectCreate'];
 type ProjectUpdate = components['schemas']['ProjectUpdate'];
 type BotTokenRequest = components['schemas']['BotTokenRequest'];
@@ -60,6 +63,11 @@ type ReplyRequest = components['schemas']['ReplyRequest'];
 type ChatMessageRequest = components['schemas']['ChatMessageRequest'];
 type TelegramAuthData = components['schemas']['TelegramAuthData'];
 type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
+type AuthTokenResponse = {
+  access_token: string;
+  token_type?: string;
+  user?: unknown;
+};
 export type ProjectSettingsUpdate = {
   brand_name?: string;
   industry?: string;
@@ -95,10 +103,10 @@ export type ProjectChannelUpsert = {
   config_json?: Record<string, unknown>;
 };
 
-async function authedJsonRequest<TBody>(
+async function authedJsonRequest<TResponse = unknown, TBody = unknown>(
   path: string,
   options: { method: string; body?: TBody }
-) {
+): Promise<{ data: TResponse; response: Response }> {
   const token = getSessionToken();
   const headers = new Headers({ 'Content-Type': 'application/json' });
   if (token) {
@@ -257,21 +265,21 @@ export const api = Object.assign(client, {
     removeManager: (projectId: string, chat_id: number) => client.DELETE('/api/projects/{project_id}/managers/{chat_id}', { params: { path: { project_id: projectId, chat_id } } }),
     connectBot: (projectId: string, token: string, type: 'client' | 'manager') => client.POST('/api/projects/{project_id}/connect-bot', { params: { path: { project_id: projectId } }, body: { token, type } }),
     getConfiguration: (projectId: string) =>
-      authedJsonRequest(`/api/projects/${projectId}/configuration`, { method: 'GET' }),
+      authedJsonRequest<ProjectConfigurationResponse>(`/api/projects/${projectId}/configuration`, { method: 'GET' }),
     updateSettings: (projectId: string, body: ProjectSettingsUpdate) =>
-      authedJsonRequest(`/api/projects/${projectId}/settings`, { method: 'PATCH', body }),
+      authedJsonRequest<ProjectConfigurationResponse, ProjectSettingsUpdate>(`/api/projects/${projectId}/settings`, { method: 'PATCH', body }),
     updatePolicies: (projectId: string, body: ProjectPoliciesUpdate) =>
-      authedJsonRequest(`/api/projects/${projectId}/policies`, { method: 'PATCH', body }),
+      authedJsonRequest<ProjectConfigurationResponse, ProjectPoliciesUpdate>(`/api/projects/${projectId}/policies`, { method: 'PATCH', body }),
     updateLimits: (projectId: string, body: ProjectLimitProfileUpdate) =>
-      authedJsonRequest(`/api/projects/${projectId}/limits`, { method: 'PATCH', body }),
+      authedJsonRequest<ProjectConfigurationResponse, ProjectLimitProfileUpdate>(`/api/projects/${projectId}/limits`, { method: 'PATCH', body }),
     listIntegrations: (projectId: string) =>
-      authedJsonRequest(`/api/projects/${projectId}/integrations`, { method: 'GET' }),
+      authedJsonRequest<ProjectIntegrationResponse[]>(`/api/projects/${projectId}/integrations`, { method: 'GET' }),
     upsertIntegration: (projectId: string, body: ProjectIntegrationUpsert) =>
-      authedJsonRequest(`/api/projects/${projectId}/integrations`, { method: 'POST', body }),
+      authedJsonRequest<ProjectIntegrationResponse, ProjectIntegrationUpsert>(`/api/projects/${projectId}/integrations`, { method: 'POST', body }),
     listChannels: (projectId: string) =>
-      authedJsonRequest(`/api/projects/${projectId}/channels`, { method: 'GET' }),
+      authedJsonRequest<ProjectChannelResponse[]>(`/api/projects/${projectId}/channels`, { method: 'GET' }),
     upsertChannel: (projectId: string, body: ProjectChannelUpsert) =>
-      authedJsonRequest(`/api/projects/${projectId}/channels`, { method: 'POST', body }),
+      authedJsonRequest<ProjectChannelResponse, ProjectChannelUpsert>(`/api/projects/${projectId}/channels`, { method: 'POST', body }),
   },
   members: {
     list: async (projectId: string) => {
@@ -345,13 +353,13 @@ export const api = Object.assign(client, {
     },
   },
   auth: {
-    telegram: async (body: TelegramAuthData) => {
+    telegram: async (body: TelegramAuthData): Promise<{ data: AuthTokenResponse; response: Response }> => {
       const response = await fetch(`${API_BASE_URL}/api/auth/telegram`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await response.json();
+      const data = await response.json() as AuthTokenResponse;
       if (isUnauthorized(response)) {
         handleUnauthorizedResponse();
       }

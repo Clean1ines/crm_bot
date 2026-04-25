@@ -1307,6 +1307,23 @@ class TestProjectsAPI:
         finally:
             self._restore_auth()
 
+    def test_project_configuration_openapi_contract_is_typed(self):
+        schema = app.openapi()
+        paths = schema["paths"]
+
+        assert paths["/api/projects/{project_id}/configuration"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/ProjectConfigurationResponse")
+        assert paths["/api/projects/{project_id}/settings"]["patch"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/ProjectConfigurationResponse")
+        assert paths["/api/projects/{project_id}/policies"]["patch"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/ProjectConfigurationResponse")
+        assert paths["/api/projects/{project_id}/limits"]["patch"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("/ProjectConfigurationResponse")
+
+        integrations_schema = paths["/api/projects/{project_id}/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert integrations_schema["items"]["$ref"].endswith("/ProjectIntegrationResponse")
+        assert paths["/api/projects/{project_id}/integrations"]["post"]["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/ProjectIntegrationResponse")
+
+        channels_schema = paths["/api/projects/{project_id}/channels"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert channels_schema["items"]["$ref"].endswith("/ProjectChannelResponse")
+        assert paths["/api/projects/{project_id}/channels"]["post"]["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/ProjectChannelResponse")
+
     def test_upsert_project_channel_rejects_invalid_kind(self, client):
         user_id = str(uuid4())
         project_id = str(uuid4())

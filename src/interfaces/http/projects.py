@@ -88,6 +88,37 @@ class ProjectChannelUpsert(BaseModel):
     config_json: Optional[Dict[str, Any]] = None
 
 
+class ProjectIntegrationResponse(BaseModel):
+    provider: str
+    status: Optional[str] = None
+    config_json: Optional[Dict[str, Any]] = None
+    credentials_encrypted: Optional[str] = None
+
+
+class ProjectChannelResponse(BaseModel):
+    kind: str
+    provider: str
+    status: Optional[str] = None
+    config_json: Optional[Dict[str, Any]] = None
+
+
+class ProjectPromptVersionResponse(BaseModel):
+    version: Optional[int] = None
+    prompt_bundle: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+    created_at: Optional[str] = None
+
+
+class ProjectConfigurationResponse(BaseModel):
+    project_id: str
+    settings: Dict[str, Any]
+    policies: Dict[str, Any]
+    limit_profile: Dict[str, Any]
+    integrations: List[ProjectIntegrationResponse]
+    channels: List[ProjectChannelResponse]
+    prompt_versions: List[ProjectPromptVersionResponse]
+
+
 @router.get("", response_model=List[ProjectResponse])
 async def list_projects(
     current_user_id: str = Depends(get_current_user_id),
@@ -244,7 +275,7 @@ async def delete_project_member(
     return None
 
 
-@router.get("/{project_id}/configuration")
+@router.get("/{project_id}/configuration", response_model=ProjectConfigurationResponse, response_model_exclude_none=True)
 async def get_project_configuration(
     project_id: str,
     current_user_id: str = Depends(get_current_user_id),
@@ -253,7 +284,7 @@ async def get_project_configuration(
     return await project_queries.get_project_configuration(project_id, current_user_id)
 
 
-@router.patch("/{project_id}/settings")
+@router.patch("/{project_id}/settings", response_model=ProjectConfigurationResponse, response_model_exclude_none=True)
 async def update_project_settings(
     project_id: str,
     data: ProjectSettingsUpdate,
@@ -267,7 +298,7 @@ async def update_project_settings(
     )
 
 
-@router.patch("/{project_id}/policies")
+@router.patch("/{project_id}/policies", response_model=ProjectConfigurationResponse, response_model_exclude_none=True)
 async def update_project_policies(
     project_id: str,
     data: ProjectPoliciesUpdate,
@@ -281,7 +312,7 @@ async def update_project_policies(
     )
 
 
-@router.patch("/{project_id}/limits")
+@router.patch("/{project_id}/limits", response_model=ProjectConfigurationResponse, response_model_exclude_none=True)
 async def update_project_limit_profile(
     project_id: str,
     data: ProjectLimitProfileUpdate,
@@ -295,7 +326,7 @@ async def update_project_limit_profile(
     )
 
 
-@router.get("/{project_id}/integrations")
+@router.get("/{project_id}/integrations", response_model=List[ProjectIntegrationResponse], response_model_exclude_none=True)
 async def list_project_integrations(
     project_id: str,
     current_user_id: str = Depends(get_current_user_id),
@@ -304,7 +335,7 @@ async def list_project_integrations(
     return await project_queries.list_project_integrations(project_id, current_user_id)
 
 
-@router.post("/{project_id}/integrations", status_code=201)
+@router.post("/{project_id}/integrations", response_model=ProjectIntegrationResponse, response_model_exclude_none=True, status_code=201)
 async def upsert_project_integration(
     project_id: str,
     data: ProjectIntegrationUpsert,
@@ -318,7 +349,7 @@ async def upsert_project_integration(
     )
 
 
-@router.get("/{project_id}/channels")
+@router.get("/{project_id}/channels", response_model=List[ProjectChannelResponse], response_model_exclude_none=True)
 async def list_project_channels(
     project_id: str,
     current_user_id: str = Depends(get_current_user_id),
@@ -327,7 +358,7 @@ async def list_project_channels(
     return await project_queries.list_project_channels(project_id, current_user_id)
 
 
-@router.post("/{project_id}/channels", status_code=201)
+@router.post("/{project_id}/channels", response_model=ProjectChannelResponse, response_model_exclude_none=True, status_code=201)
 async def upsert_project_channel(
     project_id: str,
     data: ProjectChannelUpsert,
