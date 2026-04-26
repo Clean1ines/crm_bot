@@ -40,7 +40,7 @@ __all__ = [
 # Lazy import built-in tools to avoid circular dependencies
 def _register_builtin_tools(
     knowledge_repo=None,
-    thread_repo=None,
+    thread_lifecycle_repo=None,
     queue_repo=None,
     project_members=None
 ) -> None:
@@ -52,7 +52,7 @@ def _register_builtin_tools(
     
     Args:
         knowledge_repo: KnowledgeRepository instance for search tool.
-        thread_repo: ThreadRepository instance for escalation tool.
+        thread_lifecycle_repo: Thread lifecycle repository instance for escalation tool.
         queue_repo: QueueRepository instance for escalation tool.
         project_members: ProjectMemberRepository instance for escalation tool.
     """
@@ -61,10 +61,10 @@ def _register_builtin_tools(
         tool_registry.register(SearchKnowledgeTool(knowledge_repo))
         logger.info("Registered SearchKnowledgeTool")
     
-    if thread_repo and queue_repo and project_members:
+    if thread_lifecycle_repo and queue_repo and project_members:
         from src.tools.builtins import EscalateTool
         tool_registry.register(EscalateTool(
-            thread_repository=thread_repo,
+            thread_lifecycle_repo=thread_lifecycle_repo,
             queue_repository=queue_repo,
             project_members=project_members
         ))

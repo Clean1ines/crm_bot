@@ -8,7 +8,7 @@ from src.domain.project_plane.memory_views import MemoryEntryView
 from src.interfaces.http.app import app
 from src.interfaces.http.dependencies import (
     get_current_user_id,
-    get_thread_repo,
+    get_thread_read_repo,
     get_client_repo,
     get_project_repo,
     get_memory_repository,
@@ -54,7 +54,7 @@ def override_dependencies(
     # Override dependencies
     app.dependency_overrides[get_current_user_id] = lambda: mock_current_user_id
     app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-    app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+    app.dependency_overrides[get_thread_read_repo] = lambda: mock_thread_repo
     app.dependency_overrides[get_client_repo] = lambda: mock_client_repo
     app.dependency_overrides[get_memory_repository] = lambda: mock_memory_repo
 

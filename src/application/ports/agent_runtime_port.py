@@ -19,7 +19,6 @@ class AgentFactoryPort(Protocol):
         self,
         *,
         tool_registry: Any = None,
-        thread_repo: Any = None,
         queue_repo: Any = None,
         event_repo: Any = None,
         project_repo: Any = None,

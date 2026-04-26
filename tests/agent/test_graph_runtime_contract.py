@@ -92,11 +92,38 @@ def test_create_agent_requires_core_injected_dependencies():
     with pytest.raises(ValueError, match="tool_registry"):
         create_agent()
 
-    with pytest.raises(ValueError, match="thread_repo"):
+    with pytest.raises(ValueError, match="thread_lifecycle_repo"):
         create_agent(tool_registry=MagicMock())
 
+    with pytest.raises(ValueError, match="thread_message_repo"):
+        create_agent(
+            tool_registry=MagicMock(),
+            thread_lifecycle_repo=MagicMock(),
+        )
+
+    with pytest.raises(ValueError, match="thread_runtime_state_repo"):
+        create_agent(
+            tool_registry=MagicMock(),
+            thread_lifecycle_repo=MagicMock(),
+            thread_message_repo=MagicMock(),
+        )
+
+    with pytest.raises(ValueError, match="thread_read_repo"):
+        create_agent(
+            tool_registry=MagicMock(),
+            thread_lifecycle_repo=MagicMock(),
+            thread_message_repo=MagicMock(),
+            thread_runtime_state_repo=MagicMock(),
+        )
+
     with pytest.raises(ValueError, match="queue_repo"):
-        create_agent(tool_registry=MagicMock(), thread_repo=MagicMock())
+        create_agent(
+            tool_registry=MagicMock(),
+            thread_lifecycle_repo=MagicMock(),
+            thread_message_repo=MagicMock(),
+            thread_runtime_state_repo=MagicMock(),
+            thread_read_repo=MagicMock(),
+        )
 
 
 def test_create_agent_materializes_contract_as_langgraph_runtime():
@@ -109,7 +136,10 @@ def test_create_agent_materializes_contract_as_langgraph_runtime():
     ):
         graph = create_agent(
             tool_registry=tool_registry,
-            thread_repo=MagicMock(),
+            thread_lifecycle_repo=MagicMock(),
+            thread_message_repo=MagicMock(),
+            thread_runtime_state_repo=MagicMock(),
+            thread_read_repo=MagicMock(),
             queue_repo=MagicMock(),
             event_repo=MagicMock(),
             project_repo=MagicMock(),

@@ -3,7 +3,7 @@ from typing import Optional
 from src.domain.project_plane.client_views import ClientDetailView, ClientListView
 from src.application.ports.client_port import ClientReaderPort
 from src.application.ports.memory_port import MemoryReaderPort
-from src.application.ports.thread_port import ThreadReaderPort
+from src.application.ports.thread_port import ThreadReadPort
 
 
 def _serialize_timestamp(value):
@@ -20,11 +20,11 @@ class ClientQueryService:
     def __init__(
         self,
         client_repo: ClientReaderPort,
-        thread_repo: ThreadReaderPort,
+        thread_read_repo: ThreadReadPort,
         memory_repo: MemoryReaderPort,
     ) -> None:
         self.client_repo = client_repo
-        self.thread_repo = thread_repo
+        self.thread_read_repo = thread_read_repo
         self.memory_repo = memory_repo
 
     async def list_clients(
@@ -52,7 +52,7 @@ class ClientQueryService:
 
         memory = await self._load_memory_records(project_id, client_id, limit=100)
         client["memory"] = memory
-        client["threads"] = await self.thread_repo.get_dialogs(project_id, client_id=client_id)
+        client["threads"] = await self.thread_read_repo.get_dialogs(project_id, client_id=client_id)
         for thread in client["threads"]:
             if thread.get("created_at"):
                 thread["created_at"] = _serialize_timestamp(thread["created_at"])

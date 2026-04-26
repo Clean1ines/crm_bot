@@ -9,7 +9,7 @@ from typing import Any
 from src.agent.state import AgentState
 from src.domain.runtime.escalation import EscalationContext, EscalationResult
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.application.ports.thread_port import ThreadLifecyclePort
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.builtins import TicketCreateTool
 
@@ -22,7 +22,7 @@ MISSING_THREAD_TEXT = (
 
 
 def create_escalate_node(
-    thread_repo: ThreadRepository,
+    thread_lifecycle_repo: ThreadLifecyclePort,
     queue_repo: QueueRepository,
     ticket_create_tool: TicketCreateTool,
 ):

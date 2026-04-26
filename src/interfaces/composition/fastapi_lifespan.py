@@ -25,6 +25,7 @@ from src.infrastructure.app.resources import (
 )
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.event_repository import EventRepository
+from src.infrastructure.db.repositories.client_repository import ClientRepository
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.project import (
@@ -33,7 +34,10 @@ from src.infrastructure.db.repositories.project import (
     ProjectTokenRepository,
 )
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
+from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
+from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
+from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.llm.query_expander import GroqQueryExpander
 from src.infrastructure.logging.logger import get_logger
@@ -63,7 +67,7 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     adapters, LLM services, and the process-wide tool registry together.
     """
     knowledge_repo = KnowledgeRepository(db_pool)
-    thread_repo = ThreadRepository(db_pool)
+    thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     queue_repo = QueueRepository(db_pool)
     project_tokens = ProjectTokenRepository(db_pool)
     project_members = ProjectMemberRepository(db_pool)
@@ -75,7 +79,7 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
 
     tool_registry.register(
         EscalateTool(
-            thread_repository=thread_repo,
+            thread_lifecycle_repo=thread_lifecycle_repo,
             queue_repository=queue_repo,
             project_members=project_members,
         )
@@ -105,23 +109,31 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
     """
     Build the application orchestrator with concrete adapters.
 
-    The application layer receives only ports/concrete objects by injection.
-    It does not import the agent runtime directly.
+    The application layer receives narrow thread repositories by injection.
     """
-    thread_repo = ThreadRepository(db_pool)
+    thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
+    thread_message_repo = ThreadMessageRepository(db_pool)
+    thread_read_repo = ThreadReadRepository(db_pool)
+    thread_runtime_state_repo = ThreadRuntimeStateRepository(db_pool)
+
     queue_repo = QueueRepository(db_pool)
     event_repo = EventRepository(db_pool)
     memory_repo = MemoryRepository(db_pool)
 
     return ConversationOrchestrator(
-        db_conn=db_pool,
+        thread_lifecycle_repo=thread_lifecycle_repo,
+        thread_message_repo=thread_message_repo,
+        thread_manager_assignment_repo=thread_lifecycle_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
         project_repo=ProjectQueryRepository(db_pool),
-        thread_repo=thread_repo,
-        queue_repo=queue_repo,
+        client_repo=ClientRepository(db_pool),
         event_repo=event_repo,
-        tool_registry=tool_registry,
         memory_repo=memory_repo,
-        agent_factory=create_agent,
+        queue_repo=queue_repo,
+        ticket_create_tool=None,
+        telegram=None,
+        tool_registry=tool_registry,
         logger=logger,
     )
 

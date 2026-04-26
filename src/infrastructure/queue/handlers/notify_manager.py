@@ -8,7 +8,7 @@ import asyncpg
 
 from src.domain.project_plane.manager_notifications import select_manager_notification_targets
 from src.infrastructure.db.repositories.project import ProjectRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.application.ports.thread_port import ThreadReadPort
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
 from src.infrastructure.queue.telegram_sender import TelegramSender
@@ -53,7 +53,8 @@ def build_manager_reply_markup(*, thread_id: str, is_claimed: bool) -> dict[str,
 async def handle_notify_manager(
     job: Mapping[str, object],
     *,
-    thread_repo: ThreadRepository,
+    thread_read_repo: ThreadReadPort,
+    db_pool: asyncpg.Pool,
     project_repo: ProjectRepository,
     telegram_sender: TelegramSender,
     redis_getter: RedisGetter,
@@ -72,7 +73,7 @@ async def handle_notify_manager(
     target_manager_chat_id = payload.get("target_manager_telegram_chat_id") or payload.get("manager_chat_id")
     target_manager_user_id = payload.get("manager_user_id")
 
-    thread_info = await thread_repo.get_thread_with_project_view(thread_id)
+    thread_info = await thread_read_repo.get_thread_with_project_view(thread_id)
     if not thread_info:
         logger.error("Thread not found", extra={"thread_id": thread_id, "job_id": job.get("id")})
         raise TransientJobError("Thread not found for notify_manager")
@@ -85,7 +86,7 @@ async def handle_notify_manager(
 
     client_name = "Клиент"
     if client_id:
-        client_name = await get_client_display_name(thread_repo.pool, str(project_id), str(client_id))
+        client_name = await get_client_display_name(db_pool, str(project_id), str(client_id))
 
     project_settings = await project_repo.get_project_settings(str(project_id))
     manager_bot_token = _view_get(project_settings, "manager_bot_token")

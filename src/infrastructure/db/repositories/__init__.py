@@ -1,3 +1,7 @@
+from .thread.lifecycle import ThreadLifecycleRepository
+from .thread.messages import ThreadMessageRepository
+from .thread.read import ThreadReadRepository
+from .thread.runtime_state import ThreadRuntimeStateRepository
 from .project import (
     ProjectRepository,
     ProjectRepositoryBase,
@@ -16,7 +20,6 @@ from .project import (
     ProjectChannels,
     ProjectCommands,
 )
-from .thread_repository import ThreadRepository
 from .queue_repository import QueueRepository
 from .memory_repository import MemoryRepository
 from .knowledge_repository import KnowledgeRepository
@@ -40,10 +43,13 @@ __all__ = [
     "ProjectIntegrations",
     "ProjectChannels",
     "ProjectCommands",
-    "ThreadRepository",
     "QueueRepository",
     "MemoryRepository",
     "KnowledgeRepository",
     "EventRepository",
     "UserRepository",
+    "ThreadLifecycleRepository",
+    "ThreadMessageRepository",
+    "ThreadReadRepository",
+    "ThreadRuntimeStateRepository",
 ]

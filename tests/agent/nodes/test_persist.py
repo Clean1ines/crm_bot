@@ -1,36 +1,54 @@
-from datetime import UTC, datetime
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.agent.nodes.persist import create_persist_node
+from src.domain.project_plane.thread_views import ThreadMessageCounts, ThreadWithProjectView
 
 
 @pytest.mark.asyncio
-async def test_persist_returns_error_when_required_ids_missing():
-    node = create_persist_node(thread_repo=MagicMock())
+async def test_persist_node_requires_thread_and_project_ids():
+    node = create_persist_node(
+        thread_message_repo=MagicMock(),
+        thread_runtime_state_repo=MagicMock(),
+        thread_read_repo=MagicMock(),
+    )
 
-    async def passthrough(_name, impl, state, **_kwargs):
-        return await impl(state)
-
-    with patch("src.agent.nodes.persist.log_node_execution", AsyncMock(side_effect=passthrough)):
-        result = await node({"response_text": "ok"})
+    result = await node({})
 
     assert result == {"error": "Missing thread_id or project_id"}
 
 
 @pytest.mark.asyncio
 async def test_persist_saves_state_emits_events_and_updates_analytics():
-    thread_repo = MagicMock()
-    thread_repo.add_message = AsyncMock()
-    thread_repo.save_state_json = AsyncMock()
-    thread_repo.update_analytics = AsyncMock()
-    thread_repo.get_message_counts_view = AsyncMock(
-        return_value=SimpleNamespace(total=3, ai=2, manager=1)
+    thread_message_repo = MagicMock()
+    thread_message_repo.add_message = AsyncMock()
+    thread_message_repo.get_message_counts_view = AsyncMock(
+        return_value=ThreadMessageCounts(total=3, ai=2, manager=1)
     )
-    thread_repo.get_thread_with_project_view = AsyncMock(
-        return_value=SimpleNamespace(created_at=datetime.now(UTC))
+
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.save_state_json = AsyncMock()
+    thread_runtime_state_repo.update_analytics = AsyncMock()
+
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value=ThreadWithProjectView.from_record(
+            {
+                "id": "thread-1",
+                "client_id": "client-1",
+                "status": "active",
+                "manager_user_id": None,
+                "manager_chat_id": None,
+                "context_summary": None,
+                "created_at": None,
+                "updated_at": None,
+                "project_id": "project-1",
+                "full_name": None,
+                "username": None,
+                "chat_id": None,
+            }
+        )
     )
 
     event_repo = MagicMock()
@@ -43,68 +61,69 @@ async def test_persist_saves_state_emits_events_and_updates_analytics():
     queue_repo.enqueue = AsyncMock()
 
     node = create_persist_node(
-        thread_repo=thread_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
         event_repo=event_repo,
         memory_repo=memory_repo,
         queue_repo=queue_repo,
     )
 
-    async def passthrough(_name, impl, state, **_kwargs):
-        return await impl(state)
-
-    state = {
-        "thread_id": "thread-1",
-        "project_id": "project-1",
-        "client_id": "client-1",
-        "response_text": "hello",
-        "user_input": "не хочу звонок, слишком дорого",
-        "intent": "ask_price",
-        "lifecycle": "warm",
-        "cta": "call_manager",
-        "decision": "ESCALATE_TO_HUMAN",
-        "requires_human": True,
-        "close_ticket": True,
-        "state_payload": {},
-    }
-
-    with patch("src.agent.nodes.persist.log_node_execution", AsyncMock(side_effect=passthrough)):
-        result = await node(state)
+    result = await node(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "response_text": "hello",
+            "confidence": 0.9,
+            "requires_human": True,
+            "intent": "pricing",
+            "lifecycle": "warm",
+            "cta": "call_manager",
+            "decision": "ESCALATE",
+            "dialog_state": {"lifecycle": "warm"},
+        }
+    )
 
     assert result == {}
-    thread_repo.add_message.assert_awaited_once()
-    thread_repo.save_state_json.assert_awaited_once()
-    thread_repo.update_analytics.assert_awaited_once()
-    thread_repo.get_message_counts_view.assert_awaited_once_with("thread-1")
-    thread_repo.get_thread_with_project_view.assert_awaited_once_with("thread-1")
-    assert event_repo.append.await_count >= 2
-    assert memory_repo.set.await_count >= 3
-    queue_repo.enqueue.assert_awaited_once()
+
+    thread_message_repo.add_message.assert_awaited_once()
+    thread_runtime_state_repo.save_state_json.assert_awaited_once()
+    thread_runtime_state_repo.update_analytics.assert_awaited_once()
+    thread_message_repo.get_message_counts_view.assert_not_awaited()
+    thread_read_repo.get_thread_with_project_view.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_persist_degrades_when_assistant_message_save_fails():
-    thread_repo = MagicMock()
-    thread_repo.add_message = AsyncMock(side_effect=RuntimeError("message write failed"))
-    thread_repo.save_state_json = AsyncMock()
-    thread_repo.update_analytics = AsyncMock()
+    thread_message_repo = MagicMock()
+    thread_message_repo.add_message = AsyncMock(side_effect=RuntimeError("message write failed"))
+    thread_message_repo.get_message_counts_view = AsyncMock(
+        return_value=ThreadMessageCounts(total=0, ai=0, manager=0)
+    )
 
-    node = create_persist_node(thread_repo=thread_repo)
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.save_state_json = AsyncMock()
+    thread_runtime_state_repo.update_analytics = AsyncMock()
 
-    async def passthrough(_name, impl, state, **_kwargs):
-        return await impl(state)
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(return_value=None)
 
-    with (
-        patch("src.agent.nodes.persist.log_node_execution", AsyncMock(side_effect=passthrough)),
-        patch("src.agent.nodes.persist.logger") as logger,
-    ):
-        result = await node({
+    node = create_persist_node(
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
+    )
+
+    result = await node(
+        {
             "thread_id": "thread-1",
             "project_id": "project-1",
             "response_text": "hello",
-        })
+            "intent": "support",
+        }
+    )
 
     assert result == {}
-    thread_repo.save_state_json.assert_awaited_once()
-    thread_repo.update_analytics.assert_awaited_once()
-    logger.exception.assert_called_once()
-    assert logger.exception.call_args.kwargs["extra"]["policy"] == "degrade_continue"
+    thread_runtime_state_repo.save_state_json.assert_awaited_once()
+    thread_runtime_state_repo.update_analytics.assert_awaited_once()

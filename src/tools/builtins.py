@@ -228,7 +228,7 @@ class EscalateTool(Tool):
     
     def __init__(
         self,
-        thread_repository,
+        thread_lifecycle_repo,
         queue_repository,
         project_members
     ) -> None:
@@ -236,11 +236,11 @@ class EscalateTool(Tool):
         Initialize the EscalateTool with required repositories.
         
         Args:
-            thread_repository: ThreadRepository for status updates.
+            thread_lifecycle_repo: Thread lifecycle repository for status updates.
             queue_repository: QueueRepository for notification tasks.
             project_members: ProjectMemberRepository for manager lookup.
         """
-        self._thread_repo = thread_repository
+        self._thread_lifecycle_repo = thread_lifecycle_repo
         self._queue_repo = queue_repository
         self._project_members = project_members
         logger.debug("EscalateTool initialized")
@@ -284,7 +284,7 @@ class EscalateTool(Tool):
         
         try:
             # Update thread status to MANUAL
-            await self._thread_repo.update_status(
+            await self._thread_lifecycle_repo.update_status(
                 thread_id=str(thread_id),
                 status="manual"
             )

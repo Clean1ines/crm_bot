@@ -10,7 +10,10 @@ def make_orchestrator():
     return ConversationOrchestrator(
             db_conn=MagicMock(),
             project_repo=MagicMock(),
-            thread_repo=MagicMock(),
+            thread_lifecycle_repo=MagicMock(),
+            thread_message_repo=MagicMock(),
+            thread_runtime_state_repo=MagicMock(),
+            thread_read_repo=MagicMock(),
             queue_repo=MagicMock(),
             event_repo=MagicMock(),
             tool_registry=MagicMock(),

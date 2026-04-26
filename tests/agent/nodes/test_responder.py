@@ -7,7 +7,7 @@ from src.agent.nodes.responder import create_responder_node
 
 @pytest.mark.asyncio
 async def test_responder_returns_human_fallback_when_chat_id_missing():
-    node = create_responder_node(tool_registry=MagicMock(), thread_repo=None)
+    node = create_responder_node(tool_registry=MagicMock(), thread_message_repo=None)
 
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
@@ -23,9 +23,9 @@ async def test_responder_returns_human_fallback_when_chat_id_missing():
 async def test_responder_sends_message_and_saves_assistant_copy():
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(return_value={"ok": True})
-    thread_repo = MagicMock()
-    thread_repo.add_message = AsyncMock()
-    node = create_responder_node(tool_registry=tool_registry, thread_repo=thread_repo)
+    thread_message_repo = MagicMock()
+    thread_message_repo.add_message = AsyncMock()
+    node = create_responder_node(tool_registry=tool_registry, thread_message_repo=thread_message_repo)
 
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
@@ -35,16 +35,16 @@ async def test_responder_sends_message_and_saves_assistant_copy():
 
     assert result == {"message_sent": True, "response_text": None}
     tool_registry.execute.assert_awaited_once()
-    thread_repo.add_message.assert_awaited_once()
+    thread_message_repo.add_message.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_responder_delivery_success_degrades_when_assistant_copy_fails():
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(return_value={"ok": True})
-    thread_repo = MagicMock()
-    thread_repo.add_message = AsyncMock(side_effect=RuntimeError("db write failed"))
-    node = create_responder_node(tool_registry=tool_registry, thread_repo=thread_repo)
+    thread_message_repo = MagicMock()
+    thread_message_repo.add_message = AsyncMock(side_effect=RuntimeError("db write failed"))
+    node = create_responder_node(tool_registry=tool_registry, thread_message_repo=thread_message_repo)
 
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
@@ -69,7 +69,7 @@ async def test_responder_delivery_success_degrades_when_assistant_copy_fails():
 async def test_responder_send_exception_returns_requires_human_fallback():
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(side_effect=RuntimeError("telegram down"))
-    node = create_responder_node(tool_registry=tool_registry, thread_repo=None)
+    node = create_responder_node(tool_registry=tool_registry, thread_message_repo=None)
 
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)

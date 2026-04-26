@@ -1,7 +1,8 @@
 import asyncpg
 import pytest
 from src.infrastructure.config.settings import Settings
-from src.infrastructure.db.repositories import ProjectRepository, ThreadRepository
+from src.infrastructure.db.repositories import ProjectRepository
+from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
 from src.infrastructure.db.repositories.user_repository import UserRepository
 import uuid
 
@@ -19,8 +20,8 @@ async def project_repo(db_pool):
     return ProjectRepository(db_pool)
 
 @pytest.fixture
-async def thread_repo(db_pool):
-    return ThreadRepository(db_pool)
+async def thread_lifecycle_repo(db_pool):
+    return ThreadLifecycleRepository(db_pool)
 
 @pytest.fixture
 async def test_project(project_repo):
@@ -36,9 +37,9 @@ async def test_project(project_repo):
     await project_repo.delete_project(project_id)
 
 @pytest.fixture
-async def test_client(thread_repo, test_project):
+async def test_client(thread_lifecycle_repo, test_project):
     chat_id = 123456789 + hash(uuid.uuid4()) % 1000000
-    client_id = await thread_repo.get_or_create_client(
+    client_id = await thread_lifecycle_repo.get_or_create_client(
         project_id=test_project,
         chat_id=chat_id,
         username=f"test_user_{uuid.uuid4().hex[:6]}",
@@ -47,8 +48,8 @@ async def test_client(thread_repo, test_project):
     return client_id
 
 @pytest.fixture
-async def test_thread(thread_repo, test_client):
-    thread_id = await thread_repo.create_thread(
+async def test_thread(thread_lifecycle_repo, test_client):
+    thread_id = await thread_lifecycle_repo.create_thread(
         client_id=test_client,
         status="active",
         interaction_mode="normal"

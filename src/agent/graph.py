@@ -38,7 +38,10 @@ def _decision_value(decision: AgentGraphDecision) -> str:
 
 def create_agent(
     tool_registry: Optional[Any] = None,
-    thread_repo=None,
+    thread_lifecycle_repo=None,
+    thread_message_repo=None,
+    thread_runtime_state_repo=None,
+    thread_read_repo=None,
     queue_repo=None,
     event_repo=None,
     project_repo=None,
@@ -49,7 +52,10 @@ def create_agent(
 
     Required injected dependencies:
     - tool_registry
-    - thread_repo
+    - thread_lifecycle_repo
+    - thread_message_repo
+    - thread_runtime_state_repo
+    - thread_read_repo
     - queue_repo
 
     Optional injected dependencies:
@@ -61,10 +67,19 @@ def create_agent(
     logger.info("Creating state machine agent")
 
     tool_registry = _require_dependency("tool_registry", tool_registry)
-    thread_repo = _require_dependency("thread_repo", thread_repo)
+    thread_lifecycle_repo = _require_dependency("thread_lifecycle_repo", thread_lifecycle_repo)
+    thread_message_repo = _require_dependency("thread_message_repo", thread_message_repo)
+    thread_runtime_state_repo = _require_dependency("thread_runtime_state_repo", thread_runtime_state_repo)
+    thread_read_repo = _require_dependency("thread_read_repo", thread_read_repo)
     queue_repo = _require_dependency("queue_repo", queue_repo)
 
-    load_state_node = create_load_state_node(thread_repo, project_repo, memory_repo)
+    load_state_node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=project_repo,
+        memory_repo=memory_repo,
+    )
     kb_search_node = create_kb_search_node(tool_registry)
     intent_extractor_node = create_intent_extractor_node()
     policy_engine_node = create_policy_engine_node(event_repo=event_repo)
@@ -75,10 +90,12 @@ def create_agent(
     if ticket_create_tool is None:
         logger.warning("TicketCreateTool not found in registry, escalation will degrade")
 
-    escalate_node = create_escalate_node(thread_repo, queue_repo, ticket_create_tool)
-    responder_node = create_responder_node(tool_registry, thread_repo=thread_repo)
+    escalate_node = create_escalate_node(thread_lifecycle_repo, queue_repo, ticket_create_tool)
+    responder_node = create_responder_node(tool_registry, thread_message_repo=thread_message_repo)
     persist_node = create_persist_node(
-        thread_repo=thread_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
         event_repo=event_repo,
         memory_repo=memory_repo,
         queue_repo=queue_repo,

@@ -28,7 +28,10 @@ class GraphFactory:
         *,
         agent_factory: AgentFactoryPort,
         tool_registry=None,
-        thread_repo=None,
+        thread_lifecycle_repo=None,
+        thread_message_repo=None,
+        thread_runtime_state_repo=None,
+        thread_read_repo=None,
         queue_repo=None,
         event_repo=None,
         project_repo=None,
@@ -38,7 +41,10 @@ class GraphFactory:
         self.logger = logger
         self.agent = agent_factory(
             tool_registry=tool_registry,
-            thread_repo=thread_repo,
+            thread_lifecycle_repo=thread_lifecycle_repo,
+            thread_message_repo=thread_message_repo,
+            thread_runtime_state_repo=thread_runtime_state_repo,
+            thread_read_repo=thread_read_repo,
             queue_repo=queue_repo,
             event_repo=event_repo,
             project_repo=project_repo,

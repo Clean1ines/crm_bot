@@ -14,7 +14,10 @@ def make_factory():
     return GraphFactory(
         agent_factory=MagicMock(return_value=MagicMock()),
         tool_registry=MagicMock(),
-        thread_repo=MagicMock(),
+        thread_lifecycle_repo=MagicMock(),
+        thread_message_repo=MagicMock(),
+        thread_runtime_state_repo=MagicMock(),
+        thread_read_repo=MagicMock(),
         queue_repo=MagicMock(),
         event_repo=MagicMock(),
         project_repo=MagicMock(),

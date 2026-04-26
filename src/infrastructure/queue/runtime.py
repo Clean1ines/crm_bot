@@ -11,7 +11,7 @@ from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.infrastructure.db.repositories.project import ProjectRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_dispatcher import JobDispatcher
 from src.infrastructure.queue.telegram_sender import TelegramSender
@@ -35,12 +35,13 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
     shutdown_event = asyncio.Event()
 
     queue_repo = QueueRepository(pool)
-    thread_repo = ThreadRepository(pool)
+    thread_read_repo = ThreadReadRepository(pool)
     project_repo = ProjectRepository(pool)
     metrics_repo = MetricsRepository(pool)
 
     dispatcher = JobDispatcher(
-        thread_repo=thread_repo,
+        thread_read_repo=thread_read_repo,
+        db_pool=pool,
         project_repo=project_repo,
         metrics_repo=metrics_repo,
         telegram_sender=TelegramSender(),
@@ -68,12 +69,13 @@ async def main() -> None:
     pool = await asyncpg.create_pool(db_url, min_size=1, max_size=10)
     try:
         queue_repo = QueueRepository(pool)
-        thread_repo = ThreadRepository(pool)
+        thread_read_repo = ThreadReadRepository(pool)
         project_repo = ProjectRepository(pool)
         metrics_repo = MetricsRepository(pool)
 
         dispatcher = JobDispatcher(
-            thread_repo=thread_repo,
+            thread_read_repo=thread_read_repo,
+        db_pool=pool,
             project_repo=project_repo,
             metrics_repo=metrics_repo,
             telegram_sender=TelegramSender(),

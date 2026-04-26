@@ -26,7 +26,7 @@ SEND_EXCEPTION_TEXT = (
 )
 
 
-def create_responder_node(tool_registry: ToolRegistry, thread_repo=None):
+def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None):
     """
     Create the delivery node with injected tool registry and optional thread repo.
     """
@@ -60,9 +60,9 @@ def create_responder_node(tool_registry: ToolRegistry, thread_repo=None):
             )
             if result.get("ok"):
                 logger.info("Message sent successfully", extra={"chat_id": context.chat_id})
-                if context.thread_id and thread_repo:
+                if context.thread_id and thread_message_repo:
                     try:
-                        await thread_repo.add_message(
+                        await thread_message_repo.add_message(
                             thread_id=context.thread_id,
                             role="assistant",
                             content=response_text,

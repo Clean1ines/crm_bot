@@ -8,8 +8,8 @@ from src.agent.nodes.load_state import create_load_state_node
 
 @pytest.mark.asyncio
 async def test_load_state_node_uses_thread_runtime_snapshots():
-    thread_repo = MagicMock()
-    thread_repo.get_thread_with_project_view = AsyncMock(
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
         return_value={
             "id": "thread-1",
             "client_id": "client-1",
@@ -19,7 +19,8 @@ async def test_load_state_node_uses_thread_runtime_snapshots():
             "chat_id": 123,
         }
     )
-    thread_repo.get_analytics_view = AsyncMock(
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(
         return_value=SimpleNamespace(
             to_record=lambda: {
                 "intent": "pricing",
@@ -29,12 +30,19 @@ async def test_load_state_node_uses_thread_runtime_snapshots():
             }
         )
     )
-    thread_repo.get_messages_for_langgraph = AsyncMock(
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(
         return_value=[{"role": "user", "content": "hello"}]
     )
-    thread_repo.get_state_json = AsyncMock(return_value={"ignored": True})
+    thread_runtime_state_repo.get_state_json = AsyncMock(return_value={"ignored": True})
 
-    node = create_load_state_node(thread_repo, project_repo=MagicMock(), memory_repo=None)
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
 
     result = await node({"thread_id": "thread-1", "project_id": "project-1"})
 
@@ -49,8 +57,8 @@ async def test_load_state_node_uses_thread_runtime_snapshots():
 
 @pytest.mark.asyncio
 async def test_load_state_degrades_to_empty_user_memory_when_memory_repo_fails():
-    thread_repo = MagicMock()
-    thread_repo.get_thread_with_project_view = AsyncMock(
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
         return_value={
             "id": "thread-1",
             "client_id": "client-1",
@@ -60,14 +68,23 @@ async def test_load_state_degrades_to_empty_user_memory_when_memory_repo_fails()
             "chat_id": 123,
         }
     )
-    thread_repo.get_analytics_view = AsyncMock(return_value=None)
-    thread_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
-    thread_repo.get_state_json = AsyncMock(return_value={})
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(return_value={})
+
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
 
     memory_repo = MagicMock()
     memory_repo.get_for_user_view = AsyncMock(side_effect=RuntimeError("memory unavailable"))
 
-    node = create_load_state_node(thread_repo, project_repo=MagicMock(), memory_repo=memory_repo)
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=memory_repo,
+    )
 
     with patch("src.agent.nodes.load_state.logger") as logger:
         result = await node({"thread_id": "thread-1", "project_id": "project-1"})

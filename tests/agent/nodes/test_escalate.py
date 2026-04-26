@@ -8,7 +8,7 @@ from src.agent.nodes.escalate import create_escalate_node
 @pytest.mark.asyncio
 async def test_escalate_returns_fallback_when_thread_id_missing():
     node = create_escalate_node(
-        thread_repo=MagicMock(),
+        thread_lifecycle_repo=MagicMock(),
         queue_repo=MagicMock(),
         ticket_create_tool=MagicMock(),
     )
@@ -30,7 +30,7 @@ async def test_escalate_creates_ticket_and_enqueues_notifications():
     ticket_create_tool = MagicMock()
     ticket_create_tool.run = AsyncMock(return_value={"ticket_id": "ticket-1"})
     node = create_escalate_node(
-        thread_repo=MagicMock(),
+        thread_lifecycle_repo=MagicMock(),
         queue_repo=queue_repo,
         ticket_create_tool=ticket_create_tool,
     )

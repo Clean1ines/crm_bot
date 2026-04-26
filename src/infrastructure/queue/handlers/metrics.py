@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Mapping
 
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.application.ports.thread_port import ThreadReadPort
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError
 
@@ -17,7 +17,7 @@ async def handle_update_metrics(
     job: Mapping[str, object],
     *,
     metrics_repo: MetricsRepository,
-    thread_repo: ThreadRepository,
+    thread_read_repo: ThreadReadPort,
 ) -> None:
     payload = job.get("payload") or {}
     if not isinstance(payload, Mapping):
@@ -38,7 +38,7 @@ async def handle_update_metrics(
     )
 
     if payload.get("close_ticket"):
-        thread_info = await thread_repo.get_thread_with_project_view(str(thread_id))
+        thread_info = await thread_read_repo.get_thread_with_project_view(str(thread_id))
         if not thread_info:
             logger.warning("Thread not found for project daily update", extra={"thread_id": thread_id})
             return

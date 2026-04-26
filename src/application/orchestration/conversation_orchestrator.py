@@ -63,7 +63,10 @@ class ConversationOrchestrator:
         self,
         db_conn,
         project_repo,
-        thread_repo,
+        thread_lifecycle_repo,
+        thread_message_repo,
+        thread_runtime_state_repo,
+        thread_read_repo,
         queue_repo,
         event_repo=None,
         tool_registry=None,
@@ -77,7 +80,6 @@ class ConversationOrchestrator:
     ):
         self.db = db_conn
         self.projects = project_repo
-        self.threads = thread_repo
         self.queue_repo = queue_repo
         self.event_repo = event_repo
         self.tool_registry = tool_registry
@@ -96,7 +98,10 @@ class ConversationOrchestrator:
         self.graph_factory = GraphFactory(
             agent_factory=agent_factory,
             tool_registry=tool_registry,
-            thread_repo=thread_repo,
+            thread_lifecycle_repo=thread_lifecycle_repo,
+            thread_message_repo=thread_message_repo,
+            thread_runtime_state_repo=thread_runtime_state_repo,
+            thread_read_repo=thread_read_repo,
             queue_repo=queue_repo,
             event_repo=event_repo,
             project_repo=project_repo,
@@ -105,7 +110,7 @@ class ConversationOrchestrator:
         )
         self.graph_executor = GraphExecutor(logger=self.logger)
         self.client_messages = ClientMessageService(
-            threads=thread_repo,
+            threads=thread_lifecycle_repo,
             queue_repo=queue_repo,
             runtime_guards=self.runtime_guards,
             runtime_loader=self.runtime_loader,
@@ -118,7 +123,7 @@ class ConversationOrchestrator:
         )
         self.manager_replies = ManagerReplyService(
             projects=project_repo,
-            threads=thread_repo,
+            threads=thread_lifecycle_repo,
             telegram_client=self.telegram_client,
             event_emitter=self.event_emitter,
             logger=self.logger,

@@ -1,5 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from src.application.services.thread_query_service import ThreadQueryService
 from fastapi.testclient import TestClient
 from uuid import uuid4
 
@@ -8,7 +10,8 @@ from src.domain.project_plane.thread_views import ThreadWithProjectView
 from src.interfaces.http.app import app
 from src.interfaces.http.dependencies import (
     get_current_user_id,
-    get_thread_repo,
+    get_thread_query_service,
+    get_thread_command_service,
     get_project_repo,
     get_event_repo,
     get_memory_repository,
@@ -45,6 +48,53 @@ def mock_orchestrator():
 def client():
     return TestClient(app)
 
+
+
+def make_thread_query_service(mock_thread_repo, *, event_repo=None, memory_repo=None):
+    return ThreadQueryService(
+        thread_read_repo=mock_thread_repo,
+        thread_message_repo=mock_thread_repo,
+        thread_runtime_state_repo=mock_thread_repo,
+        event_repo=event_repo or AsyncMock(),
+        memory_repo=memory_repo or AsyncMock(),
+    )
+
+
+class FakeTimelineThreadQueryService:
+    def __init__(self, *, thread_repo, event_repo):
+        self.thread_repo = thread_repo
+        self.event_repo = event_repo
+
+    async def get_thread_view(self, thread_id: str):
+        return await self.thread_repo.get_thread_with_project_view(thread_id)
+
+    async def get_timeline(self, thread_id: str, limit: int, offset: int):
+        events = await self.event_repo.get_events_for_thread(thread_id, limit, offset)
+        return {"events": events}
+
+
+class FakeMemoryThreadQueryService:
+    def __init__(self, *, thread_repo, memory_repo):
+        self.thread_repo = thread_repo
+        self.memory_repo = memory_repo
+
+    async def get_thread_view(self, thread_id: str):
+        return await self.thread_repo.get_thread_with_project_view(thread_id)
+
+    async def get_memory(self, project_id: str, client_id: str | None, *, limit: int = 100):
+        if not client_id:
+            return {"items": []}
+        items = await self.memory_repo.get_for_user_view(
+            project_id=project_id,
+            client_id=client_id,
+            limit=limit,
+        )
+        return {
+            "items": [
+                item.to_record() if hasattr(item, "to_record") else item
+                for item in items
+            ]
+        }
 
 class TestThreadsAPI:
     # ------------------------------------------------------------------
@@ -87,7 +137,7 @@ class TestThreadsAPI:
         ])
 
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
 
         response = client.get("/api/threads", params={"project_id": project_id})
         assert response.status_code == 200
@@ -95,7 +145,11 @@ class TestThreadsAPI:
         assert len(data) == 1
         assert data[0]["thread_id"] is not None
         mock_thread_repo.get_dialogs.assert_awaited_once_with(
-            project_id=project_id, limit=20, offset=0, status_filter=None, search=None
+            project_id,
+            limit=20,
+            offset=0,
+            status_filter=None,
+            search=None,
         )
 
         # Убираем переопределения (фикстура сделает это автоматически)
@@ -115,7 +169,7 @@ class TestThreadsAPI:
         mock_project_repo.get_project_view = AsyncMock(return_value=None)
 
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-        app.dependency_overrides[get_thread_repo] = lambda: AsyncMock()
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(AsyncMock())
 
         response = client.get("/api/threads", params={"project_id": project_id})
         assert response.status_code == 403
@@ -194,7 +248,7 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/messages")
@@ -219,7 +273,7 @@ class TestThreadsAPI:
         mock_thread_repo = AsyncMock()
         mock_thread_repo.get_thread_with_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
 
         response = client.get(f"/api/threads/{thread_id}/messages")
         assert response.status_code == 404
@@ -243,7 +297,7 @@ class TestThreadsAPI:
         mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
         mock_project_repo.get_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/messages")
@@ -296,7 +350,7 @@ class TestThreadsAPI:
         mock_orchestrator = AsyncMock()
         mock_orchestrator.manager_reply = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
         app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
 
@@ -327,7 +381,7 @@ class TestThreadsAPI:
         mock_thread_repo = AsyncMock()
         mock_thread_repo.get_thread_with_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
 
         response = client.post(f"/api/threads/{thread_id}/reply", json={"message": "test"})
         assert response.status_code == 404
@@ -351,7 +405,7 @@ class TestThreadsAPI:
         mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
         mock_project_repo.get_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.post(f"/api/threads/{thread_id}/reply", json={"message": "test"})
@@ -376,7 +430,7 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.post(f"/api/threads/{thread_id}/reply", json={"message": "test"})
@@ -404,7 +458,7 @@ class TestThreadsAPI:
         mock_orchestrator = AsyncMock()
         mock_orchestrator.manager_reply = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
         app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
 
@@ -455,7 +509,12 @@ class TestThreadsAPI:
             {"id": 1, "type": "message_received", "payload": {"text": "Hello"}, "ts": "2025-01-01T12:00:00"},
         ])
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        mock_thread_query_service = FakeTimelineThreadQueryService(
+            thread_repo=mock_thread_repo,
+            event_repo=mock_event_repo,
+        )
+
+        app.dependency_overrides[get_thread_query_service] = lambda: mock_thread_query_service
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
         app.dependency_overrides[get_event_repo] = lambda: mock_event_repo
 
@@ -481,7 +540,7 @@ class TestThreadsAPI:
         mock_thread_repo = AsyncMock()
         mock_thread_repo.get_thread_with_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
 
         response = client.get(f"/api/threads/{thread_id}/timeline")
         assert response.status_code == 404
@@ -505,7 +564,7 @@ class TestThreadsAPI:
         mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
         mock_project_repo.get_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/timeline")
@@ -539,15 +598,17 @@ class TestThreadsAPI:
             MemoryEntryView(id=str(uuid4()), key="pref", value="yes", type="preference"),
         ])
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: FakeMemoryThreadQueryService(
+            thread_repo=mock_thread_repo,
+            memory_repo=mock_memory_repo,
+        )
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-        app.dependency_overrides[get_memory_repository] = lambda: mock_memory_repo
 
         response = client.get(f"/api/threads/{thread_id}/memory")
         assert response.status_code == 200
         data = response.json()
-        assert "memory" in data
-        assert len(data["memory"]) == 1
+        assert "items" in data
+        assert len(data["items"]) == 1
 
         mock_memory_repo.get_for_user_view.assert_awaited_once_with(
             project_id=project_id, client_id=client_id, limit=100
@@ -571,12 +632,12 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/memory")
         assert response.status_code == 200
-        assert response.json() == {"memory": []}
+        assert response.json() == {"items": []}
 
         self._restore_auth()
 
@@ -592,7 +653,7 @@ class TestThreadsAPI:
         mock_thread_repo = AsyncMock()
         mock_thread_repo.get_thread_with_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
 
         response = client.get(f"/api/threads/{thread_id}/memory")
         assert response.status_code == 404
@@ -616,7 +677,7 @@ class TestThreadsAPI:
         mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
         mock_project_repo.get_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/memory")
@@ -645,21 +706,21 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        mock_memory_repo = AsyncMock()
-        mock_memory_repo.update_by_key = AsyncMock()
+        mock_thread_command_service = AsyncMock()
+        mock_thread_command_service.update_memory_entry = AsyncMock(return_value={"ok": True})
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
+        app.dependency_overrides[get_thread_command_service] = lambda: mock_thread_command_service
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-        app.dependency_overrides[get_memory_repository] = lambda: mock_memory_repo
 
         payload = {"key": "preference", "value": "yes"}
         response = client.patch(f"/api/threads/{thread_id}/memory", json=payload)
         if response.status_code != 200:
             print("Response body:", response.text)
         assert response.status_code == 200
-        assert response.json() == {"status": "updated"}
+        assert response.json() == {"ok": True}
 
-        mock_memory_repo.update_by_key.assert_awaited_once_with(
+        mock_thread_command_service.update_memory_entry.assert_awaited_once_with(
             project_id=project_id,
             client_id=client_id,
             key="preference",
@@ -684,7 +745,7 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         payload = {"key": "pref", "value": "yes"}
@@ -717,19 +778,19 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        mock_memory_repo = AsyncMock()
-        mock_memory_repo.update_by_key = AsyncMock()
+        mock_thread_command_service = AsyncMock()
+        mock_thread_command_service.update_memory_entry = AsyncMock(return_value={"ok": True})
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
+        app.dependency_overrides[get_thread_command_service] = lambda: mock_thread_command_service
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-        app.dependency_overrides[get_memory_repository] = lambda: mock_memory_repo
 
         payload = {"key": "preference", "value": '{"text": "yes"}'}
         response = client.patch(f"/api/threads/{thread_id}/memory", json=payload)
         assert response.status_code == 200
-        assert response.json() == {"status": "updated"}
+        assert response.json() == {"ok": True}
 
-        mock_memory_repo.update_by_key.assert_awaited_once_with(
+        mock_thread_command_service.update_memory_entry.assert_awaited_once_with(
             project_id=project_id,
             client_id=client_id,
             key="preference",
@@ -754,7 +815,7 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         payload = {"key": "pref", "value": '{"text": "yes"}'}  # FIXED: send string JSON
@@ -782,7 +843,7 @@ class TestThreadsAPI:
         mock_project_repo = AsyncMock()
         mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/state")
@@ -805,7 +866,7 @@ class TestThreadsAPI:
         mock_thread_repo = AsyncMock()
         mock_thread_repo.get_thread_with_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
 
         response = client.get(f"/api/threads/{thread_id}/state")
         assert response.status_code == 404
@@ -829,7 +890,7 @@ class TestThreadsAPI:
         mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
         mock_project_repo.get_project_view = AsyncMock(return_value=None)
 
-        app.dependency_overrides[get_thread_repo] = lambda: mock_thread_repo
+        app.dependency_overrides[get_thread_query_service] = lambda: make_thread_query_service(mock_thread_repo)
         app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
 
         response = client.get(f"/api/threads/{thread_id}/state")

@@ -13,14 +13,18 @@ from src.domain.runtime.persistence import PersistenceContext
 from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
+from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
+from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
 
 
 def create_persist_node(
-    thread_repo: ThreadRepository,
+    thread_message_repo: ThreadMessageRepository,
+    thread_runtime_state_repo: ThreadRuntimeStateRepository,
+    thread_read_repo: ThreadReadRepository,
     event_repo: EventRepository | None = None,
     memory_repo: MemoryRepository | None = None,
     summarizer: Any | None = None,
@@ -38,7 +42,7 @@ def create_persist_node(
 
         if context.response_text:
             try:
-                await thread_repo.add_message(
+                await thread_message_repo.add_message(
                     context.thread_id,
                     role="assistant",
                     content=context.response_text,
@@ -56,7 +60,7 @@ def create_persist_node(
                 )
 
         try:
-            await thread_repo.save_state_json(context.thread_id, context.state_payload or {})
+            await thread_runtime_state_repo.save_state_json(context.thread_id, context.state_payload or {})
             logger.debug("State JSON saved", extra={"thread_id": context.thread_id})
         except Exception as exc:
             logger.exception(
@@ -189,7 +193,7 @@ def create_persist_node(
                 )
 
         try:
-            await thread_repo.update_analytics(
+            await thread_runtime_state_repo.update_analytics(
                 thread_id=context.thread_id,
                 intent=context.intent,
                 lifecycle=context.lifecycle,
@@ -205,12 +209,12 @@ def create_persist_node(
 
         if context.close_ticket and queue_repo:
             try:
-                counts = await thread_repo.get_message_counts_view(context.thread_id)
+                counts = await thread_message_repo.get_message_counts_view(context.thread_id)
                 total_messages = counts.total
                 ai_messages = counts.ai
                 manager_messages = counts.manager
 
-                thread_info = await thread_repo.get_thread_with_project_view(context.thread_id)
+                thread_info = await thread_read_repo.get_thread_with_project_view(context.thread_id)
                 created_at = thread_info.created_at if thread_info else None
                 resolution_time = None
                 if created_at:

@@ -13,14 +13,20 @@ from src.interfaces.http.dependencies import (
     get_pool,
     get_orchestrator,
     get_project_repo,
-    get_thread_repo,
+    get_thread_runtime_state_repo,
+    get_thread_read_repo,
+    get_thread_message_repo,
+    get_thread_lifecycle_repo,
     get_memory_repository,
     get_tool_registry,
     get_redis,
 )
 from src.infrastructure.db.repositories.project import ProjectRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
+from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
+from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
+from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
+from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
 
 
 class TestGetCurrentUserId:
@@ -187,11 +193,29 @@ class TestRepositoryFactories:
             get_project_repo(pool=mock_pool)
             MockRepo.assert_called_once_with(mock_pool)
 
-    def test_get_thread_repo(self):
+    def test_get_thread_lifecycle_repo(self):
         mock_pool = MagicMock()
-        with patch("src.interfaces.http.dependencies.ThreadRepository") as MockRepo:
-            get_thread_repo(pool=mock_pool)
-            MockRepo.assert_called_once_with(mock_pool)
+        repo = get_thread_lifecycle_repo(pool=mock_pool)
+        assert isinstance(repo, ThreadLifecycleRepository)
+        assert repo.pool is mock_pool
+
+    def test_get_thread_message_repo(self):
+        mock_pool = MagicMock()
+        repo = get_thread_message_repo(pool=mock_pool)
+        assert isinstance(repo, ThreadMessageRepository)
+        assert repo.pool is mock_pool
+
+    def test_get_thread_read_repo(self):
+        mock_pool = MagicMock()
+        repo = get_thread_read_repo(pool=mock_pool)
+        assert isinstance(repo, ThreadReadRepository)
+        assert repo.pool is mock_pool
+
+    def test_get_thread_runtime_state_repo(self):
+        mock_pool = MagicMock()
+        repo = get_thread_runtime_state_repo(pool=mock_pool)
+        assert isinstance(repo, ThreadRuntimeStateRepository)
+        assert repo.pool is mock_pool
 
     def test_get_memory_repository(self):
         mock_pool = MagicMock()

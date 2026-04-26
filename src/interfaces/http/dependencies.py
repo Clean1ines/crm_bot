@@ -22,7 +22,10 @@ from fastapi import Header, HTTPException, Depends
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.project import ProjectRepository
-from src.infrastructure.db.repositories.thread_repository import ThreadRepository
+from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
+from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
+from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
+from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
 from src.infrastructure.db.repositories.client_repository import ClientRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.event_repository import EventRepository
@@ -113,19 +116,6 @@ def get_project_command_service(
     return ProjectCommandService(project_repo, project_service, project_query_service)
 
 
-def get_thread_repo(pool: Any = Depends(get_pool)) -> ThreadRepository:
-    """
-    Return a new ThreadRepository instance.
-    
-    Args:
-        pool: Database connection pool (injected via Depends).
-    
-    Returns:
-        ThreadRepository: Repository for thread/conversation data access.
-    """
-    return ThreadRepository(pool)
-
-
 def get_client_repo(pool: Any = Depends(get_pool)) -> ClientRepository:
     """
     Return a new ClientRepository instance.
@@ -185,6 +175,26 @@ def get_metrics_repository(pool: Any = Depends(get_pool)) -> MetricsRepository:
     return MetricsRepository(pool)
 
 
+def get_thread_lifecycle_repo(pool: Any = Depends(get_pool)) -> ThreadLifecycleRepository:
+    """Return repository for thread lifecycle operations."""
+    return ThreadLifecycleRepository(pool)
+
+
+def get_thread_message_repo(pool: Any = Depends(get_pool)) -> ThreadMessageRepository:
+    """Return repository for thread message operations."""
+    return ThreadMessageRepository(pool)
+
+
+def get_thread_read_repo(pool: Any = Depends(get_pool)) -> ThreadReadRepository:
+    """Return repository for thread read models."""
+    return ThreadReadRepository(pool)
+
+
+def get_thread_runtime_state_repo(pool: Any = Depends(get_pool)) -> ThreadRuntimeStateRepository:
+    """Return repository for thread runtime state operations."""
+    return ThreadRuntimeStateRepository(pool)
+
+
 def get_memory_repository(pool: Any = Depends(get_pool)) -> MemoryRepository:
     """
     Return a new MemoryRepository instance.
@@ -200,28 +210,36 @@ def get_memory_repository(pool: Any = Depends(get_pool)) -> MemoryRepository:
 
 def get_client_query_service(
     client_repo: ClientRepository = Depends(get_client_repo),
-    thread_repo: ThreadRepository = Depends(get_thread_repo),
+    thread_read_repo: ThreadReadRepository = Depends(get_thread_read_repo),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
 ) -> ClientQueryService:
     """Return the application read service for client-focused queries."""
-    return ClientQueryService(client_repo, thread_repo, memory_repo)
+    return ClientQueryService(client_repo, thread_read_repo, memory_repo)
 
 
 def get_thread_query_service(
-    thread_repo: ThreadRepository = Depends(get_thread_repo),
+    thread_read_repo: ThreadReadRepository = Depends(get_thread_read_repo),
+    thread_message_repo: ThreadMessageRepository = Depends(get_thread_message_repo),
+    thread_runtime_state_repo: ThreadRuntimeStateRepository = Depends(get_thread_runtime_state_repo),
     event_repo: EventRepository = Depends(get_event_repo),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
 ) -> ThreadQueryService:
     """Return the application read service for thread-focused queries."""
-    return ThreadQueryService(thread_repo, event_repo, memory_repo)
+    return ThreadQueryService(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        event_repo=event_repo,
+        memory_repo=memory_repo,
+    )
 
 
 def get_thread_command_service(
-    thread_repo: ThreadRepository = Depends(get_thread_repo),
+    thread_lifecycle_repo: ThreadLifecycleRepository = Depends(get_thread_lifecycle_repo),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
 ) -> ThreadCommandService:
     """Return the application write service for thread-focused mutations."""
-    return ThreadCommandService(thread_repo, memory_repo)
+    return ThreadCommandService(thread_lifecycle_repo, memory_repo)
 
 
 def get_tool_registry() -> Any:
