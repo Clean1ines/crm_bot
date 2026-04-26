@@ -35,6 +35,7 @@ from src.infrastructure.db.repositories.project import (
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.thread_repository import ThreadRepository
 from src.infrastructure.llm.rag_service import RAGService
+from src.infrastructure.llm.query_expander import GroqQueryExpander
 from src.infrastructure.logging.logger import get_logger
 from src.tools import tool_registry
 from src.tools.builtins import (
@@ -67,7 +68,7 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     project_tokens = ProjectTokenRepository(db_pool)
     project_members = ProjectMemberRepository(db_pool)
 
-    rag_service = RAGService(knowledge_repo)
+    rag_service = RAGService(knowledge_repo, query_expander=GroqQueryExpander())
 
     tool_registry.register(SearchKnowledgeTool(rag_service))
     logger.info("Registered SearchKnowledgeTool")

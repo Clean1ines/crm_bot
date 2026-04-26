@@ -98,3 +98,64 @@ async def test_crm_create_user_writes_project_scoped_client(mock_pool):
     assert "INSERT INTO users" not in insert_sql
     assert lookup_project_id == "project-1"
     assert lookup_chat_id == "123"
+
+from src.tools.builtins import SearchKnowledgeTool
+
+
+class FakeRAGService:
+    def __init__(self):
+        self.calls = []
+
+    async def search_with_expansion(self, *, project_id, query, final_limit):
+        self.calls.append(
+            {
+                "project_id": project_id,
+                "query": query,
+                "final_limit": final_limit,
+            }
+        )
+        return [
+            {
+                "id": "chunk-1",
+                "content": "Knowledge answer",
+                "score": 0.91,
+                "method": "hybrid",
+                "source": "faq.md",
+                "title": "FAQ",
+                "chunk_index": 2,
+            }
+        ]
+
+
+@pytest.mark.asyncio
+async def test_search_knowledge_tool_uses_injected_rag_service_without_groq():
+    rag = FakeRAGService()
+    tool = SearchKnowledgeTool(rag)
+
+    result = await tool.run(
+        {"query": "  pricing  ", "limit": 5},
+        {"project_id": "project-1"},
+    )
+
+    assert rag.calls == [
+        {
+            "project_id": "project-1",
+            "query": "pricing",
+            "final_limit": 5,
+        }
+    ]
+    assert result == {
+        "results": [
+            {
+                "id": "chunk-1",
+                "content": "Knowledge answer",
+                "score": 0.91,
+                "method": "hybrid",
+                "source": "faq.md",
+                "title": "FAQ",
+                "chunk_index": 2,
+            }
+        ],
+        "query": "pricing",
+        "total_found": 1,
+    }

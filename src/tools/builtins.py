@@ -135,8 +135,10 @@ class SearchKnowledgeTool(Tool):
             # Format results for agent consumption
             formatted_results = [
                 {
+                    "id": r.get("id"),
                     "content": r.get("content", ""),
                     "score": float(r.get("score", 0.0)),
+                    "method": r.get("method"),
                     "source": r.get("source"),
                     "title": r.get("title"),
                     "chunk_index": r.get("chunk_index")
