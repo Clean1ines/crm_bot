@@ -344,7 +344,21 @@ def verify_pro_mode_access(
         Raises:
             HTTPException: If project not found or Pro mode not enabled.
         """
-        is_pro = await project_repo.get_is_pro_mode(project_id)
+        try:
+            is_pro = await project_repo.get_is_pro_mode(project_id)
+        except Exception as exc:
+            logger.warning(
+                "Pro mode guard failed closed",
+                extra={
+                    "project_id": project_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Project runtime guard unavailable",
+            ) from exc
+
         if not is_pro:
             logger.warning(
                 "Pro mode access denied",

@@ -41,8 +41,14 @@ class ProjectRuntimeGuards:
                 await cache.expire(key, 70)
             return int(current) <= profile.requests_per_minute
         except Exception as exc:
-            self.logger.warning("Project runtime guard failed open", extra={"project_id": project_id, "error": str(exc)})
-            return True
+            self.logger.warning(
+                "Project request rate guard failed closed",
+                extra={
+                    "project_id": project_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return False
 
     async def try_acquire_thread_slot(
         self,
@@ -77,10 +83,14 @@ class ProjectRuntimeGuards:
             return True
         except Exception as exc:
             self.logger.warning(
-                "Project thread concurrency guard failed open",
-                extra={"project_id": project_id, "thread_id": thread_id, "error": str(exc)},
+                "Project thread concurrency guard failed closed",
+                extra={
+                    "project_id": project_id,
+                    "thread_id": thread_id,
+                    "error_type": type(exc).__name__,
+                },
             )
-            return True
+            return False
 
     async def release_thread_slot(self, project_id: str, thread_id: str) -> None:
         active_threads_key = f"{self.REDIS_PREFIX}{project_id}:active_threads"
@@ -93,5 +103,9 @@ class ProjectRuntimeGuards:
         except Exception as exc:
             self.logger.warning(
                 "Failed to release project thread slot",
-                extra={"project_id": project_id, "thread_id": thread_id, "error": str(exc)},
+                extra={
+                    "project_id": project_id,
+                    "thread_id": thread_id,
+                    "error_type": type(exc).__name__,
+                },
             )

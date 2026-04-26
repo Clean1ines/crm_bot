@@ -145,6 +145,18 @@ class TestVerifyProModeAccess:
         assert exc.value.status_code == 403
         assert exc.value.detail == "Pro mode required. Upgrade your plan to access this feature."
 
+    @pytest.mark.asyncio
+    async def test_pro_mode_repository_error_fails_closed(self):
+        project_repo = AsyncMock()
+        project_repo.get_is_pro_mode = AsyncMock(side_effect=RuntimeError("db down"))
+        check_pro_mode = verify_pro_mode_access(project_repo=project_repo)
+
+        with pytest.raises(HTTPException) as exc:
+            await check_pro_mode("project-id")
+
+        assert exc.value.status_code == 503
+        assert exc.value.detail == "Project runtime guard unavailable"
+
 
 class TestPoolAndOrchestrator:
     def test_get_pool_success(self):

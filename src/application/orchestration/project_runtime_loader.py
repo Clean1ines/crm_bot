@@ -5,6 +5,10 @@ Project runtime configuration loading.
 from src.application.dto.runtime_dto import ProjectRuntimeContextDto
 
 
+class ProjectRuntimeConfigurationLoadError(RuntimeError):
+    """Raised when protected runtime configuration cannot be loaded."""
+
+
 class ProjectRuntimeLoader:
     def __init__(self, projects, logger) -> None:
         self.projects = projects
@@ -17,6 +21,11 @@ class ProjectRuntimeLoader:
         except Exception as exc:
             self.logger.warning(
                 "Failed to load project configuration for runtime",
-                extra={"project_id": project_id, "error": str(exc)},
+                extra={
+                    "project_id": project_id,
+                    "error_type": type(exc).__name__,
+                },
             )
-            return ProjectRuntimeContextDto()
+            raise ProjectRuntimeConfigurationLoadError(
+                "Project runtime configuration could not be loaded"
+            ) from exc
