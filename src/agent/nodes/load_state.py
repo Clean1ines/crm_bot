@@ -111,10 +111,17 @@ def create_load_state_node(thread_repo, project_repo, memory_repo: MemoryReposit
                         logger.debug("Loaded lifecycle from memory", extra={"lifecycle": lifecycle})
 
                 result.apply_system_memory(memories)
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Failed to load user memory",
-                    extra={"client_id": thread_snapshot.client_id},
+                    extra={
+                        "client_id": thread_snapshot.client_id,
+                        "project_id": project_id,
+                        "thread_id": thread_id,
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                        "policy": "fallback_empty_memory",
+                    },
                 )
                 result.user_memory = {}
         else:

@@ -44,17 +44,30 @@ def create_persist_node(
                     content=context.response_text,
                 )
                 logger.debug("Assistant message saved", extra={"thread_id": context.thread_id})
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Failed to save assistant message",
-                    extra={"thread_id": context.thread_id},
+                    extra={
+                        "thread_id": context.thread_id,
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                        "policy": "degrade_continue",
+                    },
                 )
 
         try:
             await thread_repo.save_state_json(context.thread_id, context.state_payload or {})
             logger.debug("State JSON saved", extra={"thread_id": context.thread_id})
-        except Exception:
-            logger.exception("Failed to save state_json", extra={"thread_id": context.thread_id})
+        except Exception as exc:
+            logger.exception(
+                "Failed to save state_json",
+                extra={
+                    "thread_id": context.thread_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "degrade_continue",
+                },
+            )
 
         if event_repo:
             try:
@@ -163,10 +176,16 @@ def create_persist_node(
                             value=context.user_input[:200],
                             type_="issues",
                         )
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "Failed to store user memory",
-                    extra={"client_id": context.client_id},
+                    extra={
+                        "client_id": context.client_id,
+                        "project_id": context.project_id,
+                        "error": str(exc),
+                        "error_type": type(exc).__name__,
+                        "policy": "degrade_continue",
+                    },
                 )
 
         try:

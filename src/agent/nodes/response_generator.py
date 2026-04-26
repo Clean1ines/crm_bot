@@ -136,8 +136,16 @@ def create_response_generator_node(
                 response_text=response_text,
                 metadata=metadata,
             ).to_state_patch()
-        except Exception:
-            logger.exception("Response generation failed", extra={"decision": context.decision})
+        except Exception as exc:
+            logger.exception(
+                "Response generation failed",
+                extra={
+                    "decision": context.decision,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "fallback_user_visible_error",
+                },
+            )
             return ResponseGenerationResult(
                 response_text="Sorry, something went wrong while generating the response. Please try again later.",
             ).to_state_patch()

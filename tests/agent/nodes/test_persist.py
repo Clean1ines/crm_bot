@@ -79,3 +79,32 @@ async def test_persist_saves_state_emits_events_and_updates_analytics():
     assert event_repo.append.await_count >= 2
     assert memory_repo.set.await_count >= 3
     queue_repo.enqueue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_persist_degrades_when_assistant_message_save_fails():
+    thread_repo = MagicMock()
+    thread_repo.add_message = AsyncMock(side_effect=RuntimeError("message write failed"))
+    thread_repo.save_state_json = AsyncMock()
+    thread_repo.update_analytics = AsyncMock()
+
+    node = create_persist_node(thread_repo=thread_repo)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch("src.agent.nodes.persist.log_node_execution", AsyncMock(side_effect=passthrough)),
+        patch("src.agent.nodes.persist.logger") as logger,
+    ):
+        result = await node({
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "response_text": "hello",
+        })
+
+    assert result == {}
+    thread_repo.save_state_json.assert_awaited_once()
+    thread_repo.update_analytics.assert_awaited_once()
+    logger.exception.assert_called_once()
+    assert logger.exception.call_args.kwargs["extra"]["policy"] == "degrade_continue"

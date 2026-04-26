@@ -58,16 +58,31 @@ def create_escalate_node(
                 "Ticket created",
                 extra={"ticket_id": result.get("ticket_id"), "thread_id": context.thread_id},
             )
-        except Exception:
-            logger.exception("Failed to create ticket", extra={"thread_id": context.thread_id})
+        except Exception as exc:
+            logger.exception(
+                "Failed to create ticket",
+                extra={
+                    "thread_id": context.thread_id,
+                    "project_id": context.project_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "degrade_continue",
+                },
+            )
 
         try:
             await queue_repo.enqueue("notify_manager", context.notification_payload())
             logger.debug("Manager notification enqueued", extra={"thread_id": context.thread_id})
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Failed to enqueue manager notification",
-                extra={"thread_id": context.thread_id},
+                extra={
+                    "thread_id": context.thread_id,
+                    "project_id": context.project_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "degrade_continue",
+                },
             )
 
         try:
@@ -76,8 +91,17 @@ def create_escalate_node(
                 {"thread_id": context.thread_id, "escalated": True},
             )
             logger.debug("Metrics update enqueued", extra={"thread_id": context.thread_id})
-        except Exception:
-            logger.exception("Failed to enqueue metrics update", extra={"thread_id": context.thread_id})
+        except Exception as exc:
+            logger.exception(
+                "Failed to enqueue metrics update",
+                extra={
+                    "thread_id": context.thread_id,
+                    "project_id": context.project_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "degrade_continue",
+                },
+            )
 
         return EscalationResult().to_state_patch()
 

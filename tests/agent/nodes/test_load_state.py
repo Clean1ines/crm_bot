@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -45,3 +45,33 @@ async def test_load_state_node_uses_thread_runtime_snapshots():
     assert result["lifecycle"] == "warm"
     assert result["decision"] == "RESPOND"
     assert result["user_memory"] == {}
+
+
+@pytest.mark.asyncio
+async def test_load_state_degrades_to_empty_user_memory_when_memory_repo_fails():
+    thread_repo = MagicMock()
+    thread_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+            "chat_id": 123,
+        }
+    )
+    thread_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+    thread_repo.get_state_json = AsyncMock(return_value={})
+
+    memory_repo = MagicMock()
+    memory_repo.get_for_user_view = AsyncMock(side_effect=RuntimeError("memory unavailable"))
+
+    node = create_load_state_node(thread_repo, project_repo=MagicMock(), memory_repo=memory_repo)
+
+    with patch("src.agent.nodes.load_state.logger") as logger:
+        result = await node({"thread_id": "thread-1", "project_id": "project-1"})
+
+    assert result["user_memory"] == {}
+    logger.exception.assert_called_once()
+    assert logger.exception.call_args.kwargs["extra"]["policy"] == "fallback_empty_memory"
