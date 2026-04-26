@@ -26,14 +26,15 @@ db_diagnostic.sh
 
 schema.sql
 db_schema.txt
-scripts/
+scripts/*
+!scripts/generate_openapi.py
 test.py
 kb_demo_ai_seller_faq.json
 test_kb_fixed.py
 frontend/output.txt
 frontend/src/output.txt
 node_modules/
-package-lock.json
+/package-lock.json
 openapi.json
 sync_api.sh
 check_compilation.py
