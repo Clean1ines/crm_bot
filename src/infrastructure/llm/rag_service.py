@@ -1,7 +1,7 @@
 import json
 import re
 from typing import List, Dict, Any
-from groq import AsyncGroq
+from groq import APIConnectionError, APIError, APITimeoutError, AsyncGroq, RateLimitError
 
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
@@ -39,7 +39,7 @@ class RAGService:
             data = json.loads(match.group(0))
             if isinstance(data, list):
                 return [int(x) for x in data if isinstance(x, (int, float))]
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError, OverflowError):
             return []
 
         return []
@@ -83,8 +83,18 @@ class RAGService:
 
             return cleaned[:3]
 
-        except Exception as e:
-            logger.warning(f"expand failed: {e}")
+        except (
+            APIConnectionError,
+            APIError,
+            APITimeoutError,
+            RateLimitError,
+            json.JSONDecodeError,
+            AttributeError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
+            logger.warning("RAG query expansion failed; falling back to original query", error=str(e)[:200])
 
         return [query]
 

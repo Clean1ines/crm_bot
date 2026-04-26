@@ -7,6 +7,7 @@ supporting multi-provider authentication and user management.
 
 import asyncpg
 import base64
+import binascii
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -46,7 +47,7 @@ def _verify_password(password: str, stored_hash: str) -> bool:
         expected = base64.b64decode(hash_b64.encode("ascii"))
         derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
         return secrets.compare_digest(derived, expected)
-    except Exception:
+    except (ValueError, UnicodeEncodeError, binascii.Error):
         return False
 
 
