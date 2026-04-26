@@ -40,7 +40,8 @@ class ProjectRepositoryBase:
 
     def _normalize_record(self, row: Any) -> JsonMap:
         if not row:
-            return {}
+            empty: JsonMap = {}
+            return empty
 
         data = dict(row)
         for key, value in list(data.items()):

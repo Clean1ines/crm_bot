@@ -12,6 +12,14 @@ from uuid import UUID
 import asyncpg
 
 from src.infrastructure.logging.logger import get_logger
+from src.domain.project_plane.repository_record_views import RepositoryRecordView
+
+def _typed_records(items):
+    records = [
+        item if isinstance(item, RepositoryRecordView) else RepositoryRecordView.from_record(item)
+        for item in items
+    ]
+    return records
 
 logger = get_logger(__name__)
 
@@ -103,7 +111,7 @@ class EventRepository:
         stream_id: UUID,
         limit: int = 100,
         after_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[RepositoryRecordView]:
         """
         Retrieve events from a specific stream for state reconstruction.
         
@@ -173,14 +181,14 @@ class EventRepository:
             extra={"stream_id": str(stream_id), "event_count": len(events)}
         )
         
-        return events
+        return _typed_records(events)
     
     async def get_by_type(
         self,
         project_id: UUID,
         event_type: str,
         limit: int = 100
-    ) -> List[Dict[str, Any]]:
+    ) -> list[RepositoryRecordView]:
         """
         Retrieve events of a specific type for analytics.
         
@@ -232,14 +240,14 @@ class EventRepository:
             extra={"project_id": str(project_id), "event_count": len(events)}
         )
         
-        return events
+        return _typed_records(events)
     
     async def get_events_for_thread(
         self,
         thread_id: str,
         limit: int = 30,
         offset: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[RepositoryRecordView]:
         """
         Retrieve events for a specific thread with pagination.
         
@@ -284,4 +292,4 @@ class EventRepository:
             "Events for thread loaded",
             extra={"thread_id": thread_id, "event_count": len(events)}
         )
-        return events
+        return _typed_records(events)

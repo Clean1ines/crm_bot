@@ -13,7 +13,8 @@ from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid, logger
 class ProjectMemberRepository(ProjectRepositoryBase):
     async def get_manager_notification_targets(self, project_id: ProjectId) -> list[str]:
         targets = await self.get_manager_notification_recipients(project_id)
-        return [target.telegram_chat_id for target in targets]
+        telegram_chat_ids = [target.telegram_chat_id for target in targets]
+        return telegram_chat_ids
 
     async def get_manager_notification_recipients(
         self,
@@ -32,7 +33,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                   AND u.telegram_id IS NOT NULL
             """, ensure_uuid(project_id))
 
-        return [
+        recipients = [
             ManagerNotificationTarget(
                 user_id=str(r["user_id"]) if r.get("user_id") is not None else None,
                 telegram_chat_id=str(r["manager_chat_id"]),
@@ -40,6 +41,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
             for r in rows
             if r.get("manager_chat_id") is not None
         ]
+        return recipients
 
     async def add_manager_by_telegram_identity(
         self,

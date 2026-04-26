@@ -174,6 +174,46 @@ class ThreadMessageView:
 
 
 @dataclass(slots=True)
+class ThreadRuntimeMessageView:
+    role: str
+    content: str
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> "ThreadRuntimeMessageView":
+        return cls(
+            role=str(record["role"]),
+            content=str(record["content"]),
+        )
+
+    def to_record(self) -> dict[str, str]:
+        return {
+            "role": self.role,
+            "content": self.content,
+        }
+
+    def __getitem__(self, key: str) -> str:
+        if key == "role":
+            return self.role
+        if key == "content":
+            return self.content
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "role":
+            return self.role
+        if key == "content":
+            return self.content
+        return default
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ThreadRuntimeMessageView):
+            return self.role == other.role and self.content == other.content
+        if isinstance(other, dict):
+            return self.to_record() == other
+        return False
+
+
+@dataclass(slots=True)
 class ThreadStatusSummaryView:
     id: str
     client_id: str

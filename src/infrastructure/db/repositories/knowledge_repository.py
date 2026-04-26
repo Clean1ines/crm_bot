@@ -9,6 +9,14 @@ from typing import List, Dict, Any, Optional
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.llm.embedding_service import embed_text, embed_batch
 from src.utils.uuid_utils import ensure_uuid
+from src.domain.project_plane.repository_record_views import RepositoryRecordView
+
+def _typed_records(items):
+    records = [
+        item if isinstance(item, RepositoryRecordView) else RepositoryRecordView.from_record(item)
+        for item in items
+    ]
+    return _typed_records(records)
 
 logger = get_logger(__name__)
 
@@ -30,7 +38,7 @@ class KnowledgeRepository:
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[RepositoryRecordView]:
 
         query_embedding = await embed_text(query)
         query_embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
@@ -170,7 +178,7 @@ class KnowledgeRepository:
         project_id: str,
         limit: int = 20,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[RepositoryRecordView]:
         """
         List documents for a project.
         """

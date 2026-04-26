@@ -10,6 +10,7 @@ from src.domain.project_plane.thread_views import (
     ThreadLastMessageView,
     ThreadMessageCounts,
     ThreadMessageView,
+    ThreadRuntimeMessageView,
     ThreadStatusSummaryView,
     ThreadWithProjectView,
 )
@@ -100,7 +101,7 @@ class ThreadRepository:
             await conn.execute("UPDATE threads SET updated_at = NOW() WHERE id = $1", ensure_uuid(thread_id))
             logger.debug(f"Message added and thread updated")
 
-    async def get_messages_for_langgraph(self, thread_id: str) -> List[Dict]:
+    async def get_messages_for_langgraph(self, thread_id: str) -> list[ThreadRuntimeMessageView]:
         """Загружает историю для LangGraph."""
         logger.debug(f"Fetching messages for thread {thread_id}")
         async with self.pool.acquire() as conn:
@@ -108,7 +109,7 @@ class ThreadRepository:
                 SELECT role, content FROM messages 
                 WHERE thread_id = $1 ORDER BY created_at ASC
             """, ensure_uuid(thread_id))
-            messages = [dict(row) for row in rows]
+            messages = [ThreadRuntimeMessageView.from_record(dict(row)) for row in rows]
             logger.debug(f"Retrieved {len(messages)} messages")
             return messages
 
@@ -510,4 +511,5 @@ class ThreadRepository:
                 WHERE t.status = $1
                 ORDER BY t.updated_at DESC
             """, status)
-            return [ThreadStatusSummaryView.from_record(dict(row)) for row in rows]
+            summaries = [ThreadStatusSummaryView.from_record(dict(row)) for row in rows]
+            return summaries
