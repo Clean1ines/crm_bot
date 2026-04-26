@@ -1,6 +1,24 @@
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Mapping
+
+
+
+def _json_object(value: object) -> dict:
+    if value is None or value == "":
+        return {}
+
+    if isinstance(value, Mapping):
+        return dict(value)
+
+    if isinstance(value, str):
+        loaded = json.loads(value)
+        if not isinstance(loaded, Mapping):
+            raise ValueError("Expected JSON object")
+        return dict(loaded)
+
+    return dict(value)
 
 
 @dataclass(slots=True)
@@ -151,7 +169,7 @@ class ProjectIntegrationView:
             project_id=str(record["project_id"]),
             provider=str(record["provider"]),
             status=record.get("status"),
-            config_json=dict(record.get("config_json") or {}),
+            config_json=_json_object(record.get("config_json")),
             credentials_encrypted=record.get("credentials_encrypted"),
             created_at=record.get("created_at"),
             updated_at=record.get("updated_at"),
@@ -190,7 +208,7 @@ class ProjectChannelView:
             kind=str(record["kind"]),
             provider=str(record["provider"]),
             status=record.get("status"),
-            config_json=dict(record.get("config_json") or {}),
+            config_json=_json_object(record.get("config_json")),
             created_at=record.get("created_at"),
             updated_at=record.get("updated_at"),
         )

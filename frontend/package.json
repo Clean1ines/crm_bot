@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "generate-types": "npx openapi-typescript ./openapi.json -o ./src/shared/api/generated/schema.ts",
-    "api:sync": "cd .. && python dump_openapi.py && cp openapi.json ../frontend/openapi.json && cd ../frontend && npx openapi-typescript openapi.json -o src/shared/api/generated/schema.ts",
+    "api:sync": "cd .. && npm run generate:openapi",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
