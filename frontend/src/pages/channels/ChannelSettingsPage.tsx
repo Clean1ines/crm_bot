@@ -1,11 +1,11 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from '@entities/project/api/useProjects';
-import { useAppStore } from '@app/store';
 import { useProjectStore } from '@entities/project';
 
 export const ChannelSettingsPage: React.FC = () => {
   const navigate = useNavigate();
+  const { projectId: urlProjectId } = useParams<{ projectId: string }>();
   const {
     projects,
     isLoading: projectsLoading,
@@ -16,8 +16,9 @@ export const ChannelSettingsPage: React.FC = () => {
     openCreateModal,
     error: projectsError,
   } = useProjects();
-  const { selectedProjectId, setSelectedProjectId } = useAppStore();
-  const { setCurrentProjectId } = useProjectStore();
+  const { selectedProjectId: storedSelectedProjectId, setSelectedProjectId } = useProjectStore();
+
+  const selectedProjectId = urlProjectId || storedSelectedProjectId;
 
   const [clientToken, setClientToken] = useState('');
   const [managerToken, setManagerToken] = useState('');
@@ -27,23 +28,26 @@ export const ChannelSettingsPage: React.FC = () => {
   const safeProjects = useMemo(() => (Array.isArray(projects) ? projects : []), [projects]);
   const currentProject = safeProjects.find(p => p.id === selectedProjectId);
 
-  // Если проектов нет, открыть модалку создания
+  useEffect(() => {
+    if (urlProjectId) {
+      setSelectedProjectId(urlProjectId);
+    }
+  }, [urlProjectId, setSelectedProjectId]);
+
   useEffect(() => {
     if (!projectsLoading && safeProjects.length === 0) {
       openCreateModal();
     }
   }, [projectsLoading, safeProjects.length, openCreateModal]);
 
-  // Если выбранный проект null, но проекты есть, выбрать первый
   useEffect(() => {
     if (!projectsLoading && safeProjects.length > 0 && !selectedProjectId) {
       const firstProject = safeProjects[0];
       if (!firstProject) return;
       setSelectedProjectId(firstProject.id);
-      setCurrentProjectId(firstProject.id);
       navigate(`/projects/${firstProject.id}/channels`);
     }
-  }, [projectsLoading, safeProjects, selectedProjectId, setSelectedProjectId, setCurrentProjectId, navigate]);
+  }, [projectsLoading, safeProjects, selectedProjectId, setSelectedProjectId, navigate]);
 
   const handleSaveClientToken = async () => {
     if (!selectedProjectId) {
@@ -155,7 +159,6 @@ export const ChannelSettingsPage: React.FC = () => {
         </p>
       </div>
 
-      {/* Клиентский бот */}
       <div className="bg-[var(--surface-secondary)] rounded-xl border border-[var(--border-subtle)] p-6 shadow-sm">
         <h2 className="text-xl font-medium text-[var(--text-primary)] mb-4">Клиентский бот</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
@@ -211,7 +214,6 @@ export const ChannelSettingsPage: React.FC = () => {
         )}
       </div>
 
-      {/* Менеджерский бот */}
       <div className="bg-[var(--surface-secondary)] rounded-xl border border-[var(--border-subtle)] p-6 shadow-sm">
         <h2 className="text-xl font-medium text-[var(--text-primary)] mb-4">Менеджерский бот</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">

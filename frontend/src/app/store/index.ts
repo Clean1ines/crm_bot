@@ -2,10 +2,7 @@ import { create } from 'zustand';
 import type { Message, ThreadState, MemoryEntry, TimelineEvent } from '../../entities/thread/model/types';
 
 interface AppState {
-  // Project & thread selection
-  selectedProjectId: string | null;
   selectedThreadId: string | null;
-  setSelectedProjectId: (id: string | null) => void;
   setSelectedThreadId: (id: string | null) => void;
 
   // Messages for current thread
@@ -31,15 +28,13 @@ interface AppState {
   inspectorActiveTab: 'summary' | 'memory' | 'decision' | 'timeline' | 'raw';
   setInspectorActiveTab: (tab: AppState['inspectorActiveTab']) => void;
 
-  // Model selection (existing)
+  // Model selection
   selectedModel: string | null;
   setSelectedModel: (model: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  selectedProjectId: null,
   selectedThreadId: null,
-  setSelectedProjectId: (id) => set({ selectedProjectId: id }),
   setSelectedThreadId: (id) => set({ selectedThreadId: id }),
 
   messages: [],

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects } from '@entities/project';
-import { useAppStore } from '../../app/store';
 import { CreateProjectModal } from '@features/project/create';
 import { DeleteConfirmModal } from '@shared/ui';
 import { useMediaQuery } from '@/shared/lib/hooks/useMediaQuery';
@@ -37,8 +36,7 @@ const navItems: NavItem[] = [
 export const AppSidebar: React.FC = () => {
   const navigate = useNavigate();
   const { projectId: urlProjectId } = useParams<{ projectId: string }>();
-  const { setSelectedProjectId } = useAppStore();
-  const { setCurrentProjectId } = useProjectStore();
+  const { setSelectedProjectId } = useProjectStore();
   const {
     projects,
     isCreateOpen,
@@ -70,7 +68,6 @@ export const AppSidebar: React.FC = () => {
 
   const handleProjectSelect = (projectId: string) => {
     frontendLogger.info('Project selected', { projectId, previousUrl: urlProjectId });
-    setCurrentProjectId(projectId);
     setSelectedProjectId(projectId);
     navigate(`/projects/${projectId}/dialogs`);
     setIsProjectSelectOpen(false);
@@ -182,9 +179,9 @@ export const AppSidebar: React.FC = () => {
       <CreateProjectModal
         isOpen={isCreateOpen}
         onClose={closeModals}
-        onCreate={async (name) => {
+        onCreate={async (name, description) => {
           frontendLogger.info('Creating project', { name });
-          await createProject(name);
+          await createProject(name, description);
         }}
         isPending={isCreating}
       />

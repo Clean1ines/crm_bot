@@ -1,63 +1,77 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import { api } from '../../shared/api/client';
-import { useAppStore } from '../../app/store';
-import type { Thread, Client, LastMessage } from '../../entities/thread/model/types';
-import { getClientDisplayName } from '../../shared/lib/clients';
+import { Link, useParams } from 'react-router-dom';
+
+import { api } from '@shared/api/client';
+
+type TicketListItem = {
+  thread_id: string;
+  client?: {
+    full_name?: string | null;
+    username?: string | null;
+  } | null;
+  last_message?: {
+    content?: string | null;
+  } | null;
+};
+
+const normalizeTickets = (payload: unknown): TicketListItem[] => {
+  return Array.isArray(payload) ? (payload as TicketListItem[]) : [];
+};
 
 export const TicketsPage: React.FC = () => {
-  const { selectedProjectId } = useAppStore();
+  const { projectId } = useParams<{ projectId: string }>();
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['tickets', 'manual', selectedProjectId],
+  const { data: tickets = [], isLoading } = useQuery<TicketListItem[]>({
+    queryKey: ['tickets', 'manual', projectId],
     queryFn: async () => {
-      if (!selectedProjectId) return [];
-      const { data, error } = await api.threads.list({
-        project_id: selectedProjectId,
-        status_filter: 'manual',
-        limit: 100,
+      if (!projectId) return [];
+
+      const { data, error } = await api.GET('/api/threads', {
+        params: {
+          query: {
+            project_id: projectId,
+            status: 'manual',
+          },
+        },
       });
+
       if (error) throw error;
-      return data || [];
+      return normalizeTickets(data);
     },
-    enabled: !!selectedProjectId,
+    enabled: !!projectId,
   });
 
-  if (!selectedProjectId) return <div className="p-6 text-[var(--text-muted)]">Выберите проект</div>;
-  if (isLoading) return <div className="p-6 text-[var(--text-muted)]">Загрузка тикетов...</div>;
-  if (error) return <div className="p-6 text-[var(--accent-danger)]">Ошибка: {String(error)}</div>;
-  if (!data || data.length === 0) return <div className="p-6 text-[var(--text-muted)]">Нет открытых тикетов</div>;
+  if (!projectId) return <div className="p-6 text-[var(--text-muted)]">Выберите проект</div>;
+
+  if (isLoading) {
+    return <div className="p-6 text-[var(--text-muted)]">Загрузка тикетов...</div>;
+  }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-6">Тикеты (ожидают ответа)</h1>
-      <div className="space-y-3">
-        {data.map((ticket: Thread) => {
-          const client = ticket.client as unknown as Client;
-          const lastMsg = ticket.last_message as unknown as LastMessage | null;
-          const clientName = getClientDisplayName(client, 'Клиент');
-          return (
-            <div
+    <div className="p-6 space-y-4">
+      <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Тикеты</h1>
+
+      {tickets.length === 0 ? (
+        <div className="text-[var(--text-muted)]">Нет активных тикетов.</div>
+      ) : (
+        <div className="space-y-2">
+          {tickets.map((ticket) => (
+            <Link
               key={ticket.thread_id}
-              className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow"
+              to={`/projects/${projectId}/tickets/${ticket.thread_id}`}
+              className="block rounded-lg border border-[var(--border-subtle)] bg-white p-4 hover:shadow-sm"
             >
-              <Link
-                to={`/projects/${selectedProjectId}/tickets/${ticket.thread_id}`}
-                className="text-[var(--accent-primary)] font-medium hover:underline"
-              >
-                Тикет #{ticket.thread_id.slice(0, 8)} - {clientName}
-              </Link>
-              <p className="text-sm text-[var(--text-secondary)] mt-1 line-clamp-2">
-                {lastMsg?.content || 'Нет сообщений'}
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-2">
-                Создан: {new Date(ticket.thread_created_at).toLocaleString()}
-              </p>
-            </div>
-          );
-        })}
-      </div>
+              <div className="font-medium text-[var(--text-primary)]">
+                {ticket.client?.full_name || ticket.client?.username || ticket.thread_id}
+              </div>
+              <div className="text-sm text-[var(--text-muted)]">
+                {ticket.last_message?.content || 'Без последнего сообщения'}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
