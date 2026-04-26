@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { streamFetch } from '@shared/api/client';
+import { streamFetch } from '@shared/api/core/stream';
 import { getOrCreateVisitorId } from '@shared/lib/visitorStorage';
 
 export const useSendMessage = (projectId: string) => {

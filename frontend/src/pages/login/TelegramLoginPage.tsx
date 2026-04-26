@@ -4,7 +4,9 @@ import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { ChatWidget } from './components/ChatWidget';
 import '../../app/styles/landing.css';
-import { api, getErrorMessage, setSessionToken } from '@shared/api/client';
+import { getErrorMessage } from '@shared/api/core/errors';
+import { setSessionToken } from '@shared/api/core/session';
+import { authApi } from '@shared/api/modules/auth';
 import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
 import frontendLogger from '@shared/lib/logger';
 
@@ -114,7 +116,7 @@ export const TelegramLoginPage: React.FC = () => {
 
     setIsLoading(true);
     setAuthError('');
-    api.auth.confirmEmailVerification({ token: verificationToken })
+    authApi.confirmEmailVerification({ token: verificationToken })
       .then(() => {
         setVerificationMessage('Email успешно подтвержден. Теперь можно входить этим способом.');
       })
@@ -168,12 +170,12 @@ export const TelegramLoginPage: React.FC = () => {
     setAuthError('');
     try {
       const result = authMode === 'register'
-        ? await api.auth.emailRegister({
+        ? await authApi.emailRegister({
           email,
           password,
           full_name: fullName || undefined,
         })
-        : await api.auth.emailLogin({ email, password });
+        : await authApi.emailLogin({ email, password });
       setSessionToken(getAccessTokenFromAuthResponse(result.data));
       navigate('/', { replace: true });
     } catch (error) {
@@ -186,7 +188,7 @@ export const TelegramLoginPage: React.FC = () => {
     setIsLoading(true);
     setAuthError('');
     try {
-      const result = await api.auth.googleLoginWithIdToken({ id_token: idToken });
+      const result = await authApi.googleLoginWithIdToken({ id_token: idToken });
       setSessionToken(getAccessTokenFromAuthResponse(result.data));
       navigate('/', { replace: true });
     } catch (error) {
@@ -201,7 +203,7 @@ export const TelegramLoginPage: React.FC = () => {
     setResetMessage('');
     try {
       if (!email.trim()) throw new Error('Укажите email для сброса пароля');
-      const result = await api.auth.requestPasswordReset({ email: email.trim() });
+      const result = await authApi.requestPasswordReset({ email: email.trim() });
       const data = result.data as { url?: string | null; token?: string | null };
       setResetLink(data.url || data.token || '');
       setResetMessage('Ссылка для сброса подготовлена.');
@@ -219,7 +221,7 @@ export const TelegramLoginPage: React.FC = () => {
     try {
       if (!resetToken.trim()) throw new Error('Укажите код сброса пароля');
       if (!resetNewPassword.trim()) throw new Error('Укажите новый пароль');
-      await api.auth.confirmPasswordReset({
+      await authApi.confirmPasswordReset({
         token: resetToken.trim(),
         new_password: resetNewPassword,
       });

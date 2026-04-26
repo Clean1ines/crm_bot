@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../../app/store';
-import { api } from '../../../shared/api/client';
+import { threadsApi } from '../../../shared/api/modules/threads';
 import type { Message } from '../../../entities/thread/model/types';
 import { Send } from 'lucide-react';
 
@@ -37,7 +37,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
       setLoadingMessages(true);
       setLoadError(null);
       try {
-        const { data, error } = await api.threads.getMessages(threadId, limit, offset);
+        const { data, error } = await threadsApi.getMessages(threadId, limit, offset);
         if (error) {
           console.error('Failed to load messages', error);
           setLoadError('Не удалось загрузить сообщения');
@@ -68,13 +68,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
     if (!threadId || !inputText.trim() || isSending) return;
     setIsSending(true);
     try {
-      const { error } = await api.threads.reply(threadId, inputText);
+      const { error } = await threadsApi.reply(threadId, inputText);
       if (error) {
         console.error('Failed to send reply', error);
       } else {
         setInputText('');
         setTimeout(async () => {
-          const { data } = await api.threads.getMessages(threadId, limit, offset);
+          const { data } = await threadsApi.getMessages(threadId, limit, offset);
           if (data && typeof data === 'object' && 'messages' in data && Array.isArray(data.messages)) {
             setMessages(data.messages as Message[]);
           }

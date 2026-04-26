@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../../app/store';
-import { api } from '../../../shared/api/client';
+import { threadsApi } from '../../../shared/api/modules/threads';
 import type { Thread, Client, LastMessage } from '../../../entities/thread/model/types';
 import { Search, Circle } from 'lucide-react';
 import { getClientDisplayName } from '../../../shared/lib/clients';
@@ -25,7 +25,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const { data, error } = await api.threads.list({
+      const { data, error } = await threadsApi.list({
         project_id: projectId,
         limit,
         offset: nextOffset,

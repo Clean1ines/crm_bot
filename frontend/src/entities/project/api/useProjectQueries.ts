@@ -1,20 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { projectsApi } from '@shared/api/modules/projects';
 import type { Project } from '../model/types';
-import { api } from '@shared/api/client';
 import { projectQueryKeys } from './queryKeys';
 
-const normalizeProjects = (payload: unknown): Project[] => {
-  return Array.isArray(payload) ? (payload as Project[]) : [];
-};
-
-export const useProjectsQuery = () => {
+export const useProjectListQuery = () => {
   return useQuery<Project[]>({
     queryKey: projectQueryKeys.list(),
     queryFn: async () => {
-      const { data, error } = await api.GET('/api/projects');
+      const { data, error } = await projectsApi.list();
       if (error) throw error;
-      return normalizeProjects(data);
+      return Array.isArray(data) ? data : [];
     },
   });
 };

@@ -19,7 +19,7 @@ const formatSize = (bytes: number) => {
 };
 
 import { useMutation } from '@tanstack/react-query';
-import { api } from '@shared/api/client';
+import { knowledgeApi } from '@shared/api/modules/knowledge';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 
@@ -37,7 +37,7 @@ export const KnowledgePage: React.FC = () => {
     mutationFn: async (file: File) => {
       if (!projectId) throw new Error('Project ID is missing');
       
-      const response = await api.knowledge.upload(projectId, file);
+      const response = await knowledgeApi.upload(projectId, file);
       
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));

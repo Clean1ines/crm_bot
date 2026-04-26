@@ -1,20 +1,14 @@
 import type { Project } from '../model/types';
 import { useProjectModalState } from '../model/modalState';
-import { useProjectsQuery } from './useProjectQueries';
 import {
   useCreateProjectMutation,
   useDeleteProjectMutation,
   useUpdateBotTokenMutation,
   useUpdateManagerBotTokenMutation,
 } from './useProjectMutations';
+import { useProjectListQuery } from './useProjectQueries';
 
 export const useProjects = () => {
-  const projectsQuery = useProjectsQuery();
-  const createMutation = useCreateProjectMutation();
-  const deleteMutation = useDeleteProjectMutation();
-  const updateBotTokenMutation = useUpdateBotTokenMutation();
-  const updateManagerBotTokenMutation = useUpdateManagerBotTokenMutation();
-
   const {
     isCreateOpen,
     isDeleteOpen,
@@ -23,6 +17,12 @@ export const useProjects = () => {
     openDeleteConfirm,
     closeModals,
   } = useProjectModalState();
+
+  const projectsQuery = useProjectListQuery();
+  const createMutation = useCreateProjectMutation(() => closeModals());
+  const deleteMutation = useDeleteProjectMutation(() => closeModals());
+  const updateBotTokenMutation = useUpdateBotTokenMutation();
+  const updateManagerBotTokenMutation = useUpdateManagerBotTokenMutation();
 
   const projects = Array.isArray(projectsQuery.data) ? projectsQuery.data : [];
 
@@ -35,19 +35,11 @@ export const useProjects = () => {
     isDeleteOpen,
     deletingProject,
     openCreateModal,
-    openDeleteConfirm,
+    openDeleteConfirm: (project: Project) => openDeleteConfirm(project),
     closeModals,
 
-    createProject: async (name: string, description?: string) => {
-      await createMutation.mutateAsync({ name, description });
-      closeModals();
-    },
-
-    deleteProject: async (id: string) => {
-      await deleteMutation.mutateAsync(id);
-      closeModals();
-    },
-
+    createProject: (name: string) => createMutation.mutateAsync(name),
+    deleteProject: (id: string) => deleteMutation.mutateAsync(id),
     updateBotToken: updateBotTokenMutation.mutateAsync,
     updateManagerBotToken: updateManagerBotTokenMutation.mutateAsync,
 
@@ -57,6 +49,3 @@ export const useProjects = () => {
     isUpdatingManagerBotToken: updateManagerBotTokenMutation.isPending,
   };
 };
-
-export type UseProjectsResult = ReturnType<typeof useProjects>;
-export type { Project };

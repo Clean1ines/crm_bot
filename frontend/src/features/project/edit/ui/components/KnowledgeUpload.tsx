@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNotification } from '@/shared/lib/notification/useNotifications';
-import { api } from '@shared/api/client';
+import { knowledgeApi } from '@shared/api/modules/knowledge';
 
 export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) => {
   const [file, setFile] = useState<File | null>(null);
@@ -11,7 +11,7 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
     if (!file) return;
     setUploading(true);
     try {
-      const response = await api.knowledge.upload(projectId, file);
+      const response = await knowledgeApi.upload(projectId, file);
       if (!response.ok) {
         const error = await response.text();
         throw new Error(error);

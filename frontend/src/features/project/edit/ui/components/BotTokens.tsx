@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { api } from '@shared/api/client';
+import { projectsApi } from '@shared/api/modules/projects';
 import { useNotification } from '@/shared/lib/notification/useNotifications';
 
 export const BotTokens: React.FC<{ projectId: string }> = ({ projectId }) => {
@@ -9,14 +9,14 @@ export const BotTokens: React.FC<{ projectId: string }> = ({ projectId }) => {
 
   const handleSetClient = async () => {
     if (!clientToken.trim()) return;
-    const { error } = await api.projects.setBotToken(projectId, clientToken);
+    const { error } = await projectsApi.setBotToken(projectId, clientToken);
     if (error) showNotification('Ошибка', 'error');
     else showNotification('Токен клиента сохранён', 'success');
   };
 
   const handleSetManager = async () => {
     if (!managerToken.trim()) return;
-    const { error } = await api.projects.setManagerToken(projectId, managerToken);
+    const { error } = await projectsApi.setManagerToken(projectId, managerToken);
     if (error) showNotification('Ошибка', 'error');
     else showNotification('Токен менеджера сохранён', 'success');
   };

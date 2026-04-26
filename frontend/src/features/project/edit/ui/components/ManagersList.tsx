@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useNotification } from '@/shared/lib/notification/useNotifications';
 import { useProjectManagers } from '@entities/project/api/useCrmData';
-import { api, getErrorMessage } from '@shared/api/client';
+import { getErrorMessage } from '@shared/api/core/errors';
+import { membersApi } from '@shared/api/modules/members';
 
 const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
 
@@ -26,7 +27,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
         throw new Error('Введите user_id участника платформы');
       }
 
-      await api.members.upsert(projectId, {
+      await membersApi.upsert(projectId, {
         user_id: normalizedUserId,
         role: newMemberRole,
       });
@@ -42,7 +43,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
 
   const removeMutation = useMutation({
     mutationFn: async (memberUserId: string) => {
-      await api.members.remove(projectId, memberUserId);
+      await membersApi.remove(projectId, memberUserId);
     },
     onSuccess: async () => {
       await invalidateManagers();

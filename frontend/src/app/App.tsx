@@ -16,7 +16,7 @@ import { ClientsPage } from '@pages/clients/ClientsPage';
 import { ProjectSettingsPage } from '@pages/settings/ProjectSettingsPage';
 import { ProfilePage } from '@pages/profile/ProfilePage';
 import { Layout } from './Layout';
-import { getSessionToken } from '@shared/api/client';
+import { getSessionToken } from '@shared/api/core/session';
 import { useProjects } from '@entities/project/api/useProjects';
 
 const AuthGuard = ({ children }: { children: React.ReactNode }) => {

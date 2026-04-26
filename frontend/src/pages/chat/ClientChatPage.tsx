@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { streamFetch } from '@shared/api/client';
+import { streamFetch } from '@shared/api/core/stream';
 import { getOrCreateVisitorId } from '@shared/lib/visitorStorage';
 
 export const ClientChatPage: React.FC = () => {

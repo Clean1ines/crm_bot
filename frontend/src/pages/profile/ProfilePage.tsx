@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
-import { api, getErrorMessage } from '@shared/api/client';
+import { getErrorMessage } from '@shared/api/core/errors';
+import { authApi } from '@shared/api/modules/auth';
 import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
 
 interface AuthMethod {
@@ -30,7 +31,7 @@ export const ProfilePage: React.FC = () => {
   const methodsQuery = useQuery<AuthMethodsResponse>({
     queryKey: ['auth-methods'],
     queryFn: async () => {
-      const result = await api.auth.methods();
+      const result = await authApi.methods();
       return result.data as AuthMethodsResponse;
     },
   });
@@ -43,7 +44,7 @@ export const ProfilePage: React.FC = () => {
       const normalizedEmail = emailInputValue.trim();
       if (!normalizedEmail) throw new Error('Укажите email');
       if (!password.trim()) throw new Error('Придумайте пароль для email-входа');
-      await api.auth.linkEmail({ email: normalizedEmail, password });
+      await authApi.linkEmail({ email: normalizedEmail, password });
     },
     onSuccess: async () => {
       setPassword('');
@@ -56,7 +57,7 @@ export const ProfilePage: React.FC = () => {
 
   const linkGoogleMutation = useMutation({
     mutationFn: async (idToken: string) => {
-      await api.auth.linkGoogleWithIdToken({ id_token: idToken });
+      await authApi.linkGoogleWithIdToken({ id_token: idToken });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
@@ -68,7 +69,7 @@ export const ProfilePage: React.FC = () => {
   const changePasswordMutation = useMutation({
     mutationFn: async () => {
       if (!newPassword.trim()) throw new Error('Укажите новый пароль');
-      await api.auth.changePassword({
+      await authApi.changePassword({
         new_password: newPassword,
         current_password: currentPassword.trim() || undefined,
       });
@@ -84,7 +85,7 @@ export const ProfilePage: React.FC = () => {
 
   const requestEmailVerificationMutation = useMutation({
     mutationFn: async () => {
-      const result = await api.auth.requestEmailVerification();
+      const result = await authApi.requestEmailVerification();
       return result.data as { url?: string | null; token?: string | null };
     },
     onSuccess: async (data) => {
@@ -97,7 +98,7 @@ export const ProfilePage: React.FC = () => {
 
   const unlinkMethodMutation = useMutation({
     mutationFn: async (provider: 'telegram' | 'email' | 'google') => {
-      await api.auth.unlinkMethod(provider);
+      await authApi.unlinkMethod(provider);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });

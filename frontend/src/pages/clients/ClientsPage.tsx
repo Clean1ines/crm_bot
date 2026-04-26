@@ -3,7 +3,7 @@ import { Search, MessageSquare, Calendar, Filter } from 'lucide-react';
 import { Button } from '@shared/ui';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjectClients } from '@entities/project/api/useCrmData';
-import { getErrorMessage } from '@shared/api/client';
+import { getErrorMessage } from '@shared/api/core/errors';
 import { getClientDisplayName, getClientInitials, getClientSecondaryText } from '@shared/lib/clients';
 
 export const ClientsPage: React.FC = () => {

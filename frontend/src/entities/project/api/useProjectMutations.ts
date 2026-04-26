@@ -1,53 +1,42 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
+import { projectsApi } from '@shared/api/modules/projects';
 import type { Project } from '../model/types';
-import { api } from '@shared/api/client';
 import { projectQueryKeys } from './queryKeys';
 
-type CreateProjectInput = {
-  name: string;
-  description?: string;
-};
-
-type ProjectTokenInput = {
+type BotTokenPayload = {
   projectId: string;
   token: string | null;
 };
 
-export const useCreateProjectMutation = () => {
+export const useCreateProjectMutation = (onSuccess?: (project: Project | undefined) => void) => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ name }: CreateProjectInput): Promise<Project | undefined> => {
-      const { data, error } = await api.POST('/api/projects', {
-        body: { name },
-      });
-
+    mutationFn: async (name: string) => {
+      const { data, error } = await projectsApi.create({ name });
       if (error) throw error;
       return data as Project | undefined;
     },
-    onSuccess: async () => {
+    onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: projectQueryKeys.list() });
+      onSuccess?.(project);
     },
   });
 };
 
-export const useDeleteProjectMutation = () => {
+export const useDeleteProjectMutation = (onSuccess?: (projectId: string) => void) => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (projectId: string): Promise<string> => {
-      const { error } = await api.DELETE('/api/projects/{project_id}', {
-        params: {
-          path: { project_id: projectId },
-        },
-      });
-
+    mutationFn: async (projectId: string) => {
+      const { error } = await projectsApi.delete(projectId);
       if (error) throw error;
       return projectId;
     },
-    onSuccess: async () => {
+    onSuccess: async (projectId) => {
       await queryClient.invalidateQueries({ queryKey: projectQueryKeys.list() });
+      onSuccess?.(projectId);
     },
   });
 };
@@ -56,14 +45,11 @@ export const useUpdateBotTokenMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ projectId, token }: ProjectTokenInput) => {
-      if (token === null) {
-        const { data, error } = await api.projects.clearBotToken(projectId);
-        if (error) throw error;
-        return data;
-      }
+    mutationFn: async ({ projectId, token }: BotTokenPayload) => {
+      const { data, error } = token === null
+        ? await projectsApi.clearBotToken(projectId)
+        : await projectsApi.setBotToken(projectId, token);
 
-      const { data, error } = await api.projects.setBotToken(projectId, token);
       if (error) throw error;
       return data;
     },
@@ -77,14 +63,11 @@ export const useUpdateManagerBotTokenMutation = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ projectId, token }: ProjectTokenInput) => {
-      if (token === null) {
-        const { data, error } = await api.projects.clearManagerToken(projectId);
-        if (error) throw error;
-        return data;
-      }
+    mutationFn: async ({ projectId, token }: BotTokenPayload) => {
+      const { data, error } = token === null
+        ? await projectsApi.clearManagerToken(projectId)
+        : await projectsApi.setManagerToken(projectId, token);
 
-      const { data, error } = await api.projects.setManagerToken(projectId, token);
       if (error) throw error;
       return data;
     },

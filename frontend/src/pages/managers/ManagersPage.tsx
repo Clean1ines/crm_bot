@@ -5,7 +5,8 @@ import { History, Search, Shield, Trash2, User, XCircle, CheckCircle2 } from 'lu
 import { useParams } from 'react-router-dom';
 
 import { useProjectManagers, type ProjectMember } from '@entities/project/api/useCrmData';
-import { api, getErrorMessage } from '@shared/api/client';
+import { getErrorMessage } from '@shared/api/core/errors';
+import { membersApi } from '@shared/api/modules/members';
 import { Button } from '@shared/ui';
 
 const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
@@ -38,7 +39,7 @@ export const ManagersPage: React.FC = () => {
         throw new Error('Укажите ID участника');
       }
 
-      await api.members.upsert(projectId, {
+      await membersApi.upsert(projectId, {
         user_id: normalizedUserId,
         role: newMemberRole,
       });
@@ -59,7 +60,7 @@ export const ManagersPage: React.FC = () => {
       if (!projectId) {
         throw new Error('Project is not selected');
       }
-      await api.members.remove(projectId, memberUserId);
+      await membersApi.remove(projectId, memberUserId);
     },
     onSuccess: async () => {
       await invalidateMembers();

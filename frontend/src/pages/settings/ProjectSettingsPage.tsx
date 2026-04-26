@@ -4,7 +4,8 @@ import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 
 import { useProjectConfiguration } from '@entities/project/api/useCrmData';
-import { api, getErrorMessage } from '@shared/api/client';
+import { getErrorMessage } from '@shared/api/core/errors';
+import { projectsApi } from '@shared/api/modules/projects';
 
 type SettingsDraft = {
   brandName?: string;
@@ -61,13 +62,13 @@ export const ProjectSettingsPage: React.FC = () => {
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) throw new Error('Project is not selected');
-      await api.projects.updateSettings(projectId, {
+      await projectsApi.updateSettings(projectId, {
         brand_name: brandName || undefined,
         tone_of_voice: toneOfVoice || undefined,
         default_language: defaultLanguage || undefined,
         default_timezone: defaultTimezone || undefined,
       });
-      await api.projects.updateLimits(projectId, {
+      await projectsApi.updateLimits(projectId, {
         requests_per_minute: requestsPerMinute ? Number(requestsPerMinute) : undefined,
         fallback_model: fallbackModel || undefined,
       });
@@ -84,7 +85,7 @@ export const ProjectSettingsPage: React.FC = () => {
     mutationFn: async () => {
       if (!projectId) throw new Error('Project is not selected');
       if (!integrationProvider.trim()) throw new Error('Укажите поставщика интеграции');
-      await api.projects.upsertIntegration(projectId, {
+      await projectsApi.upsertIntegration(projectId, {
         provider: integrationProvider.trim(),
         status: integrationUrl.trim() ? 'enabled' : 'disabled',
         config_json: integrationUrl.trim() ? { url: integrationUrl.trim() } : {},
@@ -101,7 +102,7 @@ export const ProjectSettingsPage: React.FC = () => {
   const saveWidgetChannelMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) throw new Error('Project is not selected');
-      await api.projects.upsertChannel(projectId, {
+      await projectsApi.upsertChannel(projectId, {
         kind: 'widget',
         provider: 'web',
         status: widgetOrigin.trim() ? 'active' : 'disabled',

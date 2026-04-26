@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@shared/api/client';
+import { projectsApi } from '@shared/api/modules/projects';
+import { membersApi } from '@shared/api/modules/members';
+import { clientsApi } from '@shared/api/modules/clients';
 
 export interface ProjectClient {
   id: string;
@@ -90,7 +92,7 @@ export const useProjectConfiguration = (projectId: string | undefined) => {
         return emptyConfiguration();
       }
 
-      const { data } = await api.projects.getConfiguration(projectId);
+      const { data } = await projectsApi.getConfiguration(projectId);
       return normalizeProjectConfiguration(data);
     },
     enabled: !!projectId,
@@ -109,7 +111,7 @@ export const useProjectMembers = (
     queryKey: ['members', projectId, roles?.join(',') ?? 'all'],
     queryFn: async () => {
       if (!projectId) return [];
-      const { data } = await api.members.list(projectId);
+      const { data } = await membersApi.list(projectId);
 
       const record = asRecord(data);
       const list = Array.isArray(data) ? data : asArray<unknown>(record.items);
@@ -142,7 +144,7 @@ export const useProjectClients = (projectId: string | undefined, search?: string
           stats: { total_clients: 0, new_clients_7d: 0, active_dialogs: 0 },
         };
       }
-      const { data, error } = await api.clients.list({ project_id: projectId, search });
+      const { data, error } = await clientsApi.list({ project_id: projectId, search });
       if (error) throw error;
 
       const payload = asRecord(data);

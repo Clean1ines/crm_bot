@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../../app/store';
-import { api } from '../../../shared/api/client';
+import { threadsApi } from '../../../shared/api/modules/threads';
 import type { MemoryEntry, TimelineEvent, ThreadState } from '../../../entities/thread/model/types';
 import { Edit2, Save, X, AlertCircle, ChevronDown } from 'lucide-react';
 import frontendLogger from '../../../shared/lib/logger';
@@ -240,7 +240,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
 
     const loadState = async () => {
       try {
-        const { data, error } = await api.threads.getState(threadId);
+        const { data, error } = await threadsApi.getState(threadId);
         if (!isRequestValid(currentRequestId)) {
           frontendLogger.debug('State request outdated, ignoring', { requestId: currentRequestId });
           return;
@@ -260,7 +260,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
 
     const loadMemory = async () => {
       try {
-        const { data, error } = await api.threads.getMemory(threadId);
+        const { data, error } = await threadsApi.getMemory(threadId);
         if (!isRequestValid(currentRequestId)) {
           frontendLogger.debug('Memory request outdated, ignoring', { requestId: currentRequestId });
           return;
@@ -286,7 +286,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
       setLoadingInspector(true);
       frontendLogger.debug('Loading timeline', { threadId, timelineLimit });
       try {
-        const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, 0);
+        const { data, error } = await threadsApi.getTimeline(threadId, timelineLimit, 0);
         if (!isRequestValid(currentRequestId)) {
           frontendLogger.debug('Timeline request outdated, ignoring', { requestId: currentRequestId });
           return;
@@ -335,7 +335,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     const newOffset = timelineOffset + timelineLimit;
     frontendLogger.debug('Loading more timeline', { threadId, newOffset, limit: timelineLimit });
     try {
-      const { data, error } = await api.threads.getTimeline(threadId, timelineLimit, newOffset);
+      const { data, error } = await threadsApi.getTimeline(threadId, timelineLimit, newOffset);
       if (!isRequestValid(currentRequestId)) {
         frontendLogger.debug('loadMoreTimeline outdated, ignoring');
         return;
@@ -362,12 +362,12 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     if (!isRequestValid(currentRequestId)) return;
     frontendLogger.debug('Updating memory', { threadId, key });
     try {
-      const { error } = await api.threads.updateMemory(threadId, key, value);
+      const { error } = await threadsApi.updateMemory(threadId, key, value);
       if (!isRequestValid(currentRequestId)) return;
       if (error) {
         frontendLogger.warn('Memory update error', { error });
       } else {
-        const { data } = await api.threads.getMemory(threadId);
+        const { data } = await threadsApi.getMemory(threadId);
         if (!isRequestValid(currentRequestId)) return;
         if (data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
           setThreadMemory(data.memory as MemoryEntry[]);

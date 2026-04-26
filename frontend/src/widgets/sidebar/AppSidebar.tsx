@@ -179,9 +179,9 @@ export const AppSidebar: React.FC = () => {
       <CreateProjectModal
         isOpen={isCreateOpen}
         onClose={closeModals}
-        onCreate={async (name, description) => {
+        onCreate={async (name) => {
           frontendLogger.info('Creating project', { name });
-          await createProject(name, description);
+          await createProject(name);
         }}
         isPending={isCreating}
       />
