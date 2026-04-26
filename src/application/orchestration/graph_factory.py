@@ -1,5 +1,11 @@
 """
 Graph creation and execution helpers.
+
+This module owns the application-side runtime contract:
+- concrete graph implementation is injected through AgentFactoryPort
+- graph input is GraphExecutionRequestDto
+- graph output is MessageProcessingOutcomeDto
+- missing graph response has deterministic fallback behavior
 """
 
 import json
@@ -10,7 +16,10 @@ from src.application.dto.runtime_dto import (
     GraphExecutionResultDto,
     MessageProcessingOutcomeDto,
 )
-from src.application.ports.agent_runtime_port import AgentFactoryPort
+from src.application.ports.agent_runtime_port import AgentFactoryPort, AgentGraphRuntimePort
+
+
+GRAPH_EMPTY_RESPONSE_FALLBACK_TEXT = "Sorry, I couldn't generate a response."
 
 
 class GraphFactory:
@@ -36,7 +45,13 @@ class GraphFactory:
             memory_repo=memory_repo,
         )
 
-    def build_graph_from_json(self, graph_json: Union[str, dict[str, Any]]) -> Any:
+    def build_graph_from_json(self, graph_json: Union[str, dict[str, Any]]) -> AgentGraphRuntimePort:
+        """
+        Return the project graph.
+
+        Dynamic graph JSON is intentionally not trusted yet. Invalid, empty, or
+        unsupported definitions fall back to the compiled default agent.
+        """
         if isinstance(graph_json, str):
             try:
                 graph_dict = json.loads(graph_json)
@@ -50,10 +65,13 @@ class GraphFactory:
             self.logger.warning("Invalid or empty graph_json, using default agent")
             return self.agent
 
-        self.logger.debug("Building graph from JSON", extra={"node_count": len(graph_dict.get("nodes", []))})
+        self.logger.debug(
+            "Building graph from JSON",
+            extra={"node_count": len(graph_dict.get("nodes", []))},
+        )
         return self.agent
 
-    async def get_graph_for_project(self, project_id: str) -> Any:
+    async def get_graph_for_project(self, project_id: str) -> AgentGraphRuntimePort:
         self.logger.debug("Loading graph for project", extra={"project_id": project_id})
         self.logger.debug("Using default agent graph", extra={"project_id": project_id})
         return self.agent
@@ -96,6 +114,9 @@ class GraphExecutor:
         )
 
     def build_agent_state(self, *, request: GraphExecutionRequestDto) -> dict[str, Any]:
+        """
+        Convert the typed application request into the graph state contract.
+        """
         return {
             "messages": [],
             "project_id": request.project_id,
@@ -111,12 +132,24 @@ class GraphExecutor:
             "tool_name": None,
             "tool_args": None,
             "tool_result": None,
+            "user_memory": None,
             "response_text": None,
             "requires_human": False,
             "confidence": None,
             "chat_id": request.chat_id,
+            "message_sent": False,
             "trace_id": request.trace_id,
+            "client_id": None,
             "project_configuration": request.runtime_context.to_dict(),
+            "close_ticket": False,
+            "intent": None,
+            "cta": None,
+            "lifecycle": None,
+            "features": None,
+            "dialog_state": None,
+            "topic": None,
+            "lead_status": None,
+            "repeat_count": None,
         }
 
     def extract_graph_result(
@@ -141,9 +174,14 @@ class GraphExecutor:
             f"Graph did not produce response_text for question: {question[:30]}...",
             extra={"thread_id": thread_id},
         )
-        return GraphExecutionResultDto(response_text="Sorry, I couldn't generate a response.")
+        return GraphExecutionResultDto(response_text=GRAPH_EMPTY_RESPONSE_FALLBACK_TEXT)
 
-    async def invoke_graph(self, *, graph: Any, request: GraphExecutionRequestDto) -> MessageProcessingOutcomeDto:
+    async def invoke_graph(
+        self,
+        *,
+        graph: AgentGraphRuntimePort,
+        request: GraphExecutionRequestDto,
+    ) -> MessageProcessingOutcomeDto:
         state = self.build_agent_state(request=request)
         result_state = await graph.ainvoke(state)
         graph_result = self.extract_graph_result(

@@ -1,31 +1,39 @@
 """
 LangGraph agent definition for the CRM bot.
 
-Builds a state machine graph with nodes for load_state, rules_check, kb_search,
-intent_extractor, policy_engine, tool_executor, escalate, response_generator,
-responder, and persist. Uses the extended AgentState.
+The runtime topology is defined by src.domain.runtime.graph_contract.
+This module is only the LangGraph adapter that materializes that contract.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from src.infrastructure.config.settings import settings
+from src.agent.nodes.escalate import create_escalate_node
+from src.agent.nodes.intent_extractor import create_intent_extractor_node
+from src.agent.nodes.kb_search import create_kb_search_node
+from src.agent.nodes.load_state import create_load_state_node
+from src.agent.nodes.persist import create_persist_node
+from src.agent.nodes.policy_engine import create_policy_engine_node
+from src.agent.nodes.responder import create_responder_node
+from src.agent.nodes.response_generator import create_response_generator_node
+from src.agent.nodes.rules import rules_node
+from src.agent.nodes.tool_executor import create_tool_executor_node
+from src.agent.state import AgentState
+from src.domain.runtime.graph_contract import AgentGraphDecision, AgentGraphNode, AGENT_GRAPH_CONTRACT
 from src.infrastructure.logging.logger import get_logger
-from .state import AgentState
-from .nodes.load_state import create_load_state_node
-from .nodes.rules import rules_node
-from .nodes.kb_search import create_kb_search_node
-from .nodes.intent_extractor import create_intent_extractor_node
-from .nodes.policy_engine import create_policy_engine_node
-from .nodes.response_generator import create_response_generator_node
-from .nodes.tool_executor import create_tool_executor_node
-from .nodes.escalate import create_escalate_node
-from .nodes.responder import create_responder_node
-from .nodes.persist import create_persist_node
-from src.tools.builtins import TicketCreateTool
 
 logger = get_logger(__name__)
+
+
+def _require_dependency(name: str, value: Any) -> Any:
+    if value is None:
+        raise ValueError(f"agent graph dependency is required: {name}")
+    return value
+
+
+def _decision_value(decision: AgentGraphDecision) -> str:
+    return decision.value
 
 
 def create_agent(
@@ -34,125 +42,135 @@ def create_agent(
     queue_repo=None,
     event_repo=None,
     project_repo=None,
-    memory_repo=None
+    memory_repo=None,
 ):
     """
-    Create and compile the LangGraph agent (state machine version).
+    Create and compile the LangGraph runtime graph.
 
-    Args:
-        tool_registry: ToolRegistry instance for dynamic tool execution.
-        thread_repo: ThreadRepository instance.
-        queue_repo: QueueRepository instance.
-        event_repo: Optional EventRepository for event sourcing.
-        project_repo: Optional ProjectRepository (may be used by some nodes).
-        project_repo: Optional ProjectRepository (may be used by some nodes).
-        memory_repo: Optional MemoryRepository for long-term memory.
+    Required injected dependencies:
+    - tool_registry
+    - thread_repo
+    - queue_repo
 
-    Returns:
-        Compiled LangGraph runtime graph.
+    Optional injected dependencies:
+    - event_repo
+    - project_repo
+    - memory_repo
     """
+    AGENT_GRAPH_CONTRACT.validate()
     logger.info("Creating state machine agent")
 
-    # Instantiate nodes with injected dependencies
+    tool_registry = _require_dependency("tool_registry", tool_registry)
+    thread_repo = _require_dependency("thread_repo", thread_repo)
+    queue_repo = _require_dependency("queue_repo", queue_repo)
+
     load_state_node = create_load_state_node(thread_repo, project_repo, memory_repo)
-    # rules_node is a pure function, no factory needed
     kb_search_node = create_kb_search_node(tool_registry)
-    intent_extractor_node = create_intent_extractor_node()  # uses lightweight LLM
-    policy_engine_node = create_policy_engine_node()
-    response_generator_node = create_response_generator_node()  # uses main LLM
+    intent_extractor_node = create_intent_extractor_node()
+    policy_engine_node = create_policy_engine_node(event_repo=event_repo)
+    response_generator_node = create_response_generator_node()
     tool_executor_node = create_tool_executor_node(tool_registry)
 
-    # Get TicketCreateTool from registry (or create if not found)
     ticket_create_tool = tool_registry.get_tool("ticket.create")
     if ticket_create_tool is None:
-        logger.warning("TicketCreateTool not found in registry, escalation will not create ticket")
+        logger.warning("TicketCreateTool not found in registry, escalation will degrade")
 
     escalate_node = create_escalate_node(thread_repo, queue_repo, ticket_create_tool)
-    # Pass thread_repo to responder node so it can save assistant messages
     responder_node = create_responder_node(tool_registry, thread_repo=thread_repo)
-    persist_node = create_persist_node(thread_repo, event_repo, memory_repo)
+    persist_node = create_persist_node(
+        thread_repo=thread_repo,
+        event_repo=event_repo,
+        memory_repo=memory_repo,
+        queue_repo=queue_repo,
+    )
 
-    # Build graph
     graph_builder = StateGraph(AgentState)
 
-    # Add all nodes
-    graph_builder.add_node("load_state", load_state_node)
-    graph_builder.add_node("rules_check", rules_node)
-    graph_builder.add_node("kb_search", kb_search_node)
-    graph_builder.add_node("intent_extractor", intent_extractor_node)
-    graph_builder.add_node("policy_engine", policy_engine_node)
-    graph_builder.add_node("tool_executor", tool_executor_node)
-    graph_builder.add_node("escalate", escalate_node)
-    graph_builder.add_node("response_generator", response_generator_node)
-    graph_builder.add_node("responder", responder_node)
-    graph_builder.add_node("persist", persist_node)
+    graph_builder.add_node(AgentGraphNode.LOAD_STATE.value, load_state_node)
+    graph_builder.add_node(AgentGraphNode.RULES_CHECK.value, rules_node)
+    graph_builder.add_node(AgentGraphNode.KB_SEARCH.value, kb_search_node)
+    graph_builder.add_node(AgentGraphNode.INTENT_EXTRACTOR.value, intent_extractor_node)
+    graph_builder.add_node(AgentGraphNode.POLICY_ENGINE.value, policy_engine_node)
+    graph_builder.add_node(AgentGraphNode.TOOL_EXECUTOR.value, tool_executor_node)
+    graph_builder.add_node(AgentGraphNode.ESCALATE.value, escalate_node)
+    graph_builder.add_node(AgentGraphNode.RESPONSE_GENERATOR.value, response_generator_node)
+    graph_builder.add_node(AgentGraphNode.RESPONDER.value, responder_node)
+    graph_builder.add_node(AgentGraphNode.PERSIST.value, persist_node)
 
-    # Set entry point
-    graph_builder.set_entry_point("load_state")
+    graph_builder.set_entry_point(AGENT_GRAPH_CONTRACT.entrypoint.value)
 
-    # Edges
-    graph_builder.add_edge("load_state", "rules_check")
+    graph_builder.add_edge(
+        AgentGraphNode.LOAD_STATE.value,
+        AgentGraphNode.RULES_CHECK.value,
+    )
 
-    # Conditional edges from rules_check
     def route_from_rules(state: AgentState) -> str:
-        decision = state.get("decision", "PROCEED_TO_LLM")
-        logger.info(f"Rules check decision: {decision}")
-        return decision
+        decision = state.get("decision") or AgentGraphDecision.PROCEED_TO_LLM.value
+        logger.info("Rules check decision: %s", decision)
+        return str(decision)
 
     graph_builder.add_conditional_edges(
-        "rules_check",
+        AgentGraphNode.RULES_CHECK.value,
         route_from_rules,
         {
-            "RESPOND": "responder",            # fallback if rules returned RESPOND (though rules now only PROCEED or ESCALATE)
-            "ESCALATE": "escalate",
-            "PROCEED_TO_LLM": "intent_extractor",  # <-- Changed: go directly to intent_extractor
-        }
+            _decision_value(AgentGraphDecision.RESPOND): AgentGraphNode.RESPONDER.value,
+            _decision_value(AgentGraphDecision.ESCALATE): AgentGraphNode.ESCALATE.value,
+            _decision_value(AgentGraphDecision.PROCEED_TO_LLM): AgentGraphNode.INTENT_EXTRACTOR.value,
+        },
     )
 
-    # Intent extraction then policy engine (no kb_search before)
-    graph_builder.add_edge("intent_extractor", "policy_engine")
+    graph_builder.add_edge(
+        AgentGraphNode.INTENT_EXTRACTOR.value,
+        AgentGraphNode.POLICY_ENGINE.value,
+    )
 
-    # Conditional edges from policy_engine
     def route_from_policy(state: AgentState) -> str:
-        decision = state.get("decision", "LLM_GENERATE")
-        logger.info(f"Policy engine decision: {decision}")
-        return decision
+        decision = state.get("decision") or AgentGraphDecision.LLM_GENERATE.value
+        logger.info("Policy engine decision: %s", decision)
+        return str(decision)
 
     graph_builder.add_conditional_edges(
-        "policy_engine",
+        AgentGraphNode.POLICY_ENGINE.value,
         route_from_policy,
         {
-            "LLM_GENERATE": "kb_search",        # <-- Changed: go to kb_search first
-            "ESCALATE_TO_HUMAN": "escalate",
-            "CALL_TOOL": "tool_executor",
-            "ESCALATE": "escalate",  # fallback
-        }
+            _decision_value(AgentGraphDecision.LLM_GENERATE): AgentGraphNode.KB_SEARCH.value,
+            _decision_value(AgentGraphDecision.ESCALATE_TO_HUMAN): AgentGraphNode.ESCALATE.value,
+            _decision_value(AgentGraphDecision.CALL_TOOL): AgentGraphNode.TOOL_EXECUTOR.value,
+            _decision_value(AgentGraphDecision.ESCALATE): AgentGraphNode.ESCALATE.value,
+        },
     )
 
-    # After kb_search, generate response
-    graph_builder.add_edge("kb_search", "response_generator")
+    graph_builder.add_edge(
+        AgentGraphNode.KB_SEARCH.value,
+        AgentGraphNode.RESPONSE_GENERATOR.value,
+    )
 
-    # Edges from tool_executor
     graph_builder.add_conditional_edges(
-        "tool_executor",
-        lambda state: "response_generator" if not state.get("requires_human") else "escalate",
+        AgentGraphNode.TOOL_EXECUTOR.value,
+        lambda state: (
+            AgentGraphNode.RESPONSE_GENERATOR.value
+            if not state.get("requires_human")
+            else AgentGraphNode.ESCALATE.value
+        ),
         {
-            "response_generator": "response_generator",
-            "escalate": "escalate",
-        }
+            AgentGraphNode.RESPONSE_GENERATOR.value: AgentGraphNode.RESPONSE_GENERATOR.value,
+            AgentGraphNode.ESCALATE.value: AgentGraphNode.ESCALATE.value,
+        },
     )
 
-    # Edges from escalate
-    graph_builder.add_edge("escalate", "responder")
-
-    # After response generation, go to responder
-    graph_builder.add_edge("response_generator", "responder")
-
-    # Edge from responder to persist
-    graph_builder.add_edge("responder", "persist")
-
-    # Edge from persist to END
-    graph_builder.add_edge("persist", END)
+    graph_builder.add_edge(
+        AgentGraphNode.ESCALATE.value,
+        AgentGraphNode.RESPONDER.value,
+    )
+    graph_builder.add_edge(
+        AgentGraphNode.RESPONSE_GENERATOR.value,
+        AgentGraphNode.RESPONDER.value,
+    )
+    graph_builder.add_edge(
+        AgentGraphNode.RESPONDER.value,
+        AgentGraphNode.PERSIST.value,
+    )
+    graph_builder.add_edge(AgentGraphNode.PERSIST.value, END)
 
     compiled = graph_builder.compile()
     logger.info("State machine agent compiled successfully")
