@@ -5,6 +5,10 @@ Project channel operations.
 import json
 from typing import Optional
 
+from src.domain.control_plane.project_views import ProjectChannelView
+
+from src.domain.control_plane.project_views import ProjectChannelView
+
 from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid
 
 
@@ -16,7 +20,7 @@ class ProjectChannelRepository(ProjectRepositoryBase):
         provider: str,
         status: str,
         config_json: Optional[JsonMap] = None,
-    ) -> JsonMap:
+    ) -> ProjectChannelView:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO project_channels (
@@ -37,4 +41,4 @@ class ProjectChannelRepository(ProjectRepositoryBase):
                 json.dumps(config_json or {}),
             )
 
-        return self._normalize_record(row)
+        return ProjectChannelView.from_record(self._normalize_record(row))

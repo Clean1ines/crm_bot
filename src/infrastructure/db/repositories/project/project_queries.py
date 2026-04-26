@@ -4,13 +4,13 @@ Core project query operations.
 
 from typing import Optional
 
-from src.domain.control_plane.project_views import ProjectSummaryView
+from src.domain.control_plane.project_views import ProjectRuntimeSettingsView, ProjectSummaryView
 
-from .base import ProjectRepositoryBase, JsonList, JsonMap, ProjectId, ensure_uuid, logger
+from .base import ProjectRepositoryBase, ProjectId, ensure_uuid, logger
 
 
 class ProjectQueryRepository(ProjectRepositoryBase):
-    async def get_project_settings(self, project_id: ProjectId) -> JsonMap:
+    async def get_project_settings(self, project_id: ProjectId) -> ProjectRuntimeSettingsView:
         logger.info("Fetching project settings", extra={"project_id": str(project_id)})
 
         async with self.pool.acquire() as conn:
@@ -24,7 +24,7 @@ class ProjectQueryRepository(ProjectRepositoryBase):
 
             if not row:
                 logger.warning("Project not found", extra={"project_id": str(project_id)})
-                return {}
+                return ProjectRuntimeSettingsView.empty()
 
             project_settings = dict(row)
             project_settings["bot_token"] = self._decrypt_if_present(project_settings["bot_token"])
@@ -44,11 +44,9 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             for r in manager_rows
             if r.get("manager_chat_id") is not None or r.get("telegram_id") is not None
         ]
-        project_settings["manager_notification_targets"] = targets
-        project_settings["manager_chat_ids"] = targets
-        return project_settings
+        return ProjectRuntimeSettingsView.from_record(project_settings, manager_targets=targets)
 
-    async def get_all_projects(self) -> JsonList:
+    async def get_all_projects(self) -> list[ProjectSummaryView]:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT id, user_id, name, is_pro_mode, created_at, updated_at
@@ -62,7 +60,7 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             project["id"] = str(project["id"])
             if project.get("user_id"):
                 project["user_id"] = str(project["user_id"])
-            projects.append(project)
+            projects.append(ProjectSummaryView.from_record(project))
         return projects
 
     async def get_project_view(self, project_id: ProjectId) -> Optional[ProjectSummaryView]:
@@ -83,7 +81,7 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             project["user_id"] = str(project["user_id"])
         return ProjectSummaryView.from_record(project)
 
-    async def get_projects_by_user_id(self, user_id: str) -> JsonList:
+    async def get_projects_by_user_id(self, user_id: str) -> list[ProjectSummaryView]:
         logger.info("Fetching projects by user_id", extra={"user_id": user_id})
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
@@ -99,7 +97,7 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             project = dict(row)
             project["id"] = str(project["id"])
             project["user_id"] = user_id
-            projects.append(project)
+            projects.append(ProjectSummaryView.from_record(project))
         return projects
 
     async def get_projects_for_user_view(self, user_id: str) -> list[ProjectSummaryView]:

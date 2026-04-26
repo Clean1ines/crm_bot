@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -78,3 +78,149 @@ class ProjectMemberView:
             "project_id": self.project_id,
             "created_at": self.created_at,
         }
+
+@dataclass(slots=True)
+class ProjectRuntimeSettingsView:
+    system_prompt: str | None = None
+    bot_token: str | None = None
+    webhook_url: str | None = None
+    manager_bot_token: str | None = None
+    webhook_secret: str | None = None
+    is_pro_mode: bool = False
+    client_bot_username: str | None = None
+    manager_bot_username: str | None = None
+    manager_notification_targets: list[str] = field(default_factory=list)
+    manager_chat_ids: list[str] = field(default_factory=list)
+
+    @classmethod
+    def empty(cls) -> "ProjectRuntimeSettingsView":
+        return cls()
+
+    @classmethod
+    def from_record(
+        cls,
+        record: dict[str, Any] | None,
+        *,
+        manager_targets: list[str] | None = None,
+    ) -> "ProjectRuntimeSettingsView":
+        payload = record or {}
+        targets = list(manager_targets or [])
+        return cls(
+            system_prompt=payload.get("system_prompt"),
+            bot_token=payload.get("bot_token"),
+            webhook_url=payload.get("webhook_url"),
+            manager_bot_token=payload.get("manager_bot_token"),
+            webhook_secret=payload.get("webhook_secret"),
+            is_pro_mode=bool(payload.get("is_pro_mode")),
+            client_bot_username=payload.get("client_bot_username"),
+            manager_bot_username=payload.get("manager_bot_username"),
+            manager_notification_targets=targets,
+            manager_chat_ids=targets.copy(),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "system_prompt": self.system_prompt,
+            "bot_token": self.bot_token,
+            "webhook_url": self.webhook_url,
+            "manager_bot_token": self.manager_bot_token,
+            "webhook_secret": self.webhook_secret,
+            "is_pro_mode": self.is_pro_mode,
+            "client_bot_username": self.client_bot_username,
+            "manager_bot_username": self.manager_bot_username,
+            "manager_notification_targets": self.manager_notification_targets.copy(),
+            "manager_chat_ids": self.manager_chat_ids.copy(),
+        }
+
+
+@dataclass(slots=True)
+class ProjectIntegrationView:
+    id: str
+    project_id: str
+    provider: str
+    status: str | None = None
+    config_json: dict[str, Any] = field(default_factory=dict)
+    credentials_encrypted: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> "ProjectIntegrationView":
+        return cls(
+            id=str(record["id"]),
+            project_id=str(record["project_id"]),
+            provider=str(record["provider"]),
+            status=record.get("status"),
+            config_json=dict(record.get("config_json") or {}),
+            credentials_encrypted=record.get("credentials_encrypted"),
+            created_at=record.get("created_at"),
+            updated_at=record.get("updated_at"),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        payload = {
+            "id": self.id,
+            "project_id": self.project_id,
+            "provider": self.provider,
+            "status": self.status,
+            "config_json": self.config_json.copy(),
+            "credentials_encrypted": self.credentials_encrypted,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+
+
+@dataclass(slots=True)
+class ProjectChannelView:
+    id: str
+    project_id: str
+    kind: str
+    provider: str
+    status: str | None = None
+    config_json: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> "ProjectChannelView":
+        return cls(
+            id=str(record["id"]),
+            project_id=str(record["project_id"]),
+            kind=str(record["kind"]),
+            provider=str(record["provider"]),
+            status=record.get("status"),
+            config_json=dict(record.get("config_json") or {}),
+            created_at=record.get("created_at"),
+            updated_at=record.get("updated_at"),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        payload = {
+            "id": self.id,
+            "project_id": self.project_id,
+            "kind": self.kind,
+            "provider": self.provider,
+            "status": self.status,
+            "config_json": self.config_json.copy(),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        return {key: value for key, value in payload.items() if value is not None}
+
+
+@dataclass(slots=True)
+class ManagerMembershipMutationView:
+    status: str
+    storage: str
+    user_id: str
+    role: str
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "storage": self.storage,
+            "user_id": self.user_id,
+            "role": self.role,
+        }
+

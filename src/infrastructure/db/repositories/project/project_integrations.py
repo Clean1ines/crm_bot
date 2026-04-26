@@ -4,6 +4,10 @@ Project integration operations.
 
 from typing import Optional
 
+from src.domain.control_plane.project_views import ProjectIntegrationView
+
+from src.domain.control_plane.project_views import ProjectIntegrationView
+
 from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid
 
 
@@ -15,7 +19,7 @@ class ProjectIntegrationRepository(ProjectRepositoryBase):
         status: str,
         config_json: Optional[JsonMap] = None,
         credentials_encrypted: Optional[str] = None,
-    ) -> JsonMap:
+    ) -> ProjectIntegrationView:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO project_integrations (
@@ -37,4 +41,4 @@ class ProjectIntegrationRepository(ProjectRepositoryBase):
                 config_json or {},
             )
 
-        return self._normalize_record(row)
+        return ProjectIntegrationView.from_record(self._normalize_record(row))

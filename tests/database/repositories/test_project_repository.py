@@ -58,15 +58,15 @@ class TestProjectRepository:
         ):
             result = await project_repo.get_project_settings(project_id)
 
-        assert result["system_prompt"] == "prompt"
-        assert result["bot_token"] == "decrypted_encrypted_token"
-        assert result["manager_bot_token"] == "decrypted_encrypted_manager_token"
-        assert result["webhook_secret"] == "secret"
-        assert result["is_pro_mode"] is True
-        assert result["client_bot_username"] == "client_bot"
-        assert result["manager_bot_username"] == "manager_bot"
-        assert result["manager_notification_targets"] == ["123", "456"]
-        assert result["manager_chat_ids"] == ["123", "456"]
+        assert result.system_prompt == "prompt"
+        assert result.bot_token == "decrypted_encrypted_token"
+        assert result.manager_bot_token == "decrypted_encrypted_manager_token"
+        assert result.webhook_secret == "secret"
+        assert result.is_pro_mode is True
+        assert result.client_bot_username == "client_bot"
+        assert result.manager_bot_username == "manager_bot"
+        assert result.manager_notification_targets == ["123", "456"]
+        assert result.manager_chat_ids == ["123", "456"]
 
     @pytest.mark.asyncio
     async def test_get_project_settings_not_found(self, project_repo, mock_pool):
@@ -74,7 +74,18 @@ class TestProjectRepository:
 
         result = await project_repo.get_project_settings(str(uuid4()))
 
-        assert result == {}
+        assert result.to_record() == {
+            "system_prompt": None,
+            "bot_token": None,
+            "webhook_url": None,
+            "manager_bot_token": None,
+            "webhook_secret": None,
+            "is_pro_mode": False,
+            "client_bot_username": None,
+            "manager_bot_username": None,
+            "manager_notification_targets": [],
+            "manager_chat_ids": [],
+        }
 
     @pytest.mark.asyncio
     async def test_get_project_settings_no_managers(self, project_repo, mock_pool):
@@ -95,8 +106,8 @@ class TestProjectRepository:
         with patch("src.infrastructure.db.repositories.project.base.decrypt_token", return_value=None):
             result = await project_repo.get_project_settings(str(uuid4()))
 
-        assert result["manager_notification_targets"] == []
-        assert result["manager_chat_ids"] == []
+        assert result.manager_notification_targets == []
+        assert result.manager_chat_ids == []
 
     @pytest.mark.asyncio
     async def test_get_bot_token_success(self, project_repo, mock_pool):
@@ -233,7 +244,7 @@ class TestProjectRepository:
 
         result = await project_repo.add_manager_by_telegram_identity(project_id, "123")
 
-        assert result == {
+        assert result.to_record() == {
             "status": "added",
             "storage": "project_members",
             "user_id": str(user_id),
@@ -249,9 +260,9 @@ class TestProjectRepository:
 
         result = await project_repo.add_manager_by_telegram_identity(str(uuid4()), "123")
 
-        assert result["status"] == "added"
-        assert result["user_id"] == str(user_id)
-        assert result["role"] == "manager"
+        assert result.status == "added"
+        assert result.user_id == str(user_id)
+        assert result.role == "manager"
 
     @pytest.mark.asyncio
     async def test_remove_manager_by_telegram_identity_removes_member(self, project_repo, mock_pool):
@@ -409,9 +420,9 @@ class TestProjectRepository:
         result = await project_repo.get_all_projects()
 
         assert len(result) == 2
-        assert result[0]["id"] == str(rows[0]["id"])
-        assert result[0]["user_id"] == str(rows[0]["user_id"])
-        assert result[1]["user_id"] is None
+        assert result[0].id == str(rows[0]["id"])
+        assert result[0].user_id == str(rows[0]["user_id"])
+        assert result[1].user_id is None
 
     @pytest.mark.asyncio
     async def test_get_project_view_found(self, project_repo, mock_pool):
@@ -490,9 +501,9 @@ class TestProjectRepository:
         result = await project_repo.get_projects_by_user_id(user_id)
 
         assert len(result) == 1
-        assert result[0]["id"] == str(rows[0]["id"])
-        assert result[0]["user_id"] == user_id
-        assert result[0]["name"] == "p1"
+        assert result[0].id == str(rows[0]["id"])
+        assert result[0].user_id == user_id
+        assert result[0].name == "p1"
 
     @pytest.mark.asyncio
     async def test_get_projects_for_user_view(self, project_repo, mock_pool):
@@ -697,11 +708,11 @@ class TestProjectRepository:
             credentials_encrypted="encrypted",
         )
 
-        assert result["id"] == str(integration_id)
-        assert result["project_id"] == str(project_id)
-        assert result["provider"] == "amo_crm"
-        assert result["created_at"] == created_at.isoformat()
-        assert result["updated_at"] == updated_at.isoformat()
+        assert result.id == str(integration_id)
+        assert result.project_id == str(project_id)
+        assert result.provider == "amo_crm"
+        assert result.created_at == created_at.isoformat()
+        assert result.updated_at == updated_at.isoformat()
 
     @pytest.mark.asyncio
     async def test_upsert_project_channel_normalizes_result(self, project_repo, mock_pool):
@@ -729,11 +740,11 @@ class TestProjectRepository:
             config_json={"allowed_origin": "https://site.example"},
         )
 
-        assert result["id"] == str(channel_id)
-        assert result["project_id"] == str(project_id)
-        assert result["kind"] == "widget"
-        assert result["provider"] == "web"
-        assert result["created_at"] == created_at.isoformat()
+        assert result.id == str(channel_id)
+        assert result.project_id == str(project_id)
+        assert result.kind == "widget"
+        assert result.provider == "web"
+        assert result.created_at == created_at.isoformat()
 
     @pytest.mark.asyncio
     async def test_invalid_uuid_in_get_project_settings(self, project_repo):

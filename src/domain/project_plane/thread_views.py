@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -102,3 +102,98 @@ class ThreadMessageCounts:
             "ai": self.ai,
             "manager": self.manager,
         }
+
+@dataclass(slots=True)
+class ThreadDialogClientView:
+    id: str
+    full_name: str | None = None
+    username: str | None = None
+    chat_id: int | None = None
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "full_name": self.full_name,
+            "username": self.username,
+            "chat_id": self.chat_id,
+        }
+
+
+@dataclass(slots=True)
+class ThreadLastMessageView:
+    content: str
+    created_at: str | None = None
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "content": self.content,
+            "created_at": self.created_at,
+        }
+
+
+@dataclass(slots=True)
+class ThreadDialogView:
+    thread_id: str
+    status: str
+    interaction_mode: str | None
+    thread_created_at: str | None
+    thread_updated_at: str | None
+    client: ThreadDialogClientView
+    last_message: ThreadLastMessageView | None = None
+    unread_count: int = 0
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "thread_id": self.thread_id,
+            "status": self.status,
+            "interaction_mode": self.interaction_mode,
+            "thread_created_at": self.thread_created_at,
+            "thread_updated_at": self.thread_updated_at,
+            "client": self.client.to_record(),
+            "last_message": self.last_message.to_record() if self.last_message else None,
+            "unread_count": self.unread_count,
+        }
+
+
+@dataclass(slots=True)
+class ThreadMessageView:
+    id: str
+    role: str
+    content: str
+    created_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "role": self.role,
+            "content": self.content,
+            "created_at": self.created_at,
+            "metadata": self.metadata.copy(),
+        }
+
+
+@dataclass(slots=True)
+class ThreadStatusSummaryView:
+    id: str
+    client_id: str
+    status: str
+    client_name: str | None = None
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> "ThreadStatusSummaryView":
+        return cls(
+            id=str(record["id"]),
+            client_id=str(record["client_id"]),
+            status=str(record["status"]),
+            client_name=record.get("client_name"),
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "client_id": self.client_id,
+            "status": self.status,
+            "client_name": self.client_name,
+        }
+

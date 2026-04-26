@@ -5,7 +5,12 @@ from typing import List, Optional, Dict, Any
 from src.domain.project_plane.manager_assignments import ManagerActor
 from src.domain.project_plane.thread_views import (
     ThreadAnalyticsView,
+    ThreadDialogClientView,
+    ThreadDialogView,
+    ThreadLastMessageView,
     ThreadMessageCounts,
+    ThreadMessageView,
+    ThreadStatusSummaryView,
     ThreadWithProjectView,
 )
 from src.domain.project_plane.thread_status import ThreadStatus
@@ -356,7 +361,7 @@ class ThreadRepository:
         offset: int = 0,
         status_filter: Optional[str] = None,
         search: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    ) -> list[ThreadDialogView]:
         """
         Возвращает список диалогов (тредов) с дополнительными полями:
         - thread id, status, interaction_mode, updated_at, created_at
@@ -428,29 +433,29 @@ class ThreadRepository:
             if last_msg_created_at:
                 last_msg_created_at = last_msg_created_at.isoformat()
 
-            dialogs.append({
-                "thread_id": str(row["thread_id"]),
-                "status": row["status"],
-                "interaction_mode": row["interaction_mode"],
-                "thread_created_at": thread_created_at,
-                "thread_updated_at": thread_updated_at,
-                "client": {
-                    "id": str(row["client_id"]),
-                    "full_name": row["full_name"],
-                    "username": row["username"],
-                    "chat_id": row["chat_id"]
-                },
-                "last_message": {
-                    "content": row["last_message_content"],
-                    "created_at": last_msg_created_at
-                } if row["last_message_content"] else None,
-                "unread_count": 0  # placeholder
-            })
+            dialogs.append(ThreadDialogView(
+                thread_id=str(row["thread_id"]),
+                status=row["status"],
+                interaction_mode=row["interaction_mode"],
+                thread_created_at=thread_created_at,
+                thread_updated_at=thread_updated_at,
+                client=ThreadDialogClientView(
+                    id=str(row["client_id"]),
+                    full_name=row["full_name"],
+                    username=row["username"],
+                    chat_id=row["chat_id"],
+                ),
+                last_message=ThreadLastMessageView(
+                    content=row["last_message_content"],
+                    created_at=last_msg_created_at,
+                ) if row["last_message_content"] else None,
+                unread_count=0,
+            ))
         
         logger.debug(f"Retrieved {len(dialogs)} dialogs")
         return dialogs
 
-    async def get_messages(self, thread_id: str, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+    async def get_messages(self, thread_id: str, limit: int = 20, offset: int = 0) -> list[ThreadMessageView]:
         """
         Возвращает сообщения треда с пагинацией.
         """
@@ -469,13 +474,13 @@ class ThreadRepository:
             created_at = row["created_at"]
             if created_at:
                 created_at = created_at.isoformat()
-            messages.append({
-                "id": str(row["id"]),
-                "role": row["role"],
-                "content": row["content"],
-                "created_at": created_at,
-                "metadata": row["metadata"] or {}
-            })
+            messages.append(ThreadMessageView(
+                id=str(row["id"]),
+                role=row["role"],
+                content=row["content"],
+                created_at=created_at,
+                metadata=row["metadata"] or {},
+            ))
         
         messages.reverse()  # chronological order for display
         logger.debug(f"Retrieved {len(messages)} messages")
@@ -495,7 +500,7 @@ class ThreadRepository:
 
     # В ThreadRepository:
 
-    async def find_by_status(self, status: str) -> List[Dict[str, Any]]:
+    async def find_by_status(self, status: str) -> list[ThreadStatusSummaryView]:
         """Возвращает все треды с указанным статусом."""
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("""
@@ -505,5 +510,4 @@ class ThreadRepository:
                 WHERE t.status = $1
                 ORDER BY t.updated_at DESC
             """, status)
-            _result = [dict(row) for row in rows]
-            return _result
+            return [ThreadStatusSummaryView.from_record(dict(row)) for row in rows]

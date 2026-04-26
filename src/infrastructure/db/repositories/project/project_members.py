@@ -4,7 +4,7 @@ Project membership and manager identity operations.
 
 from typing import Optional
 
-from src.domain.control_plane.project_views import ProjectMemberView
+from src.domain.control_plane.project_views import ManagerMembershipMutationView, ProjectMemberView
 from src.domain.project_plane.manager_notifications import ManagerNotificationTarget
 
 from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid, logger
@@ -45,7 +45,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
         self,
         project_id: ProjectId,
         manager_chat_id: str,
-    ) -> JsonMap:
+    ) -> ManagerMembershipMutationView:
         project_uuid = ensure_uuid(project_id)
 
         async with self.pool.acquire() as conn:
@@ -77,12 +77,12 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                 DO UPDATE SET role = EXCLUDED.role
             """, project_uuid, user_id)
 
-        return {
-            "status": "added",
-            "storage": "project_members",
-            "user_id": str(user_id),
-            "role": "manager",
-        }
+        return ManagerMembershipMutationView(
+            status="added",
+            storage="project_members",
+            user_id=str(user_id),
+            role="manager",
+        )
 
     async def remove_manager_by_telegram_identity(
         self,
