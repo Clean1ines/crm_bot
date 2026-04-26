@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { streamFetch } from '@shared/api/client';
+import { getOrCreateVisitorId } from '@shared/lib/visitorStorage';
 
 export const ClientChatPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -19,15 +20,7 @@ export const ClientChatPage: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
-    const key = `crm_bot_widget_visitor:${projectId ?? 'unknown'}`;
-    const existing = window.localStorage.getItem(key);
-    if (existing) {
-      visitorIdRef.current = existing;
-      return;
-    }
-    const next = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-    window.localStorage.setItem(key, next);
-    visitorIdRef.current = next;
+    visitorIdRef.current = getOrCreateVisitorId(projectId);
   }, [projectId]);
 
   const sendMessage = async () => {

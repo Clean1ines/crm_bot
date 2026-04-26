@@ -1,14 +1,6 @@
 import { useState } from 'react';
 import { streamFetch } from '@shared/api/client';
-
-const getVisitorId = (projectId: string) => {
-  const key = `crm_bot_widget_visitor:${projectId}`;
-  const existing = window.localStorage.getItem(key);
-  if (existing) return existing;
-  const next = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-  window.localStorage.setItem(key, next);
-  return next;
-};
+import { getOrCreateVisitorId } from '@shared/lib/visitorStorage';
 
 export const useSendMessage = (projectId: string) => {
   const [isStreaming, setIsStreaming] = useState(false);
@@ -26,7 +18,7 @@ export const useSendMessage = (projectId: string) => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text, model, visitor_id: getVisitorId(projectId) }),
+          body: JSON.stringify({ message: text, model, visitor_id: getOrCreateVisitorId(projectId) }),
         },
         onChunk,
         onFinish,
