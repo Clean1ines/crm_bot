@@ -207,8 +207,18 @@ async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminR
     try:
         success_text = await PlatformBotService(pool).add_manager_by_chat_id(project_id, manager_id)
     except Exception as exc:
-        logger.exception("Failed to add manager", extra={"error": str(exc)})
-        return f"Ошибка: {str(exc)}", None
+        logger.exception(
+            "Failed to add manager",
+            extra={
+                "chat_id": chat_id,
+                "project_id": project_id,
+                "manager_id": manager_id,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "policy": "safe_user_fallback",
+            },
+        )
+        return "Ошибка при добавлении менеджера. Попробуйте позже.", None
 
     await _clear_state(chat_id)
     return success_text, await _get_project_menu_keyboard(project_id, pool)
@@ -231,9 +241,18 @@ async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
             await _clear_state(chat_id)
             return f"Проект «{project_name}» ({project_id}) успешно удален.", None
         except Exception as exc:
-            logger.error("Failed to delete project", extra={"error": str(exc)})
+            logger.exception(
+                "Failed to delete project",
+                extra={
+                    "chat_id": chat_id,
+                    "project_id": project_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "safe_user_fallback",
+                },
+            )
             await _clear_state(chat_id)
-            return f"Ошибка при удалении: {str(exc)}", None
+            return "Ошибка при удалении проекта. Попробуйте позже.", None
 
     await _clear_state(chat_id)
     return "Удаление отменено.", None
@@ -398,7 +417,15 @@ async def _verify_token(token: str) -> Optional[str]:
             resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
             if resp.status_code == 200 and resp.json().get("ok"):
                 return resp.json()["result"]["username"]
-        except Exception:
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "Telegram token verification request failed",
+                extra={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "return_invalid_token",
+                },
+            )
             return None
     return None
 
@@ -467,7 +494,15 @@ async def _get_bot_username(token: str) -> Optional[str]:
             resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
             if resp.status_code == 200 and resp.json().get("ok"):
                 return resp.json()["result"]["username"]
-        except Exception:
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "Telegram bot username lookup failed",
+                extra={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "return_missing_username",
+                },
+            )
             return None
     return None
 

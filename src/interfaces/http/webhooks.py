@@ -111,9 +111,17 @@ async def telegram_webhook(
 
     except (HTTPException, ApplicationError):
         raise
-    except Exception:
-        logger.exception("Error processing webhook", extra={"project_id": project_id})
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except Exception as exc:
+        logger.exception(
+            "Error processing webhook",
+            extra={
+                "project_id": project_id,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "policy": "propagate_to_safe_500_handler",
+            },
+        )
+        raise
 
 
 @router.post("/manager/webhook")

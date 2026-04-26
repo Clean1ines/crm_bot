@@ -343,3 +343,30 @@ class TestWebhooks:
         assert response.status_code == 200
         assert response.json() == {"ok": True}
         process.assert_not_awaited()
+
+
+def test_legacy_webhook_unexpected_error_uses_safe_500_contract():
+    project_id = str(uuid4())
+    client = TestClient(app, raise_server_exceptions=False)
+
+    with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
+        tokens = AsyncMock()
+        tokens.get_bot_token = AsyncMock(side_effect=RuntimeError("database password leaked"))
+        MockTokens.return_value = tokens
+
+        response = client.post(
+            f"/webhook/{project_id}",
+            json={"update_id": 1},
+            headers={
+                "X-Telegram-Bot-Api-Secret-Token": "valid-secret",
+                "X-Request-ID": "req-webhook-500",
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == "req-webhook-500"
+    assert response.json() == {
+        "detail": "Internal server error",
+        "request_id": "req-webhook-500",
+    }
+    assert "database password leaked" not in response.text

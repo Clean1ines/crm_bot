@@ -82,8 +82,18 @@ async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> Tuple[st
             f"Загружено {len(chunks)} чанков.\nБаза знаний обновлена.",
             await _get_project_menu_keyboard(project_id, pool),
         )
-    except Exception:
-        logger.exception("Knowledge upload failed", extra={"project_id": project_id, "filename": filename})
+    except Exception as exc:
+        logger.exception(
+            "Knowledge upload failed",
+            extra={
+                "chat_id": chat_id,
+                "project_id": project_id,
+                "filename": filename,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "policy": "safe_user_fallback",
+            },
+        )
         await _clear_state(chat_id)
         return (
             "Ошибка при обработке файла. Попробуйте другой файл или проверьте формат.",
