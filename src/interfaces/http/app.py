@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.application.errors import ApplicationError
-from src.infrastructure.app.lifespan import lifespan
+from src.interfaces.composition.fastapi_lifespan import lifespan
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import CorrelationIdMiddleware, configure_logging, get_logger
 from src.interfaces.http.auth import router as auth_router

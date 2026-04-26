@@ -18,7 +18,7 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
       }
       showNotification('Файл загружен', 'success');
       setFile(null);
-    } catch (err) {
+    } catch {
       showNotification('Ошибка загрузки', 'error');
     } finally {
       setUploading(false);

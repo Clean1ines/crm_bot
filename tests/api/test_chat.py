@@ -10,7 +10,7 @@ from src.interfaces.http.app import app
 
 @pytest.fixture(autouse=True)
 def mock_lifespan_pool():
-    with patch("src.infrastructure.app.lifespan.pool", MagicMock()):
+    with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
         yield
 
 

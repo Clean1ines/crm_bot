@@ -13,7 +13,7 @@ from src.domain.control_plane.project_configuration import ProjectConfigurationV
 @pytest.fixture(autouse=True)
 def mock_lifespan_pool():
     """Mock global pool to avoid RuntimeError."""
-    with patch("src.infrastructure.app.lifespan.pool", MagicMock()):
+    with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
         yield
 
 

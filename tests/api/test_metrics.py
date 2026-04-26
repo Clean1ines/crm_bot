@@ -34,7 +34,7 @@ class TestMetricsAggregate:
         self._override_auth()
         try:
             # Подменяем глобальный пул в lifespan
-            with patch("src.infrastructure.app.lifespan.pool", MagicMock()):
+            with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
                 # Мокаем QueueRepository по полному пути
                 with patch("src.infrastructure.db.repositories.queue_repository.QueueRepository") as MockQueueRepo:
                     mock_queue = AsyncMock()
@@ -59,7 +59,7 @@ class TestMetricsAggregate:
     def test_aggregate_metrics_extra_fields_ignored(self, client):
         self._override_auth()
         try:
-            with patch("src.infrastructure.app.lifespan.pool", MagicMock()):
+            with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
                 with patch("src.infrastructure.db.repositories.queue_repository.QueueRepository") as MockQueueRepo:
                     mock_queue = AsyncMock()
                     MockQueueRepo.return_value = mock_queue
@@ -80,7 +80,7 @@ class TestMetricsAggregate:
     def test_aggregate_metrics_invalid_date_format(self, client):
         self._override_auth()
         try:
-            with patch("src.infrastructure.app.lifespan.pool", MagicMock()):
+            with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
                 payload = {"date": "2025/01/15"}
                 response = client.post("/api/admin/metrics/aggregate", json=payload)
             assert response.status_code == 400
@@ -91,7 +91,7 @@ class TestMetricsAggregate:
     def test_aggregate_metrics_missing_date_field(self, client):
         self._override_auth()
         try:
-            with patch("src.infrastructure.app.lifespan.pool", MagicMock()):
+            with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
                 payload = {}
                 response = client.post("/api/admin/metrics/aggregate", json=payload)
             assert response.status_code == 422

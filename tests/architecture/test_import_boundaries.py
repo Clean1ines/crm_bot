@@ -122,18 +122,18 @@ def test_agent_tools_do_not_access_db_or_settings_directly():
     assert ".connect(" not in source
 
 
-def test_infrastructure_layer_does_not_import_agent_runtime_except_composition_root():
-    """Infrastructure must stay generic; only the FastAPI composition root wires agent runtime."""
+def test_infrastructure_layer_does_not_import_agent_runtime():
+    """Infrastructure must stay generic; composition roots wire agent runtime."""
     import ast
     from pathlib import Path
 
     violations: list[str] = []
-    allowed = {Path("src/infrastructure/app/lifespan.py")}
 
     for path in Path("src/infrastructure").rglob("*.py"):
-        if path in allowed:
+        if "__pycache__" in path.parts:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 module = node.module or ""
@@ -159,3 +159,37 @@ def test_application_does_not_import_agent_runtime():
             if marker in text:
                 offenders.append(f"{path}: contains {marker!r}")
     assert not offenders, "\n".join(offenders)
+
+
+def test_only_interfaces_composition_imports_agent_runtime_for_wiring():
+    """Concrete agent runtime may only be wired in interfaces/composition."""
+    import ast
+    from pathlib import Path
+
+    violations: list[str] = []
+    allowed_root = Path("src/interfaces/composition")
+
+    for root in (Path("src/application"), Path("src/infrastructure"), Path("src/interfaces")):
+        for path in root.rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+
+            try:
+                path.relative_to(allowed_root)
+                continue
+            except ValueError:
+                pass
+
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    module = node.module or ""
+                    if module == "src.agent" or module.startswith("src.agent."):
+                        violations.append(f"{path}:{node.lineno} imports from {module}")
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        name = alias.name
+                        if name == "src.agent" or name.startswith("src.agent."):
+                            violations.append(f"{path}:{node.lineno} imports {name}")
+
+    assert violations == []

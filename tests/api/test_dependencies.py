@@ -160,22 +160,22 @@ class TestVerifyProModeAccess:
 
 class TestPoolAndOrchestrator:
     def test_get_pool_success(self):
-        with patch("src.interfaces.http.dependencies.src.infrastructure.app.lifespan.pool", "mock_pool"):
+        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.pool", "mock_pool"):
             result = get_pool()
             assert result == "mock_pool"
 
     def test_get_pool_not_initialized(self):
-        with patch("src.interfaces.http.dependencies.src.infrastructure.app.lifespan.pool", None):
+        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.pool", None):
             with pytest.raises(RuntimeError, match="Database pool not initialized"):
                 get_pool()
 
     def test_get_orchestrator_success(self):
-        with patch("src.interfaces.http.dependencies.src.infrastructure.app.lifespan.orchestrator", "mock_orch"):
+        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.orchestrator", "mock_orch"):
             result = get_orchestrator()
             assert result == "mock_orch"
 
     def test_get_orchestrator_not_initialized(self):
-        with patch("src.interfaces.http.dependencies.src.infrastructure.app.lifespan.orchestrator", None):
+        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.orchestrator", None):
             with pytest.raises(RuntimeError, match="Orchestrator not initialized"):
                 get_orchestrator()
 

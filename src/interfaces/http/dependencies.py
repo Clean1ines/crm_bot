@@ -37,7 +37,7 @@ from src.application.services.thread_command_service import ThreadCommandService
 from src.application.services.thread_query_service import ThreadQueryService
 from src.infrastructure.redis.client import get_redis_client
 
-import src.infrastructure.app.lifespan
+import src.interfaces.composition.fastapi_lifespan
 
 logger = get_logger(__name__)
 
@@ -52,10 +52,10 @@ def get_pool() -> Any:
     Returns:
         asyncpg.Pool: The global database connection pool.
     """
-    if src.infrastructure.app.lifespan.pool is None:
+    if src.interfaces.composition.fastapi_lifespan.pool is None:
         logger.error("Database pool requested before initialization")
         raise RuntimeError("Database pool not initialized")
-    return src.infrastructure.app.lifespan.pool
+    return src.interfaces.composition.fastapi_lifespan.pool
 
 
 def get_orchestrator() -> Any:
@@ -68,10 +68,10 @@ def get_orchestrator() -> Any:
     Returns:
         OrchestratorService: The global orchestrator instance.
     """
-    if src.infrastructure.app.lifespan.orchestrator is None:
+    if src.interfaces.composition.fastapi_lifespan.orchestrator is None:
         logger.error("Orchestrator requested before initialization")
         raise RuntimeError("Orchestrator not initialized")
-    return src.infrastructure.app.lifespan.orchestrator
+    return src.interfaces.composition.fastapi_lifespan.orchestrator
 
 
 def get_project_repo(pool: Any = Depends(get_pool)) -> ProjectRepository:
