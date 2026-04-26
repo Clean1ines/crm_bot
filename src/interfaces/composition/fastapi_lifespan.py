@@ -121,20 +121,18 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
     memory_repo = MemoryRepository(db_pool)
 
     return ConversationOrchestrator(
+        db_conn=db_pool,
+        project_repo=ProjectQueryRepository(db_pool),
         thread_lifecycle_repo=thread_lifecycle_repo,
         thread_message_repo=thread_message_repo,
-        thread_manager_assignment_repo=thread_lifecycle_repo,
         thread_runtime_state_repo=thread_runtime_state_repo,
         thread_read_repo=thread_read_repo,
-        project_repo=ProjectQueryRepository(db_pool),
-        client_repo=ClientRepository(db_pool),
-        event_repo=event_repo,
-        memory_repo=memory_repo,
         queue_repo=queue_repo,
-        ticket_create_tool=None,
-        telegram=None,
+        event_repo=event_repo,
         tool_registry=tool_registry,
+        memory_repo=memory_repo,
         logger=logger,
+        agent_factory=create_agent,
     )
 
 
