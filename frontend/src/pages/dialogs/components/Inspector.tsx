@@ -451,7 +451,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
                 <button
                   key={tab.id}
                   onClick={() => {
-                    console.log('Tab clicked from dropdown:', tab.id);
+                    frontendLogger.debug('Inspector tab clicked from dropdown', { tabId: tab.id });
                     frontendLogger.debug('Tab selected from dropdown', { tab: tab.id });
                     setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw');
                     setShowTabMenu(false);

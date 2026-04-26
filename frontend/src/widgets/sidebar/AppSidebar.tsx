@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
-import { useProjectStore, useProjects, Project } from '@entities/project';
+import { useProjectStore, useProjects } from '@entities/project';
 import { useAppStore } from '../../app/store';
 import { CreateProjectModal } from '@features/project/create';
-import { EditProjectModal } from '@features/project/edit';
 import { DeleteConfirmModal } from '@shared/ui';
 import { useMediaQuery } from '@/shared/lib/hooks/useMediaQuery';
 import {
@@ -11,7 +10,6 @@ import {
   Users,
   Settings,
   BookOpen,
-  BarChart3,
   Plug,
   UserCog,
   PlusCircle,
@@ -44,41 +42,31 @@ export const AppSidebar: React.FC = () => {
   const {
     projects,
     isCreateOpen,
-    isEditOpen,
     isDeleteOpen,
-    editingProject,
     deletingProject,
     openCreateModal,
-    openEditModal,
-    openDeleteConfirm,
     closeModals,
     createProject,
-    updateProject,
     deleteProject,
     isCreating,
-    isUpdating,
     isDeleting,
-  } = useProjects() as any;
+  } = useProjects();
 
-  const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
   const [isProjectSelectOpen, setIsProjectSelectOpen] = useState(false);
 
   const isMobile = useMediaQuery('(max-width: 768px)');
-  const [isOpen, setIsOpen] = useState(!isMobile);
+  const [isOpen] = useState(!isMobile);
 
-  // Log component mount
   useEffect(() => {
-    frontendLogger.info('AppSidebar mounted', { urlProjectId, projectsCount: projects.length });
+    frontendLogger.info('AppSidebar mounted');
     return () => {
       frontendLogger.info('AppSidebar unmounted');
     };
   }, []);
 
-  // Log when urlProjectId or projects change
   useEffect(() => {
     frontendLogger.debug('AppSidebar state updated', { urlProjectId, projectsCount: projects.length });
-  }, [urlProjectId, projects]);
+  }, [urlProjectId, projects.length]);
 
   const handleProjectSelect = (projectId: string) => {
     frontendLogger.info('Project selected', { projectId, previousUrl: urlProjectId });
@@ -88,35 +76,22 @@ export const AppSidebar: React.FC = () => {
     setIsProjectSelectOpen(false);
   };
 
-  const handleOpenEditModal = (project: Project) => {
-    frontendLogger.debug('Edit project modal opened', { projectId: project.id, projectName: project.name });
-    setEditName(project.name);
-    setEditDescription((project as any).description || '');
-    openEditModal(project);
-  };
-
-  const handleUpdate = async (name: string, description: string) => {
-    if (editingProject) {
-      frontendLogger.info('Updating project', { projectId: editingProject.id, name });
-      await updateProject({ id: editingProject.id, name, description } as any);
-    }
-  };
-
   const handleDelete = async () => {
-    if (deletingProject) {
-      frontendLogger.warn('Deleting project', { projectId: deletingProject.id, projectName: deletingProject.name });
-      await deleteProject(deletingProject.id);
-    }
+    if (!deletingProject) return;
+
+    frontendLogger.warn('Deleting project', {
+      projectId: deletingProject.id,
+      projectName: deletingProject.name,
+    });
+    await deleteProject(deletingProject.id);
   };
 
   if (!isOpen && isMobile) return null;
 
-  // For dropdown display, we need the current project name. Use URL project if available, else use store's selected.
   const activeProjectId = urlProjectId || undefined;
-  const currentProject = projects.find((p: Project) => p.id === activeProjectId);
+  const currentProject = projects.find((project) => project.id === activeProjectId);
 
   const renderNavItem = (item: NavItem) => {
-    // Disable if there's no project ID in URL (i.e., not in a project context)
     const disabled = !urlProjectId;
     const linkClasses = (isActive: boolean) => {
       const base = 'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150';
@@ -135,12 +110,10 @@ export const AppSidebar: React.FC = () => {
       );
     }
 
-    // Use the URL projectId directly to construct the link
-    const to = `/projects/${urlProjectId}/${item.path}`;
     return (
       <NavLink
         key={item.path}
-        to={to}
+        to={`/projects/${urlProjectId}/${item.path}`}
         className={({ isActive }) => linkClasses(isActive)}
       >
         {item.icon}
@@ -166,13 +139,13 @@ export const AppSidebar: React.FC = () => {
         </button>
         {isProjectSelectOpen && (
           <div className="absolute left-4 right-4 top-[calc(100%-8px)] z-10 bg-white rounded-lg shadow-md mt-1 max-h-48 overflow-y-auto">
-            {projects.map((p: Project) => (
+            {projects.map((project) => (
               <button
-                key={p.id}
-                onClick={() => handleProjectSelect(p.id)}
+                key={project.id}
+                onClick={() => handleProjectSelect(project.id)}
                 className="w-full text-left px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--surface-secondary)] transition-colors first:rounded-t-lg last:rounded-b-lg"
               >
-                {p.name}
+                {project.name}
               </button>
             ))}
           </div>
@@ -209,21 +182,11 @@ export const AppSidebar: React.FC = () => {
       <CreateProjectModal
         isOpen={isCreateOpen}
         onClose={closeModals}
-        onCreate={async (name, description) => {
+        onCreate={async (name) => {
           frontendLogger.info('Creating project', { name });
-          await createProject({ name, description } as any);
+          await createProject(name);
         }}
         isPending={isCreating}
-      />
-      <EditProjectModal
-        isOpen={isEditOpen}
-        onClose={closeModals}
-        name={editName}
-        description={editDescription}
-        onNameChange={setEditName}
-        onDescriptionChange={setEditDescription}
-        onUpdate={handleUpdate}
-        isPending={isUpdating}
       />
       <DeleteConfirmModal
         isOpen={isDeleteOpen}

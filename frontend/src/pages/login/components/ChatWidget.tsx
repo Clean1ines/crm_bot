@@ -1,7 +1,12 @@
 import React from 'react';
 import { MessageBubble } from './MessageBubble';
 
-const staticMessages = [
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+const staticMessages: ChatMessage[] = [
   { role: 'user', content: 'Привет! Чем вы занимаетесь?' },
   { role: 'assistant', content: 'Здравствуйте! Мы создаём ассистентов для бизнеса' },
   { role: 'user', content: 'Сколько это стоит?' },
@@ -11,7 +16,6 @@ const staticMessages = [
 export const ChatWidget: React.FC = () => {
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-[#E5E2DA] flex flex-col h-[500px]">
-      {/* Header */}
       <div className="flex items-center gap-3 p-4 border-b border-[#E5E2DA]">
         <div className="w-8 h-8 rounded-full bg-[#B87333] flex items-center justify-center text-white text-sm font-medium">
           A
@@ -19,14 +23,12 @@ export const ChatWidget: React.FC = () => {
         <span className="font-medium text-[#1E1E1E]">Ассистент</span>
       </div>
 
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {staticMessages.map((msg, idx) => (
-          <MessageBubble key={idx} role={msg.role as any} content={msg.content} />
+          <MessageBubble key={idx} role={msg.role} content={msg.content} />
         ))}
       </div>
 
-      {/* Input (static) */}
       <div className="p-4 border-t border-[#E5E2DA] flex gap-2">
         <input
           type="text"

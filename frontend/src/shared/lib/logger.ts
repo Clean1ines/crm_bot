@@ -45,7 +45,7 @@ const sendToLogDrain = async (entry: LogEntry): Promise<void> => {
 
   // In development, log to console with structured output
   if (!isProduction) {
-    const consoleMethod = console[entry.level] || console.log;
+    const consoleMethod = console[entry.level] || console.debug;
     consoleMethod(`[${entry.level.toUpperCase()}] ${entry.message}`, entry);
     return;
   }

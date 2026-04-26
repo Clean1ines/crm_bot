@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { BookOpen, Upload, FileText, Trash2, Search, ExternalLink } from 'lucide-react';
-import { Button } from '@shared/ui';
 
 interface Document {
   id: string;
@@ -19,7 +18,7 @@ const formatSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { api } from '@shared/api/client';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
@@ -27,7 +26,6 @@ import { useParams } from 'react-router-dom';
 export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const [searchQuery, setSearchQuery] = useState('');
-  const queryClient = useQueryClient();
   
   // For now we don't have a list endpoint, but let's keep the UI
   const [documents] = useState<Document[]>([]);
@@ -52,8 +50,9 @@ export const KnowledgePage: React.FC = () => {
       toast.success('Документ успешно загружен и отправлен на обработку');
       // queryClient.invalidateQueries({ queryKey: ['knowledge', projectId] });
     },
-    onError: (err: any) => {
-      toast.error(err.message || 'Ошибка при загрузке документа');
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Ошибка при загрузке документа';
+      toast.error(message);
     }
   });
 

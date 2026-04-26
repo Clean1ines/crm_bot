@@ -1,13 +1,23 @@
 // frontend/src/app/test/setup.ts
 import { vi, beforeEach, afterEach } from 'vitest';
 
-// Mock sessionStorage for tests (jsdom doesn't provide it by default)
-const mockSessionStorage: any = {
-  store: new Map<string, string>(),
-  getItem: vi.fn((key: string): string | null => mockSessionStorage.store.get(key) ?? null),
-  setItem: vi.fn((key: string, value: string): void => { mockSessionStorage.store.set(key, value); }),
-  removeItem: vi.fn((key: string): void => { mockSessionStorage.store.delete(key); }),
-  clear: vi.fn((): void => { mockSessionStorage.store.clear(); }),
+const sessionStore = new Map<string, string>();
+
+const mockSessionStorage: Storage = {
+  get length(): number {
+    return sessionStore.size;
+  },
+  clear: vi.fn((): void => {
+    sessionStore.clear();
+  }),
+  getItem: vi.fn((key: string): string | null => sessionStore.get(key) ?? null),
+  key: vi.fn((index: number): string | null => Array.from(sessionStore.keys())[index] ?? null),
+  removeItem: vi.fn((key: string): void => {
+    sessionStore.delete(key);
+  }),
+  setItem: vi.fn((key: string, value: string): void => {
+    sessionStore.set(key, value);
+  }),
 };
 
 Object.defineProperty(window, 'sessionStorage', {
@@ -16,8 +26,7 @@ Object.defineProperty(window, 'sessionStorage', {
   configurable: true,
 });
 
-// Mock import.meta.env for Vite-specific code
-Object.defineProperty(global, 'import.meta', {
+Object.defineProperty(globalThis, 'import.meta', {
   value: {
     env: {
       PROD: false,
@@ -28,23 +37,22 @@ Object.defineProperty(global, 'import.meta', {
   writable: true,
 });
 
-// Mock fetch for tests
-global.fetch = vi.fn(() =>
-  Promise.resolve({
-    json: () => Promise.resolve({}),
-    ok: true,
-    status: 200,
-    headers: new Map(),
-  } as any)
+const mockFetch: typeof fetch = vi.fn(() =>
+  Promise.resolve(
+    new Response(JSON.stringify({}), {
+      status: 200,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+    }),
+  ),
 );
 
-// Reset mocks before each test
+globalThis.fetch = mockFetch;
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockSessionStorage.store.clear();
+  sessionStore.clear();
 });
 
-// Cleanup after each test
 afterEach(() => {
   vi.restoreAllMocks();
 });

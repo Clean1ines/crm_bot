@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 
 /**
  * Hook for reactive media query matching
@@ -6,19 +6,14 @@ import { useState, useEffect } from 'react';
  * @returns boolean indicating if the query matches
  */
 export const useMediaQuery = (query: string): boolean => {
-  const [matches, setMatches] = useState(false);
+  const getSnapshot = () => window.matchMedia(query).matches;
+  const getServerSnapshot = () => false;
 
-  useEffect(() => {
+  const subscribe = (onStoreChange: () => void) => {
     const media = window.matchMedia(query);
-    // Устанавливаем начальное значение, если оно отличается
-    if (media.matches !== matches) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMatches(media.matches);
-    }
-    const listener = () => setMatches(media.matches);
-    media.addEventListener('change', listener);
-    return () => media.removeEventListener('change', listener);
-  }, [matches, query]);
+    media.addEventListener('change', onStoreChange);
+    return () => media.removeEventListener('change', onStoreChange);
+  };
 
-  return matches;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 };

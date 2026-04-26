@@ -6,16 +6,11 @@ interface DeleteConfirmModalProps {
   onClose: () => void;
   onConfirm: () => Promise<void>;
   itemName: string;
-  itemType: string; // например, "project", "workflow"
+  itemType: string;
   isPending?: boolean;
-  projectName: string;
+  projectName?: string;
 }
 
-/**
- * Универсальная модалка подтверждения удаления.
- * Показывает сообщение с именем удаляемого объекта и кнопку Delete.
- * Кнопка Cancel наследуется от BaseModal.
- */
 export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   isOpen,
   onClose,
@@ -23,11 +18,9 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   itemName,
   itemType,
   isPending = false,
-  projectName,
 }) => {
   const handleConfirm = async () => {
     await onConfirm();
-    // модалка закроется автоматически через onClose, который вызовет родитель после успеха
   };
 
   return (

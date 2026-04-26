@@ -6,8 +6,9 @@ export interface SessionSlice {
   setSimpleMode: (isSimple: boolean) => void;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const createSessionSlice = (set: any): SessionSlice => ({
+type SessionSet = (partial: Partial<SessionSlice>) => void;
+
+export const createSessionSlice = (set: SessionSet): SessionSlice => ({
   qTokens: '---',
   qReq: '---',
   isSimpleMode: false,

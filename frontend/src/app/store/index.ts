@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Thread, Message, ThreadState, MemoryEntry, TimelineEvent } from '../../entities/thread/model/types';
+import type { Message, ThreadState, MemoryEntry, TimelineEvent } from '../../entities/thread/model/types';
 
 interface AppState {
   // Project & thread selection

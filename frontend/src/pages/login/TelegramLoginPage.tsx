@@ -6,6 +6,7 @@ import { ChatWidget } from './components/ChatWidget';
 import '../../app/styles/landing.css';
 import { api, getErrorMessage, setSessionToken } from '@shared/api/client';
 import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
+import frontendLogger from '@shared/lib/logger';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -47,7 +48,7 @@ export const TelegramLoginPage: React.FC = () => {
   const navigate = useNavigate();
 
   const log = (label: string, data?: unknown) => {
-    console.log(`[TG-FRONT] ${label}`, data ?? '');
+    frontendLogger.debug(`TG-FRONT ${label}`, data === undefined ? undefined : { data });
   };
 
   // Fetch bot username for widget

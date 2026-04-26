@@ -1,11 +1,10 @@
 import React, { useEffect } from 'react';
-import { Outlet, useParams, useNavigate } from 'react-router-dom';
+import { Outlet, useParams } from 'react-router-dom';
 import { AppSidebar } from '@widgets/sidebar/AppSidebar';
 import { useAppStore } from './store';
 import { useProjectStore } from '@entities/project';
 
 export const Layout: React.FC = () => {
-  const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const { setSelectedProjectId } = useAppStore();
   const { setCurrentProjectId } = useProjectStore();
