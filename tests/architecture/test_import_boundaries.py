@@ -94,32 +94,9 @@ def test_application_and_domain_do_not_import_http_framework_primitives() -> Non
 
     assert offenders == []
 
-def test_agent_tools_do_not_access_db_or_settings_directly():
-    """Agent tool wrappers must delegate to ToolRegistry, not DB/settings."""
-    import ast
-    from pathlib import Path
-
-    source_path = Path("src/agent/tools.py")
-    source = source_path.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-
-    forbidden_imports = {
-        "asyncpg",
-        "src.infrastructure.config.settings",
-        "src.infrastructure.db.repositories.knowledge_repository",
-    }
-
-    imported_modules = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported_modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported_modules.add(node.module)
-
-    assert not (imported_modules & forbidden_imports)
-    assert "DATABASE_URL" not in source
-    assert "asyncpg.connect" not in source
-    assert ".connect(" not in source
+def test_legacy_agent_tools_module_is_removed():
+    """Legacy LangChain tool wrappers must not exist in the agent layer."""
+    assert not Path("src/agent/tools.py").exists()
 
 
 def test_infrastructure_layer_does_not_import_agent_runtime():
