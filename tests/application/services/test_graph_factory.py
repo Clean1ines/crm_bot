@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -7,8 +7,8 @@ from src.application.orchestration.graph_factory import GraphFactory, GraphExecu
 
 
 def make_factory():
-    with patch("src.application.orchestration.graph_factory.create_default_agent", return_value=MagicMock()):
-        return GraphFactory(
+    return GraphFactory(
+            agent_factory=MagicMock(return_value=MagicMock()),
             tool_registry=MagicMock(),
             thread_repo=MagicMock(),
             queue_repo=MagicMock(),

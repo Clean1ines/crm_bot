@@ -5,19 +5,19 @@ Graph creation and execution helpers.
 import json
 from typing import Any, Union
 
-from src.agent.graph import create_agent as create_default_agent
-from src.agent.state import AgentState
 from src.application.dto.runtime_dto import (
     GraphExecutionRequestDto,
     GraphExecutionResultDto,
     MessageProcessingOutcomeDto,
 )
+from src.application.ports.agent_runtime_port import AgentFactoryPort
 
 
 class GraphFactory:
     def __init__(
         self,
         *,
+        agent_factory: AgentFactoryPort,
         tool_registry=None,
         thread_repo=None,
         queue_repo=None,
@@ -27,7 +27,7 @@ class GraphFactory:
         logger,
     ) -> None:
         self.logger = logger
-        self.agent = create_default_agent(
+        self.agent = agent_factory(
             tool_registry=tool_registry,
             thread_repo=thread_repo,
             queue_repo=queue_repo,
@@ -95,29 +95,29 @@ class GraphExecutor:
             trace_id=trace_id,
         )
 
-    def build_agent_state(self, *, request: GraphExecutionRequestDto) -> AgentState:
-        return AgentState(
-            messages=[],
-            project_id=request.project_id,
-            thread_id=request.thread_id,
-            escalation_requested=False,
-            tool_calls=None,
-            user_input=request.question,
-            client_profile=None,
-            conversation_summary="",
-            history=request.recent_history,
-            knowledge_chunks=None,
-            decision=None,
-            tool_name=None,
-            tool_args=None,
-            tool_result=None,
-            response_text=None,
-            requires_human=False,
-            confidence=None,
-            chat_id=request.chat_id,
-            trace_id=request.trace_id,
-            project_configuration=request.runtime_context.to_dict(),
-        )
+    def build_agent_state(self, *, request: GraphExecutionRequestDto) -> dict[str, Any]:
+        return {
+            "messages": [],
+            "project_id": request.project_id,
+            "thread_id": request.thread_id,
+            "escalation_requested": False,
+            "tool_calls": None,
+            "user_input": request.question,
+            "client_profile": None,
+            "conversation_summary": "",
+            "history": request.recent_history,
+            "knowledge_chunks": None,
+            "decision": None,
+            "tool_name": None,
+            "tool_args": None,
+            "tool_result": None,
+            "response_text": None,
+            "requires_human": False,
+            "confidence": None,
+            "chat_id": request.chat_id,
+            "trace_id": request.trace_id,
+            "project_configuration": request.runtime_context.to_dict(),
+        }
 
     def extract_graph_result(
         self,

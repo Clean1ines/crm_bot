@@ -9,6 +9,7 @@ from typing import Optional, Any
 
 from src.application.ports.cache_port import CacheFactoryPort
 from src.application.ports.lock_port import NullThreadLock, ThreadLockPort
+from src.application.ports.agent_runtime_port import AgentFactoryPort
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.application.services.project_runtime_guards import ProjectRuntimeGuards
 from src.utils.uuid_utils import ensure_uuid
@@ -72,6 +73,7 @@ class ConversationOrchestrator:
         thread_lock: ThreadLockPort | None = None,
         telegram_client: TelegramClientPort | None = None,
         logger: LoggerPort | None = None,
+        agent_factory: AgentFactoryPort | None = None,
     ):
         self.db = db_conn
         self.projects = project_repo
@@ -88,7 +90,11 @@ class ConversationOrchestrator:
         self.runtime_guards = ProjectRuntimeGuards(cache_factory=cache_factory, logger=self.logger)
         self.event_emitter = EventEmitter(event_repo=event_repo, logger=self.logger)
         self.runtime_loader = ProjectRuntimeLoader(projects=project_repo, logger=self.logger)
+        if agent_factory is None:
+            raise ValueError("agent_factory is required")
+
         self.graph_factory = GraphFactory(
+            agent_factory=agent_factory,
             tool_registry=tool_registry,
             thread_repo=thread_repo,
             queue_repo=queue_repo,

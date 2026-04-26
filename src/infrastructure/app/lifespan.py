@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.agent.graph import create_agent
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.db.repositories.project import ProjectTokenRepository, ProjectMemberRepository, ProjectQueryRepository, ProjectConfigurationRepository
 from src.infrastructure.db.repositories.thread_repository import ThreadRepository
@@ -245,7 +246,8 @@ async def lifespan(app: FastAPI):
         queue_repo=queue_repo,
         event_repo=event_repo,
         tool_registry=tool_registry,
-        memory_repo=memory_repo
+        memory_repo=memory_repo,
+        agent_factory=create_agent,
     )
     
     logger.info(

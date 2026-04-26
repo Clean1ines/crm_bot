@@ -122,14 +122,17 @@ def test_agent_tools_do_not_access_db_or_settings_directly():
     assert ".connect(" not in source
 
 
-def test_infrastructure_layer_does_not_import_agent_runtime():
-    """Infrastructure must stay generic and must not depend on agent internals."""
+def test_infrastructure_layer_does_not_import_agent_runtime_except_composition_root():
+    """Infrastructure must stay generic; only the FastAPI composition root wires agent runtime."""
     import ast
     from pathlib import Path
 
     violations: list[str] = []
+    allowed = {Path("src/infrastructure/app/lifespan.py")}
 
     for path in Path("src/infrastructure").rglob("*.py"):
+        if path in allowed:
+            continue
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -146,9 +149,9 @@ def test_infrastructure_layer_does_not_import_agent_runtime():
 
 
 
-def test_infrastructure_does_not_import_agent_runtime():
+def test_application_does_not_import_agent_runtime():
     forbidden = ("from src.agent", "import src.agent")
-    root = Path("src/infrastructure")
+    root = Path("src/application")
     offenders = []
     for path in root.rglob("*.py"):
         text = path.read_text()

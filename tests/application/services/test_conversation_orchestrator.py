@@ -1,5 +1,5 @@
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -7,8 +7,7 @@ from src.application.orchestration.conversation_orchestrator import Conversation
 
 
 def make_orchestrator():
-    with patch("src.application.orchestration.graph_factory.create_default_agent", return_value=MagicMock()):
-        return ConversationOrchestrator(
+    return ConversationOrchestrator(
             db_conn=MagicMock(),
             project_repo=MagicMock(),
             thread_repo=MagicMock(),
@@ -17,6 +16,7 @@ def make_orchestrator():
             tool_registry=MagicMock(),
             memory_repo=MagicMock(),
             logger=MagicMock(),
+            agent_factory=MagicMock(return_value=MagicMock()),
         )
 
 
