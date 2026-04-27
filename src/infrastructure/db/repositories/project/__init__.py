@@ -18,17 +18,11 @@ class ProjectRepository(
     ProjectCommandRepository,
     ProjectRepositoryBase,
 ):
-    pass
+    """
+    Concrete infrastructure repository used by composition.
 
-
-# Backward-compatible import aliases while call sites migrate to CQRS names.
-ProjectTokens = ProjectTokenRepository
-ProjectMembers = ProjectMemberRepository
-ProjectQueries = ProjectQueryRepository
-ProjectConfiguration = ProjectConfigurationRepository
-ProjectIntegrations = ProjectIntegrationRepository
-ProjectChannels = ProjectChannelRepository
-ProjectCommands = ProjectCommandRepository
+    Application code should depend on Protocol ports, not this facade directly.
+    """
 
 
 __all__ = [
@@ -41,11 +35,4 @@ __all__ = [
     "ProjectIntegrationRepository",
     "ProjectChannelRepository",
     "ProjectCommandRepository",
-    "ProjectTokens",
-    "ProjectMembers",
-    "ProjectQueries",
-    "ProjectConfiguration",
-    "ProjectIntegrations",
-    "ProjectChannels",
-    "ProjectCommands",
 ]

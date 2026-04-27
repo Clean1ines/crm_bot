@@ -1,14 +1,12 @@
 """
-Project integration operations.
+Project integration command operations.
 """
 
 from typing import Optional
 
-from src.domain.control_plane.project_views import ProjectIntegrationView
+from src.domain.control_plane.project_configuration import ProjectIntegrationView
 
-from src.domain.control_plane.project_views import ProjectIntegrationView
-
-from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid
+from .base import JsonMap, ProjectId, ProjectRepositoryBase, ensure_uuid
 
 
 class ProjectIntegrationRepository(ProjectRepositoryBase):
@@ -21,7 +19,8 @@ class ProjectIntegrationRepository(ProjectRepositoryBase):
         credentials_encrypted: Optional[str] = None,
     ) -> ProjectIntegrationView:
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 INSERT INTO project_integrations (
                     project_id, provider, status, credentials_encrypted, config_json
                 )
@@ -32,8 +31,8 @@ class ProjectIntegrationRepository(ProjectRepositoryBase):
                     credentials_encrypted = COALESCE(EXCLUDED.credentials_encrypted, project_integrations.credentials_encrypted),
                     config_json = EXCLUDED.config_json,
                     updated_at = NOW()
-                RETURNING id, project_id, provider, status, config_json, created_at, updated_at
-            """,
+                RETURNING id, project_id, provider, status, config_json, credentials_encrypted, created_at, updated_at
+                """,
                 ensure_uuid(project_id),
                 provider,
                 status,

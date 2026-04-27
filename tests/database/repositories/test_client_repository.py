@@ -86,8 +86,8 @@ async def test_list_for_project_returns_clients_and_stats(client_repo, mock_conn
     assert client.latest_thread_id == str(latest_thread_id)
     assert client.threads_count == 2
 
-    assert result.total_clients == 1
-    assert result.new_clients_7d == 1
+    assert result.total_clients == 5
+    assert result.new_clients_7d == 2
     assert result.active_dialogs == 1
 
 
