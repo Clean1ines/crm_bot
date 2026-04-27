@@ -1,6 +1,8 @@
 from typing import Protocol
 
+from src.domain.project_plane.json_types import JsonValue
 from src.domain.project_plane.memory_views import MemoryEntryView
+from src.domain.project_plane.json_types import JsonValue
 
 
 class MemoryReaderPort(Protocol):
@@ -20,5 +22,5 @@ class MemoryWriterPort(Protocol):
         project_id: str,
         client_id: str,
         key: str,
-        value: object,
+        value: JsonValue,
     ) -> None: ...

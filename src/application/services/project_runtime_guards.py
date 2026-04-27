@@ -3,14 +3,14 @@ Runtime guards driven by explicit project configuration.
 """
 
 import time
-from collections.abc import Mapping
 
-from src.application.ports.cache_port import CacheFactoryPort, NullCache
+from src.application.ports.cache_port import CacheFactoryPort, NullCache, RuntimeCachePort
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
+from src.domain.runtime.state_contracts import ProjectRuntimeConfigurationState
 
 
-ProjectConfigurationPayload = Mapping[str, object]
+ProjectConfigurationPayload = ProjectRuntimeConfigurationState
 
 
 class ProjectRuntimeGuards:
@@ -25,7 +25,7 @@ class ProjectRuntimeGuards:
         self.cache_factory = cache_factory
         self.logger = logger or NullLogger()
 
-    async def _cache(self):
+    async def _cache(self) -> RuntimeCachePort:
         if self.cache_factory is None:
             return NullCache()
         return await self.cache_factory()
