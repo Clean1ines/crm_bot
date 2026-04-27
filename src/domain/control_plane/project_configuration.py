@@ -5,25 +5,37 @@ from typing import Any
 @dataclass(slots=True)
 class ProjectIntegrationView:
     provider: str
+    id: str | None = None
+    project_id: str | None = None
     status: str | None = None
     config_json: dict[str, Any] = field(default_factory=dict)
     credentials_encrypted: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> "ProjectIntegrationView":
         return cls(
+            id=str(record["id"]) if record.get("id") is not None else None,
+            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
             provider=str(record.get("provider") or ""),
             status=record.get("status"),
             config_json=dict(record.get("config_json") or {}),
             credentials_encrypted=record.get("credentials_encrypted"),
+            created_at=record.get("created_at"),
+            updated_at=record.get("updated_at"),
         )
 
     def to_record(self) -> dict[str, Any]:
         payload = {
+            "id": self.id,
+            "project_id": self.project_id,
             "provider": self.provider,
             "status": self.status,
             "config_json": dict(self.config_json),
             "credentials_encrypted": self.credentials_encrypted,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
         return {key: value for key, value in payload.items() if value is not None}
 
@@ -32,51 +44,76 @@ class ProjectIntegrationView:
 class ProjectChannelView:
     kind: str
     provider: str
+    id: str | None = None
+    project_id: str | None = None
     status: str | None = None
     config_json: dict[str, Any] = field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> "ProjectChannelView":
         return cls(
+            id=str(record["id"]) if record.get("id") is not None else None,
+            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
             kind=str(record.get("kind") or ""),
             provider=str(record.get("provider") or ""),
             status=record.get("status"),
             config_json=dict(record.get("config_json") or {}),
+            created_at=record.get("created_at"),
+            updated_at=record.get("updated_at"),
         )
 
     def to_record(self) -> dict[str, Any]:
         payload = {
+            "id": self.id,
+            "project_id": self.project_id,
             "kind": self.kind,
             "provider": self.provider,
             "status": self.status,
             "config_json": dict(self.config_json),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
         return {key: value for key, value in payload.items() if value is not None}
 
 
 @dataclass(slots=True)
 class ProjectPromptVersionView:
+    id: str | None = None
+    name: str | None = None
     version: int | None = None
     prompt_bundle: dict[str, Any] = field(default_factory=dict)
     is_active: bool | None = None
     created_at: str | None = None
+    updated_at: str | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, Any]) -> "ProjectPromptVersionView":
         version = record.get("version")
+        prompt_bundle = record.get("prompt_bundle")
+        if prompt_bundle is None:
+            prompt_bundle = record.get("prompt_json")
+
         return cls(
+            id=str(record["id"]) if record.get("id") is not None else None,
+            name=str(record["name"]) if record.get("name") is not None else None,
             version=int(version) if version is not None else None,
-            prompt_bundle=dict(record.get("prompt_bundle") or {}),
+            prompt_bundle=dict(prompt_bundle or {}),
             is_active=record.get("is_active"),
             created_at=record.get("created_at"),
+            updated_at=record.get("updated_at"),
         )
 
     def to_record(self) -> dict[str, Any]:
         payload = {
+            "id": self.id,
+            "name": self.name,
             "version": self.version,
             "prompt_bundle": dict(self.prompt_bundle),
             "is_active": self.is_active,
             "created_at": self.created_at,
+            "updated_at": self.updated_at,
         }
         return {key: value for key, value in payload.items() if value is not None}
 

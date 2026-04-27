@@ -626,10 +626,10 @@ class TestProjectRepository:
         assert result.settings["brand_name"] == "Acme"
         assert result.policies["escalation_policy_json"] == {"mode": "manager"}
         assert result.limit_profile["requests_per_minute"] == 30
-        assert result.integrations[0]["id"] == str(integration_id)
-        assert result.channels[0]["id"] == str(channel_id)
-        assert result.prompt_versions[0]["id"] == str(prompt_id)
-        assert result.integrations[0]["created_at"] == created_at.isoformat()
+        assert result.integrations[0].id == str(integration_id)
+        assert result.channels[0].id == str(channel_id)
+        assert result.prompt_versions[0].id == str(prompt_id)
+        assert result.integrations[0].created_at == created_at.isoformat()
 
     @pytest.mark.asyncio
     async def test_update_project_settings(self, project_repo, mock_pool):
