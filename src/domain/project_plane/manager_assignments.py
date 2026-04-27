@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
+
+from src.domain.project_plane.json_types import JsonObject
+
+
+RedisSessionValue = bytes | str | None
 
 
 @dataclass(frozen=True)
@@ -39,7 +44,7 @@ class ManagerReplySession:
         return f"awaiting_reply:{self.manager_chat_id}"
 
     def to_redis_value(self) -> str:
-        payload = {
+        payload: JsonObject = {
             "manager_chat_id": self.manager_chat_id,
             "manager_user_id": self.manager_user_id,
         }
@@ -60,7 +65,12 @@ class ManagerReplySession:
         )
 
     @classmethod
-    def from_redis_value(cls, *, thread_id: str, raw_value: Any) -> Optional["ManagerReplySession"]:
+    def from_redis_value(
+        cls,
+        *,
+        thread_id: str,
+        raw_value: RedisSessionValue,
+    ) -> Optional["ManagerReplySession"]:
         """
         Parse both canonical JSON payloads and legacy plain-string chat ids.
         """
@@ -83,8 +93,8 @@ class ManagerReplySession:
                 return None
             return cls(
                 thread_id=thread_id,
-                manager_user_id=manager_user_id or "",
-                manager_chat_id=manager_chat_id,
+                manager_user_id=str(manager_user_id) if manager_user_id else "",
+                manager_chat_id=str(manager_chat_id) if manager_chat_id else None,
             )
 
         return cls(
@@ -98,14 +108,14 @@ def build_manager_audit_payload(
     *,
     manager_user_id: Optional[str],
     manager_chat_id: Optional[str],
-) -> dict[str, Any]:
+) -> JsonObject:
     """
     Build canonical event/audit payload for manager-originated actions.
 
     `manager_user_id` is the domain identity. Telegram chat id, when present, is
     preserved only inside an explicit transport bridge block.
     """
-    payload: dict[str, Any] = {}
+    payload: JsonObject = {}
     if manager_user_id:
         payload["manager_user_id"] = manager_user_id
     if manager_chat_id:

@@ -1,5 +1,23 @@
 from dataclasses import dataclass
-from typing import Any
+
+from src.domain.project_plane.json_types import JsonValue
+
+
+RuntimeRecord = dict[str, JsonValue]
+
+
+def _optional_str(value: JsonValue) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_int(value: JsonValue) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value)
+    return None
 
 
 @dataclass(slots=True)
@@ -14,22 +32,18 @@ class ThreadRuntimeSnapshot:
     chat_id: int | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "ThreadRuntimeSnapshot | None":
+    def from_record(cls, record: RuntimeRecord | None) -> "ThreadRuntimeSnapshot | None":
         if not record:
             return None
         return cls(
             thread_id=str(record.get("id") or ""),
-            client_id=str(record["client_id"]) if record.get("client_id") is not None else None,
-            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
-            status=record.get("status"),
-            context_summary=record.get("context_summary"),
-            manager_user_id=(
-                str(record["manager_user_id"]) if record.get("manager_user_id") is not None else None
-            ),
-            manager_chat_id=(
-                str(record["manager_chat_id"]) if record.get("manager_chat_id") is not None else None
-            ),
-            chat_id=record.get("chat_id"),
+            client_id=_optional_str(record.get("client_id")),
+            project_id=_optional_str(record.get("project_id")),
+            status=_optional_str(record.get("status")),
+            context_summary=_optional_str(record.get("context_summary")),
+            manager_user_id=_optional_str(record.get("manager_user_id")),
+            manager_chat_id=_optional_str(record.get("manager_chat_id")),
+            chat_id=_optional_int(record.get("chat_id")),
         )
 
 
@@ -41,17 +55,17 @@ class ThreadAnalyticsSnapshot:
     decision: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "ThreadAnalyticsSnapshot":
+    def from_record(cls, record: RuntimeRecord | None) -> "ThreadAnalyticsSnapshot":
         payload = record or {}
         return cls(
-            intent=payload.get("intent"),
-            lifecycle=payload.get("lifecycle"),
-            cta=payload.get("cta"),
-            decision=payload.get("decision"),
+            intent=_optional_str(payload.get("intent")),
+            lifecycle=_optional_str(payload.get("lifecycle")),
+            cta=_optional_str(payload.get("cta")),
+            decision=_optional_str(payload.get("decision")),
         )
 
-    def to_state_patch(self) -> dict[str, Any]:
-        result: dict[str, Any] = {}
+    def to_state_patch(self) -> dict[str, str]:
+        result: dict[str, str] = {}
         if self.intent is not None:
             result["intent"] = self.intent
         if self.lifecycle is not None:
