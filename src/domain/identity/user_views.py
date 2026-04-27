@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import SupportsInt
 
 
 def _optional_str(value: object) -> str | None:
@@ -9,8 +9,12 @@ def _optional_str(value: object) -> str | None:
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
+
+    if not isinstance(value, str | bytes | bytearray | SupportsInt):
+        return None
+
     try:
-        return int(cast(Any, value))
+        return int(value)
     except (TypeError, ValueError):
         return None
 
