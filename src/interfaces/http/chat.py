@@ -6,9 +6,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
-from src.interfaces.http.dependencies import get_orchestrator, get_project_repo
+from src.interfaces.http.dependencies import get_orchestrator, get_project_existence_repo
 from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
-from src.infrastructure.db.repositories.project import ProjectRepository
+from src.application.ports.project_port import ProjectExistencePort
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -34,7 +34,7 @@ async def client_chat(
     project_id: str,
     request: ChatMessageRequest,
     orchestrator: ConversationOrchestrator = Depends(get_orchestrator),
-    project_repo: ProjectRepository = Depends(get_project_repo)
+    project_repo: ProjectExistencePort = Depends(get_project_existence_repo)
 ):
     if not await project_repo.project_exists(project_id):
         raise HTTPException(status_code=404, detail="Project not found")

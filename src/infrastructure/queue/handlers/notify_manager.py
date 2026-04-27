@@ -7,7 +7,7 @@ from typing import Any, Awaitable, Callable, Mapping
 import asyncpg
 
 from src.domain.project_plane.manager_notifications import select_manager_notification_targets
-from src.infrastructure.db.repositories.project import ProjectRepository
+from src.application.ports.project_port import ProjectNotificationPort
 from src.application.ports.thread_port import ThreadReadPort
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
@@ -55,7 +55,7 @@ async def handle_notify_manager(
     *,
     thread_read_repo: ThreadReadPort,
     db_pool: asyncpg.Pool,
-    project_repo: ProjectRepository,
+    project_repo: ProjectNotificationPort,
     telegram_sender: TelegramSender,
     redis_getter: RedisGetter,
     worker_id: str,

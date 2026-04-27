@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Mapping
 
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
-from src.infrastructure.db.repositories.project import ProjectRepository
+from src.application.ports.project_port import ProjectNotificationPort
 from src.application.ports.thread_port import ThreadReadPort
 from src.infrastructure.queue.handlers.metrics import handle_aggregate_metrics, handle_update_metrics
 from src.infrastructure.queue.handlers.notify_manager import handle_notify_manager
@@ -25,7 +25,7 @@ RedisGetter = Callable[[], Awaitable[Any]]
 class JobDispatcher:
     thread_read_repo: ThreadReadPort
     db_pool: Any
-    project_repo: ProjectRepository
+    project_repo: ProjectNotificationPort
     metrics_repo: MetricsRepository
     telegram_sender: TelegramSender
     redis_getter: RedisGetter

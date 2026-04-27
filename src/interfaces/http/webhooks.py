@@ -7,11 +7,10 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from src.application.errors import ApplicationError
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
-from src.interfaces.http.dependencies import get_pool, get_orchestrator
+from src.interfaces.http.dependencies import get_pool, get_orchestrator, get_project_member_repo, get_project_token_repo
 from src.interfaces.telegram.platform_bot import process_admin_update
 from src.interfaces.telegram.client_bot import process_client_update
 from src.interfaces.telegram.manager_bot import process_manager_update
-from src.infrastructure.db.repositories.project import ProjectRepository, ProjectTokenRepository, ProjectMemberRepository
 from src.application.services.webhook_dispatcher import WebhookDispatcher
 
 logger = get_logger(__name__)
@@ -39,10 +38,9 @@ async def platform_webhook(request: Request, pool=Depends(get_pool)):
 async def client_webhook(
     project_id: str,
     request: Request,
-    pool=Depends(get_pool),
     orchestrator=Depends(get_orchestrator),
+    project_tokens=Depends(get_project_token_repo),
 ):
-    project_tokens = ProjectTokenRepository(pool)
     secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     update = await request.json()
     return await _get_dispatcher().handle_client_surface(
@@ -60,11 +58,10 @@ async def client_webhook(
 async def project_manager_webhook(
     project_id: str,
     request: Request,
-    pool=Depends(get_pool),
     orchestrator=Depends(get_orchestrator),
+    project_tokens=Depends(get_project_token_repo),
+    project_members=Depends(get_project_member_repo),
 ):
-    project_tokens = ProjectTokenRepository(pool)
-    project_members = ProjectMemberRepository(pool)
     secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     result = await _get_dispatcher().handle_manager_surface(
         project_id,
@@ -83,11 +80,10 @@ async def project_manager_webhook(
 async def telegram_webhook(
     project_id: str,
     request: Request,
-    pool=Depends(get_pool),
     orchestrator=Depends(get_orchestrator),
+    project_tokens=Depends(get_project_token_repo),
 ):
     try:
-        project_tokens = ProjectTokenRepository(pool)
         secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
         if not secret_token:
             raise HTTPException(status_code=401, detail="Missing secret token")
@@ -127,15 +123,13 @@ async def telegram_webhook(
 @router.post("/manager/webhook")
 async def manager_webhook(
     request: Request,
-    pool=Depends(get_pool),
     orchestrator=Depends(get_orchestrator),
+    project_tokens=Depends(get_project_token_repo),
+    project_members=Depends(get_project_member_repo),
 ):
     secret_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if not secret_token:
         raise HTTPException(status_code=401, detail="Missing secret token")
-
-    project_tokens = ProjectTokenRepository(pool)
-    project_members = ProjectMemberRepository(pool)
 
     project_id = await project_tokens.find_project_by_manager_webhook_secret(secret_token)
     if not project_id:

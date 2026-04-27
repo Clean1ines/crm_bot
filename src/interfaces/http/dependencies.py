@@ -21,7 +21,16 @@ from fastapi import Header, HTTPException, Depends
 
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
-from src.infrastructure.db.repositories.project import ProjectRepository
+from src.application.ports.project_port import (
+    ProjectExistencePort,
+    ProjectMemberResolverPort,
+    ProjectTokenPort,
+)
+from src.interfaces.composition.project_repositories import (
+    build_project_member_repository,
+    build_project_repository,
+    build_project_token_repository,
+)
 from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
 from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
@@ -77,21 +86,31 @@ def get_orchestrator() -> Any:
     return src.interfaces.composition.fastapi_lifespan.orchestrator
 
 
-def get_project_repo(pool: Any = Depends(get_pool)) -> ProjectRepository:
+def get_project_repo(pool: Any = Depends(get_pool)):
     """
-    Return a new ProjectRepository instance.
-    
-    Args:
-        pool: Database connection pool (injected via Depends).
-    
-    Returns:
-        ProjectRepository: Repository for project-level data access.
+    Return the composed project repository.
+
+    Kept as a stable dependency override seam for existing tests.
     """
-    return ProjectRepository(pool)
+    return build_project_repository(pool)
+
+
+def get_project_existence_repo(
+    project_repo = Depends(get_project_repo),
+) -> ProjectExistencePort:
+    return project_repo
+
+
+def get_project_token_repo(pool: Any = Depends(get_pool)) -> ProjectTokenPort:
+    return build_project_token_repository(pool)
+
+
+def get_project_member_repo(pool: Any = Depends(get_pool)) -> ProjectMemberResolverPort:
+    return build_project_member_repository(pool)
 
 
 def get_project_service(
-    project_repo: ProjectRepository = Depends(get_project_repo),
+    project_repo = Depends(get_project_repo),
 ) -> ProjectAccessService:
     """
     Return the application service for project control-plane operations.
@@ -113,7 +132,7 @@ def get_event_repo(pool: Any = Depends(get_pool)) -> EventRepository:
 
 
 def get_project_query_service(
-    project_repo: ProjectRepository = Depends(get_project_repo),
+    project_repo = Depends(get_project_repo),
     project_service: ProjectAccessService = Depends(get_project_service),
     event_repo: EventRepository = Depends(get_event_repo),
 ) -> ProjectQueryService:
@@ -122,7 +141,7 @@ def get_project_query_service(
 
 
 def get_project_command_service(
-    project_repo: ProjectRepository = Depends(get_project_repo),
+    project_repo = Depends(get_project_repo),
     project_service: ProjectAccessService = Depends(get_project_service),
     project_query_service: ProjectQueryService = Depends(get_project_query_service),
 ) -> ProjectCommandService:
@@ -340,7 +359,7 @@ async def require_platform_admin(
 
 
 def verify_pro_mode_access(
-    project_repo: ProjectRepository = Depends(get_project_repo)
+    project_repo = Depends(get_project_repo)
 ) -> Callable[[str], Awaitable[bool]]:
     """
     Dependency factory for checking Pro mode access.

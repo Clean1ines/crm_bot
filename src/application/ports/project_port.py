@@ -7,6 +7,70 @@ from src.domain.control_plane.project_configuration import ProjectConfigurationV
 from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
 
 
+class ProjectExistencePort(Protocol):
+    async def project_exists(self, project_id: str) -> bool: ...
+
+
+class ProjectTokenPort(Protocol):
+    async def get_webhook_secret(self, project_id: str) -> str | None: ...
+
+    async def get_bot_token(self, project_id: str) -> str | None: ...
+
+    async def get_manager_webhook_secret(self, project_id: str) -> str | None: ...
+
+    async def get_manager_bot_token(self, project_id: str) -> str | None: ...
+
+    async def find_project_by_manager_webhook_secret(self, secret_token: str) -> str | None: ...
+
+
+class ProjectMemberResolverPort(Protocol):
+    async def get_manager_notification_targets(self, project_id: str) -> list[str]: ...
+
+    async def resolve_manager_user_id_by_telegram(
+        self,
+        project_id: str,
+        telegram_id: int,
+    ) -> str | None: ...
+
+
+class ProjectNotificationPort(Protocol):
+    async def get_project_settings(self, project_id: str) -> dict[str, object] | None: ...
+
+    async def get_manager_notification_recipients(self, project_id: str): ...
+
+
+class ProjectExistencePort(Protocol):
+    async def project_exists(self, project_id: str) -> bool: ...
+
+
+class ProjectTokenPort(Protocol):
+    async def get_webhook_secret(self, project_id: str) -> str | None: ...
+
+    async def get_bot_token(self, project_id: str) -> str | None: ...
+
+    async def get_manager_webhook_secret(self, project_id: str) -> str | None: ...
+
+    async def get_manager_bot_token(self, project_id: str) -> str | None: ...
+
+    async def find_project_by_manager_webhook_secret(self, secret_token: str) -> str | None: ...
+
+
+class ProjectMemberResolverPort(Protocol):
+    async def get_manager_notification_targets(self, project_id: str) -> list[str]: ...
+
+    async def resolve_manager_user_id_by_telegram(
+        self,
+        project_id: str,
+        telegram_id: int,
+    ) -> str | None: ...
+
+
+class ProjectNotificationPort(Protocol):
+    async def get_project_settings(self, project_id: str) -> dict[str, object] | None: ...
+
+    async def get_manager_notification_recipients(self, project_id: str): ...
+
+
 class ProjectReadPort(Protocol):
     async def get_project_view(self, project_id: str) -> ProjectSummaryView | None: ...
 

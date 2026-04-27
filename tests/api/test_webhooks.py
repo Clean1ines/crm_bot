@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from uuid import uuid4
 
 from src.interfaces.http.app import app
-from src.interfaces.http.dependencies import get_pool, get_orchestrator
+from src.interfaces.http.dependencies import get_pool, get_orchestrator, get_project_member_repo, get_project_token_repo
 
 
 @pytest.fixture(autouse=True)
@@ -38,13 +38,12 @@ class TestWebhooks:
         expected_update = update.copy()
         expected_update["_bot_token"] = bot_token
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            tokens = AsyncMock()
-            tokens.get_webhook_secret = AsyncMock(return_value=secret_token)
-            tokens.get_bot_token = AsyncMock(return_value=bot_token)
-            MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.get_webhook_secret = AsyncMock(return_value=secret_token)
+        tokens.get_bot_token = AsyncMock(return_value=bot_token)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-            with patch("src.interfaces.http.webhooks.process_client_update", new_callable=AsyncMock) as process:
+        with patch("src.interfaces.http.webhooks.process_client_update", new_callable=AsyncMock) as process:
                 process.return_value = {"ok": True}
                 response = client.post(
                     f"/webhooks/projects/{project_id}/client",
@@ -92,19 +91,17 @@ class TestWebhooks:
         expected_update["_bot_token"] = manager_bot_token
         expected_update["_manager_user_id"] = "11111111-1111-1111-1111-111111111111"
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            with patch("src.interfaces.http.webhooks.ProjectMemberRepository") as MockMembers:
-                tokens = AsyncMock()
-                tokens.get_manager_webhook_secret = AsyncMock(return_value=secret_token)
-                tokens.get_manager_bot_token = AsyncMock(return_value=manager_bot_token)
-                MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.get_manager_webhook_secret = AsyncMock(return_value=secret_token)
+        tokens.get_manager_bot_token = AsyncMock(return_value=manager_bot_token)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-                members = AsyncMock()
-                members.get_manager_notification_targets = AsyncMock(return_value=[str(manager_chat_id)])
-                members.resolve_manager_user_id_by_telegram = AsyncMock(return_value="11111111-1111-1111-1111-111111111111")
-                MockMembers.return_value = members
+        members = AsyncMock()
+        members.get_manager_notification_targets = AsyncMock(return_value=[str(manager_chat_id)])
+        members.resolve_manager_user_id_by_telegram = AsyncMock(return_value="11111111-1111-1111-1111-111111111111")
+        app.dependency_overrides[get_project_member_repo] = lambda: members
 
-                with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
+        with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
                     process.return_value = {"ok": True}
                     response = client.post(
                         f"/webhooks/projects/{project_id}/manager",
@@ -132,20 +129,19 @@ class TestWebhooks:
         expected_update = update.copy()
         expected_update["_bot_token"] = bot_token
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            tokens = AsyncMock()
-            tokens.get_webhook_secret = AsyncMock(return_value=secret_token)
-            tokens.get_bot_token = AsyncMock(return_value=bot_token)
-            MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.get_webhook_secret = AsyncMock(return_value=secret_token)
+        tokens.get_bot_token = AsyncMock(return_value=bot_token)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-            with patch("src.interfaces.http.webhooks.settings.ADMIN_BOT_TOKEN", "admin_token"):
-                with patch("src.interfaces.http.webhooks.process_client_update", new_callable=AsyncMock) as process:
-                    process.return_value = {"ok": True}
-                    response = client.post(
-                        f"/webhook/{project_id}",
-                        json=update,
-                        headers={"X-Telegram-Bot-Api-Secret-Token": secret_token},
-                    )
+        with patch("src.interfaces.http.webhooks.settings.ADMIN_BOT_TOKEN", "admin_token"):
+            with patch("src.interfaces.http.webhooks.process_client_update", new_callable=AsyncMock) as process:
+                process.return_value = {"ok": True}
+                response = client.post(
+                    f"/webhook/{project_id}",
+                    json=update,
+                    headers={"X-Telegram-Bot-Api-Secret-Token": secret_token},
+                )
 
         assert response.status_code == 200
         assert response.json() == {"ok": True}
@@ -161,12 +157,11 @@ class TestWebhooks:
         secret_token = "valid-secret"
         admin_token = "admin_token"
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            tokens = AsyncMock()
-            tokens.get_bot_token = AsyncMock(return_value=admin_token)
-            MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.get_bot_token = AsyncMock(return_value=admin_token)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-            with patch("src.interfaces.http.webhooks.settings.ADMIN_BOT_TOKEN", admin_token):
+        with patch("src.interfaces.http.webhooks.settings.ADMIN_BOT_TOKEN", admin_token):
                 response = client.post(
                     f"/webhook/{project_id}",
                     json={"update_id": 1},
@@ -184,13 +179,12 @@ class TestWebhooks:
     def test_webhook_invalid_secret_token(self, client):
         project_id = str(uuid4())
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            tokens = AsyncMock()
-            tokens.get_bot_token = AsyncMock(return_value="some_token")
-            tokens.get_webhook_secret = AsyncMock(return_value="valid-secret")
-            MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.get_bot_token = AsyncMock(return_value="some_token")
+        tokens.get_webhook_secret = AsyncMock(return_value="valid-secret")
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-            response = client.post(
+        response = client.post(
                 f"/webhook/{project_id}",
                 json={"update_id": 1},
                 headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
@@ -202,12 +196,11 @@ class TestWebhooks:
     def test_webhook_project_not_found(self, client):
         project_id = str(uuid4())
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            tokens = AsyncMock()
-            tokens.get_bot_token = AsyncMock(return_value=None)
-            MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.get_bot_token = AsyncMock(return_value=None)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-            response = client.post(
+        response = client.post(
                 f"/webhook/{project_id}",
                 json={},
                 headers={"X-Telegram-Bot-Api-Secret-Token": "valid-secret"},
@@ -226,19 +219,17 @@ class TestWebhooks:
         expected_update["_bot_token"] = manager_bot_token
         expected_update["_manager_user_id"] = "11111111-1111-1111-1111-111111111111"
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            with patch("src.interfaces.http.webhooks.ProjectMemberRepository") as MockMembers:
-                tokens = AsyncMock()
-                tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=project_id)
-                tokens.get_manager_bot_token = AsyncMock(return_value=manager_bot_token)
-                MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=project_id)
+        tokens.get_manager_bot_token = AsyncMock(return_value=manager_bot_token)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-                members = AsyncMock()
-                members.get_manager_notification_targets = AsyncMock(return_value=[str(manager_chat_id)])
-                members.resolve_manager_user_id_by_telegram = AsyncMock(return_value="11111111-1111-1111-1111-111111111111")
-                MockMembers.return_value = members
+        members = AsyncMock()
+        members.get_manager_notification_targets = AsyncMock(return_value=[str(manager_chat_id)])
+        members.resolve_manager_user_id_by_telegram = AsyncMock(return_value="11111111-1111-1111-1111-111111111111")
+        app.dependency_overrides[get_project_member_repo] = lambda: members
 
-                with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
+        with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
                     process.return_value = {"ok": True}
                     response = client.post(
                         "/manager/webhook",
@@ -261,12 +252,11 @@ class TestWebhooks:
         assert response.json()["detail"] == "Missing secret token"
 
     def test_manager_webhook_invalid_secret_token(self, client):
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            tokens = AsyncMock()
-            tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=None)
-            MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=None)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-            response = client.post(
+        response = client.post(
                 "/manager/webhook",
                 json={},
                 headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
@@ -276,14 +266,13 @@ class TestWebhooks:
         assert response.json()["detail"] == "Invalid secret token"
 
     def test_manager_webhook_missing_manager_token(self, client):
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            with patch("src.interfaces.http.webhooks.ProjectMemberRepository"):
-                tokens = AsyncMock()
-                tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=str(uuid4()))
-                tokens.get_manager_bot_token = AsyncMock(return_value=None)
-                MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=str(uuid4()))
+        tokens.get_manager_bot_token = AsyncMock(return_value=None)
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
+        app.dependency_overrides[get_project_member_repo] = lambda: AsyncMock()
 
-                response = client.post(
+        response = client.post(
                     "/manager/webhook",
                     json={},
                     headers={"X-Telegram-Bot-Api-Secret-Token": "manager-secret"},
@@ -296,19 +285,17 @@ class TestWebhooks:
         project_id = str(uuid4())
         manager_chat_id = 12345
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            with patch("src.interfaces.http.webhooks.ProjectMemberRepository") as MockMembers:
-                tokens = AsyncMock()
-                tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=project_id)
-                tokens.get_manager_bot_token = AsyncMock(return_value="manager_bot_token")
-                MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=project_id)
+        tokens.get_manager_bot_token = AsyncMock(return_value="manager_bot_token")
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-                members = AsyncMock()
-                members.get_manager_notification_targets = AsyncMock(return_value=["99999"])
-                members.resolve_manager_user_id_by_telegram = AsyncMock(return_value=None)
-                MockMembers.return_value = members
+        members = AsyncMock()
+        members.get_manager_notification_targets = AsyncMock(return_value=["99999"])
+        members.resolve_manager_user_id_by_telegram = AsyncMock(return_value=None)
+        app.dependency_overrides[get_project_member_repo] = lambda: members
 
-                with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
+        with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
                     response = client.post(
                         "/manager/webhook",
                         json={"message": {"from": {"id": manager_chat_id}}},
@@ -322,18 +309,16 @@ class TestWebhooks:
     def test_manager_webhook_no_chat_id(self, client):
         project_id = str(uuid4())
 
-        with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-            with patch("src.interfaces.http.webhooks.ProjectMemberRepository") as MockMembers:
-                tokens = AsyncMock()
-                tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=project_id)
-                tokens.get_manager_bot_token = AsyncMock(return_value="token")
-                MockTokens.return_value = tokens
+        tokens = AsyncMock()
+        tokens.find_project_by_manager_webhook_secret = AsyncMock(return_value=project_id)
+        tokens.get_manager_bot_token = AsyncMock(return_value="token")
+        app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-                members = AsyncMock()
-                members.get_manager_notification_targets = AsyncMock(return_value=["123"])
-                MockMembers.return_value = members
+        members = AsyncMock()
+        members.get_manager_notification_targets = AsyncMock(return_value=["123"])
+        app.dependency_overrides[get_project_member_repo] = lambda: members
 
-                with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
+        with patch("src.interfaces.http.webhooks.process_manager_update", new_callable=AsyncMock) as process:
                     response = client.post(
                         "/manager/webhook",
                         json={},
@@ -349,12 +334,11 @@ def test_legacy_webhook_unexpected_error_uses_safe_500_contract():
     project_id = str(uuid4())
     client = TestClient(app, raise_server_exceptions=False)
 
-    with patch("src.interfaces.http.webhooks.ProjectTokenRepository") as MockTokens:
-        tokens = AsyncMock()
-        tokens.get_bot_token = AsyncMock(side_effect=RuntimeError("database password leaked"))
-        MockTokens.return_value = tokens
+    tokens = AsyncMock()
+    tokens.get_bot_token = AsyncMock(side_effect=RuntimeError("database password leaked"))
+    app.dependency_overrides[get_project_token_repo] = lambda: tokens
 
-        response = client.post(
+    response = client.post(
             f"/webhook/{project_id}",
             json={"update_id": 1},
             headers={

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.interfaces.http.chat import _visitor_chat_id
-from src.interfaces.http.dependencies import get_orchestrator, get_project_repo
+from src.interfaces.http.dependencies import get_orchestrator, get_project_existence_repo
 from src.interfaces.http.app import app
 
 
@@ -35,7 +35,7 @@ def test_client_chat_uses_project_plane_message_pipeline(client):
     orchestrator = AsyncMock()
     orchestrator.process_message = AsyncMock(return_value="hello from ai")
 
-    app.dependency_overrides[get_project_repo] = lambda: project_repo
+    app.dependency_overrides[get_project_existence_repo] = lambda: project_repo
     app.dependency_overrides[get_orchestrator] = lambda: orchestrator
 
     response = client.post(
@@ -66,7 +66,7 @@ def test_client_chat_returns_404_for_unknown_project(client):
     project_repo.project_exists = AsyncMock(return_value=False)
     orchestrator = AsyncMock()
 
-    app.dependency_overrides[get_project_repo] = lambda: project_repo
+    app.dependency_overrides[get_project_existence_repo] = lambda: project_repo
     app.dependency_overrides[get_orchestrator] = lambda: orchestrator
 
     response = client.post("/api/chat/projects/missing", json={"message": "hello"})
