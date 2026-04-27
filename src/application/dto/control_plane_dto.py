@@ -2,6 +2,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from src.application.dto.project_dto import ProjectSummaryDto
+from src.domain.control_plane.project_views import ProjectMemberView
 
 
 @dataclass(slots=True)
@@ -29,6 +30,21 @@ class ProjectMemberDto:
             full_name=record.get("full_name"),
             email=record.get("email"),
             created_at=record.get("created_at"),
+        )
+
+    @classmethod
+    def from_view(cls, view: ProjectMemberView) -> "ProjectMemberDto":
+        created_at = view.created_at
+        return cls(
+            id=getattr(view, "id", None),
+            project_id=str(view.project_id) if view.project_id is not None else "",
+            user_id=str(view.user_id),
+            role=str(view.role),
+            telegram_id=int(view.telegram_id) if view.telegram_id is not None else None,
+            username=view.username,
+            full_name=view.full_name,
+            email=view.email,
+            created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at) if created_at else None,
         )
 
     def to_dict(self) -> dict[str, Any]:

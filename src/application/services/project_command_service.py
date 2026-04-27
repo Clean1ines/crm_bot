@@ -7,13 +7,7 @@ from src.application.dto.project_dto import (
 )
 from src.application.errors import InternalServiceError, NotFoundError, ValidationError
 from src.application.ports.project_port import ProjectAccessPort, ProjectControlPort
-from src.application.services.project_query_service import (
-    ProjectQueryService,
-    _channel_record,
-    _configuration_record,
-    _integration_record,
-    _project_summary_record,
-)
+from src.application.services.project_query_service import ProjectQueryService
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.control_plane.roles import (
     ALLOWED_CHANNEL_KINDS,
@@ -40,7 +34,7 @@ class ProjectCommandService:
     def _ensure_project_payload(project: ProjectSummaryView | None) -> dict:
         if project is None:
             raise InternalServiceError("Project operation failed")
-        return ProjectSummaryDto.from_record(_project_summary_record(project)).to_dict()
+        return ProjectSummaryDto.from_view(project).to_dict()
 
     @staticmethod
     def _normalize_bot_token(token: str) -> str:
@@ -176,19 +170,19 @@ class ProjectCommandService:
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
         await self.repo.update_project_settings(project_id, data)
         configuration = await self.query_service._load_project_configuration_view(project_id)
-        return ProjectConfigurationDto.from_record(_configuration_record(configuration)).to_dict()
+        return ProjectConfigurationDto.from_view(configuration).to_dict()
 
     async def update_project_policies(self, project_id: str, current_user_id: str, data: dict):
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
         await self.repo.update_project_policies(project_id, data)
         configuration = await self.query_service._load_project_configuration_view(project_id)
-        return ProjectConfigurationDto.from_record(_configuration_record(configuration)).to_dict()
+        return ProjectConfigurationDto.from_view(configuration).to_dict()
 
     async def update_project_limit_profile(self, project_id: str, current_user_id: str, data: dict):
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
         await self.repo.update_project_limit_profile(project_id, data)
         configuration = await self.query_service._load_project_configuration_view(project_id)
-        return ProjectConfigurationDto.from_record(_configuration_record(configuration)).to_dict()
+        return ProjectConfigurationDto.from_view(configuration).to_dict()
 
     async def upsert_project_integration(self, project_id: str, current_user_id: str, data: dict):
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
@@ -203,7 +197,7 @@ class ProjectCommandService:
             config_json=data.get("config_json") or {},
             credentials_encrypted=data.get("credentials_encrypted"),
         )
-        return ProjectIntegrationDto.from_record(_integration_record(integration)).to_dict()
+        return ProjectIntegrationDto.from_view(integration).to_dict()
 
     async def upsert_project_channel(self, project_id: str, current_user_id: str, data: dict):
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
@@ -221,4 +215,4 @@ class ProjectCommandService:
             status=status,
             config_json=data.get("config_json") or {},
         )
-        return ProjectChannelDto.from_record(_channel_record(channel)).to_dict()
+        return ProjectChannelDto.from_view(channel).to_dict()

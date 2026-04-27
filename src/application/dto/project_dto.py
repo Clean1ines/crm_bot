@@ -3,6 +3,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 
+from src.domain.control_plane.project_configuration import (
+    ProjectChannelView,
+    ProjectConfigurationView,
+    ProjectIntegrationView,
+    ProjectPromptVersionView,
+)
+from src.domain.control_plane.project_views import ProjectSummaryView
+from src.domain.project_plane.manager_reply_history import ManagerReplyHistoryItemView
+
 
 def _as_dict(value: object) -> dict[str, object]:
     if isinstance(value, Mapping):
@@ -14,6 +23,14 @@ def _as_list(value: object) -> list[object]:
     if isinstance(value, list):
         return value
     return []
+
+
+def _serialize_timestamp(value: object) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +50,15 @@ class ProjectIntegrationDto:
             status=str(status) if status is not None else None,
             config_json=_as_dict(record.get("config_json")),
             credentials_encrypted=str(credentials_encrypted) if credentials_encrypted is not None else None,
+        )
+
+    @classmethod
+    def from_view(cls, view: ProjectIntegrationView) -> "ProjectIntegrationDto":
+        return cls(
+            provider=view.provider,
+            status=view.status,
+            config_json=dict(view.config_json),
+            credentials_encrypted=view.credentials_encrypted,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -60,6 +86,15 @@ class ProjectChannelDto:
             config_json=_as_dict(record.get("config_json")),
         )
 
+    @classmethod
+    def from_view(cls, view: ProjectChannelView) -> "ProjectChannelDto":
+        return cls(
+            kind=view.kind,
+            provider=view.provider,
+            status=view.status,
+            config_json=dict(view.config_json),
+        )
+
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         if not payload.get("config_json"):
@@ -85,6 +120,15 @@ class ProjectPromptVersionDto:
             prompt_bundle=_as_dict(record.get("prompt_bundle")),
             is_active=bool(is_active) if is_active is not None else None,
             created_at=str(created_at) if created_at is not None else None,
+        )
+
+    @classmethod
+    def from_view(cls, view: ProjectPromptVersionView) -> "ProjectPromptVersionDto":
+        return cls(
+            version=view.version,
+            prompt_bundle=dict(view.prompt_bundle),
+            is_active=view.is_active,
+            created_at=_serialize_timestamp(view.created_at),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -116,6 +160,17 @@ class ProjectSummaryDto:
             user_id=str(user_id) if user_id is not None else None,
             client_bot_username=str(client_bot_username) if client_bot_username is not None else None,
             manager_bot_username=str(manager_bot_username) if manager_bot_username is not None else None,
+        )
+
+    @classmethod
+    def from_view(cls, view: ProjectSummaryView) -> "ProjectSummaryDto":
+        return cls(
+            id=view.id,
+            name=view.name,
+            is_pro_mode=view.is_pro_mode,
+            user_id=view.user_id,
+            client_bot_username=view.client_bot_username,
+            manager_bot_username=view.manager_bot_username,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -165,6 +220,18 @@ class ProjectConfigurationDto:
             prompt_versions=prompt_versions,
         )
 
+    @classmethod
+    def from_view(cls, view: ProjectConfigurationView) -> "ProjectConfigurationDto":
+        return cls(
+            project_id=view.project_id,
+            settings=dict(view.settings),
+            policies=dict(view.policies),
+            limit_profile=dict(view.limit_profile),
+            integrations=[ProjectIntegrationDto.from_view(item) for item in view.integrations],
+            channels=[ProjectChannelDto.from_view(item) for item in view.channels],
+            prompt_versions=[ProjectPromptVersionDto.from_view(item) for item in view.prompt_versions],
+        )
+
     def to_dict(self) -> dict[str, object]:
         return {
             "project_id": self.project_id,
@@ -199,7 +266,19 @@ class ManagerReplyHistoryItemDto:
             manager_user_id=str(record["manager_user_id"]),
             manager_chat_id=str(manager_chat_id) if manager_chat_id is not None else None,
             text=str(record.get("text") or ""),
-            created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at) if created_at else None,
+            created_at=_serialize_timestamp(created_at),
+        )
+
+    @classmethod
+    def from_view(cls, view: ManagerReplyHistoryItemView) -> "ManagerReplyHistoryItemDto":
+        return cls(
+            id=view.id,
+            thread_id=view.thread_id,
+            project_id=view.project_id,
+            manager_user_id=view.manager_user_id,
+            manager_chat_id=view.manager_chat_id,
+            text=view.text,
+            created_at=_serialize_timestamp(view.created_at),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -223,6 +302,20 @@ class ManagerReplyHistoryDto:
     ) -> "ManagerReplyHistoryDto":
         return cls(
             items=[ManagerReplyHistoryItemDto.from_record(record) for record in records],
+            limit=limit,
+            offset=offset,
+        )
+
+    @classmethod
+    def from_views(
+        cls,
+        views: list[ManagerReplyHistoryItemView],
+        *,
+        limit: int,
+        offset: int,
+    ) -> "ManagerReplyHistoryDto":
+        return cls(
+            items=[ManagerReplyHistoryItemDto.from_view(view) for view in views],
             limit=limit,
             offset=offset,
         )
