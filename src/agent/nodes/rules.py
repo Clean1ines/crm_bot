@@ -7,7 +7,6 @@ Applies cheap rules (no LLM) to determine the initial decision:
 """
 
 import re
-from typing import Dict, Any
 
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.agent.state import AgentState
@@ -44,7 +43,7 @@ def _detect_anger(text: str) -> bool:
     return False
 
 
-async def _rules_node_impl(state: AgentState) -> Dict[str, Any]:
+async def _rules_node_impl(state: AgentState) -> dict[str, object]:
     """
     Apply cheap routing rules to the incoming state.
 
@@ -83,11 +82,11 @@ async def _rules_node_impl(state: AgentState) -> Dict[str, Any]:
 def _get_rules_input_size(state: AgentState) -> int:
     return len(state.get("user_input", ""))
 
-def _get_rules_output_size(result: Dict[str, Any]) -> int:
+def _get_rules_output_size(result: dict[str, object]) -> int:
     # output is a small decision dict, we can return 1 as approximation
     return 1
 
-async def rules_node(state: AgentState) -> Dict[str, Any]:
+async def rules_node(state: AgentState) -> dict[str, object]:
     return await log_node_execution(
         "rules",
         _rules_node_impl,

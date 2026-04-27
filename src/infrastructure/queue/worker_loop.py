@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
 import uuid
 
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
@@ -21,7 +20,7 @@ async def run_worker_loop(
     queue_repo: QueueRepository,
     dispatcher: JobDispatcher,
     shutdown_event: asyncio.Event,
-    worker_id: Optional[str] = None,
+    worker_id: str | None = None,
     idle_sleep_seconds: float = 1.0,
     error_sleep_seconds: float = 5.0,
     stale_timeout_minutes: int = 5,

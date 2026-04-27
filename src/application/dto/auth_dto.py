@@ -1,5 +1,4 @@
 from dataclasses import asdict, dataclass
-from typing import Any
 
 
 @dataclass(slots=True)
@@ -11,7 +10,7 @@ class AuthMethodDto:
     verified_at: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "AuthMethodDto":
+    def from_record(cls, record: dict[str, object]) -> "AuthMethodDto":
         return cls(
             provider=str(record["provider"]),
             provider_id=str(record["provider_id"]),
@@ -21,7 +20,7 @@ class AuthMethodDto:
         )
 
     @classmethod
-    def from_view(cls, view: Any) -> "AuthMethodDto":
+    def from_view(cls, view: object) -> "AuthMethodDto":
         return cls(
             provider=str(view.provider),
             provider_id=str(view.provider_id),
@@ -30,7 +29,7 @@ class AuthMethodDto:
             verified_at=view.verified_at,
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         return {key: value for key, value in payload.items() if value is not None}
 
@@ -43,7 +42,7 @@ class AuthMethodsDto:
     verified_email: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "AuthMethodsDto":
+    def from_record(cls, record: dict[str, object]) -> "AuthMethodsDto":
         return cls(
             user_id=str(record["user_id"]),
             methods=[AuthMethodDto.from_record(item) for item in record.get("methods", [])],
@@ -52,7 +51,7 @@ class AuthMethodsDto:
         )
 
     @classmethod
-    def from_view(cls, view: Any, *, verified_email: str | None = None) -> "AuthMethodsDto":
+    def from_view(cls, view: object, *, verified_email: str | None = None) -> "AuthMethodsDto":
         return cls(
             user_id=str(view.user_id),
             methods=[AuthMethodDto.from_view(method) for method in view.methods],
@@ -60,7 +59,7 @@ class AuthMethodsDto:
             verified_email=verified_email,
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = {
             "user_id": self.user_id,
             "methods": [method.to_dict() for method in self.methods],
@@ -89,7 +88,7 @@ class AuthSessionDto:
     ) -> "AuthSessionDto":
         return cls(access_token=access_token, user_id=user_id, username=username, full_name=full_name)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         return {key: value for key, value in payload.items() if value is not None}
 
@@ -116,7 +115,7 @@ class AuthActionDto:
     ) -> "AuthActionDto":
         return cls(status=status, delivery=delivery, expires_at=expires_at, token=token, url=url, user_id=user_id)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
 
@@ -130,7 +129,7 @@ class UserProfileDto:
     is_platform_admin: bool | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "UserProfileDto":
+    def from_record(cls, record: dict[str, object]) -> "UserProfileDto":
         telegram_id = record.get("telegram_id")
         return cls(
             id=str(record["id"]),
@@ -142,7 +141,7 @@ class UserProfileDto:
         )
 
     @classmethod
-    def from_view(cls, view: Any) -> "UserProfileDto":
+    def from_view(cls, view: object) -> "UserProfileDto":
         return cls(
             id=str(view.id),
             telegram_id=int(view.telegram_id) if view.telegram_id is not None else None,
@@ -152,6 +151,6 @@ class UserProfileDto:
             is_platform_admin=view.is_platform_admin,
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         return {key: value for key, value in payload.items() if value is not None}

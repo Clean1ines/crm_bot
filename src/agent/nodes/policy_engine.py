@@ -2,7 +2,6 @@
 Thin LangGraph adapter for the pure domain policy engine.
 """
 
-from typing import Any, Dict, Optional
 
 from src.agent.state import AgentState
 from src.domain.runtime.policy.decision_engine import get_decision
@@ -15,8 +14,8 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 logger = get_logger(__name__)
 
 
-def create_policy_engine_node(event_repo: Optional[EventRepository] = None):
-    async def _policy_engine_node_impl(state: AgentState) -> Dict[str, Any]:
+def create_policy_engine_node(event_repo: EventRepository | None = None):
+    async def _policy_engine_node_impl(state: AgentState) -> dict[str, object]:
         context = PolicyDecisionContext.from_state(state)
         normalized_intent = normalize_intent(context.intent)
         topic = resolve_topic(normalized_intent, context.features)
@@ -81,10 +80,10 @@ def create_policy_engine_node(event_repo: Optional[EventRepository] = None):
             len(str((state.get("user_memory") or {}).get("dialog_state") or ""))
         )
 
-    def _get_policy_output_size(result: Dict[str, Any]) -> int:
+    def _get_policy_output_size(result: dict[str, object]) -> int:
         return len(str(result))
 
-    async def policy_engine_node(state: AgentState) -> Dict[str, Any]:
+    async def policy_engine_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "policy_engine",
             _policy_engine_node_impl,

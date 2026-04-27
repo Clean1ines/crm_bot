@@ -2,7 +2,6 @@
 Inline keyboard factories for the platform control-plane bot.
 """
 
-from typing import List, Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LoginUrl
 
@@ -37,7 +36,7 @@ def make_main_menu_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def make_projects_list_keyboard(projects: List[Tuple[str, str]]) -> InlineKeyboardMarkup:
+def make_projects_list_keyboard(projects: list[tuple[str, str]]) -> InlineKeyboardMarkup:
     buttons = []
     for pid, name in projects:
         buttons.append([InlineKeyboardButton(name, callback_data=f"project:{pid}")])

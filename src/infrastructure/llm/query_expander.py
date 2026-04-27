@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from groq import APIConnectionError, APIError, APITimeoutError, AsyncGroq, RateLimitError
 
@@ -34,7 +33,7 @@ class GroqQueryExpander:
     def __init__(
         self,
         *,
-        client: Any | None = None,
+        client: object | None = None,
         model: str = "llama-3.3-70b-versatile",
     ) -> None:
         self._client = client or AsyncGroq(api_key=settings.GROQ_API_KEY)

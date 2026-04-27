@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Optional
 
 from src.domain.project_plane.json_types import JsonObject
 
@@ -17,7 +16,7 @@ class ManagerActor:
     """Canonical manager identity with optional Telegram transport binding."""
 
     user_id: str
-    telegram_chat_id: Optional[str] = None
+    telegram_chat_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -31,14 +30,14 @@ class ManagerReplySession:
 
     thread_id: str
     manager_user_id: str
-    manager_chat_id: Optional[str] = None
+    manager_chat_id: str | None = None
 
     @property
     def thread_key(self) -> str:
         return f"awaiting_reply_thread:{self.thread_id}"
 
     @property
-    def manager_key(self) -> Optional[str]:
+    def manager_key(self) -> str | None:
         if not self.manager_chat_id:
             return None
         return f"awaiting_reply:{self.manager_chat_id}"
@@ -70,7 +69,7 @@ class ManagerReplySession:
         *,
         thread_id: str,
         raw_value: RedisSessionValue,
-    ) -> Optional["ManagerReplySession"]:
+    ) -> "ManagerReplySession | None":
         """
         Parse both canonical JSON payloads and legacy plain-string chat ids.
         """
@@ -106,8 +105,8 @@ class ManagerReplySession:
 
 def build_manager_audit_payload(
     *,
-    manager_user_id: Optional[str],
-    manager_chat_id: Optional[str],
+    manager_user_id: str | None,
+    manager_chat_id: str | None,
 ) -> JsonObject:
     """
     Build canonical event/audit payload for manager-originated actions.

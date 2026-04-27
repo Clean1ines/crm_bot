@@ -2,7 +2,6 @@
 Project membership and manager identity operations.
 """
 
-from typing import Optional
 
 from src.domain.control_plane.project_views import ManagerMembershipMutationView, ProjectMemberView
 from src.domain.project_plane.manager_notifications import ManagerNotificationTarget
@@ -105,7 +104,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
         self,
         project_id: ProjectId,
         manager_chat_id: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         async with self.pool.acquire() as conn:
             user_id = await conn.fetchval("""
                 SELECT u.id
@@ -125,7 +124,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
 
         return str(user_id) if user_id else None
 
-    async def get_user_display_name(self, user_id: ProjectId) -> Optional[str]:
+    async def get_user_display_name(self, user_id: ProjectId) -> str | None:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT full_name, username, email
@@ -212,7 +211,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                 WHERE project_id = $1 AND user_id = $2
             """, ensure_uuid(project_id), ensure_uuid(user_id))
 
-    async def get_project_member_role(self, project_id: ProjectId, user_id: ProjectId) -> Optional[str]:
+    async def get_project_member_role(self, project_id: ProjectId, user_id: ProjectId) -> str | None:
         async with self.pool.acquire() as conn:
             role = await conn.fetchval("""
                 SELECT role

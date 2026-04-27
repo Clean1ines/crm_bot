@@ -1,4 +1,3 @@
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Json
@@ -34,17 +33,17 @@ class ThreadResponse(BaseModel):
     thread_created_at: str
     thread_updated_at: str
     client: dict
-    last_message: Optional[dict]
+    last_message: dict | None
     unread_count: int
 
 
-@router.get("", response_model=List[ThreadResponse])
+@router.get("", response_model=list[ThreadResponse])
 async def list_dialogs(
     project_id: str = Query(..., description="Project ID to filter threads"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    status_filter: Optional[str] = Query(None, description="Filter by thread status (active, manual, closed)"),
-    search: Optional[str] = Query(None, description="Search by client name or username"),
+    status_filter: str | None = Query(None, description="Filter by thread status (active, manual, closed)"),
+    search: str | None = Query(None, description="Search by client name or username"),
     current_user_id: str = Depends(get_current_user_id),
     thread_queries: ThreadQueryService = Depends(get_thread_query_service),
 ):

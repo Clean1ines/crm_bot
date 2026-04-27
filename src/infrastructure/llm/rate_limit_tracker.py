@@ -5,7 +5,6 @@ Updates and retrieves current token/request limits from API response headers.
 
 import json
 import time
-from typing import Dict, Optional, Any
 
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
@@ -30,7 +29,7 @@ class RateLimitTracker:
             self.redis = await get_redis_client()
         return self.redis
     
-    async def update_from_headers(self, model: str, headers: Dict[str, str]) -> None:
+    async def update_from_headers(self, model: str, headers: dict[str, str]) -> None:
         """
         Update rate limit information from Groq response headers.
         Headers include:
@@ -69,7 +68,7 @@ class RateLimitTracker:
         await pipe.set(f"{self.REDIS_PREFIX}{model}:last_update", str(time.time()))
         await pipe.execute()
     
-    async def get_remaining(self, model: str) -> Dict[str, Any]:
+    async def get_remaining(self, model: str) -> dict[str, object]:
         """
         Retrieve current remaining limits for a model.
         Returns dict with keys: 'requests_remaining', 'tokens_remaining', 
@@ -93,7 +92,7 @@ class RateLimitTracker:
             "last_update": values[4].decode() if values[4] else None,
         }
     
-    async def get_all_remaining(self, models: list[str]) -> Dict[str, Dict[str, Any]]:
+    async def get_all_remaining(self, models: list[str]) -> dict[str, dict[str, object]]:
         """Get remaining limits for multiple models at once."""
         result = {}
         for model in models:

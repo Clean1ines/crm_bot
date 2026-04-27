@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import Optional
 
 from src.interfaces.http.dependencies import (
     get_client_query_service,
@@ -16,7 +15,7 @@ async def list_clients(
     project_id: str = Query(..., description="Project ID"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    search: Optional[str] = Query(None, description="Search by name or username"),
+    search: str | None = Query(None, description="Search by name or username"),
     current_user_id: str = Depends(get_current_user_id),
     client_queries: ClientQueryService = Depends(get_client_query_service),
 ):

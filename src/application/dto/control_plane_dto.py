@@ -1,5 +1,4 @@
 from dataclasses import asdict, dataclass
-from typing import Any
 
 from src.application.dto.project_dto import ProjectSummaryDto
 from src.domain.control_plane.project_views import ProjectMemberView
@@ -18,7 +17,7 @@ class ProjectMemberDto:
     created_at: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ProjectMemberDto":
+    def from_record(cls, record: dict[str, object]) -> "ProjectMemberDto":
         telegram_id = record.get("telegram_id")
         return cls(
             id=str(record["id"]) if record.get("id") is not None else None,
@@ -47,7 +46,7 @@ class ProjectMemberDto:
             created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at) if created_at else None,
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         return {key: value for key, value in payload.items() if value is not None}
 
@@ -73,7 +72,7 @@ class ProjectMutationResultDto:
         return cls(status=status, type=type, storage=storage, user_id=user_id, role=role)
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ProjectMutationResultDto":
+    def from_record(cls, record: dict[str, object]) -> "ProjectMutationResultDto":
         return cls(
             status=str(record["status"]),
             type=record.get("type"),
@@ -82,7 +81,7 @@ class ProjectMutationResultDto:
             role=record.get("role"),
         )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         return {key: value for key, value in payload.items() if value is not None}
 
@@ -101,7 +100,7 @@ class ProjectTeamDto:
     ) -> "ProjectTeamDto":
         return cls(members=members, legacy_targets=legacy_targets or [])
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "members": [member.to_dict() for member in self.members],
             "legacy_targets": self.legacy_targets,
@@ -116,5 +115,5 @@ class TelegramAdminProjectsDto:
     def create(cls, projects: list[ProjectSummaryDto]) -> "TelegramAdminProjectsDto":
         return cls(projects=projects)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         return {"projects": [project.to_dict() for project in self.projects]}

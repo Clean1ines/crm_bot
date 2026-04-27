@@ -4,7 +4,6 @@ Escalation node for the LangGraph pipeline.
 Creates escalation side effects and returns a typed human-handoff state patch.
 """
 
-from typing import Any
 
 from src.agent.state import AgentState
 from src.domain.runtime.escalation import EscalationContext, EscalationResult
@@ -30,7 +29,7 @@ def create_escalate_node(
     Create the escalation node with injected dependencies.
     """
 
-    async def _escalate_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _escalate_node_impl(state: AgentState) -> dict[str, object]:
         context = EscalationContext.from_state(state)
         if not context.thread_id:
             logger.error("escalate_node called with no thread_id")
@@ -108,10 +107,10 @@ def create_escalate_node(
     def _get_escalate_input_size(state: AgentState) -> int:
         return len(str(state.get("user_input") or ""))
 
-    def _get_escalate_output_size(result: dict[str, Any]) -> int:
+    def _get_escalate_output_size(result: dict[str, object]) -> int:
         return len(str(result.get("response_text") or ""))
 
-    async def escalate_node(state: AgentState) -> dict[str, Any]:
+    async def escalate_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "escalate",
             _escalate_node_impl,

@@ -3,7 +3,6 @@ Event Repository for Event-Sourced Agent Runtime.
 """
 
 import json
-from typing import Optional
 from uuid import UUID
 
 import asyncpg
@@ -62,7 +61,7 @@ class EventRepository:
         self,
         stream_id: UUID,
         limit: int = 100,
-        after_id: Optional[int] = None,
+        after_id: int | None = None,
     ) -> list[EventTimelineItemView]:
         logger.debug(
             "Loading event stream",

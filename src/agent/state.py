@@ -5,7 +5,7 @@ Defines the TypedDict structure that carries conversation state
 through the agent graph, including messages, context, and flags.
 """
 
-from typing import Annotated, Sequence, List, Dict, Any, Optional, TypedDict
+from typing import Annotated, Sequence, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -52,53 +52,53 @@ class AgentState(TypedDict):
         project_configuration: Explicit project settings/policies/integrations/limits.
         
         # Analytics fields
-        intent: Optional[str]  # Detected intent (e.g., "pricing", "support", "sales")
-        cta: Optional[str]     # Call-to-action type (e.g., "call_manager")
-        lifecycle: Optional[str]  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
-        features: Optional[Dict]  # Tracked feature interest (e.g., {"auto_reply": True})
+        intent: str | None  # Detected intent (e.g., "pricing", "support", "sales")
+        cta: str | None     # Call-to-action type (e.g., "call_manager")
+        lifecycle: str | None  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
+        features: Dict | None  # Tracked feature interest (e.g., {"auto_reply": True})
         
         # Runtime dialog state fields (loaded from user memory)
-        dialog_state: Optional[DialogState]  # Current dialog state snapshot
-        topic: Optional[str]                 # Current conversation topic
-        lead_status: Optional[str]           # Lead status (e.g., "new", "qualified", "lost")
-        repeat_count: Optional[int]          # Number of times user repeated a question
+        dialog_state: DialogState | None  # Current dialog state snapshot
+        topic: str | None                 # Current conversation topic
+        lead_status: str | None           # Lead status (e.g., "new", "qualified", "lost")
+        repeat_count: int | None          # Number of times user repeated a question
     """
     # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
     project_id: str
     thread_id: str
     escalation_requested: bool
-    tool_calls: Optional[List[ToolCallRecord]]
+    tool_calls: list[ToolCallRecord] | None
 
     # New pipeline fields (all optional for backward compatibility)
-    user_input: Optional[str]
-    client_profile: Optional[ClientProfileState]
-    conversation_summary: Optional[str]
-    history: Optional[List[HistoryMessage]]
-    knowledge_chunks: Optional[List[KnowledgeChunkState]]
-    decision: Optional[str]  # e.g., "RESPOND", "TOOL", "ESCALATE", "COLLECT"
-    tool_name: Optional[str]
-    tool_args: Optional[ToolArguments]
-    tool_result: Optional[Any]
-    user_memory: Optional[Dict[str, Any]] # Added hidden field discovered during audit
-    response_text: Optional[str]
+    user_input: str | None
+    client_profile: ClientProfileState | None
+    conversation_summary: str | None
+    history: list[HistoryMessage] | None
+    knowledge_chunks: list[KnowledgeChunkState] | None
+    decision: str | None  # e.g., "RESPOND", "TOOL", "ESCALATE", "COLLECT"
+    tool_name: str | None
+    tool_args: ToolArguments | None
+    tool_result: object | None
+    user_memory: dict[str, object] | None # Added hidden field discovered during audit
+    response_text: str | None
     requires_human: bool
-    confidence: Optional[float]
-    chat_id: Optional[int]  # Telegram chat ID of the user, needed for responder
-    message_sent: Optional[bool]  # Flag indicating that the message was already sent by the graph
-    trace_id: Optional[str]  # Unique trace identifier for observability
-    client_id: Optional[str]  # UUID of the client for memory storage
-    project_configuration: Optional[ProjectRuntimeConfigurationState]  # Explicit project personalization config
-    close_ticket: Optional[bool] # Added hidden field discovered during audit
+    confidence: float | None
+    chat_id: int | None  # Telegram chat ID of the user, needed for responder
+    message_sent: bool | None  # Flag indicating that the message was already sent by the graph
+    trace_id: str | None  # Unique trace identifier for observability
+    client_id: str | None  # UUID of the client for memory storage
+    project_configuration: ProjectRuntimeConfigurationState | None  # Explicit project personalization config
+    close_ticket: bool | None # Added hidden field discovered during audit
 
     # Analytics fields
-    intent: Optional[str]  # Detected intent (e.g., "pricing", "support", "sales")
-    cta: Optional[str]     # Call-to-action type (e.g., "call_manager")
-    lifecycle: Optional[str]  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
-    features: Optional[Dict[str, Any]]  # Tracked feature interest (e.g., {"auto_reply": True})
+    intent: str | None  # Detected intent (e.g., "pricing", "support", "sales")
+    cta: str | None     # Call-to-action type (e.g., "call_manager")
+    lifecycle: str | None  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
+    features: dict[str, object] | None  # Tracked feature interest (e.g., {"auto_reply": True})
     
     # Runtime dialog state fields (loaded from user memory)
-    dialog_state: Optional[DialogState]  # Current dialog state snapshot
-    topic: Optional[str]         # Current conversation topic
-    lead_status: Optional[str]   # Lead status (e.g., "new", "qualified", "lost")
-    repeat_count: Optional[int]  # Number of times user repeated a question
+    dialog_state: DialogState | None  # Current dialog state snapshot
+    topic: str | None         # Current conversation topic
+    lead_status: str | None   # Lead status (e.g., "new", "qualified", "lost")
+    repeat_count: int | None  # Number of times user repeated a question

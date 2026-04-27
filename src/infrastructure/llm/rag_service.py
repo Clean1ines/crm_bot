@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Mapping
+from typing import Mapping
 
 from src.infrastructure.llm.query_expander import NoOpQueryExpander
 from src.infrastructure.llm.rag_contract import (
@@ -110,7 +110,7 @@ class RAGService:
     # Dedup and rerank
     # -------------------------
 
-    def _deduplicate(self, rows: list[Mapping[str, Any]]) -> list[RAGCandidate]:
+    def _deduplicate(self, rows: list[Mapping[str, object]]) -> list[RAGCandidate]:
         by_id: dict[str, RAGCandidate] = {}
 
         for row in rows:
@@ -160,9 +160,9 @@ class RAGService:
     async def _rerank(
         self,
         query: str,
-        candidates: list[RAGCandidate] | list[Mapping[str, Any]],
+        candidates: list[RAGCandidate] | list[Mapping[str, object]],
         top_k: int,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         """Deterministic rerank.
 
         The final score semantics are:
@@ -211,7 +211,7 @@ class RAGService:
         query: str,
         limit_per_query: int | None = None,
         final_limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, object]]:
         runtime_config = RAGPipelineConfig(
             limit_per_query=limit_per_query or self._config.limit_per_query,
             final_limit=final_limit or self._config.final_limit,
@@ -228,7 +228,7 @@ class RAGService:
         expansions = await self._expand_query(normalized_query)
         variants = self._unique_queries(normalized_query, expansions)
 
-        raw_candidates: list[Mapping[str, Any]] = []
+        raw_candidates: list[Mapping[str, object]] = []
 
         for variant in variants:
             results = await self._repo.search(

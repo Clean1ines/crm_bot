@@ -5,7 +5,6 @@ The heavy logic lives in small orchestration services. This class remains the
 public application service used by existing HTTP/Telegram entrypoints.
 """
 
-from typing import Optional, Any
 
 from src.application.ports.cache_port import CacheFactoryPort
 from src.application.ports.lock_port import NullThreadLock, ThreadLockPort
@@ -31,7 +30,7 @@ class EventEmitter:
         stream_id: str,
         project_id: str,
         event_type: str,
-        payload: dict[str, Any],
+        payload: dict[str, object],
     ) -> None:
         if self.event_repo is None:
             return
@@ -134,7 +133,7 @@ class ConversationOrchestrator:
 
         self.logger.debug("ConversationOrchestrator initialized")
 
-    async def _emit_event(self, stream_id: str, project_id: str, event_type: str, payload: dict[str, Any]) -> None:
+    async def _emit_event(self, stream_id: str, project_id: str, event_type: str, payload: dict[str, object]) -> None:
         await self.event_emitter.emit_event(stream_id, project_id, event_type, payload)
 
     def _build_graph_from_json(self, graph_json):
@@ -150,7 +149,7 @@ class ConversationOrchestrator:
     def _outcome(text: str, *, delivered: bool = False):
         return GraphExecutor.outcome(text, delivered=delivered)
 
-    def _trim_recent_history(self, recent_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _trim_recent_history(self, recent_messages: list[dict[str, object]]) -> list[dict[str, object]]:
         return self.graph_executor.trim_recent_history(recent_messages)
 
     def _create_graph_execution_request(self, **kwargs):
@@ -173,8 +172,8 @@ class ConversationOrchestrator:
         project_id: str,
         chat_id: int,
         text: str,
-        username: Optional[str] = None,
-        full_name: Optional[str] = None,
+        username: str | None = None,
+        full_name: str | None = None,
         source: str = "telegram",
     ) -> str:
         return await self.client_messages.process_message(
@@ -190,15 +189,15 @@ class ConversationOrchestrator:
         self,
         project_id: str,
         manager_chat_id: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         return await self.manager_replies.resolve_manager_user_id_by_telegram(project_id, manager_chat_id)
 
     async def _resolve_manager_display_name(
         self,
         *,
         project_id: str,
-        manager_chat_id: Optional[str],
-        manager_user_id: Optional[str],
+        manager_chat_id: str | None,
+        manager_user_id: str | None,
     ) -> str:
         return await self.manager_replies.resolve_manager_display_name(
             project_id=project_id,
@@ -210,8 +209,8 @@ class ConversationOrchestrator:
         self,
         thread_id: str,
         manager_text: str,
-        manager_chat_id: Optional[str] = None,
-        manager_user_id: Optional[str] = None,
+        manager_chat_id: str | None = None,
+        manager_user_id: str | None = None,
     ) -> bool:
         return await self.manager_replies.manager_reply(
             thread_id=thread_id,

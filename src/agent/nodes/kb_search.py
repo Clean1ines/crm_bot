@@ -5,7 +5,6 @@ Performs project-scoped knowledge retrieval through the tool registry and
 stores normalized chunks in graph state.
 """
 
-from typing import Any
 
 from src.agent.state import AgentState
 from src.domain.runtime.knowledge_search import KnowledgeSearchContext, KnowledgeSearchResult
@@ -20,7 +19,7 @@ def create_kb_search_node(tool_registry: ToolRegistry):
     Create the knowledge-search node with an injected tool registry.
     """
 
-    async def _kb_search_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _kb_search_node_impl(state: AgentState) -> dict[str, object]:
         context = KnowledgeSearchContext.from_state(state)
         if not context.project_id or not context.query:
             logger.warning(
@@ -96,10 +95,10 @@ def create_kb_search_node(tool_registry: ToolRegistry):
     def _get_kb_search_input_size(state: AgentState) -> int:
         return len(str(state.get("user_input") or ""))
 
-    def _get_kb_search_output_size(result: dict[str, Any]) -> int:
+    def _get_kb_search_output_size(result: dict[str, object]) -> int:
         return len(result.get("knowledge_chunks", []))
 
-    async def kb_search_node(state: AgentState) -> dict[str, Any]:
+    async def kb_search_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "kb_search",
             _kb_search_node_impl,

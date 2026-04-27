@@ -3,7 +3,6 @@ Load-state node for the LangGraph pipeline.
 """
 
 from collections.abc import Mapping
-from typing import Any
 
 from src.agent.state import AgentState
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
@@ -12,7 +11,7 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 logger = get_logger(__name__)
 
 
-def _read_value(view: Any, key: str, default: Any = None) -> Any:
+def _read_value(view: object, key: str, default: object = None) -> object:
     """
     Read from typed dataclass/view, mapping, or view exposing to_record().
     This is not a repository compatibility facade; it is read-model normalization
@@ -45,13 +44,13 @@ def create_load_state_node(
     Create the load-state node with split thread repositories.
     """
 
-    async def _load_state_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _load_state_node_impl(state: AgentState) -> dict[str, object]:
         thread_id = state.get("thread_id")
         if not thread_id:
             logger.warning("load_state called without thread_id")
             return {}
 
-        patch: dict[str, Any] = {
+        patch: dict[str, object] = {
             "history": [],
             "user_memory": {},
         }
@@ -103,7 +102,7 @@ def create_load_state_node(
 
         return patch
 
-    async def load_state_node(state: AgentState) -> dict[str, Any]:
+    async def load_state_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution("load_state", _load_state_node_impl, state)
 
     return load_state_node

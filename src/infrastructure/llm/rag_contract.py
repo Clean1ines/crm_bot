@@ -12,7 +12,20 @@ It defines the testable contract between:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Mapping, Protocol
+
+
+RAG_CANDIDATE_KNOWN_KEYS = frozenset(
+    {
+        "id",
+        "content",
+        "score",
+        "method",
+        "source",
+        "title",
+        "chunk_index",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,44 +61,22 @@ class RAGCandidate:
     source: str | None = None
     title: str | None = None
     chunk_index: int | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, object] = field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, payload: Mapping[str, Any]) -> "RAGCandidate":
-        raw_score = payload.get("score", 0.0)
-        try:
-            score = float(raw_score or 0.0)
-        except (TypeError, ValueError):
-            score = 0.0
-
-        chunk_index = payload.get("chunk_index")
-        try:
-            normalized_chunk_index = int(chunk_index) if chunk_index is not None else None
-        except (TypeError, ValueError):
-            normalized_chunk_index = None
-
-        known_keys = {
-            "id",
-            "content",
-            "score",
-            "method",
-            "source",
-            "title",
-            "chunk_index",
-        }
-
+    def from_mapping(cls, payload: Mapping[str, object]) -> "RAGCandidate":
         return cls(
-            id=str(payload.get("id") or ""),
-            content=str(payload.get("content") or ""),
-            score=score,
-            method=str(payload.get("method") or "unknown"),
-            source=str(payload["source"]) if payload.get("source") is not None else None,
-            title=str(payload["title"]) if payload.get("title") is not None else None,
-            chunk_index=normalized_chunk_index,
-            metadata={key: value for key, value in payload.items() if key not in known_keys},
+            id=_to_text(payload.get("id"), default=""),
+            content=_to_text(payload.get("content"), default=""),
+            score=_to_float(payload.get("score"), default=0.0),
+            method=_to_text(payload.get("method"), default="unknown"),
+            source=_to_optional_text(payload.get("source")),
+            title=_to_optional_text(payload.get("title")),
+            chunk_index=_to_optional_int(payload.get("chunk_index")),
+            metadata=_metadata_without_known_keys(payload),
         )
 
-    def to_tool_payload(self) -> dict[str, Any]:
+    def to_tool_payload(self) -> dict[str, object]:
         return {
             "id": self.id,
             "content": self.content,
@@ -95,6 +86,46 @@ class RAGCandidate:
             "title": self.title,
             "chunk_index": self.chunk_index,
         }
+
+
+def _to_text(value: object, *, default: str) -> str:
+    if value is None:
+        return default
+
+    text = str(value)
+    return text or default
+
+
+def _to_optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+
+    return str(value)
+
+
+def _to_float(value: object, *, default: float) -> float:
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _metadata_without_known_keys(payload: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in RAG_CANDIDATE_KNOWN_KEYS
+    }
 
 
 class QueryExpander(Protocol):
@@ -117,5 +148,5 @@ class KnowledgeSearchRepository(Protocol):
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
-    ) -> list[Mapping[str, Any]]:
+    ) -> list[Mapping[str, object]]:
         ...

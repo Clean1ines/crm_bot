@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Any
 
 
 @dataclass(slots=True)
@@ -12,7 +11,7 @@ class UserProfileView:
     is_platform_admin: bool = False
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "UserProfileView | None":
+    def from_record(cls, record: dict[str, object] | None) -> "UserProfileView | None":
         if not record:
             return None
         telegram_id = record.get("telegram_id")
@@ -25,7 +24,7 @@ class UserProfileView:
             is_platform_admin=bool(record.get("is_platform_admin")),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "telegram_id": self.telegram_id,
@@ -44,7 +43,7 @@ class AuthMethodView:
     verified: bool | None = None
     verified_at: str | None = None
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         payload = {
             "provider": self.provider,
             "provider_id": self.provider_id,
@@ -62,7 +61,7 @@ class AuthMethodsView:
     has_password: bool = False
     verified_email: str | None = None
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         payload = {
             "user_id": self.user_id,
             "methods": [method.to_record() for method in self.methods],
@@ -78,7 +77,7 @@ class EmailVerificationTokenView:
     token: str
     expires_at: str
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {"token": self.token, "expires_at": self.expires_at}
 
 
@@ -87,7 +86,7 @@ class PasswordResetTokenView:
     token: str
     expires_at: str
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {"token": self.token, "expires_at": self.expires_at}
 
 
@@ -96,7 +95,7 @@ class ConsumedEmailVerificationToken:
     user_id: str
     email: str
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {"user_id": self.user_id, "email": self.email}
 
 
@@ -104,5 +103,5 @@ class ConsumedEmailVerificationToken:
 class ConsumedPasswordResetToken:
     user_id: str
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {"user_id": self.user_id}

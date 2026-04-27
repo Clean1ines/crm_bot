@@ -4,7 +4,7 @@ Functions for building prompts for graph nodes.
 
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 from src.agent.router.utils import compact_whitespace, extract_kb_text, truncate_text
 from src.domain.runtime.prompting import NO_DATA_TEXT, NO_KNOWLEDGE_TEXT, ProjectPromptContext
@@ -34,7 +34,7 @@ def _load_prompt_template(filename: str) -> str:
         return ""
 
 
-def format_kb_results(kb_results: Sequence[Any], limit: int = DEFAULT_KB_LIMIT) -> tuple[str, float, int]:
+def format_kb_results(kb_results: Sequence[object], limit: int = DEFAULT_KB_LIMIT) -> tuple[str, float, int]:
     if not kb_results:
         return "[]", 0.0, 0
 
@@ -72,7 +72,7 @@ def format_kb_results(kb_results: Sequence[Any], limit: int = DEFAULT_KB_LIMIT) 
     return "\n".join(lines), top_score, len(lines)
 
 
-def format_history(history: Sequence[Any], limit: int = 5) -> str:
+def format_history(history: Sequence[object], limit: int = 5) -> str:
     if not history:
         return "[]"
 
@@ -100,7 +100,7 @@ def infer_routing_mode(kb_count: int, top_score: float, question_count: int, kb_
     return "KB_AUGMENTED_LLM"
 
 
-def _format_memory(memory_by_type: dict[str, list[dict[str, Any]]]) -> str:
+def _format_memory(memory_by_type: dict[str, list[dict[str, object]]]) -> str:
     if not memory_by_type:
         return ""
 
@@ -121,7 +121,7 @@ def _format_features(features: dict[str, float] | None) -> str:
     return ", ".join(f"{name} (interest: {score:.1f})" for name, score in features.items())
 
 
-def format_project_configuration(project_configuration: dict[str, Any] | None) -> str:
+def format_project_configuration(project_configuration: dict[str, object] | None) -> str:
     context = ProjectPromptContext.from_configuration(project_configuration)
     lines = context.format_lines(truncate=truncate_text)
     return "\n".join(lines) if lines else NO_DATA_TEXT
@@ -131,7 +131,7 @@ def build_intent_prompt(
     user_input: str,
     conversation_summary: str | None = None,
     history: list[HistoryMessage] | None = None,
-    user_memory: dict[str, list[dict[str, Any]]] | None = None,
+    user_memory: dict[str, list[dict[str, object]]] | None = None,
 ) -> str:
     global _intent_prompt_template
     if _intent_prompt_template is None:
@@ -153,8 +153,8 @@ def build_response_prompt(
     user_input: str = "",
     conversation_summary: str | None = None,
     history: list[HistoryMessage] | None = None,
-    user_memory: dict[str, list[dict[str, Any]]] | None = None,
-    knowledge_chunks: Sequence[Any] | None = None,
+    user_memory: dict[str, list[dict[str, object]]] | None = None,
+    knowledge_chunks: Sequence[object] | None = None,
     project_configuration: ProjectRuntimeConfigurationState | None = None,
 ) -> str:
     global _response_prompt_template, _interpretation_block

@@ -5,7 +5,6 @@ Uses a lightweight LLM to extract intent, CTA, topic, emotion, and feature hints
 """
 
 import json
-from typing import Any
 
 from langchain_groq import ChatGroq
 
@@ -46,7 +45,7 @@ def create_intent_extractor_node(
             api_key=settings.GROQ_API_KEY,
         )
 
-    async def _intent_extractor_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _intent_extractor_node_impl(state: AgentState) -> dict[str, object]:
         context = IntentExtractionContext.from_state(state)
         if not context.user_input:
             logger.debug("No user_input, skipping intent extraction")
@@ -91,10 +90,10 @@ def create_intent_extractor_node(
             + len(str(context.user_memory or {}))
         )
 
-    def _get_intent_output_size(result: dict[str, Any]) -> int:
+    def _get_intent_output_size(result: dict[str, object]) -> int:
         return len(str(result))
 
-    async def intent_extractor_node(state: AgentState) -> dict[str, Any]:
+    async def intent_extractor_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "intent_extractor",
             _intent_extractor_node_impl,

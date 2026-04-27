@@ -12,7 +12,6 @@ import binascii
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, Tuple
 
 from src.domain.identity.auth_providers import AUTH_PROVIDER_EMAIL, AUTH_PROVIDER_TELEGRAM
 from src.domain.identity.user_views import AuthMethodView, AuthMethodsView, UserProfileView, EmailVerificationTokenView, PasswordResetTokenView, ConsumedEmailVerificationToken, ConsumedPasswordResetToken
@@ -49,7 +48,7 @@ def _safe_metadata_dict(value) -> dict:
 
 
 
-def _hash_password(password: str, salt: Optional[bytes] = None, iterations: int = 210_000) -> str:
+def _hash_password(password: str, salt: bytes | None = None, iterations: int = 210_000) -> str:
     """
     Hash a password using PBKDF2-SHA256 with an encoded random salt.
 
@@ -104,8 +103,8 @@ class UserRepository:
         self,
         telegram_id: int,
         first_name: str,
-        username: Optional[str] = None
-    ) -> Tuple[str, bool]:
+        username: str | None = None
+    ) -> tuple[str, bool]:
         """
         Get or create a user by Telegram ID.
         
@@ -177,8 +176,8 @@ class UserRepository:
     async def get_or_create_by_email(
         self,
         email: str,
-        full_name: Optional[str] = None
-    ) -> Tuple[str, bool]:
+        full_name: str | None = None
+    ) -> tuple[str, bool]:
         """
         Get or create a user by canonical email identity.
         """
@@ -216,9 +215,9 @@ class UserRepository:
 
     async def create_user(
         self,
-        full_name: Optional[str] = None,
-        email: Optional[str] = None,
-        username: Optional[str] = None,
+        full_name: str | None = None,
+        email: str | None = None,
+        username: str | None = None,
     ) -> str:
         """
         Create a new platform user without implicitly linking auth providers.
@@ -286,7 +285,7 @@ class UserRepository:
             """, user_id, provider, provider_id)
         return True
 
-    async def get_user_by_identity_view(self, provider: str, provider_id: str) -> Optional[UserProfileView]:
+    async def get_user_by_identity_view(self, provider: str, provider_id: str) -> UserProfileView | None:
         """
         Retrieve a user by external auth identity.
         """
@@ -302,7 +301,7 @@ class UserRepository:
             return UserProfileView.from_record(dict(row))
 
 
-    async def get_user_by_telegram_view(self, telegram_id: int) -> Optional[UserProfileView]:
+    async def get_user_by_telegram_view(self, telegram_id: int) -> UserProfileView | None:
         """
         Retrieve a user by Telegram ID using auth_identities.
         
@@ -326,7 +325,7 @@ class UserRepository:
             return UserProfileView.from_record(dict(row))
 
 
-    async def get_user_by_id_view(self, user_id: str) -> Optional[UserProfileView]:
+    async def get_user_by_id_view(self, user_id: str) -> UserProfileView | None:
         """
         Retrieve a user by UUID.
         
@@ -354,7 +353,7 @@ class UserRepository:
             )
             return bool(value)
 
-    async def get_user_by_email_view(self, email: str) -> Optional[UserProfileView]:
+    async def get_user_by_email_view(self, email: str) -> UserProfileView | None:
         """
         Retrieve a user by email address.
         
@@ -553,7 +552,7 @@ class UserRepository:
 
                 return True
 
-    async def update_user(self, user_id: str, data: Dict[str, Any]) -> bool:
+    async def update_user(self, user_id: str, data: dict[str, object]) -> bool:
         """
         Update user fields.
         
@@ -610,7 +609,7 @@ class UserRepository:
 
         return EmailVerificationTokenView(token=token, expires_at=expires_at.isoformat())
 
-    async def consume_email_verification_token(self, token: str) -> Optional[ConsumedEmailVerificationToken]:
+    async def consume_email_verification_token(self, token: str) -> ConsumedEmailVerificationToken | None:
         """
         Mark an email verification token as used and return its payload when valid.
         """
@@ -675,7 +674,7 @@ class UserRepository:
 
         return EmailVerificationTokenView(token=token, expires_at=expires_at.isoformat())
 
-    async def consume_password_reset_token(self, token: str) -> Optional[ConsumedPasswordResetToken]:
+    async def consume_password_reset_token(self, token: str) -> ConsumedPasswordResetToken | None:
         """
         Mark a password reset token as used and return its payload when valid.
         """

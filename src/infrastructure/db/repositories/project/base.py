@@ -3,7 +3,6 @@ Shared base for project repository modules.
 """
 
 import uuid
-from typing import Any, Optional, Union
 
 import asyncpg
 import httpx
@@ -13,8 +12,8 @@ from src.utils.encryption import encrypt_token, decrypt_token
 
 logger = get_logger(__name__)
 
-ProjectId = Union[str, uuid.UUID]
-JsonMap = dict[str, Any]
+ProjectId = str | uuid.UUID
+JsonMap = dict[str, object]
 JsonList = list[JsonMap]
 
 
@@ -32,13 +31,13 @@ class ProjectRepositoryBase:
     def _ensure_uuid(self, value: ProjectId) -> uuid.UUID:
         return ensure_uuid(value)
 
-    def _encrypt_if_present(self, token: Optional[str]) -> Optional[str]:
+    def _encrypt_if_present(self, token: str | None) -> str | None:
         return encrypt_token(token) if token else None
 
-    def _decrypt_if_present(self, encrypted: Optional[str]) -> Optional[str]:
+    def _decrypt_if_present(self, encrypted: str | None) -> str | None:
         return decrypt_token(encrypted) if encrypted else None
 
-    def _normalize_record(self, row: Any) -> JsonMap:
+    def _normalize_record(self, row: object) -> JsonMap:
         if not row:
             empty: JsonMap = {}
             return empty
@@ -51,7 +50,7 @@ class ProjectRepositoryBase:
                 data[key] = value.isoformat()
         return data
 
-    async def _get_bot_username(self, token: str) -> Optional[str]:
+    async def _get_bot_username(self, token: str) -> str | None:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(

@@ -1,4 +1,3 @@
-from typing import Optional
 
 from src.domain.project_plane.manager_assignments import ManagerActor
 from src.domain.project_plane.thread_status import ThreadStatus
@@ -43,7 +42,7 @@ class ThreadLifecycleRepository:
             logger.info(f"Client {client_id} ensured")
             return client_id
 
-    async def get_active_thread(self, client_id: str) -> Optional[str]:
+    async def get_active_thread(self, client_id: str) -> str | None:
         logger.debug(f"Looking for thread for client {client_id}")
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
@@ -99,9 +98,9 @@ class ThreadLifecycleRepository:
         self,
         thread_id: str,
         *,
-        manager: Optional[ManagerActor] = None,
-        manager_user_id: Optional[str] = None,
-        manager_chat_id: Optional[str] = None,
+        manager: ManagerActor | None = None,
+        manager_user_id: str | None = None,
+        manager_chat_id: str | None = None,
     ) -> None:
         if manager is not None:
             manager_user_id = manager.user_id

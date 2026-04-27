@@ -2,7 +2,6 @@
 Project integration command operations.
 """
 
-from typing import Optional
 
 from src.domain.control_plane.project_configuration import ProjectIntegrationView
 
@@ -15,8 +14,8 @@ class ProjectIntegrationRepository(ProjectRepositoryBase):
         project_id: ProjectId,
         provider: str,
         status: str,
-        config_json: Optional[JsonMap] = None,
-        credentials_encrypted: Optional[str] = None,
+        config_json: JsonMap | None = None,
+        credentials_encrypted: str | None = None,
     ) -> ProjectIntegrationView:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(

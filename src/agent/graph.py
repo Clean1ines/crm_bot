@@ -5,7 +5,6 @@ The runtime topology is defined by src.domain.runtime.graph_contract.
 This module is only the LangGraph adapter that materializes that contract.
 """
 
-from typing import Any, Optional
 
 from langgraph.graph import END, StateGraph
 
@@ -26,7 +25,7 @@ from src.infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _require_dependency(name: str, value: Any) -> Any:
+def _require_dependency(name: str, value: object) -> object:
     if value is None:
         raise ValueError(f"agent graph dependency is required: {name}")
     return value
@@ -37,7 +36,7 @@ def _decision_value(decision: AgentGraphDecision) -> str:
 
 
 def create_agent(
-    tool_registry: Optional[Any] = None,
+    tool_registry: object | None = None,
     thread_lifecycle_repo=None,
     thread_message_repo=None,
     thread_runtime_state_repo=None,

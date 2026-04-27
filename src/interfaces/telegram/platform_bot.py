@@ -3,7 +3,6 @@ Admin Bot Router.
 Dispatches incoming Telegram updates to appropriate handlers based on update type.
 """
 
-from typing import Any, Dict, Optional, Tuple
 
 import asyncpg
 import httpx
@@ -24,12 +23,12 @@ logger = get_logger(__name__)
 
 STATE_AWAIT_KNOWLEDGE_FILE = "await_knowledge_file"
 
-TelegramPayload = Dict[str, Any]
-AdminUpdateResult = Dict[str, bool]
-PreparedResponse = Tuple[Optional[int], Optional[str], Optional[TelegramPayload]]
+TelegramPayload = dict[str, object]
+AdminUpdateResult = dict[str, bool]
+PreparedResponse = tuple[int | None, str | None, TelegramPayload | None]
 
 
-def _keyboard_to_dict(response: AdminResponse, *, source: str) -> Tuple[str, Optional[TelegramPayload]]:
+def _keyboard_to_dict(response: AdminResponse, *, source: str) -> tuple[str, TelegramPayload | None]:
     response_text, keyboard = response
     if not keyboard:
         return response_text, None
@@ -39,16 +38,16 @@ def _keyboard_to_dict(response: AdminResponse, *, source: str) -> Tuple[str, Opt
     return response_text, keyboard_dict
 
 
-def _main_menu_response(text: str) -> Tuple[str, TelegramPayload]:
+def _main_menu_response(text: str) -> tuple[str, TelegramPayload]:
     return text, make_main_menu_keyboard().to_dict()
 
 
-def _extract_bot_token(update: Dict[str, Any]) -> Optional[str]:
+def _extract_bot_token(update: dict[str, object]) -> str | None:
     bot_token = update.get("_bot_token")
     return str(bot_token) if bot_token else None
 
 
-async def _answer_callback_query(bot_token: str, callback_id: str, response_text: Optional[str]) -> None:
+async def _answer_callback_query(bot_token: str, callback_id: str, response_text: str | None) -> None:
     async with httpx.AsyncClient() as client:
         try:
             await client.post(
@@ -64,7 +63,7 @@ async def _answer_callback_query(bot_token: str, callback_id: str, response_text
 
 
 async def _handle_callback_query(
-    callback_query: Dict[str, Any],
+    callback_query: dict[str, object],
     *,
     bot_token: str,
     pool: asyncpg.Pool,
@@ -84,9 +83,9 @@ async def _handle_callback_query(
 
 async def _handle_document_message(
     chat_id: int,
-    message: Dict[str, Any],
+    message: dict[str, object],
     pool: asyncpg.Pool,
-) -> Tuple[str, Optional[TelegramPayload]]:
+) -> tuple[str, TelegramPayload | None]:
     state = await _get_state(str(chat_id))
     if state == STATE_AWAIT_KNOWLEDGE_FILE:
         response = await handle_knowledge_upload(str(chat_id), message, pool)
@@ -95,7 +94,7 @@ async def _handle_document_message(
     return _main_menu_response("❌ Не ожидал файл. Пожалуйста, используйте меню.")
 
 
-async def _handle_command_message(text: str, pool: asyncpg.Pool) -> Tuple[Optional[str], Optional[TelegramPayload]]:
+async def _handle_command_message(text: str, pool: asyncpg.Pool) -> tuple[str | None, TelegramPayload | None]:
     response = await handle_admin_command(text, pool)
     if response is None:
         return None, None
@@ -107,7 +106,7 @@ async def _handle_wizard_step_message(
     chat_id: int,
     text: str,
     pool: asyncpg.Pool,
-) -> Tuple[str, Optional[TelegramPayload]]:
+) -> tuple[str, TelegramPayload | None]:
     response = await handle_admin_step(str(chat_id), text, pool)
     if response is None:
         return _main_menu_response("❓ Неизвестная команда. Используйте /start.")
@@ -119,7 +118,7 @@ async def _handle_text_message(
     chat_id: int,
     text: str,
     pool: asyncpg.Pool,
-) -> Tuple[Optional[str], Optional[TelegramPayload]]:
+) -> tuple[str | None, TelegramPayload | None]:
     logger.debug("Admin message received", extra={"chat_id": chat_id, "text_preview": text[:50]})
 
     if text.startswith("/"):
@@ -128,7 +127,7 @@ async def _handle_text_message(
     return await _handle_wizard_step_message(chat_id, text, pool)
 
 
-async def _handle_message(message: Dict[str, Any], pool: asyncpg.Pool) -> PreparedResponse:
+async def _handle_message(message: dict[str, object], pool: asyncpg.Pool) -> PreparedResponse:
     chat_id = message["chat"]["id"]
     text = message.get("text")
     document = message.get("document")
@@ -147,7 +146,7 @@ async def _handle_message(message: Dict[str, Any], pool: asyncpg.Pool) -> Prepar
 def _build_send_message_payload(
     chat_id: int,
     response_text: str,
-    keyboard_dict: Optional[TelegramPayload],
+    keyboard_dict: TelegramPayload | None,
 ) -> TelegramPayload:
     payload: TelegramPayload = {
         "chat_id": chat_id,
@@ -166,7 +165,7 @@ async def _send_admin_message(
     bot_token: str,
     chat_id: int,
     response_text: str,
-    keyboard_dict: Optional[TelegramPayload],
+    keyboard_dict: TelegramPayload | None,
 ) -> None:
     payload = _build_send_message_payload(chat_id, response_text, keyboard_dict)
 
@@ -192,7 +191,7 @@ async def _send_admin_message(
 
 
 async def _dispatch_admin_update(
-    update: Dict[str, Any],
+    update: dict[str, object],
     *,
     bot_token: str,
     pool: asyncpg.Pool,
@@ -206,7 +205,7 @@ async def _dispatch_admin_update(
     return None, None, None
 
 
-async def process_admin_update(update: Dict[str, Any], pool: asyncpg.Pool) -> AdminUpdateResult:
+async def process_admin_update(update: dict[str, object], pool: asyncpg.Pool) -> AdminUpdateResult:
     """
     Main entry point for Admin Bot updates.
     Inspects the update dict and delegates to command, step, callback, or document handlers.

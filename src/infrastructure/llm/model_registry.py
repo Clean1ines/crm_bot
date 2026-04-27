@@ -4,7 +4,6 @@ Loads model definitions from a YAML configuration file.
 """
 
 import yaml
-from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 from src.infrastructure.logging.logger import get_logger
@@ -20,7 +19,7 @@ class ModelRegistry:
     """
     
     def __init__(self):
-        self._models: Dict[str, Dict[str, Any]] = {}
+        self._models: dict[str, dict[str, object]] = {}
         self._load_models()
     
     def _load_models(self) -> None:
@@ -76,15 +75,15 @@ class ModelRegistry:
             self._models[model["id"]] = model
         logger.info(f"Loaded {len(self._models)} default models")
     
-    def get_all_models(self) -> List[Dict[str, Any]]:
+    def get_all_models(self) -> list[dict[str, object]]:
         """Return list of all registered models."""
         return list(self._models.values())
     
-    def get_model(self, model_id: str) -> Optional[Dict[str, Any]]:
+    def get_model(self, model_id: str) -> dict[str, object] | None:
         """Return model definition by ID, or None if not found."""
         return self._models.get(model_id)
     
-    def get_models_by_capability(self, complex_needed: bool = False) -> List[Dict[str, Any]]:
+    def get_models_by_capability(self, complex_needed: bool = False) -> list[dict[str, object]]:
         """
         Return models that match the required capability.
         If complex_needed is True, only models with complex=True are returned.
@@ -95,7 +94,7 @@ class ModelRegistry:
             models = [m for m in models if m.get("capabilities", {}).get("complex", False)]
         return models
     
-    def get_models_sorted_by_priority(self, complex_needed: bool = False) -> List[Dict[str, Any]]:
+    def get_models_sorted_by_priority(self, complex_needed: bool = False) -> list[dict[str, object]]:
         """Return models sorted by priority (lower number = higher priority)."""
         models = self.get_models_by_capability(complex_needed)
         return sorted(models, key=lambda m: m.get("priority", 999))

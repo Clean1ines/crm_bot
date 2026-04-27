@@ -2,7 +2,6 @@
 Platform admin bot handler for uploading knowledge base files.
 """
 
-from typing import List, Optional, Tuple
 
 import aiohttp
 
@@ -37,7 +36,7 @@ async def _get_file_path(file_id: str) -> str:
             return data["result"]["file_path"]
 
 
-async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> Tuple[str, Optional[object]]:
+async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> tuple[str, object | None]:
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
 
@@ -61,7 +60,7 @@ async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> Tuple[st
         file_bytes = await _download_file(file_path)
 
         chunker = ChunkerService()
-        chunks: List[str] = await chunker.process_file(file_bytes, filename)
+        chunks: list[str] = await chunker.process_file(file_bytes, filename)
         if not chunks:
             logger.warning("No chunks generated", extra={"filename": filename})
             return "Не удалось извлечь текст из файла.", None

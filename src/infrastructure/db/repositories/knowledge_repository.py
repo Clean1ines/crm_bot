@@ -6,7 +6,6 @@ Clean Architecture contract:
 - Repository read methods do not return dict/Mapping compatibility objects.
 """
 
-from typing import Optional
 from uuid import UUID
 
 import asyncpg
@@ -140,7 +139,7 @@ class KnowledgeRepository:
         self,
         project_id: str,
         chunks: list[dict[str, object]],
-        document_id: Optional[str] = None,
+        document_id: str | None = None,
     ) -> int:
         if not chunks:
             return 0
@@ -171,8 +170,8 @@ class KnowledgeRepository:
         self,
         project_id: str,
         file_name: str,
-        file_size: Optional[int] = None,
-        uploaded_by: Optional[str] = None,
+        file_size: int | None = None,
+        uploaded_by: str | None = None,
     ) -> str:
         logger.info(
             "Creating knowledge document",
@@ -283,7 +282,7 @@ class KnowledgeRepository:
         self,
         document_id: str,
         status: str,
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         logger.info(
             "Updating document status",

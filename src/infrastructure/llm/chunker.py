@@ -1,7 +1,8 @@
 import io
 import re
-from typing import List
+
 import PyPDF2  # оставляем как у тебя
+
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -50,7 +51,7 @@ class ChunkerService:
 
         return text.strip()
 
-    def chunk_text(self, text: str) -> List[str]:
+    def chunk_text(self, text: str) -> list[str]:
         """
         Split extracted text into stable RAG chunks.
 
@@ -59,64 +60,41 @@ class ChunkerService:
         - Markdown headers are preserved as useful context when possible;
         - if structure detection fails, fallback still splits by size.
         """
-        if not text:
+        clean_text = self._normalized_input(text)
+        if not clean_text:
             return []
 
-        text = self._clean_text(text)
-        if not text:
-            return []
+        if self._should_split_directly(clean_text):
+            return self._non_empty_chunks(self._split_buffer(clean_text))
 
+        chunks = self._chunk_markdown_sections(clean_text)
+        if chunks:
+            return self._non_empty_chunks(chunks)
+
+        return self._non_empty_chunks(self._split_buffer(clean_text))
+
+    def _normalized_input(self, text: str) -> str:
+        if not text:
+            return ""
+
+        return self._clean_text(text)
+
+    def _should_split_directly(self, text: str) -> bool:
         # Fast and safe path: if text is already one big cleaned block,
         # split it directly. This protects runtime uploads from becoming
         # a single huge knowledge chunk.
-        if len(text) >= self.chunk_size and "\n#" not in text:
-            return [c.strip() for c in self._split_buffer(text) if c.strip()]
+        return len(text) >= self.chunk_size and "\n#" not in text
 
+    def _chunk_markdown_sections(self, text: str) -> list[str]:
         sections = re.split(r'(?:^|\n)(#{1,3}\s[^\n]+)', text)
 
-        chunks: List[str] = []
-        current_header = ""
-        buffer = ""
-
-        def flush_buffer() -> None:
-            nonlocal buffer
-            if buffer.strip():
-                chunks.extend(self._split_buffer(buffer.strip()))
-                buffer = ""
-
+        builder = _SectionChunkBuilder(chunker=self)
         for part in sections:
-            part = part.strip()
-            if not part:
-                continue
+            builder.add(part)
 
-            if re.match(r'^#{1,3}\s', part):
-                flush_buffer()
-                current_header = part.replace("#", "").strip()
-                continue
+        return builder.finish()
 
-            combined = f"{current_header}\n{part}".strip() if current_header else part
-
-            if len(combined) >= self.chunk_size:
-                flush_buffer()
-                chunks.extend(self._split_buffer(combined))
-                continue
-
-            next_buffer = f"{buffer}\n\n{combined}".strip() if buffer else combined
-            if len(next_buffer) >= self.chunk_size:
-                flush_buffer()
-                buffer = combined
-            else:
-                buffer = next_buffer
-
-        flush_buffer()
-
-        # Final safety net: never return empty chunks for non-empty text.
-        if not chunks and text.strip():
-            chunks = self._split_buffer(text)
-
-        return [c.strip() for c in chunks if c.strip()]
-
-    def _split_buffer(self, text: str) -> List[str]:
+    def _split_buffer(self, text: str) -> list[str]:
         """
         sentence-aware splitting
         """
@@ -162,7 +140,10 @@ class ChunkerService:
 
         return chunks
 
-    async def process_file(self, file_bytes: bytes, filename: str) -> List[str]:
+    def _non_empty_chunks(self, chunks: list[str]) -> list[str]:
+        return [chunk.strip() for chunk in chunks if chunk.strip()]
+
+    async def process_file(self, file_bytes: bytes, filename: str) -> list[str]:
         filename_lower = filename.lower()
 
         if filename_lower.endswith(('.txt', '.md')):
@@ -180,3 +161,68 @@ class ChunkerService:
             return []
 
         return self.chunk_text(text)
+
+
+class _SectionChunkBuilder:
+    def __init__(self, *, chunker: ChunkerService) -> None:
+        self._chunker = chunker
+        self._chunks: list[str] = []
+        self._current_header = ""
+        self._buffer = ""
+
+    def add(self, raw_part: str) -> None:
+        part = raw_part.strip()
+        if not part:
+            return
+
+        if _is_markdown_header(part):
+            self._flush_buffer()
+            self._current_header = _header_text(part)
+            return
+
+        self._add_body_part(part)
+
+    def finish(self) -> list[str]:
+        self._flush_buffer()
+        return self._chunks
+
+    def _add_body_part(self, part: str) -> None:
+        combined = self._with_current_header(part)
+
+        if len(combined) >= self._chunker.chunk_size:
+            self._flush_buffer()
+            self._chunks.extend(self._chunker._split_buffer(combined))
+            return
+
+        self._append_to_buffer(combined)
+
+    def _with_current_header(self, part: str) -> str:
+        if not self._current_header:
+            return part
+
+        return f"{self._current_header}\n{part}".strip()
+
+    def _append_to_buffer(self, combined: str) -> None:
+        next_buffer = f"{self._buffer}\n\n{combined}".strip() if self._buffer else combined
+
+        if len(next_buffer) >= self._chunker.chunk_size:
+            self._flush_buffer()
+            self._buffer = combined
+            return
+
+        self._buffer = next_buffer
+
+    def _flush_buffer(self) -> None:
+        if not self._buffer.strip():
+            return
+
+        self._chunks.extend(self._chunker._split_buffer(self._buffer.strip()))
+        self._buffer = ""
+
+
+def _is_markdown_header(text: str) -> bool:
+    return re.match(r'^#{1,3}\s', text) is not None
+
+
+def _header_text(text: str) -> str:
+    return text.replace("#", "").strip()

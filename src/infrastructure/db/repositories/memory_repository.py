@@ -4,7 +4,6 @@ Memory repository for long-term user memory.
 Stores facts, preferences, and issues per user for cross-conversation recall.
 """
 
-from typing import List, Dict, Any, Optional, Union
 import uuid
 import asyncpg
 
@@ -14,7 +13,7 @@ from src.infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _ensure_uuid(value: Union[str, uuid.UUID]) -> uuid.UUID:
+def _ensure_uuid(value: str | uuid.UUID) -> uuid.UUID:
     """
     Convert a string or UUID object to a UUID object.
     If the input is already a UUID, return it unchanged.
@@ -44,12 +43,12 @@ class MemoryRepository:
 
     async def get_for_user_view(
         self,
-        project_id: Union[str, uuid.UUID],
-        client_id: Union[str, uuid.UUID],
+        project_id: str | uuid.UUID,
+        client_id: str | uuid.UUID,
         *,
         limit: int = 50,
-        types: Optional[List[str]] = None
-    ) -> List[MemoryEntryView]:
+        types: list[str] | None = None
+    ) -> list[MemoryEntryView]:
         """
         Retrieve memory entries for a specific user.
 
@@ -94,10 +93,10 @@ class MemoryRepository:
 
     async def set(
         self,
-        project_id: Union[str, uuid.UUID],
-        client_id: Union[str, uuid.UUID],
+        project_id: str | uuid.UUID,
+        client_id: str | uuid.UUID,
         key: str,
-        value: Any,
+        value: object,
         type_: str
     ) -> None:
         """
@@ -110,7 +109,7 @@ class MemoryRepository:
             project_id: UUID of the project (string or UUID object).
             client_id: UUID of the client (string or UUID object).
             key: Memory key (e.g., "preferred_contact").
-            value: Any JSON-serializable value.
+            value: object JSON-serializable value.
             type_: Type of memory (e.g., "preference", "fact").
         """
         project_uuid = _ensure_uuid(project_id)
@@ -131,7 +130,7 @@ class MemoryRepository:
             extra={"project_id": str(project_id), "client_id": str(client_id), "key": key, "type": type_}
         )
 
-    async def delete(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID], key: str) -> bool:
+    async def delete(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID, key: str) -> bool:
         """
         Delete a specific memory entry.
 
@@ -159,7 +158,7 @@ class MemoryRepository:
                 )
             return deleted
 
-    async def clear_for_user(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID]) -> None:
+    async def clear_for_user(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID) -> None:
         """
         Delete all memory for a user (e.g., if user requests data deletion).
 
@@ -180,7 +179,7 @@ class MemoryRepository:
             extra={"project_id": str(project_id), "client_id": str(client_id)}
         )
 
-    async def get_lifecycle(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID]) -> Optional[str]:
+    async def get_lifecycle(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID) -> str | None:
         """
         Retrieve the current lifecycle stage for a user from long-term memory.
 
@@ -215,7 +214,7 @@ class MemoryRepository:
         logger.debug("No lifecycle found", extra={"project_id": str(project_id), "client_id": str(client_id)})
         return None
 
-    async def set_lifecycle(self, project_id: Union[str, uuid.UUID], client_id: Union[str, uuid.UUID], lifecycle: str) -> None:
+    async def set_lifecycle(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID, lifecycle: str) -> None:
         """
         Store the lifecycle stage for a user in long-term memory.
 
@@ -233,10 +232,10 @@ class MemoryRepository:
 
     async def update_by_key(
         self,
-        project_id: Union[str, uuid.UUID],
-        client_id: Union[str, uuid.UUID],
+        project_id: str | uuid.UUID,
+        client_id: str | uuid.UUID,
         key: str,
-        value: Any
+        value: object
     ) -> None:
         """
         Update a memory entry by key (preserves type). If the entry does not exist,

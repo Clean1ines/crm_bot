@@ -5,7 +5,6 @@ Uses the configured LLM to craft the final answer from decision, history,
 knowledge, memory, and project runtime configuration.
 """
 
-from typing import Any
 
 from langchain_groq import ChatGroq
 
@@ -23,16 +22,16 @@ logger = get_logger(__name__)
 
 
 def _merge_dialog_state_into_user_memory(
-    user_memory: dict[str, list[dict[str, Any]]] | None,
-    dialog_state: dict[str, Any] | None,
-) -> dict[str, list[dict[str, Any]]] | None:
+    user_memory: dict[str, list[dict[str, object]]] | None,
+    dialog_state: dict[str, object] | None,
+) -> dict[str, list[dict[str, object]]] | None:
     if not dialog_state:
         return user_memory
 
-    merged: dict[str, list[dict[str, Any]]] = {}
+    merged: dict[str, list[dict[str, object]]] = {}
     if user_memory:
         for memory_type, items in user_memory.items():
-            normalized_items: list[dict[str, Any]] = []
+            normalized_items: list[dict[str, object]] = []
             if isinstance(items, list):
                 for item in items:
                     if isinstance(item, dict):
@@ -74,7 +73,7 @@ def create_response_generator_node(
             api_key=settings.GROQ_API_KEY,
         )
 
-    async def _response_generator_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
         context = ResponseGenerationContext.from_state(state)
         if context.decision not in {"LLM_GENERATE", "RESPOND_KB", "RESPOND_TEMPLATE"}:
             logger.debug(
@@ -122,7 +121,7 @@ def create_response_generator_node(
             response = await llm_for_request.ainvoke([("human", prompt)])
             response_text = (response.content or "").strip()
 
-            metadata: dict[str, Any] = {}
+            metadata: dict[str, object] = {}
 
             logger.debug(
                 "Response generated",
@@ -162,10 +161,10 @@ def create_response_generator_node(
             + len(str(context.dialog_state or {}))
         )
 
-    def _get_response_output_size(result: dict[str, Any]) -> int:
+    def _get_response_output_size(result: dict[str, object]) -> int:
         return len(result.get("response_text", ""))
 
-    async def response_generator_node(state: AgentState) -> dict[str, Any]:
+    async def response_generator_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "response_generator",
             _response_generator_node_impl,

@@ -11,7 +11,6 @@ Tool interface for dynamic execution from agent tool calls.
 """
 
 import httpx
-from typing import Any, Dict, Optional
 
 from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import Tool, ToolExecutionError
@@ -88,7 +87,7 @@ class SearchKnowledgeTool(Tool):
         self._rag_service = rag_service
         logger.debug("SearchKnowledgeTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         """
         Execute semantic search over the project's knowledge base.
         
@@ -245,7 +244,7 @@ class EscalateTool(Tool):
         self._project_members = project_members
         logger.debug("EscalateTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         """
         Create a ticket and notify managers for the escalated conversation.
         
@@ -408,7 +407,7 @@ class CRMGetUserTool(Tool):
         self._pool = pool
         logger.debug("CRMGetUserTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         project_id = self._require_context_field(context, "project_id")
         
         telegram_id = args.get("telegram_id")
@@ -512,7 +511,7 @@ class CRMCreateUserTool(Tool):
         self._pool = pool
         logger.debug("CRMCreateUserTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         project_id = self._require_context_field(context, "project_id")
         
         telegram_id = args["telegram_id"]
@@ -588,7 +587,7 @@ class CRMCollectProfileTool(Tool):
     def __init__(self):
         logger.debug("CRMCollectProfileTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         # For now, return static list
         return {
             "asking_fields": [
@@ -644,7 +643,7 @@ class TicketCreateTool(Tool):
         self._pool = pool
         logger.debug("TicketCreateTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         project_id = self._require_context_field(context, "project_id")
         thread_id = context.get("thread_id")
         user_id = context.get("user_id")  # client UUID
@@ -704,7 +703,7 @@ class TelegramSendMessageTool(Tool):
         self._project_tokens = project_tokens
         logger.debug("TelegramSendMessageTool initialized")
     
-    async def run(self, args: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    async def run(self, args: dict[str, object], context: dict[str, object]) -> dict[str, object]:
         project_id = self._require_context_field(context, "project_id")
         
         chat_id = args["chat_id"]

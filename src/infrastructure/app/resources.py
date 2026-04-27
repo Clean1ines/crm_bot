@@ -10,12 +10,11 @@ No src.tools registry wiring.
 No application composition.
 """
 
-from typing import Any
 
 import asyncpg
 
 
-async def init_db(*, settings: Any, logger: Any) -> asyncpg.Pool:
+async def init_db(*, settings: object, logger: object) -> asyncpg.Pool:
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL not configured")
 
@@ -41,7 +40,7 @@ async def init_db(*, settings: Any, logger: Any) -> asyncpg.Pool:
     return db_pool
 
 
-async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: Any) -> None:
+async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: object) -> None:
     if db_pool is None:
         return
 
@@ -50,7 +49,7 @@ async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: Any) -> None:
     logger.info("Database pool closed")
 
 
-def platform_owner_telegram_id(*, settings: Any) -> int | None:
+def platform_owner_telegram_id(*, settings: object) -> int | None:
     if not settings.BOOTSTRAP_PLATFORM_OWNER:
         return None
 
@@ -64,8 +63,8 @@ def platform_owner_telegram_id(*, settings: Any) -> int | None:
 async def bootstrap_platform_owner(
     db_pool: asyncpg.Pool,
     *,
-    settings: Any,
-    logger: Any,
+    settings: object,
+    logger: object,
 ) -> str | None:
     telegram_id = platform_owner_telegram_id(settings=settings)
     if telegram_id is None:

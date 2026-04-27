@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Mapping, cast
+from typing import Callable, Mapping, cast
 
 from src.domain.runtime.dialog_state import DialogState, merge_dialog_state
 from src.domain.runtime.state_contracts import (
@@ -67,16 +67,48 @@ class LoadStateResult:
         return memory_by_type
 
     def apply_system_memory(self, memories: list[MemoryRecord]) -> None:
+        handlers = self._system_memory_handlers()
         for memory in memories:
-            if memory["type"] != "system":
+            if not _is_system_memory(memory):
                 continue
-            key = str(memory["key"])
-            value = memory["value"]
-            if key == "dialog_state" and isinstance(value, Mapping):
-                self.dialog_state = merge_dialog_state(cast(Mapping[str, object], value), lifecycle=str(self.lifecycle or "cold"))
-            elif key == "topic":
-                self.topic = str(value) if value is not None else None
-            elif key == "lead_status":
-                self.lead_status = str(value) if value is not None else None
-            elif key == "repeat_count":
-                self.repeat_count = coerce_int(value, 0)
+
+            handler = handlers.get(str(memory["key"]))
+            if handler is not None:
+                handler(memory["value"])
+
+    def _system_memory_handlers(self) -> Mapping[str, "SystemMemoryHandler"]:
+        return {
+            "dialog_state": self._apply_dialog_state_memory,
+            "topic": self._apply_topic_memory,
+            "lead_status": self._apply_lead_status_memory,
+            "repeat_count": self._apply_repeat_count_memory,
+        }
+
+    def _apply_dialog_state_memory(self, value: object) -> None:
+        if not isinstance(value, Mapping):
+            return
+
+        self.dialog_state = merge_dialog_state(
+            cast(Mapping[str, object], value),
+            lifecycle=str(self.lifecycle or "cold"),
+        )
+
+    def _apply_topic_memory(self, value: object) -> None:
+        self.topic = _optional_text(value)
+
+    def _apply_lead_status_memory(self, value: object) -> None:
+        self.lead_status = _optional_text(value)
+
+    def _apply_repeat_count_memory(self, value: object) -> None:
+        self.repeat_count = coerce_int(value, 0)
+
+
+SystemMemoryHandler = Callable[[object], None]
+
+
+def _is_system_memory(memory: MemoryRecord) -> bool:
+    return memory["type"] == "system"
+
+
+def _optional_text(value: object) -> str | None:
+    return str(value) if value is not None else None

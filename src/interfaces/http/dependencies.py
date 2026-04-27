@@ -13,7 +13,7 @@ This module provides centralized dependency injection functions for:
 All dependencies use the global pool from lifespan management.
 """
 
-from typing import Optional, Any, Callable, Awaitable
+from typing import Callable, Awaitable
 from datetime import datetime
 import jwt
 
@@ -54,7 +54,7 @@ import src.interfaces.composition.fastapi_lifespan
 logger = get_logger(__name__)
 
 
-def get_pool() -> Any:
+def get_pool() -> object:
     """
     Return the global database connection pool.
     
@@ -70,7 +70,7 @@ def get_pool() -> Any:
     return src.interfaces.composition.fastapi_lifespan.pool
 
 
-def get_orchestrator() -> Any:
+def get_orchestrator() -> object:
     """
     Return the global orchestrator instance.
     
@@ -86,7 +86,7 @@ def get_orchestrator() -> Any:
     return src.interfaces.composition.fastapi_lifespan.orchestrator
 
 
-def get_project_repo(pool: Any = Depends(get_pool)):
+def get_project_repo(pool: object = Depends(get_pool)):
     """
     Return the composed project repository.
 
@@ -101,11 +101,11 @@ def get_project_existence_repo(
     return project_repo
 
 
-def get_project_token_repo(pool: Any = Depends(get_pool)) -> ProjectTokenPort:
+def get_project_token_repo(pool: object = Depends(get_pool)) -> ProjectTokenPort:
     return build_project_token_repository(pool)
 
 
-def get_project_member_repo(pool: Any = Depends(get_pool)) -> ProjectMemberResolverPort:
+def get_project_member_repo(pool: object = Depends(get_pool)) -> ProjectMemberResolverPort:
     return build_project_member_repository(pool)
 
 
@@ -118,7 +118,7 @@ def get_project_service(
     return ProjectAccessService(project_repo)
 
 
-def get_event_repo(pool: Any = Depends(get_pool)) -> EventRepository:
+def get_event_repo(pool: object = Depends(get_pool)) -> EventRepository:
     """
     Return a new EventRepository instance.
     
@@ -149,14 +149,14 @@ def get_project_command_service(
     return ProjectCommandService(project_repo, project_service, project_query_service)
 
 
-def get_client_repo(pool: Any = Depends(get_pool)) -> ClientRepository:
+def get_client_repo(pool: object = Depends(get_pool)) -> ClientRepository:
     """
     Return a new ClientRepository instance.
     """
     return ClientRepository(pool)
 
 
-def get_queue_repo(pool: Any = Depends(get_pool)) -> QueueRepository:
+def get_queue_repo(pool: object = Depends(get_pool)) -> QueueRepository:
     """
     Return a new QueueRepository instance.
     
@@ -169,7 +169,7 @@ def get_queue_repo(pool: Any = Depends(get_pool)) -> QueueRepository:
     return QueueRepository(pool)
 
 
-def get_user_repository(pool: Any = Depends(get_pool)) -> UserRepository:
+def get_user_repository(pool: object = Depends(get_pool)) -> UserRepository:
     """
     Return a new UserRepository instance.
     
@@ -182,7 +182,7 @@ def get_user_repository(pool: Any = Depends(get_pool)) -> UserRepository:
     return UserRepository(pool)
 
 
-def get_metrics_repository(pool: Any = Depends(get_pool)) -> MetricsRepository:
+def get_metrics_repository(pool: object = Depends(get_pool)) -> MetricsRepository:
     """
     Return a new MetricsRepository instance.
     
@@ -195,27 +195,27 @@ def get_metrics_repository(pool: Any = Depends(get_pool)) -> MetricsRepository:
     return MetricsRepository(pool)
 
 
-def get_thread_lifecycle_repo(pool: Any = Depends(get_pool)) -> ThreadLifecycleRepository:
+def get_thread_lifecycle_repo(pool: object = Depends(get_pool)) -> ThreadLifecycleRepository:
     """Return repository for thread lifecycle operations."""
     return ThreadLifecycleRepository(pool)
 
 
-def get_thread_message_repo(pool: Any = Depends(get_pool)) -> ThreadMessageRepository:
+def get_thread_message_repo(pool: object = Depends(get_pool)) -> ThreadMessageRepository:
     """Return repository for thread message operations."""
     return ThreadMessageRepository(pool)
 
 
-def get_thread_read_repo(pool: Any = Depends(get_pool)) -> ThreadReadRepository:
+def get_thread_read_repo(pool: object = Depends(get_pool)) -> ThreadReadRepository:
     """Return repository for thread read models."""
     return ThreadReadRepository(pool)
 
 
-def get_thread_runtime_state_repo(pool: Any = Depends(get_pool)) -> ThreadRuntimeStateRepository:
+def get_thread_runtime_state_repo(pool: object = Depends(get_pool)) -> ThreadRuntimeStateRepository:
     """Return repository for thread runtime state operations."""
     return ThreadRuntimeStateRepository(pool)
 
 
-def get_memory_repository(pool: Any = Depends(get_pool)) -> MemoryRepository:
+def get_memory_repository(pool: object = Depends(get_pool)) -> MemoryRepository:
     """
     Return a new MemoryRepository instance.
     
@@ -265,7 +265,7 @@ def get_thread_command_service(
     return ThreadCommandService(thread_lifecycle_repo, memory_repo)
 
 
-def get_tool_registry() -> Any:
+def get_tool_registry() -> object:
     """
     Return the global ToolRegistry singleton instance.
     
@@ -288,7 +288,7 @@ def get_tool_registry() -> Any:
     return tool_registry
 
 
-async def get_redis() -> Any:
+async def get_redis() -> object:
     """
     Return the Redis client instance.
     
@@ -298,7 +298,7 @@ async def get_redis() -> Any:
     return await get_redis_client()
 
 
-async def get_current_user_id(authorization: Optional[str] = Header(default=None)) -> str:
+async def get_current_user_id(authorization: str | None = Header(default=None)) -> str:
     """
     Dependency that validates JWT and returns the user's UUID.
     

@@ -2,7 +2,7 @@
 Platform control-plane Telegram command and callback handlers.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from collections.abc import Awaitable, Callable
 import json
 import uuid
 
@@ -26,7 +26,8 @@ from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
-AdminResponse = Tuple[str, Optional[InlineKeyboardMarkup]]
+AdminResponse = tuple[str, InlineKeyboardMarkup | None]
+AdminStateHandler = Callable[[str, str, object], Awaitable[AdminResponse]]
 
 STATE_PREFIX = "admin_state:"
 DATA_PREFIX = "admin_data:"
@@ -60,7 +61,7 @@ async def _clear_state(chat_id: str):
     logger.debug("State cleared", extra={"chat_id": chat_id})
 
 
-async def _get_data(chat_id: str) -> Dict[str, Any]:
+async def _get_data(chat_id: str) -> dict[str, object]:
     redis = await get_redis_client()
     data = await redis.get(f"{DATA_PREFIX}{chat_id}")
     if data:
@@ -70,7 +71,7 @@ async def _get_data(chat_id: str) -> Dict[str, Any]:
     return {}
 
 
-async def _set_data(chat_id: str, data: Dict[str, Any]):
+async def _set_data(chat_id: str, data: dict[str, object]):
     redis = await get_redis_client()
     await redis.setex(f"{DATA_PREFIX}{chat_id}", 600, json.dumps(data))
     logger.debug("Data stored", extra={"chat_id": chat_id, "data_keys": list(data.keys())})
@@ -103,7 +104,7 @@ def _cmd_help() -> str:
     )
 
 
-async def handle_admin_step(chat_id: str, text: str, pool) -> Optional[AdminResponse]:
+async def handle_admin_step(chat_id: str, text: str, pool) -> AdminResponse | None:
     state = await _get_state(chat_id)
     if state == STATE_IDLE:
         return None
@@ -113,11 +114,13 @@ async def handle_admin_step(chat_id: str, text: str, pool) -> Optional[AdminResp
 
 async def _process_admin_step(
     text: str,
-    data: Dict[str, Any],
+    data: dict[str, object],
     pool,
-    chat_id: Optional[str] = None,
-    state: Optional[str] = None,
+    chat_id: str | None = None,
+    state: str | None = None,
 ) -> AdminResponse:
+    del data
+
     if chat_id is None or state is None:
         return "Ошибка состояния. Напишите /start.", None
 
@@ -127,21 +130,26 @@ async def _process_admin_step(
         await _clear_state(chat_id)
         return await _cmd_start()
 
-    if state == STATE_AWAIT_PROJECT_NAME:
-        return await _step_await_project_name(chat_id, text, pool)
-    if state == STATE_AWAIT_CLIENT_TOKEN:
-        return await _step_await_client_token(chat_id, text, pool)
-    if state == STATE_AWAIT_MANAGER_TOKEN:
-        return await _step_await_manager_token(chat_id, text, pool)
-    if state == STATE_AWAIT_ADD_MANAGER:
-        return await _step_await_add_manager(chat_id, text, pool)
-    if state == STATE_DELETE_AWAIT_CONFIRM:
-        return await _step_delete_confirm(chat_id, text, pool)
-    if state == STATE_AWAIT_DETACH_CHOICE:
-        return await _step_detach_choice(chat_id, text, pool)
-    if state == STATE_AWAIT_KNOWLEDGE_FILE:
-        return await _step_await_knowledge_file(chat_id, text, pool)
+    handler = _admin_step_handlers().get(state)
+    if handler is None:
+        return await _reset_unknown_admin_step(chat_id)
 
+    return await handler(chat_id, text, pool)
+
+
+def _admin_step_handlers() -> dict[str, AdminStateHandler]:
+    return {
+        STATE_AWAIT_PROJECT_NAME: _step_await_project_name,
+        STATE_AWAIT_CLIENT_TOKEN: _step_await_client_token,
+        STATE_AWAIT_MANAGER_TOKEN: _step_await_manager_token,
+        STATE_AWAIT_ADD_MANAGER: _step_await_add_manager,
+        STATE_DELETE_AWAIT_CONFIRM: _step_delete_confirm,
+        STATE_AWAIT_DETACH_CHOICE: _step_detach_choice,
+        STATE_AWAIT_KNOWLEDGE_FILE: _step_await_knowledge_file,
+    }
+
+
+async def _reset_unknown_admin_step(chat_id: str) -> AdminResponse:
     await _clear_state(chat_id)
     return "Диалог сброшен. Напишите /start.", None
 
@@ -472,7 +480,7 @@ async def handle_admin_callback(callback_data: str, chat_id: str, pool) -> Admin
     return "Неизвестная кнопка.", None
 
 
-async def _verify_token(token: str) -> Optional[str]:
+async def _verify_token(token: str) -> str | None:
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
@@ -549,7 +557,7 @@ async def _set_manager_token(project_id: str, token: str, admin_chat_id: str, po
             raise Exception(f"Manager webhook setup failed: {resp.text}")
 
 
-async def _get_bot_username(token: str) -> Optional[str]:
+async def _get_bot_username(token: str) -> str | None:
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
@@ -585,38 +593,64 @@ async def _show_projects_list(chat_id: str, pool) -> AdminResponse:
 
 
 async def _show_project_menu(chat_id: str, project_id: str, pool) -> AdminResponse:
-    project_repo = ProjectRepository(pool)
+    del chat_id
 
-    async with pool.acquire() as conn:
-        name_row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id))
-        if not name_row:
-            return "Проект не найден.", None
-        project_name = name_row["name"]
+    project_name = await _project_name(project_id, pool)
+    if project_name is None:
+        return "Проект не найден.", None
 
-    settings_view = await project_repo.get_project_settings(project_id)
-
+    settings_view = await ProjectRepository(pool).get_project_settings(project_id)
     has_client = bool(settings_view.bot_token)
     has_manager = bool(settings_view.manager_bot_token)
 
-    lines = [f"Проект: {project_name}"]
-    if has_client and has_manager:
-        lines.append("Проект настроен полностью.")
-        client_username = await _get_bot_username(settings_view.bot_token or "")
-        manager_username = await _get_bot_username(settings_view.manager_bot_token or "")
-        if client_username:
-            lines.append(f"Клиентский бот: @{client_username}")
-        if manager_username:
-            lines.append(f"Менеджерский бот: @{manager_username}")
-    else:
-        lines.append("Проект настроен не полностью.")
-        if has_client:
-            client_username = await _get_bot_username(settings_view.bot_token or "")
-            lines.append(f"Клиентский бот: @{client_username}" if client_username else "Клиентский бот: токен установлен")
-        if has_manager:
-            manager_username = await _get_bot_username(settings_view.manager_bot_token or "")
-            lines.append(f"Менеджерский бот: @{manager_username}" if manager_username else "Менеджерский бот: токен установлен")
+    text = await _project_menu_text(
+        project_name=project_name,
+        client_token=settings_view.bot_token,
+        manager_token=settings_view.manager_bot_token,
+    )
+    keyboard = make_project_dynamic_keyboard(project_id, has_client, has_manager)
+    return text, keyboard
 
-    return "\n".join(lines), make_project_dynamic_keyboard(project_id, has_client, has_manager)
+
+async def _project_name(project_id: str, pool) -> str | None:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id))
+    return str(row["name"]) if row else None
+
+
+async def _project_menu_text(
+    *,
+    project_name: str,
+    client_token: str | None,
+    manager_token: str | None,
+) -> str:
+    lines = [
+        f"Проект: {project_name}",
+        _project_setup_status(client_token=client_token, manager_token=manager_token),
+    ]
+
+    await _append_bot_status_line(lines, label="Клиентский бот", token=client_token)
+    await _append_bot_status_line(lines, label="Менеджерский бот", token=manager_token)
+
+    return "\n".join(lines)
+
+
+def _project_setup_status(*, client_token: str | None, manager_token: str | None) -> str:
+    if client_token and manager_token:
+        return "Проект настроен полностью."
+    return "Проект настроен не полностью."
+
+
+async def _append_bot_status_line(lines: list[str], *, label: str, token: str | None) -> None:
+    if not token:
+        return
+
+    username = await _get_bot_username(token)
+    if username:
+        lines.append(f"{label}: @{username}")
+        return
+
+    lines.append(f"{label}: токен установлен")
 
 
 async def _get_project_menu_keyboard(project_id: str, pool) -> InlineKeyboardMarkup:

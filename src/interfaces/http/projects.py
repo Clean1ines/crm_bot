@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional
 
 from src.interfaces.http.dependencies import (
     get_project_command_service,
@@ -37,16 +36,16 @@ class ProjectCreate(BaseModel):
     
 
 class ProjectUpdate(BaseModel):
-    name: Optional[str] = None
+    name: str | None = None
     
 
 class ProjectResponse(BaseModel):
     id: str
     name: str
     is_pro_mode: bool
-    user_id: Optional[str]
-    client_bot_username: Optional[str] = None
-    manager_bot_username: Optional[str] = None
+    user_id: str | None
+    client_bot_username: str | None = None
+    manager_bot_username: str | None = None
 
 
 class BotTokenRequest(BaseModel):
@@ -67,76 +66,76 @@ class ProjectMemberUpsertRequest(BaseModel):
 
 
 class ProjectSettingsUpdate(BaseModel):
-    brand_name: Optional[str] = None
-    industry: Optional[str] = None
-    tone_of_voice: Optional[str] = None
-    default_language: Optional[str] = None
-    default_timezone: Optional[str] = None
-    system_prompt_override: Optional[str] = None
+    brand_name: str | None = None
+    industry: str | None = None
+    tone_of_voice: str | None = None
+    default_language: str | None = None
+    default_timezone: str | None = None
+    system_prompt_override: str | None = None
 
 
 class ProjectPoliciesUpdate(BaseModel):
-    escalation_policy_json: Optional[Dict[str, Any]] = None
-    routing_policy_json: Optional[Dict[str, Any]] = None
-    crm_policy_json: Optional[Dict[str, Any]] = None
-    response_policy_json: Optional[Dict[str, Any]] = None
-    privacy_policy_json: Optional[Dict[str, Any]] = None
+    escalation_policy_json: dict[str, object] | None = None
+    routing_policy_json: dict[str, object] | None = None
+    crm_policy_json: dict[str, object] | None = None
+    response_policy_json: dict[str, object] | None = None
+    privacy_policy_json: dict[str, object] | None = None
 
 
 class ProjectLimitProfileUpdate(BaseModel):
-    monthly_token_limit: Optional[int] = None
-    requests_per_minute: Optional[int] = None
-    max_concurrent_threads: Optional[int] = None
-    priority: Optional[int] = None
-    fallback_model: Optional[str] = None
+    monthly_token_limit: int | None = None
+    requests_per_minute: int | None = None
+    max_concurrent_threads: int | None = None
+    priority: int | None = None
+    fallback_model: str | None = None
 
 
 class ProjectIntegrationUpsert(BaseModel):
     provider: str
     status: str = "disabled"
-    config_json: Optional[Dict[str, Any]] = None
-    credentials_encrypted: Optional[str] = None
+    config_json: dict[str, object] | None = None
+    credentials_encrypted: str | None = None
 
 
 class ProjectChannelUpsert(BaseModel):
     kind: str
     provider: str
     status: str = "disabled"
-    config_json: Optional[Dict[str, Any]] = None
+    config_json: dict[str, object] | None = None
 
 
 class ProjectIntegrationResponse(BaseModel):
     provider: str
-    status: Optional[str] = None
-    config_json: Optional[Dict[str, Any]] = None
-    credentials_encrypted: Optional[str] = None
+    status: str | None = None
+    config_json: dict[str, object] | None = None
+    credentials_encrypted: str | None = None
 
 
 class ProjectChannelResponse(BaseModel):
     kind: str
     provider: str
-    status: Optional[str] = None
-    config_json: Optional[Dict[str, Any]] = None
+    status: str | None = None
+    config_json: dict[str, object] | None = None
 
 
 class ProjectPromptVersionResponse(BaseModel):
-    version: Optional[int] = None
-    prompt_bundle: Optional[Dict[str, Any]] = None
-    is_active: Optional[bool] = None
-    created_at: Optional[str] = None
+    version: int | None = None
+    prompt_bundle: dict[str, object] | None = None
+    is_active: bool | None = None
+    created_at: str | None = None
 
 
 class ProjectConfigurationResponse(BaseModel):
     project_id: str
-    settings: Dict[str, Any]
-    policies: Dict[str, Any]
-    limit_profile: Dict[str, Any]
-    integrations: List[ProjectIntegrationResponse]
-    channels: List[ProjectChannelResponse]
-    prompt_versions: List[ProjectPromptVersionResponse]
+    settings: dict[str, object]
+    policies: dict[str, object]
+    limit_profile: dict[str, object]
+    integrations: list[ProjectIntegrationResponse]
+    channels: list[ProjectChannelResponse]
+    prompt_versions: list[ProjectPromptVersionResponse]
 
 
-@router.get("", response_model=List[ProjectResponse])
+@router.get("", response_model=list[ProjectResponse])
 async def list_projects(
     current_user_id: str = Depends(get_current_user_id),
     project_queries: ProjectQueryService = Depends(get_project_query_service),
@@ -221,7 +220,7 @@ async def clear_manager_token(
     return (await project_commands.clear_manager_bot_token(project_id, current_user_id)).to_dict()
 
 
-@router.get("/{project_id}/managers", response_model=List[int])
+@router.get("/{project_id}/managers", response_model=list[int])
 async def get_managers(
     project_id: str,
     current_user_id: str = Depends(get_current_user_id),
@@ -343,7 +342,7 @@ async def update_project_limit_profile(
     )
 
 
-@router.get("/{project_id}/integrations", response_model=List[ProjectIntegrationResponse], response_model_exclude_none=True)
+@router.get("/{project_id}/integrations", response_model=list[ProjectIntegrationResponse], response_model_exclude_none=True)
 async def list_project_integrations(
     project_id: str,
     current_user_id: str = Depends(get_current_user_id),
@@ -366,7 +365,7 @@ async def upsert_project_integration(
     )
 
 
-@router.get("/{project_id}/channels", response_model=List[ProjectChannelResponse], response_model_exclude_none=True)
+@router.get("/{project_id}/channels", response_model=list[ProjectChannelResponse], response_model_exclude_none=True)
 async def list_project_channels(
     project_id: str,
     current_user_id: str = Depends(get_current_user_id),

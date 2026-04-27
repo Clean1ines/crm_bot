@@ -3,7 +3,6 @@ Embedding generation service using fastembed.
 """
 
 import asyncio
-from typing import List
 from fastembed import TextEmbedding
 
 from src.infrastructure.logging.logger import get_logger
@@ -19,7 +18,7 @@ def _get_model():
         _model = TextEmbedding("BAAI/bge-small-en-v1.5")
     return _model
 
-async def embed_text(text: str) -> List[float]:
+async def embed_text(text: str) -> list[float]:
     logger.debug(f"Generating embedding for text of length {len(text)}")
     loop = asyncio.get_event_loop()
     model = _get_model()
@@ -29,7 +28,7 @@ async def embed_text(text: str) -> List[float]:
     )
     return embedding.tolist()
 
-async def embed_batch(texts: List[str]) -> List[List[float]]:
+async def embed_batch(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
     logger.debug(f"Generating embeddings for batch of {len(texts)} texts")

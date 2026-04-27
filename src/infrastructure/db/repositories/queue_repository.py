@@ -6,7 +6,6 @@ supporting reliable task processing with retry logic and worker tracking.
 """
 
 import json
-from typing import Optional
 
 import asyncpg
 
@@ -99,7 +98,7 @@ class QueueRepository:
             )
             return job
 
-    async def complete_job(self, job_id: str, success: bool, error: Optional[str] = None) -> None:
+    async def complete_job(self, job_id: str, success: bool, error: str | None = None) -> None:
         new_status = "done" if success else "failed"
         logger.info(
             "Completing job",
@@ -183,7 +182,7 @@ class QueueRepository:
                 logger.warning("Job fail failed - not found", extra={"job_id": job_id})
             return updated
 
-    async def increment_attempts(self, job_id: str) -> Optional[int]:
+    async def increment_attempts(self, job_id: str) -> int | None:
         logger.debug("Incrementing attempts", extra={"job_id": job_id})
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""

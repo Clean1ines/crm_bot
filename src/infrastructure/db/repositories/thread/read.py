@@ -1,4 +1,3 @@
-from typing import Optional
 
 from src.domain.project_plane.thread_views import (
     ThreadDialogClientView,
@@ -52,8 +51,8 @@ class ThreadReadRepository:
         project_id: str,
         limit: int = 20,
         offset: int = 0,
-        status_filter: Optional[str] = None,
-        search: Optional[str] = None,
+        status_filter: str | None = None,
+        search: str | None = None,
     ) -> list[ThreadDialogView]:
         logger.info(
             "Fetching dialogs",

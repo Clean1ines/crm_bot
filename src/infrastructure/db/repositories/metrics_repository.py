@@ -6,7 +6,6 @@ Provides methods to update thread_metrics and project_metrics_daily tables.
 import uuid
 import asyncpg
 from datetime import datetime, date
-from typing import Optional, Dict, Any
 
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
@@ -35,11 +34,11 @@ class MetricsRepository:
     async def update_thread_metrics(
         self,
         thread_id: str,
-        total_messages: Optional[int] = None,
-        ai_messages: Optional[int] = None,
-        manager_messages: Optional[int] = None,
-        escalated: Optional[bool] = None,
-        resolution_time: Optional[float] = None  # in seconds
+        total_messages: int | None = None,
+        ai_messages: int | None = None,
+        manager_messages: int | None = None,
+        escalated: bool | None = None,
+        resolution_time: float | None = None  # in seconds
     ) -> None:
         """
         Update thread_metrics for a given thread. Uses ON CONFLICT to handle upsert.
@@ -104,7 +103,7 @@ class MetricsRepository:
         total_threads_delta: int = 0,
         escalations_delta: int = 0,
         tokens_used_delta: int = 0,
-        avg_messages_to_resolution: Optional[float] = None
+        avg_messages_to_resolution: float | None = None
     ) -> None:
         """
         Update project_metrics_daily for a given project and date.

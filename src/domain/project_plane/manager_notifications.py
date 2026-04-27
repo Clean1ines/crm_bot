@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Iterable
 
 
 @dataclass(frozen=True)
 class ManagerNotificationTarget:
     """A project member who can receive manager-plane Telegram notifications."""
 
-    user_id: Optional[str]
+    user_id: str | None
     telegram_chat_id: str
 
 
 def select_manager_notification_targets(
     targets: Iterable[ManagerNotificationTarget],
     *,
-    manager_user_id: Optional[str] = None,
-    manager_chat_id: Optional[str] = None,
-) -> List[ManagerNotificationTarget]:
+    manager_user_id: str | None = None,
+    manager_chat_id: str | None = None,
+) -> list[ManagerNotificationTarget]:
     """
     Select Telegram notification recipients for a manager-plane event.
 

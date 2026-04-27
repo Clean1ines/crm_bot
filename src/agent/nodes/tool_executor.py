@@ -6,7 +6,6 @@ patch describing the outcome.
 """
 
 import json
-from typing import Any
 
 from src.agent.state import AgentState
 from src.domain.runtime.tool_execution import ToolExecutionContext, ToolExecutionResult
@@ -29,7 +28,7 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
     Create the tool executor node with an injected tool registry.
     """
 
-    async def _tool_executor_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _tool_executor_node_impl(state: AgentState) -> dict[str, object]:
         context = ToolExecutionContext.from_state(state)
         if not context.tool_name:
             logger.warning("tool_executor_node called with no tool_name")
@@ -70,10 +69,10 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
         context = ToolExecutionContext.from_state(state)
         return len(json.dumps(context.tool_args))
 
-    def _get_tool_executor_output_size(result: dict[str, Any]) -> int:
+    def _get_tool_executor_output_size(result: dict[str, object]) -> int:
         return len(json.dumps(result.get("tool_result", ""))) if result.get("tool_result") else 0
 
-    async def tool_executor_node(state: AgentState) -> dict[str, Any]:
+    async def tool_executor_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "tool_executor",
             _tool_executor_node_impl,

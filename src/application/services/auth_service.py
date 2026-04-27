@@ -237,29 +237,43 @@ class AuthService:
         return self.build_auth_session(user_id, await self._load_user_profile_view(user_id))
 
     async def link_google(self, current_user_id: str, provider_subject: str, email: str | None = None) -> AuthMethodsDto:
+        normalized_subject = self._required_google_subject(provider_subject)
+        await self._ensure_google_identity_available(current_user_id, normalized_subject)
+        await self._link_google_identity(current_user_id, normalized_subject)
+        await self._sync_google_email(current_user_id, email)
+        return await self.get_auth_methods(current_user_id)
+
+    def _required_google_subject(self, provider_subject: str) -> str:
         normalized_subject = self.normalize_provider_subject(provider_subject)
         if not normalized_subject:
             raise ValidationError("provider_subject is required")
+        return normalized_subject
 
+    async def _ensure_google_identity_available(self, current_user_id: str, normalized_subject: str) -> None:
         existing = await self._load_user_by_identity_view(AUTH_PROVIDER_GOOGLE, normalized_subject)
         if existing and existing.id != current_user_id:
             raise ConflictError("Google account is already linked to another account")
 
+    async def _link_google_identity(self, current_user_id: str, normalized_subject: str) -> None:
         try:
             await self.user_repo.link_identity(current_user_id, AUTH_PROVIDER_GOOGLE, normalized_subject)
         except ValueError:
             raise ConflictError("Google account is already linked to another account") from None
 
+    async def _sync_google_email(self, current_user_id: str, email: str | None) -> None:
         normalized_email = self.normalize_email(email) if email else None
-        if normalized_email:
-            existing_email_user = await self._load_user_by_email_view(normalized_email)
-            if existing_email_user and existing_email_user.id != current_user_id:
-                raise ConflictError("Google account email is already used by another account")
-            current_user = await self._load_user_profile_view(current_user_id)
-            if current_user and not current_user.email:
-                await self.user_repo.update_user(current_user_id, {"email": normalized_email})
+        if not normalized_email:
+            return
 
-        return await self.get_auth_methods(current_user_id)
+        await self._ensure_google_email_available(current_user_id, normalized_email)
+        current_user = await self._load_user_profile_view(current_user_id)
+        if current_user and not current_user.email:
+            await self.user_repo.update_user(current_user_id, {"email": normalized_email})
+
+    async def _ensure_google_email_available(self, current_user_id: str, normalized_email: str) -> None:
+        existing_email_user = await self._load_user_by_email_view(normalized_email)
+        if existing_email_user and existing_email_user.id != current_user_id:
+            raise ConflictError("Google account email is already used by another account")
 
     async def change_password(self, current_user_id: str, new_password: str, current_password: str | None = None) -> AuthMethodsDto:
         if not await self.user_repo.has_auth_method(current_user_id, AUTH_PROVIDER_EMAIL):

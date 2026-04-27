@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.thread_views import (
@@ -60,10 +59,10 @@ class ThreadRuntimeStateRepository:
     async def update_analytics(
         self,
         thread_id: str,
-        intent: Optional[str] = None,
-        lifecycle: Optional[str] = None,
-        cta: Optional[str] = None,
-        decision: Optional[str] = None,
+        intent: str | None = None,
+        lifecycle: str | None = None,
+        cta: str | None = None,
+        decision: str | None = None,
     ) -> None:
         thread_uuid = ensure_uuid(thread_id)
 

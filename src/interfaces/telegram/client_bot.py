@@ -3,7 +3,6 @@ Client Bot Router.
 Wraps ConversationOrchestrator to handle end-user Telegram messages.
 """
 
-from typing import Any, Dict
 
 import asyncpg
 import httpx
@@ -14,22 +13,22 @@ from src.infrastructure.redis.client import get_redis_client
 
 logger = get_logger(__name__)
 
-OK_RESPONSE: Dict[str, bool] = {"ok": True}
+OK_RESPONSE: dict[str, bool] = {"ok": True}
 IDEMPOTENCY_TTL_SECONDS = 3600
 CLIENT_ERROR_MESSAGE = "❌ Произошла ошибка при обработке вашего запроса. Попробуйте позже."
 
 
-def _extract_message(update: Dict[str, Any]) -> Dict[str, Any] | None:
+def _extract_message(update: dict[str, object]) -> dict[str, object] | None:
     message = update.get("message")
     return message if isinstance(message, dict) else None
 
 
-def _extract_sender(message: Dict[str, Any]) -> Dict[str, Any]:
+def _extract_sender(message: dict[str, object]) -> dict[str, object]:
     sender = message.get("from") or message.get("chat") or {}
     return sender if isinstance(sender, dict) else {}
 
 
-def _extract_full_name(sender: Dict[str, Any]) -> str | None:
+def _extract_full_name(sender: dict[str, object]) -> str | None:
     first_name = str(sender.get("first_name") or "").strip()
     last_name = str(sender.get("last_name") or "").strip()
     return " ".join(part for part in (first_name, last_name) if part) or None
@@ -51,7 +50,7 @@ async def _is_duplicate_update(update_id: object) -> bool:
     return False
 
 
-async def _skip_duplicate_update(update: Dict[str, Any]) -> bool:
+async def _skip_duplicate_update(update: dict[str, object]) -> bool:
     try:
         return await _is_duplicate_update(update.get("update_id"))
     except Exception as exc:
@@ -84,7 +83,7 @@ async def _send_error_message(bot_token: str, chat_id: object) -> None:
 
 async def _process_text_message(
     *,
-    message: Dict[str, Any],
+    message: dict[str, object],
     project_id: str,
     orchestrator: ConversationOrchestrator,
     bot_token: str,
@@ -116,11 +115,11 @@ async def _process_text_message(
 
 
 async def process_client_update(
-    update: Dict[str, Any],
+    update: dict[str, object],
     project_id: str,
     orchestrator: ConversationOrchestrator,
     bot_token: str,
-) -> Dict[str, bool]:
+) -> dict[str, bool]:
     """
     Process incoming message from a client end-user.
 

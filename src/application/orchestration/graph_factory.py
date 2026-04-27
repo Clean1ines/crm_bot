@@ -9,7 +9,6 @@ This module owns the application-side runtime contract:
 """
 
 import json
-from typing import Any, Union
 
 from src.application.dto.runtime_dto import (
     GraphExecutionRequestDto,
@@ -51,7 +50,7 @@ class GraphFactory:
             memory_repo=memory_repo,
         )
 
-    def build_graph_from_json(self, graph_json: Union[str, dict[str, Any]]) -> AgentGraphRuntimePort:
+    def build_graph_from_json(self, graph_json: str | dict[str, object]) -> AgentGraphRuntimePort:
         """
         Return the project graph.
 
@@ -93,7 +92,7 @@ class GraphExecutor:
     def outcome(text: str, *, delivered: bool = False) -> MessageProcessingOutcomeDto:
         return MessageProcessingOutcomeDto.create(text=text, delivered=delivered)
 
-    def trim_recent_history(self, recent_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def trim_recent_history(self, recent_messages: list[dict[str, object]]) -> list[dict[str, object]]:
         if len(recent_messages) <= self.RECENT_MESSAGES_LIMIT:
             return recent_messages
         return recent_messages[-self.RECENT_MESSAGES_LIMIT:]
@@ -105,7 +104,7 @@ class GraphExecutor:
         thread_id: str,
         chat_id: int,
         question: str,
-        recent_history: list[dict[str, Any]],
+        recent_history: list[dict[str, object]],
         runtime_context,
         trace_id: str,
     ) -> GraphExecutionRequestDto:
@@ -119,7 +118,7 @@ class GraphExecutor:
             trace_id=trace_id,
         )
 
-    def build_agent_state(self, *, request: GraphExecutionRequestDto) -> dict[str, Any]:
+    def build_agent_state(self, *, request: GraphExecutionRequestDto) -> dict[str, object]:
         """
         Convert the typed application request into the graph state contract.
         """
@@ -160,7 +159,7 @@ class GraphExecutor:
 
     def extract_graph_result(
         self,
-        result_state: dict[str, Any],
+        result_state: dict[str, object],
         *,
         question: str,
         thread_id: str,

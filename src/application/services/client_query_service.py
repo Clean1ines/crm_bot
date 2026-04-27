@@ -1,5 +1,4 @@
 from dataclasses import asdict, is_dataclass
-from typing import Optional
 
 from src.application.ports.client_port import ClientReaderPort
 from src.application.ports.memory_port import MemoryReaderPort
@@ -58,7 +57,7 @@ class ClientQueryService:
         *,
         limit: int,
         offset: int,
-        search: Optional[str],
+        search: str | None,
         current_user_id: str,
     ) -> dict:
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)

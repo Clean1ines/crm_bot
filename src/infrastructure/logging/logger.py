@@ -9,7 +9,7 @@ import sys
 import time
 import uuid
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Mapping
+from typing import Callable, Mapping
 
 import structlog
 from fastapi import Request
@@ -70,12 +70,12 @@ def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
 
 async def log_node_execution(
     node_name: str,
-    func: Callable[[Mapping[str, Any]], Any],
-    state: Mapping[str, Any],
+    func: Callable[[Mapping[str, object]], object],
+    state: Mapping[str, object],
     *,
-    get_input_size: Optional[Callable[[Mapping[str, Any]], int]] = None,
-    get_output_size: Optional[Callable[[Any], int]] = None,
-) -> Any:
+    get_input_size: Callable[[Mapping[str, object]], int] | None = None,
+    get_output_size: Callable[[object], int] | None = None,
+) -> object:
     """
     Execute an agent node with timing and observability logging.
 
@@ -97,7 +97,7 @@ async def log_node_execution(
         raise
     finally:
         latency_ms = (time.monotonic() - start) * 1000
-        extra: Dict[str, Any] = {
+        extra: dict[str, object] = {
             "trace_id": trace_id,
             "node": node_name,
             "latency_ms": round(latency_ms, 2),

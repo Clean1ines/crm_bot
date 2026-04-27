@@ -1,6 +1,5 @@
 """Manager Bot Router."""
 
-from typing import Dict, Any
 
 from src.application.dto.webhook_dto import WebhookAckDto
 from src.application.services.manager_bot_service import ManagerBotService
@@ -12,11 +11,11 @@ logger = get_logger(__name__)
 
 
 async def process_manager_update(
-    update: Dict[str, Any],
+    update: dict[str, object],
     project_id: str,
     orchestrator: ConversationOrchestrator,
     bot_token: str
-) -> Dict[str, bool]:
+) -> dict[str, bool]:
     """
     Process incoming update from a manager.
     Handles callback queries (claim ticket, close ticket) and text replies.

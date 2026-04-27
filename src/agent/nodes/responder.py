@@ -5,7 +5,6 @@ Delivers the final response through the transport adapter and reports the
 delivery outcome back into graph state.
 """
 
-from typing import Any
 
 from src.agent.state import AgentState
 from src.domain.runtime.delivery import ResponseDeliveryContext, ResponseDeliveryResult
@@ -31,7 +30,7 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
     Create the delivery node with injected tool registry and optional thread repo.
     """
 
-    async def _responder_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _responder_node_impl(state: AgentState) -> dict[str, object]:
         context = ResponseDeliveryContext.from_state(state)
         if not context.chat_id:
             logger.error("responder_node called with no chat_id")
@@ -113,10 +112,10 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
         context = ResponseDeliveryContext.from_state(state)
         return len(context.resolve_response_text())
 
-    def _get_responder_output_size(result: dict[str, Any]) -> int:
+    def _get_responder_output_size(result: dict[str, object]) -> int:
         return 1
 
-    async def responder_node(state: AgentState) -> dict[str, Any]:
+    async def responder_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "responder",
             _responder_node_impl,

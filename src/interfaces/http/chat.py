@@ -4,7 +4,6 @@ import hashlib
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
 
 from src.interfaces.http.dependencies import get_orchestrator, get_project_existence_repo
 from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
@@ -17,10 +16,10 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 class ChatMessageRequest(BaseModel):
     message: str
-    model: Optional[str] = None
-    visitor_id: Optional[str] = None
-    username: Optional[str] = None
-    full_name: Optional[str] = None
+    model: str | None = None
+    visitor_id: str | None = None
+    username: str | None = None
+    full_name: str | None = None
 
 
 def _visitor_chat_id(project_id: str, visitor_id: str | None) -> int:

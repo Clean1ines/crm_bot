@@ -6,7 +6,6 @@ the graph finishes processing a turn.
 """
 
 import datetime
-from typing import Any
 
 from src.agent.state import AgentState
 from src.domain.runtime.persistence import PersistenceContext
@@ -27,14 +26,14 @@ def create_persist_node(
     thread_read_repo: ThreadReadRepository,
     event_repo: EventRepository | None = None,
     memory_repo: MemoryRepository | None = None,
-    summarizer: Any | None = None,
+    summarizer: object | None = None,
     queue_repo: QueueRepository | None = None,
 ):
     """
     Create the persist node with injected repositories.
     """
 
-    async def _persist_node_impl(state: AgentState) -> dict[str, Any]:
+    async def _persist_node_impl(state: AgentState) -> dict[str, object]:
         context = PersistenceContext.from_state(state)
         if not context.thread_id or not context.project_id:
             logger.error("persist_node missing required identifiers")
@@ -250,10 +249,10 @@ def create_persist_node(
     def _get_persist_input_size(state: AgentState) -> int:
         return 0
 
-    def _get_persist_output_size(result: dict[str, Any]) -> int:
+    def _get_persist_output_size(result: dict[str, object]) -> int:
         return 0
 
-    async def persist_node(state: AgentState) -> dict[str, Any]:
+    async def persist_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(
             "persist",
             _persist_node_impl,

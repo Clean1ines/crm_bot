@@ -2,7 +2,6 @@
 Configuration management for the application.
 Uses Pydantic Settings to load and validate environment variables.
 """
-from typing import Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, field_validator
 import uuid
@@ -27,15 +26,15 @@ class Settings(BaseSettings):
         True,
         description="Ensure the configured platform owner exists as a global platform admin on startup",
     )
-    PLATFORM_OWNER_TELEGRAM_ID: Optional[str] = Field(
+    PLATFORM_OWNER_TELEGRAM_ID: str | None = Field(
         None,
         description="Telegram ID of the global platform owner; falls back to ADMIN_CHAT_ID",
     )
-    PLATFORM_WEBHOOK_SECRET: Optional[str] = Field(
+    PLATFORM_WEBHOOK_SECRET: str | None = Field(
         None,
         description="Telegram webhook secret for the global platform bot surface",
     )
-    ADMIN_PROJECT_ID: Optional[str] = Field(None, description="ID of the admin project (excluded from user lists)")
+    ADMIN_PROJECT_ID: str | None = Field(None, description="ID of the admin project (excluded from user lists)")
 
     # External URLs
     RENDER_EXTERNAL_URL: str = Field("", description="Public URL of the service (set by Render)")
@@ -52,7 +51,7 @@ class Settings(BaseSettings):
     TOKEN_ENCRYPTION_KEY: str = Field(..., description="Fernet key for encrypting bot tokens")
 
     # Legacy env compatibility only. Active platform admin checks use users.is_platform_admin.
-    ADMIN_API_TOKEN: Optional[str] = Field(
+    ADMIN_API_TOKEN: str | None = Field(
         None,
         description="Deprecated legacy admin token; do not use for domain authorization",
     )
@@ -67,8 +66,8 @@ class Settings(BaseSettings):
     PRO_MODE_ENABLED: bool = False
     RATE_LIMIT_BURST: int = 10
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
-    TOOL_HTTP_ALLOWED_DOMAINS: Optional[str] = None
-    TOOL_N8N_ALLOWED_WEBHOOKS: Optional[str] = None
+    TOOL_HTTP_ALLOWED_DOMAINS: str | None = None
+    TOOL_N8N_ALLOWED_WEBHOOKS: str | None = None
 
     # Model and rate limit configuration
     GROQ_MODEL: str = Field("llama-3.3-70b-versatile", description="Default Groq model")
@@ -79,10 +78,10 @@ class Settings(BaseSettings):
 
     # JWT for web authentication
     JWT_SECRET_KEY: str = Field(..., description="Secret key for signing JWT tokens (used for web auth)")
-    GOOGLE_CLIENT_ID: Optional[str] = Field(None, description="Google OAuth client ID for ID token audience validation")
+    GOOGLE_CLIENT_ID: str | None = Field(None, description="Google OAuth client ID for ID token audience validation")
 
-    VITE_API_URL: Optional[str] = Field(None, description="Frontend API URL (for CORS)")
-    FRONTEND_URL: Optional[str] = Field(None, description="Frontend URL (for autologin)")
+    VITE_API_URL: str | None = Field(None, description="Frontend API URL (for CORS)")
+    FRONTEND_URL: str | None = Field(None, description="Frontend URL (for autologin)")
 
     HF_MODEL_URL: str = "https://huggingface.co/intfloat/multilingual-e5-large"
     HF_TOKEN: str = ""
@@ -97,7 +96,7 @@ class Settings(BaseSettings):
         return v
 
     @field_validator("PLATFORM_OWNER_TELEGRAM_ID")
-    def validate_platform_owner_telegram_id(cls, v: Optional[str]) -> Optional[str]:
+    def validate_platform_owner_telegram_id(cls, v: str | None) -> str | None:
         """Ensure optional platform owner Telegram ID is numeric when configured."""
         if not v:
             return v

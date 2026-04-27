@@ -3,7 +3,6 @@ Project channel command operations.
 """
 
 import json
-from typing import Optional
 
 from src.domain.control_plane.project_configuration import ProjectChannelView
 
@@ -17,7 +16,7 @@ class ProjectChannelRepository(ProjectRepositoryBase):
         kind: str,
         provider: str,
         status: str,
-        config_json: Optional[JsonMap] = None,
+        config_json: JsonMap | None = None,
     ) -> ProjectChannelView:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(

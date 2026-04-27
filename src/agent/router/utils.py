@@ -9,7 +9,6 @@ tool execution, escalation, response generation, responder, and persist.
 
 import json
 import re
-from typing import Any
 
 
 def compact_whitespace(text: str) -> str:
@@ -29,7 +28,7 @@ def truncate_text(text: str, max_length: int = 280) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def safe_json_dumps(value: Any, *, indent: int = 2) -> str:
+def safe_json_dumps(value: object, *, indent: int = 2) -> str:
     """
     Serialize values to JSON safely for prompt/debug usage.
     """
@@ -39,7 +38,7 @@ def safe_json_dumps(value: Any, *, indent: int = 2) -> str:
         return json.dumps(str(value), ensure_ascii=False, indent=indent)
 
 
-def extract_kb_text(item: Any) -> str:
+def extract_kb_text(item: object) -> str:
     """
     Extract a human-readable knowledge snippet from KB result items.
 

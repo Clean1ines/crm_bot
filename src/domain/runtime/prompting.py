@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.state_contracts import ProjectChannelState, ProjectIntegrationState, ProjectRuntimeConfigurationState
@@ -7,6 +7,27 @@ from src.domain.runtime.state_contracts import ProjectChannelState, ProjectInteg
 
 NO_DATA_TEXT = "none"
 NO_KNOWLEDGE_TEXT = "No knowledge-base evidence found."
+
+ACTIVE_STATUSES = frozenset({"active", "enabled"})
+SETTING_LABELS = (
+    ("brand_name", "brand", 160),
+    ("industry", "industry", 160),
+    ("tone_of_voice", "tone", 160),
+    ("default_language", "language", 160),
+    ("default_timezone", "timezone", 160),
+)
+POLICY_KEYS = (
+    "escalation_policy_json",
+    "routing_policy_json",
+    "crm_policy_json",
+    "response_policy_json",
+    "privacy_policy_json",
+)
+
+
+class TruncateText(Protocol):
+    def __call__(self, value: str, limit: int) -> str:
+        ...
 
 
 @dataclass(slots=True)
@@ -28,56 +49,78 @@ class ProjectPromptContext:
             runtime_profile=ProjectRuntimeProfile.from_configuration(payload),
         )
 
-    def format_lines(self, *, truncate) -> list[str]:
-        lines: list[str] = []
-        setting_labels = [
-            ("brand_name", "brand"),
-            ("industry", "industry"),
-            ("tone_of_voice", "tone"),
-            ("default_language", "language"),
-            ("default_timezone", "timezone"),
+    def format_lines(self, *, truncate: TruncateText) -> list[str]:
+        return [
+            *_format_settings(self.settings, truncate),
+            *_format_prompt_override(self.settings, truncate),
+            *_format_policies(self.policies, truncate),
+            *_format_runtime_profile(self.runtime_profile, truncate),
+            *_format_active_integrations(self.integrations),
+            *_format_active_channels(self.channels),
         ]
-        for key, label in setting_labels:
-            value = self.settings.get(key)
-            if value:
-                lines.append(f"- {label}: {truncate(str(value), 160)}")
 
-        prompt_override = self.settings.get("system_prompt_override")
-        if prompt_override:
-            lines.append(f"- project instruction: {truncate(str(prompt_override), 500)}")
 
-        for key in [
-            "escalation_policy_json",
-            "routing_policy_json",
-            "crm_policy_json",
-            "response_policy_json",
-            "privacy_policy_json",
-        ]:
-            value = self.policies.get(key)
-            if value:
-                lines.append(f"- {key}: {truncate(str(value), 350)}")
+def _format_settings(settings: Mapping[str, object], truncate: TruncateText) -> list[str]:
+    return [
+        f"- {label}: {truncate(str(value), limit)}"
+        for key, label, limit in SETTING_LABELS
+        if (value := settings.get(key))
+    ]
 
-        if self.runtime_profile.fallback_model:
-            lines.append(f"- fallback_model: {truncate(self.runtime_profile.fallback_model, 120)}")
-        if self.runtime_profile.requests_per_minute:
-            lines.append(f"- requests_per_minute: {self.runtime_profile.requests_per_minute}")
-        if self.runtime_profile.max_concurrent_threads:
-            lines.append(f"- max_concurrent_threads: {self.runtime_profile.max_concurrent_threads}")
 
-        active_integrations = [
-            str(item.get("provider"))
-            for item in self.integrations
-            if item.get("provider") and item.get("status") in {"active", "enabled"}
-        ]
-        if active_integrations:
-            lines.append(f"- active_integrations: {', '.join(active_integrations)}")
+def _format_prompt_override(settings: Mapping[str, object], truncate: TruncateText) -> list[str]:
+    prompt_override = settings.get("system_prompt_override")
+    if not prompt_override:
+        return []
 
-        active_channels = [
-            f"{item.get('kind')}/{item.get('provider')}"
-            for item in self.channels
-            if item.get("kind") and item.get("provider") and item.get("status") in {"active", "enabled"}
-        ]
-        if active_channels:
-            lines.append(f"- active_channels: {', '.join(active_channels)}")
+    return [f"- project instruction: {truncate(str(prompt_override), 500)}"]
 
-        return lines
+
+def _format_policies(policies: Mapping[str, object], truncate: TruncateText) -> list[str]:
+    return [
+        f"- {key}: {truncate(str(value), 350)}"
+        for key in POLICY_KEYS
+        if (value := policies.get(key))
+    ]
+
+
+def _format_runtime_profile(profile: ProjectRuntimeProfile, truncate: TruncateText) -> list[str]:
+    lines: list[str] = []
+
+    if profile.fallback_model:
+        lines.append(f"- fallback_model: {truncate(profile.fallback_model, 120)}")
+    if profile.requests_per_minute:
+        lines.append(f"- requests_per_minute: {profile.requests_per_minute}")
+    if profile.max_concurrent_threads:
+        lines.append(f"- max_concurrent_threads: {profile.max_concurrent_threads}")
+
+    return lines
+
+
+def _format_active_integrations(integrations: list[ProjectIntegrationState]) -> list[str]:
+    providers = [
+        str(provider)
+        for item in integrations
+        if (provider := item.get("provider")) and item.get("status") in ACTIVE_STATUSES
+    ]
+    return _format_joined_line("active_integrations", providers)
+
+
+def _format_active_channels(channels: list[ProjectChannelState]) -> list[str]:
+    active_channels = [
+        f"{kind}/{provider}"
+        for item in channels
+        if (
+            (kind := item.get("kind"))
+            and (provider := item.get("provider"))
+            and item.get("status") in ACTIVE_STATUSES
+        )
+    ]
+    return _format_joined_line("active_channels", active_channels)
+
+
+def _format_joined_line(label: str, values: list[str]) -> list[str]:
+    if not values:
+        return []
+
+    return [f"- {label}: {', '.join(values)}"]

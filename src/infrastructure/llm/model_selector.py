@@ -2,7 +2,6 @@
 Model selector: chooses the best available model based on current rate limits and task complexity.
 """
 
-from typing import Optional
 
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.llm.model_registry import ModelRegistry

@@ -2,7 +2,6 @@
 Core project query operations.
 """
 
-from typing import Optional
 
 from src.domain.control_plane.project_views import ProjectRuntimeSettingsView, ProjectSummaryView
 
@@ -63,7 +62,7 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             projects.append(ProjectSummaryView.from_record(project))
         return projects
 
-    async def get_project_view(self, project_id: ProjectId) -> Optional[ProjectSummaryView]:
+    async def get_project_view(self, project_id: ProjectId) -> ProjectSummaryView | None:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT id, user_id, name, is_pro_mode, created_at, updated_at,
@@ -131,7 +130,7 @@ class ProjectQueryRepository(ProjectRepositoryBase):
         self,
         project_id: ProjectId,
         user_id: ProjectId,
-        allowed_roles: Optional[list[str]] = None,
+        allowed_roles: list[str] | None = None,
     ) -> bool:
         allowed_roles = allowed_roles or ["owner", "admin", "manager", "viewer"]
 

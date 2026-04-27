@@ -2,7 +2,6 @@
 Core project command operations.
 """
 
-from typing import Optional
 
 from .base import ProjectRepositoryBase, ProjectId, ensure_uuid, logger
 
@@ -52,7 +51,7 @@ class ProjectCommandRepository(ProjectRepositoryBase):
 
         return str(project_id)
 
-    async def update_project(self, project_id: ProjectId, name: Optional[str]) -> None:
+    async def update_project(self, project_id: ProjectId, name: str | None) -> None:
         if name is None:
             return
 

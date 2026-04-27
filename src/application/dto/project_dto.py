@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
+from typing import TypeVar
 
 from src.domain.control_plane.project_configuration import (
     ProjectChannelView,
@@ -11,6 +12,9 @@ from src.domain.control_plane.project_configuration import (
 )
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.manager_reply_history import ManagerReplyHistoryItemView
+
+
+DtoT = TypeVar("DtoT")
 
 
 def _as_dict(value: object) -> dict[str, object]:
@@ -31,6 +35,31 @@ def _serialize_timestamp(value: object) -> str | None:
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return str(value)
+
+
+def _dto_list(
+    raw_items: object,
+    dto_type: type[DtoT],
+    from_record: Callable[[Mapping[str, object]], DtoT],
+) -> list[DtoT]:
+    result: list[DtoT] = []
+    for item in _as_list(raw_items):
+        parsed = _dto_item(item, dto_type, from_record)
+        if parsed is not None:
+            result.append(parsed)
+    return result
+
+
+def _dto_item(
+    item: object,
+    dto_type: type[DtoT],
+    from_record: Callable[[Mapping[str, object]], DtoT],
+) -> DtoT | None:
+    if isinstance(item, dto_type):
+        return item
+    if isinstance(item, Mapping):
+        return from_record(item)
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,35 +218,26 @@ class ProjectConfigurationDto:
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> "ProjectConfigurationDto":
-        integrations: list[ProjectIntegrationDto] = []
-        for item in _as_list(record.get("integrations")):
-            if isinstance(item, ProjectIntegrationDto):
-                integrations.append(item)
-            elif isinstance(item, Mapping):
-                integrations.append(ProjectIntegrationDto.from_record(item))
-
-        channels: list[ProjectChannelDto] = []
-        for item in _as_list(record.get("channels")):
-            if isinstance(item, ProjectChannelDto):
-                channels.append(item)
-            elif isinstance(item, Mapping):
-                channels.append(ProjectChannelDto.from_record(item))
-
-        prompt_versions: list[ProjectPromptVersionDto] = []
-        for item in _as_list(record.get("prompt_versions")):
-            if isinstance(item, ProjectPromptVersionDto):
-                prompt_versions.append(item)
-            elif isinstance(item, Mapping):
-                prompt_versions.append(ProjectPromptVersionDto.from_record(item))
-
         return cls(
             project_id=str(record.get("project_id") or ""),
             settings=_as_dict(record.get("settings")),
             policies=_as_dict(record.get("policies")),
             limit_profile=_as_dict(record.get("limit_profile")),
-            integrations=integrations,
-            channels=channels,
-            prompt_versions=prompt_versions,
+            integrations=_dto_list(
+                record.get("integrations"),
+                ProjectIntegrationDto,
+                ProjectIntegrationDto.from_record,
+            ),
+            channels=_dto_list(
+                record.get("channels"),
+                ProjectChannelDto,
+                ProjectChannelDto.from_record,
+            ),
+            prompt_versions=_dto_list(
+                record.get("prompt_versions"),
+                ProjectPromptVersionDto,
+                ProjectPromptVersionDto.from_record,
+            ),
         )
 
     @classmethod

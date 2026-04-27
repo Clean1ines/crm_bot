@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Awaitable, Callable, Mapping
 
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.application.ports.project_port import ProjectNotificationPort
@@ -18,13 +18,13 @@ from src.infrastructure.queue.job_types import (
 )
 from src.infrastructure.queue.telegram_sender import TelegramSender
 
-RedisGetter = Callable[[], Awaitable[Any]]
+RedisGetter = Callable[[], Awaitable[object]]
 
 
 @dataclass(slots=True)
 class JobDispatcher:
     thread_read_repo: ThreadReadPort
-    db_pool: Any
+    db_pool: object
     project_repo: ProjectNotificationPort
     metrics_repo: MetricsRepository
     telegram_sender: TelegramSender

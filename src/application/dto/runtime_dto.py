@@ -1,5 +1,4 @@
 from dataclasses import asdict, dataclass, field
-from typing import Any
 
 from src.domain.runtime.state_contracts import (
     HistoryMessage,
@@ -11,14 +10,14 @@ from src.domain.runtime.state_contracts import (
 
 @dataclass(slots=True)
 class ProjectRuntimeContextDto:
-    settings: dict[str, Any] = field(default_factory=dict)
-    policies: dict[str, Any] = field(default_factory=dict)
-    limits: dict[str, Any] = field(default_factory=dict)
+    settings: dict[str, object] = field(default_factory=dict)
+    policies: dict[str, object] = field(default_factory=dict)
+    limits: dict[str, object] = field(default_factory=dict)
     integrations: list[ProjectIntegrationState] = field(default_factory=list)
     channels: list[ProjectChannelState] = field(default_factory=list)
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "ProjectRuntimeContextDto":
+    def from_record(cls, record: dict[str, object] | None) -> "ProjectRuntimeContextDto":
         payload = record or {}
         return cls(
             settings=dict(payload.get("settings") or {}),
@@ -59,7 +58,7 @@ class GraphExecutionResultDto:
     delivered: bool = False
 
     @classmethod
-    def from_graph_state(cls, state: dict[str, Any] | None) -> "GraphExecutionResultDto":
+    def from_graph_state(cls, state: dict[str, object] | None) -> "GraphExecutionResultDto":
         payload = state or {}
         if payload.get("message_sent"):
             return cls(response_text="", delivered=True)
