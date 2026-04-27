@@ -1,7 +1,8 @@
 """Repository for project-scoped CRM clients/contacts."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from uuid import UUID
+from typing import cast
 
 import asyncpg
 
@@ -55,7 +56,13 @@ def _coerce_chat_id(value: object) -> int | None:
 def _row_mapping(row: object) -> Mapping[str, object]:
     if isinstance(row, Mapping):
         return row
-    return {}
+
+    try:
+        mapped = dict(cast(Iterable[tuple[object, object]], row))
+    except (TypeError, ValueError):
+        return {}
+
+    return {str(key): value for key, value in mapped.items()}
 
 
 def _search_filter(
