@@ -19,35 +19,27 @@ pgdata_test/
 # OS
 .DS_Store
 
-docs/
+dox/
 tree_output.txt
-db_diagnostic.sh
+
 *.log
 
-schema.sql
+
 db_schema.txt
-scripts/*
-!scripts/generate_openapi.py
-test.py
+dev_scripts/*
+reports/
+
 kb_demo_ai_seller_faq.json
-test_kb_fixed.py
+
 frontend/output.txt
 frontend/src/output.txt
 node_modules/
 /package-lock.json
 openapi.json
-sync_api.sh
-check_compilation.py
+
 
 .coverage
 htmlcov/
 # Generated API snapshots / local build artifacts
 frontend/openapi.json
 *.tsbuildinfo
-context_mcp_analysis.txt
-reports/
-coverage.json
-reports/
-htmlcov/
-.coverage
-coverage.json
