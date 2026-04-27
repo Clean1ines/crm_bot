@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+
+from src.domain.project_plane.json_types import JsonObject
 
 
 @dataclass(slots=True)
@@ -19,7 +20,7 @@ class ThreadWithProjectView:
     chat_id: int | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "ThreadWithProjectView | None":
+    def from_record(cls, record: dict[str, object] | None) -> "ThreadWithProjectView | None":
         if not record:
             return None
         return cls(
@@ -37,7 +38,7 @@ class ThreadWithProjectView:
             chat_id=record.get("chat_id"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.thread_id,
             "client_id": self.client_id,
@@ -62,7 +63,7 @@ class ThreadAnalyticsView:
     decision: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "ThreadAnalyticsView | None":
+    def from_record(cls, record: dict[str, object] | None) -> "ThreadAnalyticsView | None":
         if not record:
             return None
         return cls(
@@ -72,7 +73,7 @@ class ThreadAnalyticsView:
             decision=record.get("decision"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "intent": self.intent,
             "lifecycle": self.lifecycle,
@@ -88,7 +89,7 @@ class ThreadMessageCounts:
     manager: int = 0
 
     @classmethod
-    def from_record(cls, record: dict[str, Any] | None) -> "ThreadMessageCounts":
+    def from_record(cls, record: dict[str, object] | None) -> "ThreadMessageCounts":
         payload = record or {}
         return cls(
             total=int(payload.get("total") or 0),
@@ -110,7 +111,7 @@ class ThreadDialogClientView:
     username: str | None = None
     chat_id: int | None = None
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "full_name": self.full_name,
@@ -124,7 +125,7 @@ class ThreadLastMessageView:
     content: str
     created_at: str | None = None
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "content": self.content,
             "created_at": self.created_at,
@@ -142,7 +143,7 @@ class ThreadDialogView:
     last_message: ThreadLastMessageView | None = None
     unread_count: int = 0
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "thread_id": self.thread_id,
             "status": self.status,
@@ -161,9 +162,9 @@ class ThreadMessageView:
     role: str
     content: str
     created_at: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: JsonObject = field(default_factory=dict)
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "role": self.role,
@@ -179,7 +180,7 @@ class ThreadRuntimeMessageView:
     content: str
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ThreadRuntimeMessageView":
+    def from_record(cls, record: dict[str, object]) -> "ThreadRuntimeMessageView":
         return cls(
             role=str(record["role"]),
             content=str(record["content"]),
@@ -205,7 +206,7 @@ class ThreadStatusSummaryView:
     client_name: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ThreadStatusSummaryView":
+    def from_record(cls, record: dict[str, object]) -> "ThreadStatusSummaryView":
         return cls(
             id=str(record["id"]),
             client_id=str(record["client_id"]),
@@ -213,7 +214,7 @@ class ThreadStatusSummaryView:
             client_name=record.get("client_name"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "client_id": self.client_id,

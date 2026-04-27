@@ -1,24 +1,11 @@
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Mapping
+
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
-
-def _json_object(value: object) -> dict:
-    if value is None or value == "":
-        return {}
-
-    if isinstance(value, Mapping):
-        return dict(value)
-
-    if isinstance(value, str):
-        loaded = json.loads(value)
-        if not isinstance(loaded, Mapping):
-            raise ValueError("Expected JSON object")
-        return dict(loaded)
-
-    return dict(value)
+def _json_object(value: object) -> JsonObject:
+    return json_object_from_unknown(value)
 
 
 @dataclass(slots=True)
@@ -34,7 +21,7 @@ class ProjectSummaryView:
     updated_at: datetime | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ProjectSummaryView":
+    def from_record(cls, record: dict[str, object]) -> "ProjectSummaryView":
         return cls(
             id=str(record["id"]),
             name=str(record["name"]),
@@ -47,7 +34,7 @@ class ProjectSummaryView:
             updated_at=record.get("updated_at"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "name": self.name,
@@ -73,7 +60,7 @@ class ProjectMemberView:
     created_at: datetime | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ProjectMemberView":
+    def from_record(cls, record: dict[str, object]) -> "ProjectMemberView":
         return cls(
             user_id=str(record["user_id"]),
             role=str(record["role"]),
@@ -85,7 +72,7 @@ class ProjectMemberView:
             created_at=record.get("created_at"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "user_id": self.user_id,
             "role": self.role,
@@ -117,7 +104,7 @@ class ProjectRuntimeSettingsView:
     @classmethod
     def from_record(
         cls,
-        record: dict[str, Any] | None,
+        record: dict[str, object] | None,
         *,
         manager_targets: list[str] | None = None,
     ) -> "ProjectRuntimeSettingsView":
@@ -136,7 +123,7 @@ class ProjectRuntimeSettingsView:
             manager_chat_ids=targets.copy(),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "system_prompt": self.system_prompt,
             "bot_token": self.bot_token,
@@ -157,13 +144,13 @@ class ProjectIntegrationView:
     project_id: str
     provider: str
     status: str | None = None
-    config_json: dict[str, Any] = field(default_factory=dict)
+    config_json: JsonObject = field(default_factory=dict)
     credentials_encrypted: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ProjectIntegrationView":
+    def from_record(cls, record: dict[str, object]) -> "ProjectIntegrationView":
         return cls(
             id=str(record["id"]),
             project_id=str(record["project_id"]),
@@ -175,7 +162,7 @@ class ProjectIntegrationView:
             updated_at=record.get("updated_at"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         payload = {
             "id": self.id,
             "project_id": self.project_id,
@@ -196,12 +183,12 @@ class ProjectChannelView:
     kind: str
     provider: str
     status: str | None = None
-    config_json: dict[str, Any] = field(default_factory=dict)
+    config_json: JsonObject = field(default_factory=dict)
     created_at: str | None = None
     updated_at: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "ProjectChannelView":
+    def from_record(cls, record: dict[str, object]) -> "ProjectChannelView":
         return cls(
             id=str(record["id"]),
             project_id=str(record["project_id"]),
@@ -213,7 +200,7 @@ class ProjectChannelView:
             updated_at=record.get("updated_at"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         payload = {
             "id": self.id,
             "project_id": self.project_id,
@@ -234,7 +221,7 @@ class ManagerMembershipMutationView:
     user_id: str
     role: str
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "status": self.status,
             "storage": self.storage,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -18,7 +17,7 @@ class ManagerReplyHistoryItemView:
     created_at: datetime | str | None = None
 
     @classmethod
-    def from_record(cls, record: Mapping[str, object]) -> "ManagerReplyHistoryItemView":
+    def from_record(cls, record: dict[str, object]) -> "ManagerReplyHistoryItemView":
         payload = json_object_from_unknown(record.get("payload"))
         transport = json_object_from_unknown(payload.get("manager_transport"))
         chat_id = transport.get("chat_id")

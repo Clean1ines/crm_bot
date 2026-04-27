@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Mapping
 
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
@@ -15,7 +14,7 @@ class QueueJobView:
     created_at: str | datetime | None = None
 
     @classmethod
-    def from_record(cls, record: Mapping[str, object]) -> "QueueJobView":
+    def from_record(cls, record: dict[str, object]) -> "QueueJobView":
         return cls(
             id=str(record["id"]),
             task_type=str(record["task_type"]),

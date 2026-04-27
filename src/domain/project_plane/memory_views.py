@@ -1,29 +1,30 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+
+from src.domain.project_plane.json_types import JsonValue, json_value_from_unknown
 
 
 @dataclass(slots=True)
 class MemoryEntryView:
     id: str
     key: str
-    value: Any
+    value: JsonValue
     type: str
     created_at: datetime | str | None = None
     updated_at: datetime | str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "MemoryEntryView":
+    def from_record(cls, record: dict[str, object]) -> "MemoryEntryView":
         return cls(
             id=str(record["id"]),
             key=str(record["key"]),
-            value=record.get("value"),
+            value=json_value_from_unknown(record.get("value")),
             type=str(record["type"]),
             created_at=record.get("created_at"),
             updated_at=record.get("updated_at"),
         )
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "key": self.key,

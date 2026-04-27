@@ -1,21 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Any
-import json
 
-def _ensure_metadata_dict(metadata: Any) -> dict:
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
+
+
+def _ensure_metadata_dict(metadata: JsonObject | str | None) -> JsonObject:
     if metadata is None:
         return {}
-    if isinstance(metadata, dict):
-        return metadata
-    if isinstance(metadata, str):
-        try:
-            parsed = json.loads(metadata)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-        return {}
-    return dict(metadata) if hasattr(metadata, '__iter__') else {}
+    return json_object_from_unknown(metadata)
 
 @dataclass(slots=True)
 class ClientListItemView:
@@ -26,7 +17,7 @@ class ClientListItemView:
     email: str | None = None
     company: str | None = None
     phone: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: JsonObject = field(default_factory=dict)
     chat_id: int | None = None
     source: str | None = None
     created_at: str | None = None
@@ -34,7 +25,7 @@ class ClientListItemView:
     threads_count: int = 0
     latest_thread_id: str | None = None
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         metadata_dict = _ensure_metadata_dict(self.metadata)
         return {
             "id": self.id,
@@ -61,7 +52,7 @@ class ClientListView:
     new_clients_7d: int = 0
     active_dialogs: int = 0
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         return {
             "clients": [client.to_record() for client in self.clients],
             "stats": {
@@ -81,12 +72,12 @@ class ClientDetailView:
     email: str | None = None
     company: str | None = None
     phone: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: JsonObject = field(default_factory=dict)
     chat_id: int | None = None
     source: str | None = None
     created_at: str | None = None
 
-    def to_record(self) -> dict[str, Any]:
+    def to_record(self) -> dict[str, object]:
         metadata_dict = _ensure_metadata_dict(self.metadata)
         return {
             "id": self.id,
