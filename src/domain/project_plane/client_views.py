@@ -1,6 +1,21 @@
 from dataclasses import dataclass, field
 from typing import Any
+import json
 
+def _ensure_metadata_dict(metadata: Any) -> dict:
+    if metadata is None:
+        return {}
+    if isinstance(metadata, dict):
+        return metadata
+    if isinstance(metadata, str):
+        try:
+            parsed = json.loads(metadata)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        return {}
+    return dict(metadata) if hasattr(metadata, '__iter__') else {}
 
 @dataclass(slots=True)
 class ClientListItemView:
@@ -20,6 +35,7 @@ class ClientListItemView:
     latest_thread_id: str | None = None
 
     def to_record(self) -> dict[str, Any]:
+        metadata_dict = _ensure_metadata_dict(self.metadata)
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -28,7 +44,7 @@ class ClientListItemView:
             "email": self.email,
             "company": self.company,
             "phone": self.phone,
-            "metadata": self.metadata.copy(),
+            "metadata": metadata_dict.copy(),
             "chat_id": self.chat_id,
             "source": self.source,
             "created_at": self.created_at,
@@ -71,6 +87,7 @@ class ClientDetailView:
     created_at: str | None = None
 
     def to_record(self) -> dict[str, Any]:
+        metadata_dict = _ensure_metadata_dict(self.metadata)
         return {
             "id": self.id,
             "user_id": self.user_id,
@@ -79,7 +96,7 @@ class ClientDetailView:
             "email": self.email,
             "company": self.company,
             "phone": self.phone,
-            "metadata": self.metadata.copy(),
+            "metadata": metadata_dict.copy(),
             "chat_id": self.chat_id,
             "source": self.source,
             "created_at": self.created_at,
