@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import { useProjectManagers, type ProjectMember } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { membersApi } from '@shared/api/modules/members';
+import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
 
 const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
@@ -36,7 +37,20 @@ export const ManagersPage: React.FC = () => {
 
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error('Укажите ID участника');
+        throw new Error(newMemberRole === 'manager' ? 'Укажите Telegram chat_id менеджера' : 'Укажите user_id участника');
+      }
+
+      if (newMemberRole === 'manager') {
+        const chatId = Number(normalizedUserId);
+        if (!Number.isInteger(chatId)) {
+          throw new Error('Telegram chat_id менеджера должен быть числом');
+        }
+
+        const { error } = await projectsApi.addManager(projectId, chatId);
+        if (error) {
+          throw new Error(getErrorMessage(error));
+        }
+        return;
       }
 
       await membersApi.upsert(projectId, {
@@ -48,7 +62,7 @@ export const ManagersPage: React.FC = () => {
       await invalidateMembers();
       setNewMemberUserId('');
       setNewMemberRole('manager');
-      toast.success('Участник проекта сохранён');
+      toast.success(newMemberRole === 'manager' ? 'Менеджер добавлен' : 'Участник проекта сохранён');
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));

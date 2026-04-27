@@ -5,6 +5,7 @@ import { useNotification } from '@/shared/lib/notification/useNotifications';
 import { useProjectManagers } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { membersApi } from '@shared/api/modules/members';
+import { projectsApi } from '@shared/api/modules/projects';
 
 const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
 
@@ -24,7 +25,20 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
     mutationFn: async () => {
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error('Введите user_id участника платформы');
+        throw new Error(newMemberRole === 'manager' ? 'Введите Telegram chat_id менеджера' : 'Введите user_id участника платформы');
+      }
+
+      if (newMemberRole === 'manager') {
+        const chatId = Number(normalizedUserId);
+        if (!Number.isInteger(chatId)) {
+          throw new Error('Telegram chat_id менеджера должен быть числом');
+        }
+
+        const { error } = await projectsApi.addManager(projectId, chatId);
+        if (error) {
+          throw new Error(getErrorMessage(error));
+        }
+        return;
       }
 
       await membersApi.upsert(projectId, {
@@ -36,7 +50,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
       await invalidateManagers();
       setNewMemberUserId('');
       setNewMemberRole('manager');
-      showNotification('Участник проекта сохранён', 'success');
+      showNotification(newMemberRole === 'manager' ? 'Менеджер добавлен' : 'Участник проекта сохранён', 'success');
     },
     onError: (error) => showNotification(getErrorMessage(error), 'error'),
   });
@@ -82,7 +96,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           type="text"
           value={newMemberUserId}
           onChange={(e) => setNewMemberUserId(e.target.value)}
-          placeholder="user_id участника"
+          placeholder={newMemberRole === 'manager' ? 'Telegram chat_id менеджера' : 'user_id участника'}
           className="rounded border p-1"
         />
         <select

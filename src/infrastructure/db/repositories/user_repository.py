@@ -5,6 +5,7 @@ This module provides data access methods for users and auth_identities tables,
 supporting multi-provider authentication and user management.
 """
 
+import json
 import asyncpg
 import base64
 import binascii
@@ -19,6 +20,33 @@ from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
 
 logger = get_logger(__name__)
+
+
+def _safe_metadata_dict(value) -> dict:
+    """
+    Normalize users.user_metadata from asyncpg/jsonb/string/None into dict.
+
+    Production can return this as a JSON string after older writes, and
+    dict("{}") crashes with:
+    ValueError: dictionary update sequence element #0 has length 1; 2 is required
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return {}
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    if hasattr(value, "items"):
+        return dict(value)
+    return {}
+
 
 
 def _hash_password(password: str, salt: Optional[bytes] = None, iterations: int = 210_000) -> str:
@@ -371,7 +399,7 @@ class UserRepository:
             """, user_id)
 
             methods: list[AuthMethodView] = []
-            metadata = dict(user_row["user_metadata"] or {}) if user_row else {}
+            metadata = _safe_metadata_dict(user_row["user_metadata"] if user_row else None)
             verified_email = str(metadata.get("email_verified_address") or "").strip().lower()
             verified_at = metadata.get("email_verified_at")
             for row in identity_rows:
@@ -450,7 +478,7 @@ class UserRepository:
         await self.link_identity(user_id, "email", normalized_email)
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT user_metadata FROM users WHERE id = $1", user_id)
-            metadata = dict(row["user_metadata"] or {}) if row else {}
+            metadata = _safe_metadata_dict(row["user_metadata"] if row else None)
             metadata.pop("email_verified_at", None)
             metadata.pop("email_verified_address", None)
             await conn.execute(
@@ -507,7 +535,7 @@ class UserRepository:
 
                 if provider == AUTH_PROVIDER_EMAIL:
                     row = await conn.fetchrow("SELECT user_metadata FROM users WHERE id = $1", user_id)
-                    metadata = dict(row["user_metadata"] or {}) if row else {}
+                    metadata = _safe_metadata_dict(row["user_metadata"] if row else None)
                     metadata.pop("email_verified_at", None)
                     metadata.pop("email_verified_address", None)
                     await conn.execute("""
@@ -613,7 +641,7 @@ class UserRepository:
         verified_at = datetime.now(timezone.utc).isoformat()
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT user_metadata FROM users WHERE id = $1", user_id)
-            metadata = dict(row["user_metadata"] or {}) if row else {}
+            metadata = _safe_metadata_dict(row["user_metadata"] if row else None)
             metadata["email_verified_address"] = normalized_email
             metadata["email_verified_at"] = verified_at
             await conn.execute("""

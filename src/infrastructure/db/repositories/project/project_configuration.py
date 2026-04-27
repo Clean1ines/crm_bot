@@ -54,15 +54,21 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 ORDER BY version DESC, created_at DESC
             """, project_uuid)
 
-        return ProjectConfigurationView(
-            project_id=str(project_uuid),
-            settings=self._normalize_record(settings_row),
-            policies=self._normalize_record(policies_row),
-            limit_profile=self._normalize_record(limit_row),
-            integrations=[self._normalize_record(row) for row in integrations_rows],
-            channels=[self._normalize_record(row) for row in channels_rows],
-            prompt_versions=[self._normalize_record(row) for row in prompt_rows],
-        )
+        return ProjectConfigurationView.from_record({
+            "project_id": str(project_uuid),
+            "settings": self._normalize_record(settings_row),
+            "policies": self._normalize_record(policies_row),
+            "limit_profile": self._normalize_record(limit_row),
+            "integrations": [self._normalize_record(row) for row in integrations_rows],
+            "channels": [self._normalize_record(row) for row in channels_rows],
+            "prompt_versions": [
+                {
+                    **self._normalize_record(row),
+                    "prompt_bundle": self._normalize_record(row).get("prompt_json", {}),
+                }
+                for row in prompt_rows
+            ],
+        })
 
     async def update_project_settings(self, project_id: ProjectId, data: JsonMap) -> None:
         async with self.pool.acquire() as conn:

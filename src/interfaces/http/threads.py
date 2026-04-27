@@ -57,13 +57,17 @@ async def list_dialogs(
     Includes client info and last message.
     """
     await project_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
-    return await thread_queries.list_dialogs(
+    dialogs = await thread_queries.list_dialogs(
         project_id=project_id,
         limit=limit,
         offset=offset,
         status_filter=status_filter,
         search=search,
     )
+    return [
+        dialog.to_record() if hasattr(dialog, "to_record") else dialog
+        for dialog in dialogs
+    ]
 
 
 @router.get("/{thread_id}/messages")
