@@ -1,6 +1,11 @@
-import { authedMultipartRequest } from '../core/http';
+import { authedJsonRequest, authedMultipartRequest } from '../core/http';
 
 export const knowledgeApi = {
+  list: (projectId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge`, {
+      method: 'GET',
+    }),
+
   upload: (projectId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);

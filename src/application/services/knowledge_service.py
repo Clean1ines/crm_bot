@@ -66,24 +66,46 @@ class KnowledgeService:
 
         chunker = chunker_factory()
         try:
-            chunks = await chunker.process_file(file_content, normalized_file_name)
+            raw_chunks = await chunker.process_file(file_content, normalized_file_name)
         except ValueError as e:
             logger.error(f"Chunking failed: {e}")
             raise ValidationError(str(e))
+
+        chunks = [
+            {"content": chunk}
+            if isinstance(chunk, str)
+            else chunk
+            for chunk in raw_chunks
+        ]
+
+        chunks = [
+            chunk
+            for chunk in chunks
+            if isinstance(chunk, dict) and str(chunk.get("content") or "").strip()
+        ]
 
         if not chunks:
             logger.warning("No text extracted from file")
             return KnowledgeUploadResultDto.create(message="No text extracted", chunks=0)
 
-        async with self.pool.acquire() as conn:
-            repo = knowledge_repo_factory(conn)
-            document_id = await repo.create_document(
-                project_id=project_id,
-                file_name=normalized_file_name,
-                file_size=len(file_content),
-                uploaded_by=uploaded_by,
-            )
+        repo = knowledge_repo_factory(self.pool)
+        document_id = await repo.create_document(
+            project_id=project_id,
+            file_name=normalized_file_name,
+            file_size=len(file_content),
+            uploaded_by=uploaded_by,
+        )
+
+        try:
             await repo.add_knowledge_batch(project_id, chunks, document_id=document_id)
+            await repo.update_document_status(document_id, "processed")
+        except Exception as exc:
+            logger.exception(
+                "Knowledge upload processing failed",
+                extra={"project_id": project_id, "document_id": document_id},
+            )
+            await repo.update_document_status(document_id, "error", str(exc))
+            raise
 
         logger.info(f"Successfully uploaded {len(chunks)} chunks to project {project_id}")
         return KnowledgeUploadResultDto.create(message=f"Uploaded {len(chunks)} chunks", chunks=len(chunks))

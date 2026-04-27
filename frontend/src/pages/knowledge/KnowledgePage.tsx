@@ -18,18 +18,36 @@ const formatSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 
 export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   
   // For now we don't have a list endpoint, but let's keep the UI
-  const [documents] = useState<Document[]>([]);
-  const [isLoadingList] = useState(false);
+  const documentsQuery = useQuery({
+    queryKey: ['knowledge-documents', projectId],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data } = await knowledgeApi.list(projectId);
+
+      const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+      const list = Array.isArray(payload.documents)
+        ? payload.documents
+        : Array.isArray(payload.items)
+          ? payload.items
+          : [];
+
+      return list as Document[];
+    },
+    enabled: !!projectId,
+  });
+
+  const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -46,9 +64,9 @@ export const KnowledgePage: React.FC = () => {
       
       return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success('Документ успешно загружен и отправлен на обработку');
-      // queryClient.invalidateQueries({ queryKey: ['knowledge', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : 'Ошибка при загрузке документа';
@@ -67,9 +85,26 @@ export const KnowledgePage: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  if (isLoadingList) {
+  if (documentsQuery.isLoading) {
     return <div className="p-8 flex justify-center text-[#6B6B6B]">Загрузка базы знаний...</div>;
   }
+
+
+  const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      uploadMutation.mutate(file);
+    }
+  };
+
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -104,6 +139,8 @@ export const KnowledgePage: React.FC = () => {
       {/* Upload Zone */}
       <div 
         onClick={triggerUpload}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         className={`border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center bg-white transition-colors cursor-pointer group ${
           uploadMutation.isPending 
             ? 'border-[#B87333] bg-[#B87333]/5 cursor-wait' 
