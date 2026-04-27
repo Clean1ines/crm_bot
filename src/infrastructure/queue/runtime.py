@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from dataclasses import asdict
+from functools import partial
+from typing import cast
 
 import asyncpg
 
+from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.manager_notifications import ManagerNotificationTarget
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.infrastructure.db.repositories.project import ProjectRepository
@@ -19,6 +24,30 @@ from src.infrastructure.queue.worker_loop import run_worker_loop
 from src.infrastructure.redis.client import get_redis_client
 
 logger = get_logger(__name__)
+
+
+class ProjectNotificationAdapter:
+    """Adapter from composed ProjectRepository views to queue notification port."""
+
+    def __init__(self, repo: ProjectRepository) -> None:
+        self._repo = repo
+
+    async def get_project_settings(self, project_id: str) -> JsonObject | None:
+        settings_view = await self._repo.get_project_settings(project_id)
+
+        if hasattr(settings_view, "to_dict"):
+            return cast(JsonObject, settings_view.to_dict())
+
+        if hasattr(settings_view, "model_dump"):
+            return cast(JsonObject, settings_view.model_dump())
+
+        return cast(JsonObject, asdict(settings_view))
+
+    async def get_manager_notification_recipients(
+        self,
+        project_id: str,
+    ) -> list[ManagerNotificationTarget]:
+        return await self._repo.get_manager_notification_recipients(project_id)
 
 
 def request_shutdown(shutdown_event: asyncio.Event) -> None:
@@ -42,7 +71,7 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
     dispatcher = JobDispatcher(
         thread_read_repo=thread_read_repo,
         db_pool=pool,
-        project_repo=project_repo,
+        project_repo=ProjectNotificationAdapter(project_repo),
         metrics_repo=metrics_repo,
         telegram_sender=TelegramSender(),
         redis_getter=get_redis_client,
@@ -60,9 +89,7 @@ async def main() -> None:
     shutdown_event = asyncio.Event()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(
-            sig, lambda event=shutdown_event: request_shutdown(event)
-        )
+        loop.add_signal_handler(sig, partial(request_shutdown, shutdown_event))
 
     db_url = settings.DATABASE_URL
     if not db_url:
@@ -78,7 +105,7 @@ async def main() -> None:
         dispatcher = JobDispatcher(
             thread_read_repo=thread_read_repo,
             db_pool=pool,
-            project_repo=project_repo,
+            project_repo=ProjectNotificationAdapter(project_repo),
             metrics_repo=metrics_repo,
             telegram_sender=TelegramSender(),
             redis_getter=get_redis_client,

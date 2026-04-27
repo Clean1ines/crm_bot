@@ -17,6 +17,22 @@ class AgentToolRegistryPort(Protocol):
     """Application-facing tool registry dependency injected into agent runtime."""
 
 
+class AgentThreadLifecyclePort(Protocol):
+    """Application-facing thread lifecycle dependency injected into agent runtime."""
+
+
+class AgentThreadMessagePort(Protocol):
+    """Application-facing thread message dependency injected into agent runtime."""
+
+
+class AgentThreadRuntimeStatePort(Protocol):
+    """Application-facing thread runtime-state dependency injected into agent runtime."""
+
+
+class AgentThreadReadPort(Protocol):
+    """Application-facing thread read dependency injected into agent runtime."""
+
+
 class AgentQueuePort(Protocol):
     """Application-facing queue dependency injected into agent runtime."""
 
@@ -44,6 +60,10 @@ class AgentFactoryPort(Protocol):
         self,
         *,
         tool_registry: AgentToolRegistryPort | None = None,
+        thread_lifecycle_repo: AgentThreadLifecyclePort | None = None,
+        thread_message_repo: AgentThreadMessagePort | None = None,
+        thread_runtime_state_repo: AgentThreadRuntimeStatePort | None = None,
+        thread_read_repo: AgentThreadReadPort | None = None,
         queue_repo: AgentQueuePort | None = None,
         event_repo: AgentEventPort | None = None,
         project_repo: AgentProjectPort | None = None,

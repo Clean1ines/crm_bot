@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, cast
 
 from src.domain.runtime.dialog_state import DialogState
 from src.domain.runtime.state_contracts import (
@@ -29,6 +29,25 @@ class ResponseGenerationContext:
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "ResponseGenerationContext":
+        raw_dialog_state = state.get("dialog_state")
+        dialog_state = (
+            cast(DialogState, raw_dialog_state)
+            if isinstance(raw_dialog_state, Mapping)
+            else None
+        )
+        raw_features = state.get("features")
+        features = (
+            cast(RuntimeFeatures | Mapping[str, object], raw_features)
+            if isinstance(raw_features, Mapping)
+            else None
+        )
+        raw_project_configuration = state.get("project_configuration")
+        project_configuration = (
+            cast(ProjectRuntimeConfigurationState, raw_project_configuration)
+            if isinstance(raw_project_configuration, Mapping)
+            else None
+        )
+
         return cls(
             decision=str(state.get("decision") or "LLM_GENERATE"),
             user_input=str(state.get("user_input") or ""),
@@ -36,11 +55,9 @@ class ResponseGenerationContext:
             history=list(state.get("history") or []),
             knowledge_chunks=list(state.get("knowledge_chunks") or []),
             user_memory=state.get("user_memory"),
-            dialog_state=state.get("dialog_state")
-            if isinstance(state.get("dialog_state"), dict)
-            else None,
-            features=state.get("features"),
-            project_configuration=state.get("project_configuration"),
+            dialog_state=dialog_state,
+            features=features,
+            project_configuration=project_configuration,
             intent=str(state.get("intent") or ""),
             lifecycle=str(state.get("lifecycle") or ""),
             cta=str(state.get("cta") or ""),

@@ -2,20 +2,34 @@
 Thin LangGraph adapter for the pure domain policy engine.
 """
 
+from typing import Any, cast
+from uuid import UUID
+
 from src.agent.state import AgentState
 from src.domain.runtime.policy.decision_engine import get_decision
 from src.domain.runtime.policy.intent_topic import normalize_intent, resolve_topic
+from src.domain.runtime.dialog_state import merge_dialog_state
 from src.domain.runtime.policy.repeat_detection import build_dialog_state_update
 from src.domain.runtime.policy.result import PolicyDecisionContext, PolicyDecisionResult
+from src.domain.runtime.state_contracts import RuntimeStateInput
+from src.domain.project_plane.json_types import json_object_from_unknown
 from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
+
 
 logger = get_logger(__name__)
 
 
+def _event_id_for_append(value: str) -> UUID | str:
+    try:
+        return UUID(value)
+    except ValueError:
+        return value
+
+
 def create_policy_engine_node(event_repo: EventRepository | None = None):
     async def _policy_engine_node_impl(state: AgentState) -> dict[str, object]:
-        context = PolicyDecisionContext.from_state(state)
+        context = PolicyDecisionContext.from_state(cast(RuntimeStateInput, state))
         normalized_intent = normalize_intent(context.intent)
         topic = resolve_topic(normalized_intent, context.features)
 
@@ -26,14 +40,16 @@ def create_policy_engine_node(event_repo: EventRepository | None = None):
             dialog_state=context.dialog_state,
         )
 
-        next_dialog_state = build_dialog_state_update(
-            context.dialog_state,
-            intent=normalized_intent,
-            topic=topic,
-            cta=cta,
-            lifecycle=new_lifecycle,
-            decision=decision,
-            features=context.features,
+        next_dialog_state = merge_dialog_state(
+            build_dialog_state_update(
+                context.dialog_state,
+                intent=normalized_intent,
+                topic=topic,
+                cta=cta,
+                lifecycle=new_lifecycle,
+                decision=decision,
+                features=context.features,
+            )
         )
         result = PolicyDecisionResult(
             lifecycle=new_lifecycle,
@@ -46,11 +62,14 @@ def create_policy_engine_node(event_repo: EventRepository | None = None):
 
         if event_repo and context.thread_id and context.project_id:
             try:
-                await event_repo.append(
-                    stream_id=context.thread_id,
-                    project_id=context.project_id,
+                appendable_event_repo = cast(Any, event_repo)
+                await appendable_event_repo.append(
+                    stream_id=_event_id_for_append(context.thread_id),
+                    project_id=_event_id_for_append(context.project_id),
                     event_type="policy_decision",
-                    payload=result.to_event_payload(confidence=context.confidence),
+                    payload=json_object_from_unknown(
+                        result.to_event_payload(confidence=context.confidence)
+                    ),
                 )
                 logger.debug(
                     "Policy decision event emitted",
@@ -74,7 +93,7 @@ def create_policy_engine_node(event_repo: EventRepository | None = None):
                 "lead_status": result.lead_status,
             },
         )
-        return result.to_state_patch(previous_lifecycle=context.lifecycle)
+        return dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
 
     def _get_policy_input_size(state: AgentState) -> int:
         return (

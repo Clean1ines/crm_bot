@@ -32,17 +32,24 @@ class ModelSelector:
             return settings.DEFAULT_MODEL
 
         for model in models:
-            model_id = model["id"]
+            model_id_raw = model.get("id")
+            if not isinstance(model_id_raw, str) or not model_id_raw:
+                logger.warning(
+                    "Skipping model without string id", extra={"model": model}
+                )
+                continue
+
+            model_id = model_id_raw
             remaining = await self.tracker.get_remaining(model_id)
             # Check tokens_remaining – if it's present and > 0, use it.
             # The header x-ratelimit-remaining-tokens refers to TPM (per minute).
             # For TPD we don't get from headers, but we can infer from limits.
             # For simplicity, if we have a token remaining value (even per minute), assume available.
             # A more sophisticated check could involve the static TPD limit and an estimate.
-            tokens_rem_str = remaining.get("tokens_remaining")
-            if tokens_rem_str is not None:
+            tokens_rem_raw = remaining.get("tokens_remaining")
+            if tokens_rem_raw is not None:
                 try:
-                    tokens_rem = int(tokens_rem_str)
+                    tokens_rem = int(str(tokens_rem_raw))
                     if tokens_rem > 100:  # arbitrary small threshold
                         logger.debug(
                             "Selected model",

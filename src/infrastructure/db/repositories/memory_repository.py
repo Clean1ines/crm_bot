@@ -69,7 +69,7 @@ class MemoryRepository:
             FROM user_memory
             WHERE project_id = $1 AND client_id = $2
         """
-        params = [project_uuid, client_uuid]
+        params: list[object] = [project_uuid, client_uuid]
 
         if types:
             placeholders = [f"${i + 3}" for i in range(len(types))]

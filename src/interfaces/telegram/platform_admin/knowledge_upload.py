@@ -81,7 +81,13 @@ async def handle_knowledge_upload(
                 logger.debug("Embedding progress", extra={"processed": index})
 
         repo = KnowledgeRepository(pool)
-        await repo.add_knowledge_batch(project_id, chunks, embeddings)
+        await repo.add_knowledge_batch(
+            str(project_id),
+            [
+                {"content": chunk, "embedding": embedding}
+                for chunk, embedding in zip(chunks, embeddings, strict=True)
+            ],
+        )
 
         logger.info(
             "Knowledge base updated",
@@ -90,7 +96,7 @@ async def handle_knowledge_upload(
         await _clear_state(chat_id)
         return (
             f"Загружено {len(chunks)} чанков.\nБаза знаний обновлена.",
-            await _get_project_menu_keyboard(project_id, pool),
+            await _get_project_menu_keyboard(str(project_id), pool),
         )
     except Exception as exc:
         logger.exception(
@@ -107,5 +113,5 @@ async def handle_knowledge_upload(
         await _clear_state(chat_id)
         return (
             "Ошибка при обработке файла. Попробуйте другой файл или проверьте формат.",
-            await _get_project_menu_keyboard(project_id, pool),
+            await _get_project_menu_keyboard(str(project_id), pool),
         )

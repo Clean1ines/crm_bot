@@ -92,7 +92,6 @@ class Settings(BaseSettings):
     TOOL_N8N_ALLOWED_WEBHOOKS: str | None = None
 
     # Model and rate limit configuration
-    GROQ_MODEL: str = Field("llama-3.3-70b-versatile", description="Default Groq model")
     MODEL_CONFIG_PATH: str = Field(
         "models.yaml", description="Path to YAML file with model definitions"
     )

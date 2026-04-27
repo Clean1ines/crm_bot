@@ -1,4 +1,5 @@
 import json
+from uuid import UUID
 
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.thread_views import (
@@ -77,8 +78,8 @@ class ThreadRuntimeStateRepository:
     ) -> None:
         thread_uuid = ensure_uuid(thread_id)
 
-        updates = []
-        params = []
+        updates: list[str] = []
+        params: list[str | UUID] = []
 
         if intent is not None:
             updates.append("intent = $%d" % (len(params) + 1))

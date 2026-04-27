@@ -4,6 +4,29 @@ from src.application.dto.project_dto import ProjectSummaryDto
 from src.domain.control_plane.project_views import ProjectMemberView
 
 
+def _optional_str(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized.lstrip("-").isdigit():
+            return int(normalized)
+    return None
+
+
+def _serialize_timestamp(value: object) -> str | None:
+    if value is None:
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return str(isoformat())
+    return str(value)
+
+
 @dataclass(slots=True)
 class ProjectMemberDto:
     project_id: str
@@ -18,36 +41,30 @@ class ProjectMemberDto:
 
     @classmethod
     def from_record(cls, record: dict[str, object]) -> "ProjectMemberDto":
-        telegram_id = record.get("telegram_id")
         return cls(
-            id=str(record["id"]) if record.get("id") is not None else None,
+            id=_optional_str(record.get("id")),
             project_id=str(record["project_id"]),
             user_id=str(record["user_id"]),
             role=str(record["role"]),
-            telegram_id=int(telegram_id) if telegram_id is not None else None,
-            username=record.get("username"),
-            full_name=record.get("full_name"),
-            email=record.get("email"),
-            created_at=record.get("created_at"),
+            telegram_id=_optional_int(record.get("telegram_id")),
+            username=_optional_str(record.get("username")),
+            full_name=_optional_str(record.get("full_name")),
+            email=_optional_str(record.get("email")),
+            created_at=_serialize_timestamp(record.get("created_at")),
         )
 
     @classmethod
     def from_view(cls, view: ProjectMemberView) -> "ProjectMemberDto":
-        created_at = view.created_at
         return cls(
-            id=getattr(view, "id", None),
+            id=_optional_str(getattr(view, "id", None)),
             project_id=str(view.project_id) if view.project_id is not None else "",
             user_id=str(view.user_id),
             role=str(view.role),
-            telegram_id=int(view.telegram_id) if view.telegram_id is not None else None,
-            username=view.username,
-            full_name=view.full_name,
-            email=view.email,
-            created_at=created_at.isoformat()
-            if hasattr(created_at, "isoformat")
-            else str(created_at)
-            if created_at
-            else None,
+            telegram_id=_optional_int(view.telegram_id),
+            username=_optional_str(view.username),
+            full_name=_optional_str(view.full_name),
+            email=_optional_str(view.email),
+            created_at=_serialize_timestamp(view.created_at),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -81,10 +98,10 @@ class ProjectMutationResultDto:
     def from_record(cls, record: dict[str, object]) -> "ProjectMutationResultDto":
         return cls(
             status=str(record["status"]),
-            type=record.get("type"),
-            storage=record.get("storage"),
-            user_id=record.get("user_id"),
-            role=record.get("role"),
+            type=_optional_str(record.get("type")),
+            storage=_optional_str(record.get("storage")),
+            user_id=_optional_str(record.get("user_id")),
+            role=_optional_str(record.get("role")),
         )
 
     def to_dict(self) -> dict[str, object]:

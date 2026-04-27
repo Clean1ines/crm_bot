@@ -5,11 +5,48 @@ Loads model definitions from a YAML configuration file.
 
 import yaml
 from pathlib import Path
+from collections.abc import Mapping
 
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
 
 logger = get_logger(__name__)
+
+
+def _as_text(value: object) -> str | None:
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return None
+
+
+def _as_int(value: object, default: int = 999) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def _capability_enabled(model: Mapping[str, object], capability: str) -> bool:
+    raw_capabilities = model.get("capabilities")
+    if not isinstance(raw_capabilities, Mapping):
+        return False
+    return bool(raw_capabilities.get(capability))
+
+
+def _model_priority(model: Mapping[str, object]) -> int:
+    return _as_int(model.get("priority"), 999)
 
 
 class ModelRegistry:
@@ -78,7 +115,9 @@ class ModelRegistry:
             # Add more models as needed
         ]
         for model in defaults:
-            self._models[model["id"]] = model
+            model_id = _as_text(model.get("id"))
+            if model_id:
+                self._models[model_id] = model
         logger.info(f"Loaded {len(self._models)} default models")
 
     def get_all_models(self) -> list[dict[str, object]]:
@@ -99,9 +138,7 @@ class ModelRegistry:
         """
         models = list(self._models.values())
         if complex_needed:
-            models = [
-                m for m in models if m.get("capabilities", {}).get("complex", False)
-            ]
+            models = [m for m in models if _capability_enabled(m, "complex")]
         return models
 
     def get_models_sorted_by_priority(
@@ -109,4 +146,4 @@ class ModelRegistry:
     ) -> list[dict[str, object]]:
         """Return models sorted by priority (lower number = higher priority)."""
         models = self.get_models_by_capability(complex_needed)
-        return sorted(models, key=lambda m: m.get("priority", 999))
+        return sorted(models, key=_model_priority)

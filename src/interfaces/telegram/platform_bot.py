@@ -3,6 +3,7 @@ Admin Bot Router.
 Dispatches incoming Telegram updates to appropriate handlers based on update type.
 """
 
+from typing import cast
 import asyncpg
 import httpx
 import json
@@ -73,16 +74,17 @@ async def _handle_callback_query(
     bot_token: str,
     pool: asyncpg.Pool,
 ) -> PreparedResponse:
-    chat_id = callback_query["from"]["id"]
+    from_user = cast(dict[str, object], callback_query["from"])
+    chat_id = int(cast(int | str, from_user["id"]))
     data = callback_query.get("data", "")
     callback_id = callback_query["id"]
 
     logger.debug("Admin callback received", extra={"chat_id": chat_id, "data": data})
 
-    response = await handle_admin_callback(data, str(chat_id), pool)
+    response = await handle_admin_callback(str(data), str(chat_id), pool)
     response_text, keyboard_dict = _keyboard_to_dict(response, source="Callback")
 
-    await _answer_callback_query(bot_token, callback_id, response_text)
+    await _answer_callback_query(bot_token, str(callback_id), response_text)
     return chat_id, response_text, keyboard_dict
 
 
@@ -103,9 +105,6 @@ async def _handle_command_message(
     text: str, pool: asyncpg.Pool
 ) -> tuple[str | None, TelegramPayload | None]:
     response = await handle_admin_command(text, pool)
-    if response is None:
-        return None, None
-
     return _keyboard_to_dict(response, source="Command")
 
 
@@ -139,19 +138,22 @@ async def _handle_text_message(
 async def _handle_message(
     message: dict[str, object], pool: asyncpg.Pool
 ) -> PreparedResponse:
-    chat_id = message["chat"]["id"]
-    text = message.get("text")
+    chat = cast(dict[str, object], message["chat"])
+    chat_id = int(cast(int | str, chat["id"]))
+    text = cast(str | None, message.get("text"))
     document = message.get("document")
 
     if document:
-        response_text, keyboard_dict = await _handle_document_message(
+        document_response_text, document_keyboard_dict = await _handle_document_message(
             chat_id, message, pool
         )
-        return chat_id, response_text, keyboard_dict
+        return chat_id, document_response_text, document_keyboard_dict
 
     if text:
-        response_text, keyboard_dict = await _handle_text_message(chat_id, text, pool)
-        return chat_id, response_text, keyboard_dict
+        text_response_text, text_keyboard_dict = await _handle_text_message(
+            chat_id, text, pool
+        )
+        return chat_id, text_response_text, text_keyboard_dict
 
     return chat_id, None, None
 
@@ -213,11 +215,13 @@ async def _dispatch_admin_update(
 ) -> PreparedResponse:
     if "callback_query" in update:
         return await _handle_callback_query(
-            update["callback_query"], bot_token=bot_token, pool=pool
+            cast(dict[str, object], update["callback_query"]),
+            bot_token=bot_token,
+            pool=pool,
         )
 
     if "message" in update:
-        return await _handle_message(update["message"], pool)
+        return await _handle_message(cast(dict[str, object], update["message"]), pool)
 
     return None, None, None
 

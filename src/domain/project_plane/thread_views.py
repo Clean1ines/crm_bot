@@ -4,6 +4,40 @@ from datetime import datetime
 from src.domain.project_plane.json_types import JsonObject
 
 
+def _view_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def _view_text(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _view_datetime_or_text(value: object) -> datetime | str | None:
+    if isinstance(value, (datetime, str)):
+        return value
+    return None
+
+
+def _view_datetime(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    return None
+
+
 @dataclass(slots=True)
 class ThreadWithProjectView:
     thread_id: str
@@ -30,22 +64,26 @@ class ThreadWithProjectView:
             client_id=str(record["client_id"])
             if record.get("client_id") is not None
             else None,
-            status=record.get("status"),
+            status=_view_text(record.get("status")),
             manager_user_id=str(record["manager_user_id"])
             if record.get("manager_user_id") is not None
             else None,
             manager_chat_id=str(record["manager_chat_id"])
             if record.get("manager_chat_id") is not None
             else None,
-            context_summary=record.get("context_summary"),
-            created_at=record.get("created_at"),
-            updated_at=record.get("updated_at"),
+            context_summary=_view_text(record.get("context_summary")),
+            created_at=_view_datetime(record.get("created_at")),
+            updated_at=_view_datetime(record.get("updated_at")),
             project_id=str(record["project_id"])
             if record.get("project_id") is not None
             else None,
-            full_name=record.get("full_name"),
-            username=record.get("username"),
-            chat_id=record.get("chat_id"),
+            full_name=_view_text(record.get("full_name")),
+            username=_view_text(record.get("username")),
+            chat_id=(
+                _view_int(record.get("chat_id"))
+                if record.get("chat_id") is not None
+                else None
+            ),
         )
 
     def to_record(self) -> dict[str, object]:
@@ -79,10 +117,10 @@ class ThreadAnalyticsView:
         if not record:
             return None
         return cls(
-            intent=record.get("intent"),
-            lifecycle=record.get("lifecycle"),
-            cta=record.get("cta"),
-            decision=record.get("decision"),
+            intent=_view_text(record.get("intent")),
+            lifecycle=_view_text(record.get("lifecycle")),
+            cta=_view_text(record.get("cta")),
+            decision=_view_text(record.get("decision")),
         )
 
     def to_record(self) -> dict[str, object]:
@@ -104,9 +142,9 @@ class ThreadMessageCounts:
     def from_record(cls, record: dict[str, object] | None) -> "ThreadMessageCounts":
         payload = record or {}
         return cls(
-            total=int(payload.get("total") or 0),
-            ai=int(payload.get("ai") or 0),
-            manager=int(payload.get("manager") or 0),
+            total=_view_int(payload.get("total")),
+            ai=_view_int(payload.get("ai")),
+            manager=_view_int(payload.get("manager")),
         )
 
     def to_record(self) -> dict[str, int]:
@@ -226,7 +264,7 @@ class ThreadStatusSummaryView:
             id=str(record["id"]),
             client_id=str(record["client_id"]),
             status=str(record["status"]),
-            client_name=record.get("client_name"),
+            client_name=_view_text(record.get("client_name")),
         )
 
     def to_record(self) -> dict[str, object]:

@@ -7,6 +7,26 @@ from typing import Mapping
 import random
 
 MAX_RETRIES = 3
+
+
+def _coerce_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        try:
+            return int(stripped)
+        except ValueError:
+            return default
+    return default
+
+
 INITIAL_BACKOFF_SECONDS = 1
 MAX_BACKOFF_SECONDS = 60
 
@@ -34,8 +54,8 @@ def build_retry_decision(job: Mapping[str, object], error: str) -> RetryDecision
     QueueRepository.fail_job(increment_attempt=True) is responsible for
     incrementing attempts and returning the job to pending or failed.
     """
-    attempts = int(job.get("attempts") or 0)
-    max_attempts = int(job.get("max_attempts") or MAX_RETRIES)
+    attempts = _coerce_int(job.get("attempts"), 0)
+    max_attempts = _coerce_int(job.get("max_attempts"), MAX_RETRIES)
 
     exhausted = attempts + 1 >= max_attempts
     return RetryDecision(

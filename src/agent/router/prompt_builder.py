@@ -4,7 +4,7 @@ Functions for building prompts for graph nodes.
 
 import json
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, cast
 
 from src.agent.router.utils import compact_whitespace, extract_kb_text, truncate_text
 from src.domain.runtime.prompting import (
@@ -145,11 +145,21 @@ def _format_features(features: dict[str, float] | None) -> str:
     )
 
 
+def _prompt_configuration_state(
+    value: ProjectRuntimeConfigurationState | dict[str, object] | None,
+) -> ProjectRuntimeConfigurationState | None:
+    if value is None:
+        return None
+    return cast(ProjectRuntimeConfigurationState, value)
+
+
 def format_project_configuration(
     project_configuration: dict[str, object] | None,
 ) -> str:
-    context = ProjectPromptContext.from_configuration(project_configuration)
-    lines = context.format_lines(truncate=truncate_text)
+    context = ProjectPromptContext.from_configuration(
+        _prompt_configuration_state(project_configuration)
+    )
+    lines = context.format_lines(truncate=truncate_text)  # type: ignore[arg-type]
     return "\n".join(lines) if lines else NO_DATA_TEXT
 
 
@@ -192,7 +202,9 @@ def build_response_prompt(
     hist_str = format_history(history, limit=5) if history else "[]"
     mem_str = _format_memory(user_memory) if user_memory else ""
     feat_str = _format_features(features)
-    project_context = format_project_configuration(project_configuration)
+    project_context = format_project_configuration(
+        cast(dict[str, object] | None, project_configuration)
+    )
     knowledge_block = (
         format_kb_results(knowledge_chunks, limit=DEFAULT_KB_LIMIT)[0]
         if knowledge_chunks

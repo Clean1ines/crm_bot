@@ -82,7 +82,9 @@ class ManagerReplyService:
         await self._send_reply_to_client(
             project_id=project_id,
             thread_id=thread_id,
-            chat_id=thread_snapshot.chat_id,
+            chat_id=str(thread_snapshot.chat_id)
+            if thread_snapshot.chat_id is not None
+            else None,
             text=prefixed_text,
         )
         await self._emit_manager_reply_event(

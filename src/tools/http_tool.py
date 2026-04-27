@@ -251,6 +251,24 @@ class HTTPRequest:
         return kwargs
 
 
+def _coerce_int(value: object, default: int = 30) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
 def _request_from_args(args: JsonMap) -> HTTPRequest:
     url = str(args.get("url") or "").strip()
     if not url:
@@ -288,7 +306,7 @@ def _object_mapping_or_none(value: object) -> dict[str, object] | None:
 
 def _timeout_seconds(value: object) -> int:
     try:
-        timeout = int(value) if value is not None else 30
+        timeout = _coerce_int(value, 30)
     except (TypeError, ValueError):
         timeout = 30
 

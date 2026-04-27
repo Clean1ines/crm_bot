@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from src.application.dto.control_plane_dto import (
     ProjectMemberDto,
     ProjectTeamDto,
@@ -22,12 +24,14 @@ class PlatformBotService:
     def __init__(
         self, user_repo: UserAuthPort, project_repo: ProjectControlPort | None = None
     ) -> None:
+        self.user_repo = user_repo
         if project_repo is None:
-            self.user_repo = user_repo
-            self.project_repo = getattr(user_repo, "project_repo", user_repo)
+            self.project_repo = cast(
+                ProjectControlPort,
+                getattr(user_repo, "project_repo", user_repo),
+            )
             return
 
-        self.user_repo = user_repo
         self.project_repo = project_repo
 
     async def create_project_for_telegram_user(

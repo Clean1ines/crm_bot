@@ -3,6 +3,7 @@ Shared base for project repository modules.
 """
 
 import uuid
+from collections.abc import Mapping
 
 import asyncpg
 import httpx
@@ -42,7 +43,14 @@ class ProjectRepositoryBase:
             empty: JsonMap = {}
             return empty
 
-        data = dict(row)
+        if isinstance(row, Mapping):
+            data = {str(key): value for key, value in row.items()}
+        elif hasattr(row, "items"):
+            row_items = row.items()
+            data = {str(key): value for key, value in row_items}
+        else:
+            return {}
+
         for key, value in list(data.items()):
             if isinstance(value, uuid.UUID):
                 data[key] = str(value)

@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from src.application.dto.knowledge_dto import KnowledgeUploadResultDto
 from src.application.errors import (
@@ -16,7 +16,7 @@ from src.application.ports.knowledge_port import (
     PlatformUserAdminPort,
 )
 from src.application.ports.logger_port import LoggerPort
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 
 
 BEARER_PREFIX = "Bearer "
@@ -199,7 +199,7 @@ def _subject_from_payload(payload: object) -> str:
     return user_id
 
 
-def _normalize_chunks(raw_chunks: list[object]) -> list[JsonObject]:
+def _normalize_chunks(raw_chunks: Sequence[object]) -> list[JsonObject]:
     chunks: list[JsonObject] = []
     for chunk in raw_chunks:
         normalized = _normalize_chunk(chunk)
@@ -229,4 +229,4 @@ def _chunk_from_mapping(value: Mapping[object, object]) -> JsonObject | None:
     if not content:
         return None
 
-    return {str(key): item for key, item in value.items()}
+    return {str(key): json_value_from_unknown(item) for key, item in value.items()}

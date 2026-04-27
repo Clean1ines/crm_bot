@@ -675,7 +675,7 @@ class UserRepository:
             return True
 
         sets = []
-        params = [user_id]
+        params: list[object] = [user_id]
         for idx, (key, value) in enumerate(data.items(), start=2):
             sets.append(f"{key} = ${idx}")
             params.append(value)
@@ -816,9 +816,7 @@ class UserRepository:
                     expires_at,
                 )
 
-        return EmailVerificationTokenView(
-            token=token, expires_at=expires_at.isoformat()
-        )
+        return PasswordResetTokenView(token=token, expires_at=expires_at.isoformat())
 
     async def consume_password_reset_token(
         self, token: str

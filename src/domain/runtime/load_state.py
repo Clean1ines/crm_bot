@@ -41,19 +41,22 @@ class LoadStateResult:
             "client_id": self.client_id,
             "user_memory": self.user_memory,
         }
-        for field_name in (
-            "intent",
-            "lifecycle",
-            "cta",
-            "decision",
-            "dialog_state",
-            "topic",
-            "lead_status",
-            "repeat_count",
-        ):
-            value = getattr(self, field_name)
-            if value is not None:
-                result[field_name] = value
+        if self.intent is not None:
+            result["intent"] = self.intent
+        if self.lifecycle is not None:
+            result["lifecycle"] = self.lifecycle
+        if self.cta is not None:
+            result["cta"] = self.cta
+        if self.decision is not None:
+            result["decision"] = self.decision
+        if self.dialog_state is not None:
+            result["dialog_state"] = self.dialog_state
+        if self.topic is not None:
+            result["topic"] = self.topic
+        if self.lead_status is not None:
+            result["lead_status"] = self.lead_status
+        if self.repeat_count is not None:
+            result["repeat_count"] = self.repeat_count
         return result
 
     @staticmethod

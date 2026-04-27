@@ -2,9 +2,18 @@
 API endpoints for managing knowledge base (uploading documents).
 """
 
-import jwt
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Header, Query
+from typing import cast
 
+import jwt
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+
+from src.domain.project_plane.json_types import JsonObject
+from src.application.ports.knowledge_port import (
+    JwtDecoderPort,
+    KnowledgeChunkerPort,
+    KnowledgeDbPoolPort,
+    KnowledgeRepositoryPort,
+)
 from src.interfaces.http.dependencies import (
     get_pool,
     get_project_repo,
@@ -22,6 +31,32 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 
 
+class PyJwtDecoder:
+    ExpiredSignatureError: type[Exception] = cast(
+        type[Exception], jwt.ExpiredSignatureError
+    )
+    InvalidTokenError: type[Exception] = cast(type[Exception], jwt.InvalidTokenError)
+
+    def decode(
+        self,
+        token: str,
+        secret: str,
+        algorithms: list[str],
+    ) -> JsonObject:
+        return cast(JsonObject, jwt.decode(token, secret, algorithms=algorithms))
+
+
+jwt_decoder: JwtDecoderPort = PyJwtDecoder()
+
+
+def make_chunker() -> KnowledgeChunkerPort:
+    return cast(KnowledgeChunkerPort, ChunkerService())
+
+
+def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
+    return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
+
+
 @router.get("")
 async def list_knowledge_documents(
     project_id: str,
@@ -36,7 +71,7 @@ async def list_knowledge_documents(
     Lists uploaded knowledge documents for a project.
     """
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
     )
     await service.require_access(project_id, authorization)
 
@@ -59,7 +94,7 @@ async def upload_knowledge(
     и сохраняет в базу знаний проекта.
     """
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
     )
     try:
         file_content = await file.read()
@@ -71,8 +106,8 @@ async def upload_knowledge(
         file.filename,
         file_content,
         authorization,
-        chunker_factory=ChunkerService,
-        knowledge_repo_factory=KnowledgeRepository,
+        chunker_factory=make_chunker,
+        knowledge_repo_factory=make_knowledge_repo,
         logger=logger,
     )
     return result.to_dict()

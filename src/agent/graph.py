@@ -5,6 +5,10 @@ The runtime topology is defined by src.domain.runtime.graph_contract.
 This module is only the LangGraph adapter that materializes that contract.
 """
 
+from typing import cast
+
+from src.tools.registry import ToolRegistry
+from src.tools.builtins import TicketCreateTool
 from langgraph.graph import END, StateGraph
 
 from src.agent.nodes.escalate import create_escalate_node
@@ -88,17 +92,17 @@ def create_agent(
         project_repo=project_repo,
         memory_repo=memory_repo,
     )
+    tool_registry = cast(ToolRegistry, tool_registry)
     kb_search_node = create_kb_search_node(tool_registry)
     intent_extractor_node = create_intent_extractor_node()
     policy_engine_node = create_policy_engine_node(event_repo=event_repo)
     response_generator_node = create_response_generator_node()
     tool_executor_node = create_tool_executor_node(tool_registry)
 
-    ticket_create_tool = tool_registry.get_tool("ticket.create")
-    if ticket_create_tool is None:
-        logger.warning(
-            "TicketCreateTool not found in registry, escalation will degrade"
-        )
+    ticket_create_tool_raw = tool_registry.get_tool("ticket.create")
+    if ticket_create_tool_raw is None:
+        raise RuntimeError("ticket.create tool is not registered")
+    ticket_create_tool = cast(TicketCreateTool, ticket_create_tool_raw)
 
     escalate_node = create_escalate_node(
         thread_lifecycle_repo, queue_repo, ticket_create_tool

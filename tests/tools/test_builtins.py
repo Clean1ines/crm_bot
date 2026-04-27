@@ -3,7 +3,12 @@ from uuid import uuid4
 
 import pytest
 
-from src.tools.builtins import CRMCreateUserTool, CRMGetUserTool, EscalateTool, SearchKnowledgeTool
+from src.tools.builtins import (
+    CRMCreateUserTool,
+    CRMGetUserTool,
+    EscalateTool,
+    SearchKnowledgeTool,
+)
 
 
 @pytest.fixture
@@ -110,8 +115,6 @@ async def test_crm_create_user_writes_project_scoped_client(mock_pool):
     assert "INSERT INTO users" not in insert_sql
     assert lookup_project_id == "project-1"
     assert lookup_chat_id == "123"
-
-
 
 
 class FakeRAGService:

@@ -5,6 +5,7 @@ Provides methods to update thread_metrics and project_metrics_daily tables.
 
 import asyncpg
 from datetime import date
+from uuid import UUID
 
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
@@ -52,8 +53,8 @@ class MetricsRepository:
         """
         thread_uuid = ensure_uuid(thread_id)
         # Build SET clause dynamically
-        updates = []
-        params = [thread_uuid]
+        updates: list[str] = []
+        params: list[object] = [thread_uuid]
         param_idx = 2
 
         if total_messages is not None:
@@ -200,7 +201,7 @@ class MetricsRepository:
             """,
                 target_date,
             )
-            thread_counts = {}
+            thread_counts: dict[UUID, int] = {}
             for row in rows:
                 pid = row["project_id"]
                 thread_counts[pid] = thread_counts.get(pid, 0) + 1
@@ -215,7 +216,9 @@ class MetricsRepository:
             """,
                 target_date,
             )
-            escal_counts = {row["project_id"]: row["count"] for row in escalations}
+            escal_counts: dict[UUID, int] = {
+                row["project_id"]: int(row["count"]) for row in escalations
+            }
 
             # For each project, update the daily metrics
             # We'll first delete existing rows for this date to avoid double counting

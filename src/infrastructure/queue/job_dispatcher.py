@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Mapping
+from typing import Mapping
 
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.application.ports.project_port import ProjectNotificationPort
@@ -12,7 +12,10 @@ from src.infrastructure.queue.handlers.metrics import (
     handle_aggregate_metrics,
     handle_update_metrics,
 )
-from src.infrastructure.queue.handlers.notify_manager import handle_notify_manager
+from src.infrastructure.queue.handlers.notify_manager import (
+    RedisGetter,
+    handle_notify_manager,
+)
 from src.infrastructure.queue.job_exceptions import PermanentJobError
 from src.infrastructure.queue.job_types import (
     TASK_AGGREGATE_METRICS,
@@ -20,8 +23,6 @@ from src.infrastructure.queue.job_types import (
     TASK_UPDATE_METRICS,
 )
 from src.infrastructure.queue.telegram_sender import TelegramSender
-
-RedisGetter = Callable[[], Awaitable[object]]
 
 
 @dataclass(slots=True)

@@ -11,9 +11,12 @@ No application composition.
 """
 
 import asyncpg
+from structlog.stdlib import BoundLogger
+
+from src.infrastructure.config.settings import Settings
 
 
-async def init_db(*, settings: object, logger: object) -> asyncpg.Pool:
+async def init_db(*, settings: Settings, logger: BoundLogger) -> asyncpg.Pool:
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL not configured")
 
@@ -39,7 +42,7 @@ async def init_db(*, settings: object, logger: object) -> asyncpg.Pool:
     return db_pool
 
 
-async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: object) -> None:
+async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: BoundLogger) -> None:
     if db_pool is None:
         return
 
@@ -48,7 +51,7 @@ async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: object) -> None:
     logger.info("Database pool closed")
 
 
-def platform_owner_telegram_id(*, settings: object) -> int | None:
+def platform_owner_telegram_id(*, settings: Settings) -> int | None:
     if not settings.BOOTSTRAP_PLATFORM_OWNER:
         return None
 
@@ -62,8 +65,8 @@ def platform_owner_telegram_id(*, settings: object) -> int | None:
 async def bootstrap_platform_owner(
     db_pool: asyncpg.Pool,
     *,
-    settings: object,
-    logger: object,
+    settings: Settings,
+    logger: BoundLogger,
 ) -> str | None:
     telegram_id = platform_owner_telegram_id(settings=settings)
     if telegram_id is None:

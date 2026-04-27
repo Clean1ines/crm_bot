@@ -59,10 +59,33 @@ class PersistenceContext:
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "PersistenceContext":
-        state_copy: RuntimeStatePatch = dict(cast(Mapping[str, object], state))
-        state_copy.pop("messages", None)
-        state_copy.pop("history", None)
-        state_copy.pop("knowledge_chunks", None)
+        state_copy: RuntimeStatePatch = {}
+        for key in (
+            "thread_id",
+            "project_id",
+            "client_id",
+            "response_text",
+            "metadata",
+            "decision",
+            "intent",
+            "lifecycle",
+            "lead_status",
+            "cta",
+            "topic",
+            "cta_hint",
+            "emotion",
+            "is_repeat_like",
+            "confidence",
+            "requires_human",
+            "close_ticket",
+            "features",
+            "dialog_state",
+            "tool_name",
+            "tool_args",
+            "tool_result",
+        ):
+            if key in state:
+                state_copy[key] = state[key]  # type: ignore[literal-required]
 
         raw_dialog_state = state.get("dialog_state")
         dialog_state = raw_dialog_state if isinstance(raw_dialog_state, dict) else None

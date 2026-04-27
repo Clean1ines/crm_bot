@@ -5,10 +5,13 @@ Uses the configured LLM to craft the final answer from decision, history,
 knowledge, memory, and project runtime configuration.
 """
 
+from collections.abc import Mapping
+from typing import cast
 from langchain_groq import ChatGroq
 
 from src.agent.router.prompt_builder import build_response_prompt
 from src.agent.state import AgentState
+from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.response_generation import (
     ResponseGenerationContext,
@@ -30,14 +33,7 @@ def _merge_dialog_state_into_user_memory(
     merged: dict[str, list[dict[str, object]]] = {}
     if user_memory:
         for memory_type, items in user_memory.items():
-            normalized_items: list[dict[str, object]] = []
-            if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, dict):
-                        normalized_items.append(dict(item))
-                    else:
-                        normalized_items.append({"key": "value", "value": item})
-            merged[memory_type] = normalized_items
+            merged[memory_type] = [dict(item) for item in items]
 
     merged["dialog_state"] = [{"key": "dialog_state", "value": dialog_state}]
     return merged
@@ -48,6 +44,76 @@ def _resolve_response_model_name(state: AgentState, default_model: str) -> str:
         state.get("project_configuration")
     )
     return profile.fallback_model or default_model
+
+
+def _prompt_user_memory(value: object) -> dict[str, list[dict[str, object]]] | None:
+    if not isinstance(value, Mapping):
+        return None
+
+    normalized: dict[str, list[dict[str, object]]] = {}
+    for raw_key, raw_items in value.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_items, list):
+            continue
+
+        items: list[dict[str, object]] = []
+        for raw_item in raw_items:
+            if isinstance(raw_item, Mapping):
+                items.append(
+                    {
+                        str(item_key): item_value
+                        for item_key, item_value in raw_item.items()
+                    }
+                )
+
+        normalized[raw_key] = items
+
+    return normalized
+
+
+def _prompt_dialog_state(value: object) -> dict[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return {str(key): item for key, item in value.items()}
+
+
+def _prompt_history(value: object) -> list[RuntimeHistoryMessage] | None:
+    if not isinstance(value, list):
+        return None
+
+    history: list[RuntimeHistoryMessage] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+
+        role = item.get("role")
+        content = item.get("content")
+        if role is None or content is None:
+            continue
+
+        history.append(
+            RuntimeHistoryMessage(
+                role=str(role),
+                content=str(content),
+            )
+        )
+
+    return history
+
+
+def _prompt_features(value: object) -> dict[str, float] | None:
+    if not isinstance(value, Mapping):
+        return None
+
+    features: dict[str, float] = {}
+    for key, raw_value in value.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            features[key] = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+
+    return features
 
 
 def create_response_generator_node(
@@ -75,7 +141,7 @@ def create_response_generator_node(
         )
 
     async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
-        context = ResponseGenerationContext.from_state(state)
+        context = ResponseGenerationContext.from_state(cast(RuntimeStateInput, state))
         if context.decision not in {"LLM_GENERATE", "RESPOND_KB", "RESPOND_TEMPLATE"}:
             logger.debug(
                 "Skipping response generation, decision not generative",
@@ -84,8 +150,8 @@ def create_response_generator_node(
             return {}
 
         merged_memory = _merge_dialog_state_into_user_memory(
-            context.user_memory,
-            context.dialog_state,
+            _prompt_user_memory(context.user_memory),
+            _prompt_dialog_state(context.dialog_state),
         )
         logger.debug(
             "Preparing response prompt",
@@ -101,10 +167,10 @@ def create_response_generator_node(
             decision=context.decision,
             user_input=context.user_input,
             conversation_summary=context.conversation_summary,
-            history=context.history,
+            history=_prompt_history(context.history),
             knowledge_chunks=context.knowledge_chunks,
             user_memory=merged_memory,
-            features=context.features,
+            features=_prompt_features(context.features),
             project_configuration=context.project_configuration,
         )
 
@@ -132,10 +198,12 @@ def create_response_generator_node(
                     "model": selected_model,
                 },
             )
-            return ResponseGenerationResult(
-                response_text=response_text,
-                metadata=metadata,
-            ).to_state_patch()
+            return dict(
+                ResponseGenerationResult(
+                    response_text=response_text,
+                    metadata=metadata,
+                ).to_state_patch()
+            )
         except Exception as exc:
             logger.exception(
                 "Response generation failed",
@@ -146,12 +214,14 @@ def create_response_generator_node(
                     "policy": "fallback_user_visible_error",
                 },
             )
-            return ResponseGenerationResult(
-                response_text="Sorry, something went wrong while generating the response. Please try again later.",
-            ).to_state_patch()
+            return dict(
+                ResponseGenerationResult(
+                    response_text="Sorry, something went wrong while generating the response. Please try again later.",
+                ).to_state_patch()
+            )
 
     def _get_response_input_size(state: AgentState) -> int:
-        context = ResponseGenerationContext.from_state(state)
+        context = ResponseGenerationContext.from_state(cast(RuntimeStateInput, state))
         return (
             len(context.user_input)
             + len(context.conversation_summary or "")
@@ -163,7 +233,7 @@ def create_response_generator_node(
         )
 
     def _get_response_output_size(result: dict[str, object]) -> int:
-        return len(result.get("response_text", ""))
+        return len(str(result.get("response_text") or ""))
 
     async def response_generator_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(

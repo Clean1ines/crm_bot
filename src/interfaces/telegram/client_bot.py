@@ -3,6 +3,7 @@ Client Bot Router.
 Wraps ConversationOrchestrator to handle end-user Telegram messages.
 """
 
+from typing import cast
 import httpx
 
 from src.application.orchestration.conversation_orchestrator import (
@@ -92,9 +93,12 @@ async def _process_text_message(
     orchestrator: ConversationOrchestrator,
     bot_token: str,
 ) -> None:
-    chat_id = message["chat"]["id"]
-    text = message.get("text")
+    chat = cast(dict[str, object], message["chat"])
+    chat_id = int(cast(int | str, chat["id"]))
+    text = str(message.get("text") or "")
     sender = _extract_sender(message)
+    username_value = sender.get("username")
+    username = str(username_value) if username_value else None
 
     logger.debug(
         "Client message received",
@@ -109,7 +113,7 @@ async def _process_text_message(
         project_id=project_id,
         chat_id=chat_id,
         text=text,
-        username=sender.get("username"),
+        username=username,
         full_name=_extract_full_name(sender),
         source="telegram",
     )
@@ -137,7 +141,8 @@ async def process_client_update(
     if message is None or not message.get("text"):
         return OK_RESPONSE
 
-    chat_id = message["chat"]["id"]
+    chat = cast(dict[str, object], message["chat"])
+    chat_id = int(cast(int | str, chat["id"]))
 
     try:
         await _process_text_message(

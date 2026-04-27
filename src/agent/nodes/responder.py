@@ -5,8 +5,11 @@ Delivers the final response through the transport adapter and reports the
 delivery outcome back into graph state.
 """
 
+from typing import cast
+
 from src.agent.state import AgentState
 from src.domain.runtime.delivery import ResponseDeliveryContext, ResponseDeliveryResult
+from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -26,14 +29,15 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
     """
 
     async def _responder_node_impl(state: AgentState) -> dict[str, object]:
-        context = ResponseDeliveryContext.from_state(state)
+        context = ResponseDeliveryContext.from_state(cast(RuntimeStateInput, state))
         if not context.chat_id:
             logger.error("responder_node called with no chat_id")
-            return ResponseDeliveryResult(
+            patch = ResponseDeliveryResult(
                 message_sent=False,
                 requires_human=True,
                 response_text=MISSING_CHAT_ID_TEXT,
             ).to_state_patch()
+            return dict(patch)
 
         response_text = context.resolve_response_text()
         logger.debug(
@@ -82,20 +86,22 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
                             },
                         )
 
-                return ResponseDeliveryResult(
+                patch = ResponseDeliveryResult(
                     message_sent=True,
                     response_text=None,
                 ).to_state_patch()
+                return dict(patch)
 
             logger.error(
                 "Telegram send failed",
                 extra={"chat_id": context.chat_id, "result": result},
             )
-            return ResponseDeliveryResult(
+            patch = ResponseDeliveryResult(
                 message_sent=False,
                 requires_human=True,
                 response_text=SEND_FAILED_TEXT,
             ).to_state_patch()
+            return dict(patch)
         except Exception as exc:
             logger.exception(
                 "Exception while sending message",
@@ -108,14 +114,15 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
                     "policy": "fallback_requires_human",
                 },
             )
-            return ResponseDeliveryResult(
+            patch = ResponseDeliveryResult(
                 message_sent=False,
                 requires_human=True,
                 response_text=SEND_EXCEPTION_TEXT,
             ).to_state_patch()
+            return dict(patch)
 
     def _get_responder_input_size(state: AgentState) -> int:
-        context = ResponseDeliveryContext.from_state(state)
+        context = ResponseDeliveryContext.from_state(cast(RuntimeStateInput, state))
         return len(context.resolve_response_text())
 
     def _get_responder_output_size(result: dict[str, object]) -> int:

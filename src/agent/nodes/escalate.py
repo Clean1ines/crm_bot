@@ -4,8 +4,12 @@ Escalation node for the LangGraph pipeline.
 Creates escalation side effects and returns a typed human-handoff state patch.
 """
 
+from typing import cast
+
 from src.agent.state import AgentState
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.runtime.escalation import EscalationContext, EscalationResult
+from src.domain.runtime.state_contracts import RuntimeStateInput, RuntimeStatePatch
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.application.ports.thread_port import ThreadLifecyclePort
 from src.infrastructure.logging.logger import get_logger, log_node_execution
@@ -28,8 +32,8 @@ def create_escalate_node(
     Create the escalation node with injected dependencies.
     """
 
-    async def _escalate_node_impl(state: AgentState) -> dict[str, object]:
-        context = EscalationContext.from_state(state)
+    async def _escalate_node_impl(state: AgentState) -> RuntimeStatePatch:
+        context = EscalationContext.from_state(cast(RuntimeStateInput, state))
         if not context.thread_id:
             logger.error("escalate_node called with no thread_id")
             return EscalationResult(response_text=MISSING_THREAD_TEXT).to_state_patch()
@@ -45,7 +49,7 @@ def create_escalate_node(
 
         try:
             result = await ticket_create_tool.run(
-                args=context.ticket_payload(),
+                args=dict(context.ticket_payload()),
                 context={
                     "project_id": context.project_id,
                     "thread_id": context.thread_id,
@@ -72,7 +76,15 @@ def create_escalate_node(
             )
 
         try:
-            await queue_repo.enqueue("notify_manager", context.notification_payload())
+            notification_payload = cast(
+                JsonObject,
+                {
+                    "thread_id": context.thread_id,
+                    "project_id": context.project_id,
+                    "message": context.user_input[:200],
+                },
+            )
+            await queue_repo.enqueue("notify_manager", notification_payload)
             logger.debug(
                 "Manager notification enqueued", extra={"thread_id": context.thread_id}
             )
@@ -113,10 +125,10 @@ def create_escalate_node(
     def _get_escalate_input_size(state: AgentState) -> int:
         return len(str(state.get("user_input") or ""))
 
-    def _get_escalate_output_size(result: dict[str, object]) -> int:
+    def _get_escalate_output_size(result: RuntimeStatePatch) -> int:
         return len(str(result.get("response_text") or ""))
 
-    async def escalate_node(state: AgentState) -> dict[str, object]:
+    async def escalate_node(state: AgentState) -> RuntimeStatePatch:
         return await log_node_execution(
             "escalate",
             _escalate_node_impl,

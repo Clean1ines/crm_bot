@@ -62,7 +62,7 @@ TRANSITIONS = {
     ("angry", "support"): ("angry", "ESCALATE_TO_HUMAN", "call_manager"),
     ("angry", "feedback"): ("angry", "ESCALATE_TO_HUMAN", "call_manager"),
     ("angry", "other"): ("angry", "ESCALATE_TO_HUMAN", "call_manager"),
-    (None, None): (None, "LLM_GENERATE", "none"),
+    (None, None): ("cold", "LLM_GENERATE", "none"),
 }
 
 
@@ -71,6 +71,6 @@ def lookup_transition(lifecycle: str, topic: str) -> tuple[str, str, str]:
         (lifecycle, topic),
         TRANSITIONS.get(
             (lifecycle, "other"),
-            TRANSITIONS.get((None, None), (None, DEFAULT_DECISION, DEFAULT_CTA)),
+            TRANSITIONS.get((None, None), ("cold", DEFAULT_DECISION, DEFAULT_CTA)),
         ),
     )

@@ -1,2 +1,2 @@
-[bandit]
-skips: B608
+skips:
+  - B608

@@ -1,3 +1,4 @@
+from typing import cast
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel
 
@@ -461,10 +462,13 @@ async def get_manager_reply_history(
     current_user_id: str = Depends(get_current_user_id),
     service: ProjectQueryService = Depends(get_project_query_service),
 ) -> dict[str, object]:
-    return await service.get_manager_reply_history(
-        project_id=project_id,
-        current_user_id=current_user_id,
-        manager_user_id=manager_user_id,
-        limit=limit,
-        offset=offset,
+    return cast(
+        dict[str, object],
+        await service.get_manager_reply_history(
+            project_id=project_id,
+            current_user_id=current_user_id,
+            manager_user_id=manager_user_id,
+            limit=limit,
+            offset=offset,
+        ),
     )

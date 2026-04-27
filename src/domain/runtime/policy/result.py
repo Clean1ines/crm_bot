@@ -34,10 +34,17 @@ class PolicyDecisionContext:
         else:
             dialog_state = dialog_state_from_memory(state.get("user_memory"))
 
+        raw_features = state.get("features")
+        features = (
+            cast(RuntimeFeatures, raw_features)
+            if isinstance(raw_features, Mapping)
+            else None
+        )
+
         return cls(
             lifecycle=str(state.get("lifecycle") or "cold"),
             intent=state.get("intent"),
-            features=state.get("features"),
+            features=features,
             dialog_state=dialog_state,
             thread_id=state.get("thread_id"),
             project_id=state.get("project_id"),

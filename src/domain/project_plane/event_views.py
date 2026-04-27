@@ -5,6 +5,30 @@ from uuid import UUID
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
+def _event_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def _event_timestamp(value: object) -> datetime | str | None:
+    if isinstance(value, (datetime, str)):
+        return value
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class EventTimelineItemView:
     id: int
@@ -17,10 +41,10 @@ class EventTimelineItemView:
     def from_record(cls, record: dict[str, object]) -> "EventTimelineItemView":
         stream_id = record.get("stream_id")
         return cls(
-            id=int(record["id"]),
+            id=_event_int(record.get("id")),
             type=str(record["type"]),
             payload=json_object_from_unknown(record.get("payload")),
-            ts=record.get("ts"),
+            ts=_event_timestamp(record.get("ts")),
             stream_id=str(stream_id) if isinstance(stream_id, (str, UUID)) else None,
         )
 

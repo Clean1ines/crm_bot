@@ -160,14 +160,11 @@ class ThreadQueryService:
         if not client_id:
             return {"items": []}
 
-        if hasattr(self.memory_repo, "list_for_client"):
-            items = await self.memory_repo.list_for_client(
-                project_id, client_id, limit=limit
-            )
-        else:
-            items = await self.memory_repo.get_for_client(
-                project_id, client_id, limit=limit
-            )
+        items = await self.memory_repo.get_for_user_view(
+            project_id,
+            client_id,
+            limit=limit,
+        )
 
         return {"items": items}
 

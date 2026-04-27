@@ -81,6 +81,11 @@ async def _set_data(chat_id: str, data: dict[str, object]):
     )
 
 
+def _project_id_from_data(data: dict[str, object]) -> str | None:
+    value = data.get("project_id")
+    return str(value) if value else None
+
+
 async def handle_admin_command(text: str, pool) -> AdminResponse:
     parts = text.strip().split()
     if not parts:
@@ -93,7 +98,7 @@ async def handle_admin_command(text: str, pool) -> AdminResponse:
         return await _cmd_start()
     if cmd == "/help":
         return _cmd_help(), None
-    return await _process_admin_step(text, None, pool, None, None)
+    return await _process_admin_step(text, {}, pool, None, None)
 
 
 async def _cmd_start() -> AdminResponse:
@@ -114,7 +119,7 @@ async def handle_admin_step(chat_id: str, text: str, pool) -> AdminResponse | No
 
 async def _process_admin_step(
     text: str,
-    data: dict[str, object],
+    data: dict[str, object] | None,
     pool,
     chat_id: str | None = None,
     state: str | None = None,
@@ -173,7 +178,7 @@ async def _step_await_project_name(chat_id: str, name: str, pool) -> AdminRespon
 
 async def _step_await_client_token(chat_id: str, token: str, pool) -> AdminResponse:
     data = await _get_data(chat_id)
-    project_id = data.get("project_id")
+    project_id = _project_id_from_data(data)
     if not project_id:
         await _clear_state(chat_id)
         return "Ошибка: проект не указан.", None
@@ -189,7 +194,7 @@ async def _step_await_client_token(chat_id: str, token: str, pool) -> AdminRespo
 
 async def _step_await_manager_token(chat_id: str, token: str, pool) -> AdminResponse:
     data = await _get_data(chat_id)
-    project_id = data.get("project_id")
+    project_id = _project_id_from_data(data)
     if not project_id:
         await _clear_state(chat_id)
         return "Ошибка: проект не указан.", None
@@ -210,7 +215,7 @@ async def _step_await_manager_token(chat_id: str, token: str, pool) -> AdminResp
 
 async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminResponse:
     data = await _get_data(chat_id)
-    project_id = data.get("project_id")
+    project_id = _project_id_from_data(data)
     if not project_id:
         await _clear_state(chat_id)
         return "Ошибка: проект не указан.", None
@@ -242,7 +247,7 @@ async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminR
 
 async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
     data = await _get_data(chat_id)
-    project_id = data.get("project_id")
+    project_id = _project_id_from_data(data)
     project_name = data.get("project_name")
 
     if not project_id:
@@ -281,7 +286,7 @@ async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
 
 async def _step_detach_choice(chat_id: str, choice: str, pool) -> AdminResponse:
     data = await _get_data(chat_id)
-    project_id = data.get("project_id")
+    project_id = _project_id_from_data(data)
     if not project_id:
         await _clear_state(chat_id)
         return "Ошибка: проект не указан.", None

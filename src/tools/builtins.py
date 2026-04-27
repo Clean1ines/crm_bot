@@ -19,6 +19,46 @@ from src.infrastructure.llm.rag_service import RAGService
 logger = get_logger(__name__)
 
 
+def _as_text(value: object, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value)
+
+
+def _as_int(value: object, default: int = 5) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return float(normalized)
+        except ValueError:
+            return default
+    return default
+
+
 class SearchKnowledgeTool(Tool):
     """
     Tool for searching project knowledge base using RAG.
@@ -104,8 +144,8 @@ class SearchKnowledgeTool(Tool):
             ToolExecutionError: If search fails or project not found.
         """
         project_id = self._require_context_field(context, "project_id")
-        query = args.get("query", "").strip()
-        limit = min(args.get("limit", 5), 10)  # Cap at 10 for safety
+        query = _as_text(args.get("query")).strip()
+        limit = min(_as_int(args.get("limit"), 5), 10)  # Cap at 10 for safety
         # category is currently not used by repository; ignore it
         # category = args.get("category")
 
@@ -134,7 +174,7 @@ class SearchKnowledgeTool(Tool):
                 {
                     "id": r.get("id"),
                     "content": r.get("content", ""),
-                    "score": float(r.get("score", 0.0)),
+                    "score": _as_float(r.get("score"), 0.0),
                     "method": r.get("method"),
                     "source": r.get("source"),
                     "title": r.get("title"),
@@ -258,7 +298,7 @@ class EscalateTool(Tool):
         project_id = self._require_context_field(context, "project_id")
         thread_id = self._require_context_field(context, "thread_id")
 
-        reason = args.get("reason", "User requested human assistance").strip()
+        reason = _as_text(args.get("reason"), "User requested human assistance").strip()
         priority = args.get("priority", "normal")
 
         if not reason:

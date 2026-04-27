@@ -3,6 +3,10 @@
 from collections.abc import Mapping
 from uuid import UUID
 
+import asyncpg
+
+from src.domain.project_plane.json_types import json_object_from_unknown
+
 from src.domain.project_plane.client_views import (
     ClientDetailView,
     ClientListItemView,
@@ -22,6 +26,30 @@ def _serialize_timestamp(value: object) -> str | None:
 
 def _optional_text(value: object) -> str | None:
     return str(value) if value is not None else None
+
+
+def _coerce_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def _coerce_chat_id(value: object) -> int | None:
+    if value is None:
+        return None
+    return _coerce_int(value)
 
 
 def _row_mapping(row: object) -> Mapping[str, object]:
@@ -116,12 +144,12 @@ def _client_list_item_from_row(row: Mapping[str, object]) -> ClientListItemView:
         email=_optional_text(row.get("email")),
         company=_optional_text(row.get("company")),
         phone=_optional_text(row.get("phone")),
-        metadata=dict(_row_mapping(row.get("metadata"))),
-        chat_id=row.get("chat_id"),
+        metadata=json_object_from_unknown(row.get("metadata")),
+        chat_id=_coerce_chat_id(row.get("chat_id")),
         source=_optional_text(row.get("source")),
         created_at=_serialize_timestamp(row.get("created_at")),
         last_activity_at=_serialize_timestamp(row.get("last_activity_at")),
-        threads_count=int(row.get("threads_count") or 0),
+        threads_count=_coerce_int(row.get("threads_count")),
         latest_thread_id=_optional_text(row.get("latest_thread_id")),
     )
 
@@ -135,8 +163,8 @@ def _client_detail_from_row(row: Mapping[str, object]) -> ClientDetailView:
         email=_optional_text(row.get("email")),
         company=_optional_text(row.get("company")),
         phone=_optional_text(row.get("phone")),
-        metadata=dict(_row_mapping(row.get("metadata"))),
-        chat_id=row.get("chat_id"),
+        metadata=json_object_from_unknown(row.get("metadata")),
+        chat_id=_coerce_chat_id(row.get("chat_id")),
         source=_optional_text(row.get("source")),
         created_at=_serialize_timestamp(row.get("created_at")),
     )
@@ -149,14 +177,14 @@ def _client_list_from_rows(
     stats = stats_row or {}
     return ClientListView(
         clients=[_client_list_item_from_row(row) for row in rows],
-        total_clients=int(stats.get("total_clients") or 0),
-        new_clients_7d=int(stats.get("new_clients_7d") or 0),
-        active_dialogs=int(stats.get("active_dialogs") or 0),
+        total_clients=_coerce_int(stats.get("total_clients")),
+        new_clients_7d=_coerce_int(stats.get("new_clients_7d")),
+        active_dialogs=_coerce_int(stats.get("active_dialogs")),
     )
 
 
 class ClientRepository:
-    def __init__(self, pool: object) -> None:
+    def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
 
     async def list_for_project_view(

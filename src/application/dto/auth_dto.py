@@ -1,4 +1,35 @@
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from typing import Any, cast
+
+from src.domain.identity.user_views import (
+    AuthMethodView,
+    AuthMethodsView,
+    UserProfileView,
+)
+
+
+def _optional_str(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_bool(value: object) -> bool | None:
+    return bool(value) if value is not None else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
 @dataclass(slots=True)
@@ -14,13 +45,13 @@ class AuthMethodDto:
         return cls(
             provider=str(record["provider"]),
             provider_id=str(record["provider_id"]),
-            created_at=record.get("created_at"),
-            verified=record.get("verified"),
-            verified_at=record.get("verified_at"),
+            created_at=_optional_str(record.get("created_at")),
+            verified=_optional_bool(record.get("verified")),
+            verified_at=_optional_str(record.get("verified_at")),
         )
 
     @classmethod
-    def from_view(cls, view: object) -> "AuthMethodDto":
+    def from_view(cls, view: AuthMethodView) -> "AuthMethodDto":
         return cls(
             provider=str(view.provider),
             provider_id=str(view.provider_id),
@@ -46,15 +77,16 @@ class AuthMethodsDto:
         return cls(
             user_id=str(record["user_id"]),
             methods=[
-                AuthMethodDto.from_record(item) for item in record.get("methods", [])
+                AuthMethodDto.from_record(item)
+                for item in _record_list(record.get("methods", []))
             ],
             has_password=bool(record.get("has_password")),
-            verified_email=record.get("verified_email"),
+            verified_email=_optional_str(record.get("verified_email")),
         )
 
     @classmethod
     def from_view(
-        cls, view: object, *, verified_email: str | None = None
+        cls, view: AuthMethodsView, *, verified_email: str | None = None
     ) -> "AuthMethodsDto":
         return cls(
             user_id=str(view.user_id),
@@ -64,7 +96,7 @@ class AuthMethodsDto:
         )
 
     def to_dict(self) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "user_id": self.user_id,
             "methods": [method.to_dict() for method in self.methods],
             "has_password": self.has_password,
@@ -146,21 +178,20 @@ class UserProfileDto:
 
     @classmethod
     def from_record(cls, record: dict[str, object]) -> "UserProfileDto":
-        telegram_id = record.get("telegram_id")
         return cls(
             id=str(record["id"]),
-            telegram_id=int(telegram_id) if telegram_id is not None else None,
-            username=record.get("username"),
-            full_name=record.get("full_name"),
-            email=record.get("email"),
-            is_platform_admin=record.get("is_platform_admin"),
+            telegram_id=_optional_int(record.get("telegram_id")),
+            username=_optional_str(record.get("username")),
+            full_name=_optional_str(record.get("full_name")),
+            email=_optional_str(record.get("email")),
+            is_platform_admin=_optional_bool(record.get("is_platform_admin")),
         )
 
     @classmethod
-    def from_view(cls, view: object) -> "UserProfileDto":
+    def from_view(cls, view: UserProfileView) -> "UserProfileDto":
         return cls(
             id=str(view.id),
-            telegram_id=int(view.telegram_id) if view.telegram_id is not None else None,
+            telegram_id=view.telegram_id,
             username=view.username,
             full_name=view.full_name,
             email=view.email,

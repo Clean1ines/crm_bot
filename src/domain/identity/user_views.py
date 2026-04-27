@@ -1,4 +1,18 @@
 from dataclasses import dataclass, field
+from typing import Any, cast
+
+
+def _optional_str(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclass(slots=True)
@@ -14,13 +28,12 @@ class UserProfileView:
     def from_record(cls, record: dict[str, object] | None) -> "UserProfileView | None":
         if not record:
             return None
-        telegram_id = record.get("telegram_id")
         return cls(
             id=str(record["id"]),
-            telegram_id=int(telegram_id) if telegram_id is not None else None,
-            username=record.get("username"),
-            full_name=record.get("full_name"),
-            email=record.get("email"),
+            telegram_id=_optional_int(record.get("telegram_id")),
+            username=_optional_str(record.get("username")),
+            full_name=_optional_str(record.get("full_name")),
+            email=_optional_str(record.get("email")),
             is_platform_admin=bool(record.get("is_platform_admin")),
         )
 

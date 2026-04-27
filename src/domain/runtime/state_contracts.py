@@ -104,21 +104,34 @@ class RuntimeStateInput(TypedDict, total=False):
 
 
 class RuntimeStatePatch(TypedDict, total=False):
-    response_text: str
+    thread_id: str | None
+    project_id: str | None
+    client_id: str | None
+    response_text: str | None
     metadata: Mapping[str, object]
+    conversation_summary: str | None
+    history: list[RuntimeHistoryMessage] | list[Mapping[str, object]]
+    user_memory: RuntimeMemory | Mapping[str, object]
+    knowledge_chunks: list[KnowledgeChunkPayload] | None
+    client_profile: ClientProfileState | None
+    message_sent: bool
     decision: str
     intent: str | None
-    lifecycle: str
-    lead_status: str
-    cta: str
-    topic: str
+    lifecycle: str | None
+    lead_status: str | None
+    cta: str | None
+    topic: str | None
     cta_hint: str | None
     emotion: str
     is_repeat_like: bool
     confidence: float | None
     requires_human: bool
+    close_ticket: bool
+    repeat_count: int | object
     features: Mapping[str, object]
     dialog_state: object
+    tool_name: str | None
+    tool_args: Mapping[str, object]
     tool_result: object
 
 

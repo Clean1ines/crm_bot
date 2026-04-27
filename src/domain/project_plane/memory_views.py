@@ -4,6 +4,12 @@ from datetime import datetime
 from src.domain.project_plane.json_types import JsonValue, json_value_from_unknown
 
 
+def _memory_timestamp(value: object) -> datetime | str | None:
+    if isinstance(value, (datetime, str)):
+        return value
+    return None
+
+
 @dataclass(slots=True)
 class MemoryEntryView:
     id: str
@@ -20,8 +26,8 @@ class MemoryEntryView:
             key=str(record["key"]),
             value=json_value_from_unknown(record.get("value")),
             type=str(record["type"]),
-            created_at=record.get("created_at"),
-            updated_at=record.get("updated_at"),
+            created_at=_memory_timestamp(record.get("created_at")),
+            updated_at=_memory_timestamp(record.get("updated_at")),
         )
 
     def to_record(self) -> dict[str, object]:

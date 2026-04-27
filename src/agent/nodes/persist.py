@@ -6,9 +6,13 @@ the graph finishes processing a turn.
 """
 
 import datetime
+from typing import cast
+from uuid import UUID
 
 from src.agent.state import AgentState
 from src.domain.runtime.persistence import PersistenceContext
+from src.domain.runtime.state_contracts import RuntimeStateInput
+from src.domain.project_plane.json_types import json_object_from_unknown
 from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
@@ -36,7 +40,7 @@ def create_persist_node(
     """
 
     async def _persist_node_impl(state: AgentState) -> dict[str, object]:
-        context = PersistenceContext.from_state(state)
+        context = PersistenceContext.from_state(cast(RuntimeStateInput, state))
         if not context.thread_id or not context.project_id:
             logger.error("persist_node missing required identifiers")
             return {"error": "Missing thread_id or project_id"}
@@ -64,7 +68,8 @@ def create_persist_node(
 
         try:
             await thread_runtime_state_repo.save_state_json(
-                context.thread_id, context.state_payload or {}
+                context.thread_id,
+                json_object_from_unknown(context.state_payload or {}),
             )
             logger.debug("State JSON saved", extra={"thread_id": context.thread_id})
         except Exception as exc:
@@ -81,14 +86,16 @@ def create_persist_node(
         if event_repo:
             try:
                 await event_repo.append(
-                    stream_id=context.thread_id,
-                    project_id=context.project_id,
+                    stream_id=UUID(context.thread_id),
+                    project_id=UUID(context.project_id),
                     event_type="ai_response",
-                    payload={
-                        "text": context.response_text,
-                        "confidence": context.confidence,
-                        "requires_human": context.requires_human,
-                    },
+                    payload=json_object_from_unknown(
+                        {
+                            "text": context.response_text,
+                            "confidence": context.confidence,
+                            "requires_human": context.requires_human,
+                        }
+                    ),
                 )
             except Exception as exc:
                 logger.warning(
@@ -99,14 +106,16 @@ def create_persist_node(
             if context.tool_name:
                 try:
                     await event_repo.append(
-                        stream_id=context.thread_id,
-                        project_id=context.project_id,
+                        stream_id=UUID(context.thread_id),
+                        project_id=UUID(context.project_id),
                         event_type="tool_called",
-                        payload={
-                            "tool": context.tool_name,
-                            "args": context.tool_args,
-                            "result": context.tool_result,
-                        },
+                        payload=json_object_from_unknown(
+                            {
+                                "tool": context.tool_name,
+                                "args": context.tool_args or {},
+                                "result": context.tool_result,
+                            }
+                        ),
                     )
                 except Exception as exc:
                     logger.warning(
@@ -117,13 +126,15 @@ def create_persist_node(
             if context.requires_human:
                 try:
                     await event_repo.append(
-                        stream_id=context.thread_id,
-                        project_id=context.project_id,
+                        stream_id=UUID(context.thread_id),
+                        project_id=UUID(context.project_id),
                         event_type="ticket_created",
-                        payload={
-                            "reason": "Human escalation requested",
-                            "manager_notified": True,
-                        },
+                        payload=json_object_from_unknown(
+                            {
+                                "reason": "Human escalation requested",
+                                "manager_notified": True,
+                            }
+                        ),
                     )
                 except Exception as exc:
                     logger.warning(
@@ -228,7 +239,7 @@ def create_persist_node(
 
         if context.close_ticket and queue_repo:
             try:
-                counts = await thread_message_repo.get_message_counts_view(
+                counts = await thread_runtime_state_repo.get_message_counts_view(
                     context.thread_id
                 )
                 total_messages = counts.total

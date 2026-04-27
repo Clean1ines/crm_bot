@@ -14,17 +14,19 @@ class ThreadLifecycleRepository:
         self,
         project_id: str,
         chat_id: int,
-        username: str = None,
+        username: str | None = None,
         source: str = "telegram",
-        full_name: str = None,
+        full_name: str | None = None,
     ) -> str:
+        username_value = username or ""
+        full_name_value = full_name or ""
         logger.info(
             f"Getting or creating client for project {project_id}, chat {chat_id}"
         )
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO clients (project_id, chat_id, username, source, user_id, full_name)
+                INSERT INTO clients (project_id, chat_id, username_value, source, user_id, full_name_value)
                 VALUES (
                     $1,
                     $2,
@@ -35,16 +37,16 @@ class ThreadLifecycleRepository:
                 )
                 ON CONFLICT (project_id, chat_id) DO UPDATE
                 SET
-                    username = EXCLUDED.username,
-                    full_name = COALESCE(EXCLUDED.full_name, clients.full_name),
+                    username_value = EXCLUDED.username_value,
+                    full_name_value = COALESCE(EXCLUDED.full_name_value, clients.full_name_value),
                     user_id = COALESCE(clients.user_id, EXCLUDED.user_id)
                 RETURNING id
             """,
                 ensure_uuid(project_id),
                 chat_id,
-                username,
+                username_value,
                 source,
-                full_name,
+                full_name_value,
             )
             client_id = str(row["id"])
             logger.info(f"Client {client_id} ensured")
@@ -102,6 +104,9 @@ class ThreadLifecycleRepository:
                 status_value,
                 ensure_uuid(thread_id),
             )
+
+    async def archive_thread(self, thread_id: str) -> None:
+        await self.update_status(thread_id, "archived")
 
     async def update_interaction_mode(self, thread_id: str, mode: str) -> None:
         logger.info(f"Updating interaction mode for thread {thread_id} to {mode}")

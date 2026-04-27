@@ -9,6 +9,8 @@ This module owns the application-side runtime contract:
 """
 
 import json
+from collections.abc import Mapping
+from typing import cast
 
 from src.application.dto.runtime_dto import (
     GraphExecutionRequestDto,
@@ -19,6 +21,7 @@ from src.application.ports.agent_runtime_port import (
     AgentFactoryPort,
     AgentGraphRuntimePort,
 )
+from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 
 
 GRAPH_EMPTY_RESPONSE_FALLBACK_TEXT = "Sorry, I couldn't generate a response."
@@ -100,8 +103,8 @@ class GraphExecutor:
         return MessageProcessingOutcomeDto.create(text=text, delivered=delivered)
 
     def trim_recent_history(
-        self, recent_messages: list[dict[str, object]]
-    ) -> list[dict[str, object]]:
+        self, recent_messages: list[RuntimeHistoryMessage]
+    ) -> list[RuntimeHistoryMessage]:
         if len(recent_messages) <= self.RECENT_MESSAGES_LIMIT:
             return recent_messages
         return recent_messages[-self.RECENT_MESSAGES_LIMIT :]
@@ -113,7 +116,7 @@ class GraphExecutor:
         thread_id: str,
         chat_id: int,
         question: str,
-        recent_history: list[dict[str, object]],
+        recent_history: list[RuntimeHistoryMessage],
         runtime_context,
         trace_id: str,
     ) -> GraphExecutionRequestDto:
@@ -129,48 +132,51 @@ class GraphExecutor:
 
     def build_agent_state(
         self, *, request: GraphExecutionRequestDto
-    ) -> dict[str, object]:
+    ) -> RuntimeStateInput:
         """
         Convert the typed application request into the graph state contract.
         """
-        return {
-            "messages": [],
-            "project_id": request.project_id,
-            "thread_id": request.thread_id,
-            "escalation_requested": False,
-            "tool_calls": None,
-            "user_input": request.question,
-            "client_profile": None,
-            "conversation_summary": "",
-            "history": request.recent_history,
-            "knowledge_chunks": None,
-            "decision": None,
-            "tool_name": None,
-            "tool_args": None,
-            "tool_result": None,
-            "user_memory": None,
-            "response_text": None,
-            "requires_human": False,
-            "confidence": None,
-            "chat_id": request.chat_id,
-            "message_sent": False,
-            "trace_id": request.trace_id,
-            "client_id": None,
-            "project_configuration": request.runtime_context.to_dict(),
-            "close_ticket": False,
-            "intent": None,
-            "cta": None,
-            "lifecycle": None,
-            "features": None,
-            "dialog_state": None,
-            "topic": None,
-            "lead_status": None,
-            "repeat_count": None,
-        }
+        return cast(
+            RuntimeStateInput,
+            {
+                "messages": [],
+                "project_id": request.project_id,
+                "thread_id": request.thread_id,
+                "escalation_requested": False,
+                "tool_calls": None,
+                "user_input": request.question,
+                "client_profile": None,
+                "conversation_summary": "",
+                "history": request.recent_history,
+                "knowledge_chunks": None,
+                "decision": None,
+                "tool_name": None,
+                "tool_args": None,
+                "tool_result": None,
+                "user_memory": None,
+                "response_text": None,
+                "requires_human": False,
+                "confidence": None,
+                "chat_id": request.chat_id,
+                "message_sent": False,
+                "trace_id": request.trace_id,
+                "client_id": None,
+                "project_configuration": request.runtime_context.to_dict(),
+                "close_ticket": False,
+                "intent": None,
+                "cta": None,
+                "lifecycle": None,
+                "features": None,
+                "dialog_state": None,
+                "topic": None,
+                "lead_status": None,
+                "repeat_count": None,
+            },
+        )
 
     def extract_graph_result(
         self,
-        result_state: dict[str, object],
+        result_state: Mapping[str, object],
         *,
         question: str,
         thread_id: str,

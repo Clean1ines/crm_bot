@@ -69,7 +69,7 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
     Returns:
         Dict with keys to update in the state.
     """
-    user_input = state.get("user_input", "")
+    user_input = str(state.get("user_input") or "")
 
     if not user_input:
         logger.warning("rules_node called with empty user_input")
@@ -90,7 +90,7 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
 
 
 def _get_rules_input_size(state: AgentState) -> int:
-    return len(state.get("user_input", ""))
+    return len(str(state.get("user_input") or ""))
 
 
 def _get_rules_output_size(result: dict[str, object]) -> int:

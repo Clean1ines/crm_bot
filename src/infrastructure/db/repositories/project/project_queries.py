@@ -161,6 +161,22 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             projects.append(ProjectSummaryView.from_record(project))
         return projects
 
+    async def get_project_member_role(
+        self, project_id: ProjectId, user_id: ProjectId
+    ) -> str | None:
+        async with self.pool.acquire() as conn:
+            role = await conn.fetchval(
+                """
+                SELECT role
+                FROM project_members
+                WHERE project_id = $1 AND user_id = $2
+            """,
+                ensure_uuid(project_id),
+                ensure_uuid(user_id),
+            )
+
+        return str(role) if role else None
+
     async def user_has_project_role(
         self,
         project_id: ProjectId,

@@ -39,7 +39,7 @@ class GroqQueryExpander:
     def __init__(
         self,
         *,
-        client: object | None = None,
+        client: AsyncGroq | None = None,
         model: str = "llama-3.3-70b-versatile",
     ) -> None:
         self._client = client or AsyncGroq(api_key=settings.GROQ_API_KEY)

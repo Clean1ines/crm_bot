@@ -46,6 +46,8 @@ class ThreadLifecyclePort(Protocol):
 
     async def release_manager_assignment(self, thread_id: str) -> None: ...
 
+    async def archive_thread(self, thread_id: str) -> None: ...
+
 
 class ThreadMessagePort(Protocol):
     async def add_message(self, thread_id: str, role: str, content: str) -> None: ...
@@ -101,6 +103,7 @@ class ThreadReadPort(Protocol):
         offset: int = 0,
         status_filter: str | None = None,
         search: str | None = None,
+        client_id: str | None = None,
     ) -> list[ThreadDialogView]: ...
 
     async def find_by_status(self, status: str) -> list[ThreadStatusSummaryView]: ...

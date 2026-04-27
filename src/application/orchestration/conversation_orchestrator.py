@@ -14,6 +14,7 @@ from src.utils.uuid_utils import ensure_uuid
 
 from src.application.orchestration.client_message_service import ClientMessageService
 from src.application.orchestration.graph_factory import GraphExecutor, GraphFactory
+from src.domain.runtime.state_contracts import RuntimeHistoryMessage
 from src.application.orchestration.manager_reply_service import ManagerReplyService
 from src.application.orchestration.project_runtime_loader import ProjectRuntimeLoader
 from src.application.orchestration.transport_sender_port import (
@@ -166,8 +167,8 @@ class ConversationOrchestrator:
         return GraphExecutor.outcome(text, delivered=delivered)
 
     def _trim_recent_history(
-        self, recent_messages: list[dict[str, object]]
-    ) -> list[dict[str, object]]:
+        self, recent_messages: list[RuntimeHistoryMessage]
+    ) -> list[RuntimeHistoryMessage]:
         return self.graph_executor.trim_recent_history(recent_messages)
 
     def _create_graph_execution_request(self, **kwargs):

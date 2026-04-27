@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from src.application.dto.control_plane_dto import ProjectMutationResultDto
 from src.application.dto.project_dto import (
     ProjectChannelDto,
@@ -145,7 +146,17 @@ class ProjectCommandService:
         result = await self.repo.add_manager_by_telegram_identity(
             project_id, str(chat_id)
         )
-        return ProjectMutationResultDto.from_record(result)
+        if hasattr(result, "to_record"):
+            record = result.to_record()
+        elif isinstance(result, Mapping):
+            record = dict(result)
+        else:
+            raise TypeError(
+                "add_manager_by_telegram_identity must return a mapping "
+                "or an object with to_record()"
+            )
+
+        return ProjectMutationResultDto.from_record(record)
 
     async def remove_manager(
         self, project_id: str, current_user_id: str, chat_id: int
@@ -246,10 +257,10 @@ class ProjectCommandService:
         await self.access_service.require_project_role(
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
-        provider = (data.get("provider") or "").strip()
+        provider = str(data.get("provider") or "").strip()
         if not provider:
             raise ValidationError("Integration provider is required")
-        status = data.get("status") or "disabled"
+        status = str(data.get("status") or "disabled")
         integration = await self.repo.upsert_project_integration(
             project_id,
             provider=provider,
@@ -265,13 +276,13 @@ class ProjectCommandService:
         await self.access_service.require_project_role(
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
-        kind = (data.get("kind") or "").strip()
-        provider = (data.get("provider") or "").strip()
+        kind = str(data.get("kind") or "").strip()
+        provider = str(data.get("provider") or "").strip()
         if kind not in ALLOWED_CHANNEL_KINDS:
             raise ValidationError("Invalid channel kind")
         if not provider:
             raise ValidationError("Channel provider is required")
-        status = data.get("status") or "disabled"
+        status = str(data.get("status") or "disabled")
         channel = await self.repo.upsert_project_channel(
             project_id,
             kind=kind,

@@ -6,6 +6,24 @@ from datetime import datetime
 from src.domain.project_plane.json_types import json_object_from_unknown
 
 
+def _history_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
 @dataclass(frozen=True, slots=True)
 class ManagerReplyHistoryItemView:
     id: int
@@ -24,7 +42,7 @@ class ManagerReplyHistoryItemView:
         created_at = record.get("created_at")
 
         return cls(
-            id=int(record["id"]),
+            id=_history_int(record.get("id")),
             thread_id=str(record["stream_id"]),
             project_id=str(record["project_id"]),
             manager_user_id=str(payload.get("manager_user_id") or ""),

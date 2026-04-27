@@ -1,5 +1,7 @@
 """Shared utilities for the agent pipeline."""
 
+from typing import Any, cast
+
 
 def coerce_int(value: object, default: int = 0) -> int:
     """
@@ -15,6 +17,6 @@ def coerce_int(value: object, default: int = 0) -> int:
     try:
         if value is None:
             return default
-        return int(value)
+        return int(cast(Any, value))
     except (TypeError, ValueError):
         return default

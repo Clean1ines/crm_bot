@@ -21,14 +21,18 @@ from src.utils.uuid_utils import ensure_uuid
 logger = get_logger(__name__)
 
 
-def _normalize_timestamp(value: object) -> object:
+def _normalize_timestamp(value: object) -> str | None:
     """
     Keep test strings unchanged and serialize real datetime-like values only
     when the repository owns the DB-row normalization boundary.
     """
-    if value is not None and hasattr(value, "isoformat"):
-        return value.isoformat()
-    return value
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
 
 
 class KnowledgeRepository:

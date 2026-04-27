@@ -29,6 +29,24 @@ def _as_list(value: object) -> list[object]:
     return []
 
 
+def _coerce_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        try:
+            return int(stripped)
+        except ValueError:
+            return default
+    return default
+
+
 def _serialize_timestamp(value: object) -> str | None:
     if value is None:
         return None
@@ -147,7 +165,7 @@ class ProjectPromptVersionDto:
         created_at = record.get("created_at")
 
         return cls(
-            version=int(version) if version is not None else None,
+            version=_coerce_int(version) if version is not None else None,
             prompt_bundle=_as_dict(record.get("prompt_bundle")),
             is_active=bool(is_active) if is_active is not None else None,
             created_at=str(created_at) if created_at is not None else None,
@@ -290,7 +308,7 @@ class ManagerReplyHistoryItemDto:
         manager_chat_id = record.get("manager_chat_id")
 
         return cls(
-            id=int(record["id"]),
+            id=_coerce_int(record["id"]),
             thread_id=str(record["thread_id"]),
             project_id=str(record["project_id"]),
             manager_user_id=str(record["manager_user_id"]),

@@ -13,7 +13,7 @@ This module provides centralized dependency injection functions for:
 All dependencies use the global pool from lifespan management.
 """
 
-from typing import Callable, Awaitable
+from typing import TYPE_CHECKING, Protocol, cast, Callable, Awaitable
 import jwt
 
 from fastapi import Header, HTTPException, Depends
@@ -54,7 +54,39 @@ from src.infrastructure.redis.client import get_redis_client
 
 import src.interfaces.composition.fastapi_lifespan
 
+if TYPE_CHECKING:
+    from src.tools.registry import ToolRegistry
+
+
+class ProjectMemberResolverRepoPort(Protocol):
+    async def get_manager_notification_targets(self, project_id: str) -> list[str]: ...
+
+    async def resolve_manager_user_id_by_telegram(
+        self,
+        project_id: str,
+        manager_chat_id: str,
+    ) -> str | None: ...
+
+
 logger = get_logger(__name__)
+
+
+class ProjectMemberResolverAdapter:
+    def __init__(self, repo: ProjectMemberResolverRepoPort) -> None:
+        self.repo = repo
+
+    async def get_manager_notification_targets(self, project_id: str) -> list[str]:
+        return await self.repo.get_manager_notification_targets(project_id)
+
+    async def resolve_manager_user_id_by_telegram(
+        self,
+        project_id: str,
+        telegram_id: int,
+    ) -> str | None:
+        return await self.repo.resolve_manager_user_id_by_telegram(
+            project_id,
+            str(telegram_id),
+        )
 
 
 def get_pool() -> object:
@@ -111,7 +143,9 @@ def get_project_token_repo(pool: object = Depends(get_pool)) -> ProjectTokenPort
 def get_project_member_repo(
     pool: object = Depends(get_pool),
 ) -> ProjectMemberResolverPort:
-    return build_project_member_repository(pool)
+    return ProjectMemberResolverAdapter(
+        cast(ProjectMemberResolverRepoPort, build_project_member_repository(pool))
+    )
 
 
 def get_project_service(
@@ -282,27 +316,21 @@ def get_thread_command_service(
     return ThreadCommandService(thread_lifecycle_repo, memory_repo)
 
 
-def get_tool_registry() -> object:
+def get_tool_registry() -> "ToolRegistry":
     """
     Return the global ToolRegistry singleton instance.
 
-    This dependency provides access to the ToolRegistry for dynamic
-    tool execution from API endpoints.
-
-    Returns:
-        ToolRegistry: The global tool registry singleton.
-
-    Raises:
-        RuntimeError: If tool_registry is not initialized.
+    Lazy import keeps startup/circular-import behavior sane. getattr keeps
+    the test monkeypatch path working, and cast keeps application code typed.
     """
-    # Lazy import to avoid circular dependencies
-    from src.tools import tool_registry
+    from src import tools
 
-    if tool_registry is None:
+    registry = getattr(tools, "tool_registry", None)
+    if registry is None:
         logger.error("ToolRegistry requested before initialization")
         raise RuntimeError("ToolRegistry not initialized")
 
-    return tool_registry
+    return cast("ToolRegistry", registry)
 
 
 async def get_redis() -> object:

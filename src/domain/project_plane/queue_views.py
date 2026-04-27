@@ -4,6 +4,36 @@ from datetime import datetime
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
+def _queue_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
+def _queue_optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    return _queue_int(value)
+
+
+def _queue_timestamp(value: object) -> str | datetime | None:
+    if isinstance(value, (str, datetime)):
+        return value
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class QueueJobView:
     id: str
@@ -19,13 +49,9 @@ class QueueJobView:
             id=str(record["id"]),
             task_type=str(record["task_type"]),
             payload=json_object_from_unknown(record.get("payload") or {}),
-            attempts=int(record.get("attempts") or 0),
-            max_attempts=(
-                int(record["max_attempts"])
-                if record.get("max_attempts") is not None
-                else None
-            ),
-            created_at=record.get("created_at"),
+            attempts=_queue_int(record.get("attempts")),
+            max_attempts=_queue_optional_int(record.get("max_attempts")),
+            created_at=_queue_timestamp(record.get("created_at")),
         )
 
     def to_record(self) -> JsonObject:

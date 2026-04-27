@@ -7,7 +7,8 @@ import logging
 import sys
 import time
 import uuid
-from typing import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TypeVar
 
 import structlog
 from fastapi import Request
@@ -67,14 +68,17 @@ def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(module_name)
 
 
+StateT = TypeVar("StateT", bound=Mapping[str, object])
+ResultT = TypeVar("ResultT")
+
+
 async def log_node_execution(
     node_name: str,
-    func: Callable[[Mapping[str, object]], object],
-    state: Mapping[str, object],
-    *,
-    get_input_size: Callable[[Mapping[str, object]], int] | None = None,
-    get_output_size: Callable[[object], int] | None = None,
-) -> object:
+    func: Callable[[StateT], Awaitable[ResultT]],
+    state: StateT,
+    get_input_size: Callable[[StateT], int] | None = None,
+    get_output_size: Callable[[ResultT], int] | None = None,
+) -> ResultT:
     """
     Execute an agent node with timing and observability logging.
 
@@ -103,7 +107,7 @@ async def log_node_execution(
             "input_size": input_size,
         }
         if error is None:
-            if get_output_size:
+            if get_output_size and result is not None:
                 extra["output_size"] = get_output_size(result)
             logger.info("Node execution completed", **extra)
         else:

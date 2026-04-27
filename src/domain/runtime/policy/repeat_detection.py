@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 
 from src.domain.runtime.dialog_state import default_dialog_state
+from src.domain.runtime.value_parsing import coerce_int
 from .intent_topic import FeatureMap
 from .lifecycle import DEFAULT_LIFECYCLE
 
@@ -12,13 +13,6 @@ HIGH_INTENT_TOPICS = {"pricing", "product", "integration"}
 
 DialogStateMap = Mapping[str, object]
 MutableDialogState = dict[str, object]
-
-
-def _coerce_int(value: object, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _normalized_previous_value(
@@ -33,7 +27,7 @@ def calculate_repeat_count(
 ) -> int:
     prev_intent = _normalized_previous_value(previous_dialog_state, "last_intent")
     prev_topic = _normalized_previous_value(previous_dialog_state, "last_topic")
-    previous_count = _coerce_int(previous_dialog_state.get("repeat_count"), 0)
+    previous_count = coerce_int(previous_dialog_state.get("repeat_count"), 0)
 
     if not intent:
         return previous_count

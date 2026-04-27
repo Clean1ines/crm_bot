@@ -4,12 +4,14 @@ Intent extraction node for LangGraph pipeline.
 Uses a lightweight LLM to extract intent, CTA, topic, emotion, and feature hints.
 """
 
+from typing import cast
 import json
 
 from langchain_groq import ChatGroq
 
 from src.agent.router.prompt_builder import build_intent_prompt
 from src.agent.state import AgentState
+from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.domain.runtime.intent_extraction import (
     IntentExtractionContext,
     IntentExtractionResult,
@@ -18,6 +20,29 @@ from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
+
+
+def _prompt_memory_from_runtime(
+    value: object,
+) -> dict[str, list[dict[str, object]]] | None:
+    if not isinstance(value, dict):
+        return None
+
+    normalized: dict[str, list[dict[str, object]]] = {}
+    for key, raw_items in value.items():
+        if not isinstance(raw_items, list):
+            continue
+
+        items: list[dict[str, object]] = []
+        for item in raw_items:
+            if isinstance(item, dict):
+                items.append(
+                    {str(item_key): item_value for item_key, item_value in item.items()}
+                )
+
+        normalized[str(key)] = items
+
+    return normalized or None
 
 
 def _unwrap_json_block(content: str) -> str:
@@ -46,7 +71,7 @@ def create_intent_extractor_node(
         )
 
     async def _intent_extractor_node_impl(state: AgentState) -> dict[str, object]:
-        context = IntentExtractionContext.from_state(state)
+        context = IntentExtractionContext.from_state(cast(RuntimeStateInput, state))
         if not context.user_input:
             logger.debug("No user_input, skipping intent extraction")
             return {}
@@ -55,7 +80,7 @@ def create_intent_extractor_node(
             user_input=context.user_input,
             conversation_summary=context.conversation_summary,
             history=context.history,
-            user_memory=context.user_memory,
+            user_memory=_prompt_memory_from_runtime(context.user_memory),
         )
 
         try:
@@ -73,7 +98,7 @@ def create_intent_extractor_node(
                     "features": result.features,
                 },
             )
-            return result.to_state_patch()
+            return dict(result.to_state_patch())
         except Exception as exc:
             logger.warning(
                 "Intent extraction failed",
@@ -82,7 +107,7 @@ def create_intent_extractor_node(
             return {}
 
     def _get_intent_input_size(state: AgentState) -> int:
-        context = IntentExtractionContext.from_state(state)
+        context = IntentExtractionContext.from_state(cast(RuntimeStateInput, state))
         return (
             len(context.user_input)
             + len(context.conversation_summary or "")

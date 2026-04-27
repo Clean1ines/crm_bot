@@ -78,8 +78,10 @@ def create_load_state_node(
         if isinstance(persisted_state, dict):
             patch.update(persisted_state)
 
-        project_id = patch.get("project_id") or state.get("project_id")
-        client_id = patch.get("client_id") or state.get("client_id")
+        project_id_value = patch.get("project_id") or state.get("project_id")
+        client_id_value = patch.get("client_id") or state.get("client_id")
+        project_id = str(project_id_value) if project_id_value else None
+        client_id = str(client_id_value) if client_id_value else None
 
         if memory_repo and project_id and client_id:
             try:

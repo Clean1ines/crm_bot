@@ -5,11 +5,14 @@ Performs project-scoped knowledge retrieval through the tool registry and
 stores normalized chunks in graph state.
 """
 
+from typing import cast
+
 from src.agent.state import AgentState
 from src.domain.runtime.knowledge_search import (
     KnowledgeSearchContext,
     KnowledgeSearchResult,
 )
+from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -22,13 +25,14 @@ def create_kb_search_node(tool_registry: ToolRegistry):
     """
 
     async def _kb_search_node_impl(state: AgentState) -> dict[str, object]:
-        context = KnowledgeSearchContext.from_state(state)
+        context = KnowledgeSearchContext.from_state(cast(RuntimeStateInput, state))
         if not context.project_id or not context.query:
             logger.warning(
                 "KB search skipped",
                 extra={"project_id": context.project_id, "query": context.query},
             )
-            return KnowledgeSearchResult().to_state_patch()
+            patch = KnowledgeSearchResult().to_state_patch()
+            return dict(patch)
 
         logger.info(
             "KB search start",
@@ -87,7 +91,8 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     extra={"chunk_scores": result.scores()},
                 )
 
-            return result.to_state_patch()
+            patch = result.to_state_patch()
+            return dict(patch)
         except Exception as exc:
             logger.exception(
                 "KB search failed",
@@ -97,13 +102,15 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     "error": str(exc),
                 },
             )
-            return KnowledgeSearchResult().to_state_patch()
+            patch = KnowledgeSearchResult().to_state_patch()
+            return dict(patch)
 
     def _get_kb_search_input_size(state: AgentState) -> int:
         return len(str(state.get("user_input") or ""))
 
     def _get_kb_search_output_size(result: dict[str, object]) -> int:
-        return len(result.get("knowledge_chunks", []))
+        chunks = result.get("knowledge_chunks")
+        return len(chunks) if isinstance(chunks, list) else 0
 
     async def kb_search_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(

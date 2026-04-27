@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from src.domain.project_plane.thread_views import (
     ThreadDialogClientView,
     ThreadDialogView,
@@ -57,6 +59,7 @@ class ThreadReadRepository:
         offset: int = 0,
         status_filter: str | None = None,
         search: str | None = None,
+        client_id: str | None = None,
     ) -> list[ThreadDialogView]:
         logger.info(
             "Fetching dialogs",
@@ -64,7 +67,7 @@ class ThreadReadRepository:
         )
 
         where_parts = ["c.project_id = $1"]
-        params = [ensure_uuid(project_id)]
+        params: list[UUID | str | int] = [ensure_uuid(project_id)]
         param_idx = 2
 
         if status_filter:
@@ -77,6 +80,11 @@ class ThreadReadRepository:
                 f"(c.full_name ILIKE ${param_idx} OR c.username ILIKE ${param_idx})"
             )
             params.append(f"%{search}%")
+            param_idx += 1
+
+        if client_id:
+            where_parts.append(f"c.id = ${param_idx}")
+            params.append(ensure_uuid(client_id))
             param_idx += 1
 
         where_clause = " AND ".join(where_parts)

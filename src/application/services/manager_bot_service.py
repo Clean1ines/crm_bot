@@ -3,7 +3,7 @@ from src.application.ports.cache_port import CachePort
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
 from src.application.ports.telegram_port import TelegramClientPort
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.manager_assignments import (
     ManagerActor,
     ManagerReplySession,
@@ -194,7 +194,9 @@ class ManagerBotService:
                         project_id,
                         client_id,
                         "dialog_state",
-                        default_dialog_state(lifecycle="active_client"),
+                        json_object_from_unknown(
+                            default_dialog_state(lifecycle="active_client")
+                        ),
                         "dialog_state",
                     )
                     self.logger.info(

@@ -3,8 +3,16 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Protocol
 
-from src.domain.control_plane.project_configuration import ProjectConfigurationView
-from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
+from src.domain.control_plane.project_configuration import (
+    ProjectChannelView,
+    ProjectConfigurationView,
+    ProjectIntegrationView,
+)
+from src.domain.control_plane.project_views import (
+    ManagerMembershipMutationView,
+    ProjectMemberView,
+    ProjectSummaryView,
+)
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.manager_notifications import ManagerNotificationTarget
 
@@ -91,6 +99,12 @@ class ProjectControlPort(ProjectReadPort, Protocol):
 
     async def project_exists(self, project_id: str) -> bool: ...
 
+    async def create_project_with_user_id(self, user_id: str, name: str) -> str: ...
+
+    async def update_project(self, project_id: str, name: str | None) -> None: ...
+
+    async def delete_project(self, project_id: str) -> None: ...
+
     async def set_bot_token(self, project_id: str, token: str | None) -> None: ...
 
     async def set_manager_bot_token(
@@ -121,7 +135,37 @@ class ProjectControlPort(ProjectReadPort, Protocol):
 
     async def remove_project_member(self, project_id: str, user_id: str) -> None: ...
 
+    async def add_manager_by_telegram_identity(
+        self, project_id: str, manager_chat_id: str
+    ) -> ManagerMembershipMutationView: ...
+
+    async def remove_manager_by_telegram_identity(
+        self, project_id: str, manager_chat_id: str
+    ) -> None: ...
+
     async def get_project_settings(self, project_id: str) -> JsonObject | None: ...
+
+    async def update_project_settings(
+        self, project_id: str, data: JsonObject
+    ) -> None: ...
+
+    async def update_project_policies(
+        self, project_id: str, data: JsonObject
+    ) -> None: ...
+
+    async def update_project_limit_profile(
+        self, project_id: str, data: JsonObject
+    ) -> None: ...
+
+    async def upsert_project_integration(
+        self,
+        project_id: str,
+        *,
+        provider: str,
+        status: str,
+        config_json: JsonObject,
+        credentials_encrypted: str | None = None,
+    ) -> ProjectIntegrationView: ...
 
     async def upsert_project_channel(
         self,
@@ -131,4 +175,4 @@ class ProjectControlPort(ProjectReadPort, Protocol):
         provider: str,
         status: str,
         config_json: JsonObject,
-    ) -> JsonObject: ...
+    ) -> ProjectChannelView: ...

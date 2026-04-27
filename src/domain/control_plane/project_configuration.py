@@ -107,7 +107,7 @@ class ProjectPromptVersionView:
         return cls(
             id=str(record["id"]) if record.get("id") is not None else None,
             name=str(record["name"]) if record.get("name") is not None else None,
-            version=int(version) if version is not None else None,
+            version=_optional_int(version),
             prompt_bundle=json_object_from_unknown(prompt_bundle),
             is_active=_optional_bool(record.get("is_active")),
             created_at=_optional_text(record.get("created_at")),
@@ -215,6 +215,26 @@ def _view_item(
 
 def _optional_text(value: object) -> str | None:
     return str(value) if value is not None else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return int(normalized)
+        except ValueError:
+            return None
+    return None
 
 
 def _optional_bool(value: object) -> bool | None:

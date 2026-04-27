@@ -12,7 +12,7 @@ from src.application.ports.project_port import ProjectAccessPort, ProjectReadPor
 from src.domain.control_plane.project_configuration import ProjectConfigurationView
 from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
 from src.domain.control_plane.roles import PROJECT_READ_ROLES
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
 class ProjectQueryService:
@@ -56,7 +56,10 @@ class ProjectQueryService:
 
     async def list_projects(self, current_user_id: str) -> list[JsonObject]:
         projects = await self._load_projects_for_user_view(current_user_id)
-        return [ProjectSummaryDto.from_view(project).to_dict() for project in projects]
+        return [
+            json_object_from_unknown(ProjectSummaryDto.from_view(project).to_dict())
+            for project in projects
+        ]
 
     async def get_project(self, project_id: str, current_user_id: str) -> JsonObject:
         project = await self._load_project_view(project_id)
@@ -66,7 +69,7 @@ class ProjectQueryService:
             await self.access_service.require_project_role(
                 project_id, current_user_id, PROJECT_READ_ROLES
             )
-        return ProjectSummaryDto.from_view(project).to_dict()
+        return json_object_from_unknown(ProjectSummaryDto.from_view(project).to_dict())
 
     async def get_managers(self, project_id: str, current_user_id: str) -> list[int]:
         await self.access_service.require_project_role(
@@ -92,7 +95,9 @@ class ProjectQueryService:
             project_id, current_user_id, PROJECT_READ_ROLES
         )
         configuration = await self._load_project_configuration_view(project_id)
-        return ProjectConfigurationDto.from_view(configuration).to_dict()
+        return json_object_from_unknown(
+            ProjectConfigurationDto.from_view(configuration).to_dict()
+        )
 
     async def list_project_integrations(
         self, project_id: str, current_user_id: str
@@ -102,7 +107,9 @@ class ProjectQueryService:
         )
         configuration = await self._load_project_configuration_view(project_id)
         return [
-            ProjectIntegrationDto.from_view(integration).to_dict()
+            json_object_from_unknown(
+                ProjectIntegrationDto.from_view(integration).to_dict()
+            )
             for integration in configuration.integrations
         ]
 
@@ -114,7 +121,7 @@ class ProjectQueryService:
         )
         configuration = await self._load_project_configuration_view(project_id)
         return [
-            ProjectChannelDto.from_view(channel).to_dict()
+            json_object_from_unknown(ProjectChannelDto.from_view(channel).to_dict())
             for channel in configuration.channels
         ]
 
@@ -137,8 +144,10 @@ class ProjectQueryService:
             offset=offset,
         )
 
-        return ManagerReplyHistoryDto.from_views(
-            items,
-            limit=limit,
-            offset=offset,
-        ).to_dict()
+        return json_object_from_unknown(
+            ManagerReplyHistoryDto.from_views(
+                items,
+                limit=limit,
+                offset=offset,
+            ).to_dict()
+        )

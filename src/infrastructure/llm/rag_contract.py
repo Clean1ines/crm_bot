@@ -12,7 +12,7 @@ It defines the testable contract between:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol
+from typing import Any, Mapping, Protocol, cast
 
 
 RAG_CANDIDATE_KNOWN_KEYS = frozenset(
@@ -104,8 +104,10 @@ def _to_optional_text(value: object) -> str | None:
 
 
 def _to_float(value: object, *, default: float) -> float:
+    if value is None:
+        return default
     try:
-        return float(value or default)
+        return float(cast(Any, value))
     except (TypeError, ValueError):
         return default
 
@@ -115,7 +117,7 @@ def _to_optional_int(value: object) -> int | None:
         return None
 
     try:
-        return int(value)
+        return int(cast(Any, value))
     except (TypeError, ValueError):
         return None
 

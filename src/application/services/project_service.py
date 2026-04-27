@@ -1,3 +1,5 @@
+from collections.abc import Collection
+
 from src.application.ports.project_port import ProjectControlPort
 
 from src.application.errors import ForbiddenError
@@ -13,7 +15,7 @@ class ProjectAccessService:
         self,
         project_id: str,
         user_id: str,
-        allowed_roles: list[str],
+        allowed_roles: Collection[str],
     ) -> None:
         has_role = await self.repo.user_has_project_role(
             project_id, user_id, allowed_roles

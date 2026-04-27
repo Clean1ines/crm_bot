@@ -6,9 +6,11 @@ patch describing the outcome.
 """
 
 import json
+from typing import cast
 
 from src.agent.state import AgentState
 from src.domain.runtime.tool_execution import ToolExecutionContext, ToolExecutionResult
+from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -27,13 +29,14 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
     """
 
     async def _tool_executor_node_impl(state: AgentState) -> dict[str, object]:
-        context = ToolExecutionContext.from_state(state)
+        context = ToolExecutionContext.from_state(cast(RuntimeStateInput, state))
         if not context.tool_name:
             logger.warning("tool_executor_node called with no tool_name")
-            return ToolExecutionResult(
+            patch = ToolExecutionResult(
                 requires_human=True,
                 response_text=MISSING_TOOL_TEXT,
             ).to_state_patch()
+            return dict(patch)
 
         logger.info(
             "Executing tool",
@@ -47,28 +50,30 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
         try:
             result = await tool_registry.execute(
                 context.tool_name,
-                context.tool_args,
-                context.execution_context(),
+                dict(context.tool_args),
+                dict(context.execution_context()),
             )
             logger.debug(
                 "Tool executed successfully", extra={"tool_name": context.tool_name}
             )
-            return ToolExecutionResult(
+            patch = ToolExecutionResult(
                 tool_result=result, requires_human=False
             ).to_state_patch()
+            return dict(patch)
         except Exception as exc:
             logger.exception(
                 "Tool execution failed",
                 extra={"tool_name": context.tool_name, "error": str(exc)},
             )
-            return ToolExecutionResult(
+            patch = ToolExecutionResult(
                 tool_result=None,
                 requires_human=True,
                 response_text=TOOL_FAILED_TEXT,
             ).to_state_patch()
+            return dict(patch)
 
     def _get_tool_executor_input_size(state: AgentState) -> int:
-        context = ToolExecutionContext.from_state(state)
+        context = ToolExecutionContext.from_state(cast(RuntimeStateInput, state))
         return len(json.dumps(context.tool_args))
 
     def _get_tool_executor_output_size(result: dict[str, object]) -> int:

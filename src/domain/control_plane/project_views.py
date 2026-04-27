@@ -8,6 +8,38 @@ def _json_object(value: object) -> JsonObject:
     return json_object_from_unknown(value)
 
 
+def _optional_text(value: object) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        try:
+            return int(normalized)
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return None
+
+
 @dataclass(slots=True)
 class ProjectSummaryView:
     id: str
@@ -29,11 +61,11 @@ class ProjectSummaryView:
             user_id=str(record["user_id"])
             if record.get("user_id") is not None
             else None,
-            client_bot_username=record.get("client_bot_username"),
-            manager_bot_username=record.get("manager_bot_username"),
-            access_role=record.get("access_role"),
-            created_at=record.get("created_at"),
-            updated_at=record.get("updated_at"),
+            client_bot_username=_optional_text(record.get("client_bot_username")),
+            manager_bot_username=_optional_text(record.get("manager_bot_username")),
+            access_role=_optional_text(record.get("access_role")),
+            created_at=_optional_datetime(record.get("created_at")),
+            updated_at=_optional_datetime(record.get("updated_at")),
         )
 
     def to_record(self) -> dict[str, object]:
@@ -66,14 +98,14 @@ class ProjectMemberView:
         return cls(
             user_id=str(record["user_id"]),
             role=str(record["role"]),
-            telegram_id=record.get("telegram_id"),
-            username=record.get("username"),
-            full_name=record.get("full_name"),
-            email=record.get("email"),
+            telegram_id=_optional_int(record.get("telegram_id")),
+            username=_optional_text(record.get("username")),
+            full_name=_optional_text(record.get("full_name")),
+            email=_optional_text(record.get("email")),
             project_id=str(record["project_id"])
             if record.get("project_id") is not None
             else None,
-            created_at=record.get("created_at"),
+            created_at=_optional_datetime(record.get("created_at")),
         )
 
     def to_record(self) -> dict[str, object]:
@@ -116,14 +148,14 @@ class ProjectRuntimeSettingsView:
         payload = record or {}
         targets = list(manager_targets or [])
         return cls(
-            system_prompt=payload.get("system_prompt"),
-            bot_token=payload.get("bot_token"),
-            webhook_url=payload.get("webhook_url"),
-            manager_bot_token=payload.get("manager_bot_token"),
-            webhook_secret=payload.get("webhook_secret"),
+            system_prompt=_optional_text(payload.get("system_prompt")),
+            bot_token=_optional_text(payload.get("bot_token")),
+            webhook_url=_optional_text(payload.get("webhook_url")),
+            manager_bot_token=_optional_text(payload.get("manager_bot_token")),
+            webhook_secret=_optional_text(payload.get("webhook_secret")),
             is_pro_mode=bool(payload.get("is_pro_mode")),
-            client_bot_username=payload.get("client_bot_username"),
-            manager_bot_username=payload.get("manager_bot_username"),
+            client_bot_username=_optional_text(payload.get("client_bot_username")),
+            manager_bot_username=_optional_text(payload.get("manager_bot_username")),
             manager_notification_targets=targets,
             manager_chat_ids=targets.copy(),
         )
@@ -160,11 +192,11 @@ class ProjectIntegrationView:
             id=str(record["id"]),
             project_id=str(record["project_id"]),
             provider=str(record["provider"]),
-            status=record.get("status"),
+            status=_optional_text(record.get("status")),
             config_json=_json_object(record.get("config_json")),
-            credentials_encrypted=record.get("credentials_encrypted"),
-            created_at=record.get("created_at"),
-            updated_at=record.get("updated_at"),
+            credentials_encrypted=_optional_text(record.get("credentials_encrypted")),
+            created_at=_optional_text(record.get("created_at")),
+            updated_at=_optional_text(record.get("updated_at")),
         )
 
     def to_record(self) -> dict[str, object]:
@@ -199,10 +231,10 @@ class ProjectChannelView:
             project_id=str(record["project_id"]),
             kind=str(record["kind"]),
             provider=str(record["provider"]),
-            status=record.get("status"),
+            status=_optional_text(record.get("status")),
             config_json=_json_object(record.get("config_json")),
-            created_at=record.get("created_at"),
-            updated_at=record.get("updated_at"),
+            created_at=_optional_text(record.get("created_at")),
+            updated_at=_optional_text(record.get("updated_at")),
         )
 
     def to_record(self) -> dict[str, object]:

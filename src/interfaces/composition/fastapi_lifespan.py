@@ -11,6 +11,7 @@ This module wires the concrete application:
 Infrastructure modules must stay generic and must not import src.agent.
 """
 
+from typing import cast
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -43,7 +44,7 @@ from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.db.repositories.thread.runtime_state import (
     ThreadRuntimeStateRepository,
 )
-from src.infrastructure.llm.rag_service import RAGService
+from src.infrastructure.llm.rag_service import KnowledgeSearchRepository, RAGService
 from src.infrastructure.llm.query_expander import GroqQueryExpander
 from src.infrastructure.logging.logger import get_logger
 from src.tools import tool_registry
@@ -77,7 +78,10 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     project_tokens = ProjectTokenRepository(db_pool)
     project_members = ProjectMemberRepository(db_pool)
 
-    rag_service = RAGService(knowledge_repo, query_expander=GroqQueryExpander())
+    rag_service = RAGService(
+        cast(KnowledgeSearchRepository, knowledge_repo),
+        query_expander=GroqQueryExpander(),
+    )
 
     tool_registry.register(SearchKnowledgeTool(rag_service))
     logger.info("Registered SearchKnowledgeTool")

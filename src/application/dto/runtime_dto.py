@@ -1,4 +1,6 @@
-from dataclasses import asdict, dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import cast
 
 from src.domain.runtime.state_contracts import (
     HistoryMessage,
@@ -6,6 +8,30 @@ from src.domain.runtime.state_contracts import (
     ProjectIntegrationState,
     ProjectRuntimeConfigurationState,
 )
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    return {}
+
+
+def _project_integration_states(value: object) -> list[ProjectIntegrationState]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [
+        cast(ProjectIntegrationState, item)
+        for item in value
+        if isinstance(item, Mapping)
+    ]
+
+
+def _project_channel_states(value: object) -> list[ProjectChannelState]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [
+        cast(ProjectChannelState, item) for item in value if isinstance(item, Mapping)
+    ]
 
 
 @dataclass(slots=True)
@@ -22,15 +48,21 @@ class ProjectRuntimeContextDto:
     ) -> "ProjectRuntimeContextDto":
         payload = record or {}
         return cls(
-            settings=dict(payload.get("settings") or {}),
-            policies=dict(payload.get("policies") or {}),
-            limits=dict(payload.get("limits") or {}),
-            integrations=list(payload.get("integrations") or []),
-            channels=list(payload.get("channels") or []),
+            settings=_object_dict(payload.get("settings")),
+            policies=_object_dict(payload.get("policies")),
+            limits=_object_dict(payload.get("limits")),
+            integrations=_project_integration_states(payload.get("integrations")),
+            channels=_project_channel_states(payload.get("channels")),
         )
 
     def to_dict(self) -> ProjectRuntimeConfigurationState:
-        return ProjectRuntimeConfigurationState(**asdict(self))
+        return {
+            "settings": dict(self.settings),
+            "policies": dict(self.policies),
+            "limits": dict(self.limits),
+            "integrations": list(self.integrations),
+            "channels": list(self.channels),
+        }
 
 
 @dataclass(slots=True)
@@ -65,7 +97,7 @@ class GraphExecutionResultDto:
 
     @classmethod
     def from_graph_state(
-        cls, state: dict[str, object] | None
+        cls, state: Mapping[str, object] | None
     ) -> "GraphExecutionResultDto":
         payload = state or {}
         if payload.get("message_sent"):
