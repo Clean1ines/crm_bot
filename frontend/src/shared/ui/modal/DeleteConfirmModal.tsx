@@ -25,9 +25,9 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 
   return (
     <BaseModal isOpen={isOpen} onClose={onClose} title={`Delete ${itemType}`}>
-      <p className="text-[var(--text-main)] mb-4">
+      <p className="text-[var(--text-primary)] mb-4">
         Are you sure you want to delete {itemType}{' '}
-        <span className="font-semibold text-[var(--bronze-base)]">"{itemName}"</span>? This action cannot be undone.
+        <span className="font-semibold text-[var(--accent-primary)]">"{itemName}"</span>? This action cannot be undone.
       </p>
       <div className="flex justify-end gap-2">
         <button

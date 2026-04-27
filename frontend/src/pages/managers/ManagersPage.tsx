@@ -265,19 +265,8 @@ export const ManagersPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex-1 space-y-6 overflow-y-auto pr-2">
-              {[1, 2, 3].map((index) => (
-                <div key={index} className="relative border-l-2 border-[#F4F1EA] pl-6">
-                  <div className="absolute -left-[7px] top-0 h-3 w-3 rounded-full bg-[#B87333]" />
-                  <div className="mb-1 text-xs font-bold text-[#B87333]">Сегодня, 14:2{index}</div>
-                  <div className="rounded-lg border border-[#E5E2DA] bg-[#FAF9F6] p-4">
-                    <div className="mb-2 text-sm font-medium text-[#1E1E1E]">Ответ в треде #{index}54...</div>
-                    <div className="text-sm italic text-[#6B6B6B]">
-                      &quot;Конечно, мы можем подготовить для вас индивидуальное предложение...&quot;
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="flex-1 rounded-xl border border-dashed border-[#E5E2DA] bg-[#FAF9F6] p-6 text-sm text-[#6B6B6B]">
+              История ответов пока не подключена к API. Фейковые ответы скрыты, чтобы не вводить менеджера в заблуждение.
             </div>
           </div>
         </>

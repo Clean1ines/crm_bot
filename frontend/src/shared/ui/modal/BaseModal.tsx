@@ -20,14 +20,14 @@ export const BaseModal: React.FC<BaseModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[1100] p-4 backdrop-blur-[2px]">
-      <div className="w-full max-w-md bg-[var(--ios-glass-dark)] backdrop-blur-[var(--blur-std)] border border-[var(--ios-border)] rounded-2xl shadow-[var(--shadow-heavy)] p-6">
-        <h2 className="text-xl font-bold text-[var(--bronze-base)] mb-4">{title}</h2>
+    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/20 p-4 backdrop-blur-[2px]">
+      <div className="w-full max-w-md rounded-2xl border border-[var(--border-primary)] bg-white p-6 text-[var(--text-primary)] shadow-[var(--shadow-heavy)]">
+        <h2 className="mb-4 text-xl font-bold text-[var(--text-primary)]">{title}</h2>
         {children}
         <div className="flex justify-end gap-2 mt-6">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs font-semibold rounded bg-[var(--ios-glass-dark)] border border-[var(--ios-border)] text-[var(--text-main)] hover:bg-[var(--ios-glass-bright)] transition-colors"
+            className="rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-secondary)]"
           >
             Cancel
           </button>

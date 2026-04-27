@@ -57,7 +57,7 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
             required
             maxLength={100}
             autoFocus
-            className="w-full bg-[var(--ios-glass-dark)] border border-[var(--ios-border)] rounded px-3 py-2 text-sm text-[var(--text-main)] outline-none focus:border-[var(--bronze-base)] transition-colors"
+            className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div>
@@ -68,14 +68,14 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
             type="text"
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
-            className="w-full bg-[var(--ios-glass-dark)] border border-[var(--ios-border)] rounded px-3 py-2 text-sm text-[var(--text-main)] outline-none focus:border-[var(--bronze-base)] transition-colors"
+            className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="submit"
             disabled={isPending}
-            className="px-3 py-1.5 text-xs font-semibold rounded bg-[var(--bronze-base)] text-black hover:bg-[var(--bronze-bright)] transition-colors disabled:opacity-30"
+            className="rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
           >
             {isPending ? 'Saving...' : 'Save'}
           </button>

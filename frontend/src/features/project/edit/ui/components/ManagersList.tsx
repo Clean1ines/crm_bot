@@ -6,6 +6,7 @@ import { useProjectManagers } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
+import { Button } from '@shared/ui';
 
 const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
 
@@ -110,12 +111,13 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
             </option>
           ))}
         </select>
-        <button
+        <Button
+          variant="primary"
           onClick={() => addMutation.mutate()}
-          className="rounded bg-green-600 px-3 py-1 text-white"
+          disabled={addMutation.isPending}
         >
           Добавить
-        </button>
+        </Button>
       </div>
     </div>
   );

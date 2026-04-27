@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, MessageSquare, Calendar, Filter } from 'lucide-react';
 import { Button } from '@shared/ui';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -6,12 +6,24 @@ import { useProjectClients } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { getClientDisplayName, getClientInitials, getClientSecondaryText } from '@shared/lib/clients';
 
+const useDebouncedValue = <T,>(value: T, delayMs = 300): T => {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
+};
+
 export const ClientsPage: React.FC = () => {
   const navigate = useNavigate();
   const { projectId } = useParams<{ projectId: string }>();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data, isLoading, isError, error } = useProjectClients(projectId, searchQuery);
+  const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 300);
+  const { data, isLoading, isError, error } = useProjectClients(projectId, debouncedSearchQuery);
   const clients = Array.isArray(data?.clients) ? data.clients : [];
   const stats = data?.stats ?? { total_clients: 0, new_clients_7d: 0, active_dialogs: 0 };
 

@@ -2,6 +2,7 @@ type ClientLike = {
   username?: string | null;
   full_name?: string | null;
   first_name?: string | null;
+  chat_id?: number | string | null;
 };
 
 const normalizeUsername = (username?: string | null): string | null => {
@@ -19,6 +20,9 @@ export const getClientDisplayName = (client?: ClientLike | null, fallback = '–ö–
 
   const firstName = client?.first_name?.trim();
   if (firstName) return firstName;
+  if (client?.chat_id !== undefined && client?.chat_id !== null) {
+    return `Telegram #${client.chat_id}`;
+  }
 
   return fallback;
 };
