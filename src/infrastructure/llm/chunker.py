@@ -51,46 +51,68 @@ class ChunkerService:
         return text.strip()
 
     def chunk_text(self, text: str) -> List[str]:
+        """
+        Split extracted text into stable RAG chunks.
+
+        Runtime guarantee:
+        - large text must never collapse into one giant chunk;
+        - Markdown headers are preserved as useful context when possible;
+        - if structure detection fails, fallback still splits by size.
+        """
         if not text:
             return []
 
         text = self._clean_text(text)
+        if not text:
+            return []
 
-        # 1. режем по заголовкам Markdown
-        sections = re.split(r'(\n#{1,3}\s[^\n]+)', text)
+        # Fast and safe path: if text is already one big cleaned block,
+        # split it directly. This protects runtime uploads from becoming
+        # a single huge knowledge chunk.
+        if len(text) >= self.chunk_size and "\n#" not in text:
+            return [c.strip() for c in self._split_buffer(text) if c.strip()]
 
-        chunks = []
+        sections = re.split(r'(?:^|\n)(#{1,3}\s[^\n]+)', text)
+
+        chunks: List[str] = []
         current_header = ""
-
         buffer = ""
+
+        def flush_buffer() -> None:
+            nonlocal buffer
+            if buffer.strip():
+                chunks.extend(self._split_buffer(buffer.strip()))
+                buffer = ""
 
         for part in sections:
             part = part.strip()
             if not part:
                 continue
 
-            # если это заголовок
             if re.match(r'^#{1,3}\s', part):
+                flush_buffer()
                 current_header = part.replace("#", "").strip()
                 continue
 
-            # основной текст
             combined = f"{current_header}\n{part}".strip() if current_header else part
 
-            # если маленький — копим
-            if len(combined) < self.chunk_size:
-                buffer += "\n" + combined
+            if len(combined) >= self.chunk_size:
+                flush_buffer()
+                chunks.extend(self._split_buffer(combined))
                 continue
 
-            # если есть накопленный буфер — флашим
-            if buffer.strip():
-                chunks.extend(self._split_buffer(buffer))
-                buffer = ""
+            next_buffer = f"{buffer}\n\n{combined}".strip() if buffer else combined
+            if len(next_buffer) >= self.chunk_size:
+                flush_buffer()
+                buffer = combined
+            else:
+                buffer = next_buffer
 
-            chunks.extend(self._split_buffer(combined))
+        flush_buffer()
 
-        if buffer.strip():
-            chunks.extend(self._split_buffer(buffer))
+        # Final safety net: never return empty chunks for non-empty text.
+        if not chunks and text.strip():
+            chunks = self._split_buffer(text)
 
         return [c.strip() for c in chunks if c.strip()]
 
@@ -123,17 +145,27 @@ class ChunkerService:
             if chunk:
                 chunks.append(chunk)
 
-            start = max(end - self.overlap, 0)
-
-            if start >= len(text):
+            # Если дошли до конца текста — завершаем цикл.
+            # Иначе overlap вернёт start назад и можно бесконечно
+            # повторять последний хвост документа.
+            if end >= len(text):
                 break
+
+            next_start = max(end - self.overlap, 0)
+
+            # Защита от не-прогресса: при странных cut/overlap
+            # следующий start обязан двигаться вправо.
+            if next_start <= start:
+                next_start = end
+
+            start = next_start
 
         return chunks
 
     async def process_file(self, file_bytes: bytes, filename: str) -> List[str]:
         filename_lower = filename.lower()
 
-        if filename_lower.endswith('.txt'):
+        if filename_lower.endswith(('.txt', '.md')):
             text = file_bytes.decode('utf-8', errors='ignore')
             text = self._clean_text(text)
 
