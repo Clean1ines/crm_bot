@@ -45,3 +45,9 @@ htmlcov/
 frontend/openapi.json
 *.tsbuildinfo
 context_mcp_analysis.txt
+reports/
+coverage.json
+reports/
+htmlcov/
+.coverage
+coverage.json

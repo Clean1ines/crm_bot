@@ -60,32 +60,52 @@ class PersistenceContext:
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "PersistenceContext":
         state_copy: RuntimeStatePatch = {}
-        for key in (
-            "thread_id",
-            "project_id",
-            "client_id",
-            "response_text",
-            "metadata",
-            "decision",
-            "intent",
-            "lifecycle",
-            "lead_status",
-            "cta",
-            "topic",
-            "cta_hint",
-            "emotion",
-            "is_repeat_like",
-            "confidence",
-            "requires_human",
-            "close_ticket",
-            "features",
-            "dialog_state",
-            "tool_name",
-            "tool_args",
-            "tool_result",
-        ):
-            if key in state:
-                state_copy[key] = state[key]  # type: ignore[literal-required]
+        if "thread_id" in state:
+            state_copy["thread_id"] = state["thread_id"]
+        if "project_id" in state:
+            state_copy["project_id"] = state["project_id"]
+        if "client_id" in state:
+            state_copy["client_id"] = state["client_id"]
+        if "response_text" in state:
+            state_copy["response_text"] = state["response_text"]
+        if "metadata" in state:
+            state_copy["metadata"] = state["metadata"]
+        if "decision" in state:
+            state_copy["decision"] = state["decision"]
+        if "intent" in state:
+            state_copy["intent"] = state["intent"]
+        if "lifecycle" in state:
+            state_copy["lifecycle"] = state["lifecycle"]
+        if "lead_status" in state:
+            state_copy["lead_status"] = state["lead_status"]
+        if "cta" in state:
+            state_copy["cta"] = state["cta"]
+        if "topic" in state:
+            state_copy["topic"] = state["topic"]
+        if "cta_hint" in state:
+            state_copy["cta_hint"] = state["cta_hint"]
+        if "emotion" in state:
+            emotion = state["emotion"]
+            if emotion is not None:
+                state_copy["emotion"] = emotion
+        if "is_repeat_like" in state:
+            state_copy["is_repeat_like"] = state["is_repeat_like"]
+        if "confidence" in state:
+            state_copy["confidence"] = state["confidence"]
+        if "requires_human" in state:
+            state_copy["requires_human"] = state["requires_human"]
+        if "close_ticket" in state:
+            state_copy["close_ticket"] = state["close_ticket"]
+        if "features" in state:
+            state_copy["features"] = state["features"]
+        if "dialog_state" in state:
+            state_copy["dialog_state"] = state["dialog_state"]
+        if "tool_name" in state:
+            state_copy["tool_name"] = state["tool_name"]
+        if "tool_args" in state:
+            state_copy["tool_args"] = state["tool_args"]
+        if "tool_result" in state:
+            state_copy["tool_result"] = state["tool_result"]
 
         raw_dialog_state = state.get("dialog_state")
         dialog_state = raw_dialog_state if isinstance(raw_dialog_state, dict) else None

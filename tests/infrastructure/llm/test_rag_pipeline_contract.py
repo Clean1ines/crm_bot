@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 import pytest
 
@@ -9,9 +9,9 @@ from src.infrastructure.llm.rag_service import RAGService
 
 
 class FakeKnowledgeRepository:
-    def __init__(self, responses: dict[str, list[dict[str, Any]]]) -> None:
+    def __init__(self, responses: dict[str, list[Mapping[str, object]]]) -> None:
         self.responses = responses
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[dict[str, object]] = []
 
     async def search(
         self,
@@ -19,7 +19,7 @@ class FakeKnowledgeRepository:
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
-    ) -> list[dict[str, Any]]:
+    ) -> list[Mapping[str, object]]:
         self.calls.append(
             {
                 "project_id": project_id,
@@ -34,7 +34,7 @@ class FakeKnowledgeRepository:
 class FakeExpander:
     def __init__(self, expansions: list[str]) -> None:
         self.expansions = expansions
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[dict[str, object]] = []
 
     async def expand(self, query: str, *, max_expansions: int) -> list[str]:
         self.calls.append({"query": query, "max_expansions": max_expansions})

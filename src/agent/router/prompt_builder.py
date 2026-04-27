@@ -11,6 +11,7 @@ from src.domain.runtime.prompting import (
     NO_DATA_TEXT,
     NO_KNOWLEDGE_TEXT,
     ProjectPromptContext,
+    TruncateText,
 )
 from src.domain.runtime.state_contracts import (
     HistoryMessage,
@@ -153,13 +154,20 @@ def _prompt_configuration_state(
     return cast(ProjectRuntimeConfigurationState, value)
 
 
+def _truncate_project_prompt_text(value: str, limit: int) -> str:
+    return truncate_text(value, limit)
+
+
+PROJECT_PROMPT_TRUNCATE: TruncateText = _truncate_project_prompt_text
+
+
 def format_project_configuration(
     project_configuration: dict[str, object] | None,
 ) -> str:
     context = ProjectPromptContext.from_configuration(
         _prompt_configuration_state(project_configuration)
     )
-    lines = context.format_lines(truncate=truncate_text)  # type: ignore[arg-type]
+    lines = context.format_lines(truncate=PROJECT_PROMPT_TRUNCATE)
     return "\n".join(lines) if lines else NO_DATA_TEXT
 
 

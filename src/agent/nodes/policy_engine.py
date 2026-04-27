@@ -2,7 +2,8 @@
 Thin LangGraph adapter for the pure domain policy engine.
 """
 
-from typing import Any, cast
+from collections.abc import Awaitable, Callable
+from typing import Protocol, cast
 from uuid import UUID
 
 from src.agent.state import AgentState
@@ -12,12 +13,25 @@ from src.domain.runtime.dialog_state import merge_dialog_state
 from src.domain.runtime.policy.repeat_detection import build_dialog_state_update
 from src.domain.runtime.policy.result import PolicyDecisionContext, PolicyDecisionResult
 from src.domain.runtime.state_contracts import RuntimeStateInput
-from src.domain.project_plane.json_types import json_object_from_unknown
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 
 logger = get_logger(__name__)
+
+
+PolicyEngineNode = Callable[[AgentState], Awaitable[dict[str, object]]]
+
+
+class PolicyEventAppender(Protocol):
+    async def append(
+        self,
+        stream_id: UUID | str,
+        project_id: UUID | str,
+        event_type: str,
+        payload: JsonObject,
+    ) -> int: ...
 
 
 def _event_id_for_append(value: str) -> UUID | str:
@@ -27,7 +41,9 @@ def _event_id_for_append(value: str) -> UUID | str:
         return value
 
 
-def create_policy_engine_node(event_repo: EventRepository | None = None):
+def create_policy_engine_node(
+    event_repo: EventRepository | None = None,
+) -> PolicyEngineNode:
     async def _policy_engine_node_impl(state: AgentState) -> dict[str, object]:
         context = PolicyDecisionContext.from_state(cast(RuntimeStateInput, state))
         normalized_intent = normalize_intent(context.intent)
@@ -62,7 +78,7 @@ def create_policy_engine_node(event_repo: EventRepository | None = None):
 
         if event_repo and context.thread_id and context.project_id:
             try:
-                appendable_event_repo = cast(Any, event_repo)
+                appendable_event_repo = cast(PolicyEventAppender, event_repo)
                 await appendable_event_repo.append(
                     stream_id=_event_id_for_append(context.thread_id),
                     project_id=_event_id_for_append(context.project_id),
