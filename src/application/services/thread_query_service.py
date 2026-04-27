@@ -1,10 +1,13 @@
 from src.application.ports.event_port import EventReaderPort
+from src.application.errors import NotFoundError, ValidationError
 from src.application.ports.memory_port import MemoryReaderPort
+from src.application.ports.project_port import ProjectAccessPort
 from src.application.ports.thread_port import (
     ThreadMessagePort,
     ThreadReadPort,
     ThreadRuntimeStatePort,
 )
+from src.domain.control_plane.roles import PROJECT_READ_ROLES, PROJECT_WRITE_ROLES
 
 
 def _event_record(event) -> dict[str, object]:
@@ -25,12 +28,14 @@ class ThreadQueryService:
         thread_runtime_state_repo: ThreadRuntimeStatePort,
         event_repo: EventReaderPort,
         memory_repo: MemoryReaderPort,
+        access_service: ProjectAccessPort,
     ) -> None:
         self.thread_read_repo = thread_read_repo
         self.thread_message_repo = thread_message_repo
         self.thread_runtime_state_repo = thread_runtime_state_repo
         self.event_repo = event_repo
         self.memory_repo = memory_repo
+        self.access_service = access_service
 
     async def list_dialogs(
         self,
@@ -39,7 +44,11 @@ class ThreadQueryService:
         offset: int = 0,
         status_filter: str | None = None,
         search: str | None = None,
+        current_user_id: str | None = None,
     ):
+        if current_user_id is not None:
+            await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+
         return await self.thread_read_repo.get_dialogs(
             project_id,
             limit=limit,
@@ -53,6 +62,72 @@ class ThreadQueryService:
 
     async def get_thread(self, thread_id: str):
         return await self.get_thread_view(thread_id)
+
+
+    async def require_thread_access(
+        self,
+        thread_id: str,
+        current_user_id: str,
+        allowed_roles: list[str],
+    ):
+        thread = await self.get_thread_view(thread_id)
+        if not thread:
+            raise NotFoundError("Thread not found")
+        if not thread.project_id:
+            raise NotFoundError("Thread not found")
+
+        await self.access_service.require_project_role(
+            thread.project_id,
+            current_user_id,
+            allowed_roles,
+        )
+        return thread
+
+    async def get_messages_for_user(
+        self,
+        thread_id: str,
+        current_user_id: str,
+        limit: int,
+        offset: int,
+    ) -> dict:
+        await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+        return await self.get_messages(thread_id, limit, offset)
+
+    async def get_timeline_for_user(
+        self,
+        thread_id: str,
+        current_user_id: str,
+        limit: int,
+        offset: int,
+    ) -> dict:
+        await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+        return await self.get_timeline(thread_id, limit, offset)
+
+    async def get_memory_for_user(
+        self,
+        thread_id: str,
+        current_user_id: str,
+        *,
+        limit: int = 100,
+    ) -> dict:
+        thread = await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+        return await self.get_memory(thread.project_id, thread.client_id, limit=limit)
+
+    async def get_state_for_user(self, thread_id: str, current_user_id: str) -> dict:
+        await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+        return await self.get_state(thread_id)
+
+    async def get_manual_reply_thread_for_user(self, thread_id: str, current_user_id: str):
+        thread = await self.require_thread_access(thread_id, current_user_id, PROJECT_WRITE_ROLES)
+        if thread.status != "manual":
+            raise ValidationError("Thread is not in manual mode")
+        return thread
+
+    async def get_memory_update_target_for_user(self, thread_id: str, current_user_id: str):
+        thread = await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+        if not thread.client_id:
+            raise ValidationError("No client associated with thread")
+        return thread
 
     async def get_messages(self, thread_id: str, limit: int, offset: int) -> dict:
         return {

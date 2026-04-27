@@ -3,7 +3,9 @@ from typing import Optional
 
 from src.application.ports.client_port import ClientReaderPort
 from src.application.ports.memory_port import MemoryReaderPort
+from src.application.ports.project_port import ProjectAccessPort
 from src.application.ports.thread_port import ThreadReadPort
+from src.domain.control_plane.roles import PROJECT_READ_ROLES
 from src.domain.project_plane.client_views import ClientDetailView, ClientListView
 
 
@@ -43,10 +45,12 @@ class ClientQueryService:
         client_repo: ClientReaderPort,
         thread_read_repo: ThreadReadPort,
         memory_repo: MemoryReaderPort,
+        access_service: ProjectAccessPort,
     ) -> None:
         self.client_repo = client_repo
         self.thread_read_repo = thread_read_repo
         self.memory_repo = memory_repo
+        self.access_service = access_service
 
     async def list_clients(
         self,
@@ -55,7 +59,10 @@ class ClientQueryService:
         limit: int,
         offset: int,
         search: Optional[str],
+        current_user_id: str,
     ) -> dict:
+        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+
         result: ClientListView = await self.client_repo.list_for_project_view(
             project_id,
             limit=limit,
@@ -64,7 +71,9 @@ class ClientQueryService:
         )
         return _serialize_value(result)
 
-    async def get_client_detail(self, project_id: str, client_id: str) -> dict | None:
+    async def get_client_detail(self, project_id: str, client_id: str, current_user_id: str) -> dict | None:
+        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+
         result: ClientDetailView | None = await self.client_repo.get_by_id_view(project_id, client_id)
         if result is None:
             return None

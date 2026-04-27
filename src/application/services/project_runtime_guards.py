@@ -3,11 +3,14 @@ Runtime guards driven by explicit project configuration.
 """
 
 import time
-from typing import Any, Mapping
+from collections.abc import Mapping
 
 from src.application.ports.cache_port import CacheFactoryPort, NullCache
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
+
+
+ProjectConfigurationPayload = Mapping[str, object]
 
 
 class ProjectRuntimeGuards:
@@ -27,7 +30,7 @@ class ProjectRuntimeGuards:
             return NullCache()
         return await self.cache_factory()
 
-    async def allow_request(self, project_id: str, project_configuration: Mapping[str, Any] | None) -> bool:
+    async def allow_request(self, project_id: str, project_configuration: ProjectConfigurationPayload | None) -> bool:
         profile = ProjectRuntimeProfile.from_configuration(project_configuration)
         if profile.requests_per_minute is None:
             return True
@@ -54,7 +57,7 @@ class ProjectRuntimeGuards:
         self,
         project_id: str,
         thread_id: str,
-        project_configuration: Mapping[str, Any] | None,
+        project_configuration: ProjectConfigurationPayload | None,
     ) -> bool:
         profile = ProjectRuntimeProfile.from_configuration(project_configuration)
         if profile.max_concurrent_threads is None:

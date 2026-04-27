@@ -213,9 +213,10 @@ def get_client_query_service(
     client_repo: ClientRepository = Depends(get_client_repo),
     thread_read_repo: ThreadReadRepository = Depends(get_thread_read_repo),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
+    project_service: ProjectAccessService = Depends(get_project_service),
 ) -> ClientQueryService:
     """Return the application read service for client-focused queries."""
-    return ClientQueryService(client_repo, thread_read_repo, memory_repo)
+    return ClientQueryService(client_repo, thread_read_repo, memory_repo, project_service)
 
 
 def get_thread_query_service(
@@ -224,6 +225,7 @@ def get_thread_query_service(
     thread_runtime_state_repo: ThreadRuntimeStateRepository = Depends(get_thread_runtime_state_repo),
     event_repo: EventRepository = Depends(get_event_repo),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
+    project_service: ProjectAccessService = Depends(get_project_service),
 ) -> ThreadQueryService:
     """Return the application read service for thread-focused queries."""
     return ThreadQueryService(
@@ -232,6 +234,7 @@ def get_thread_query_service(
         thread_runtime_state_repo=thread_runtime_state_repo,
         event_repo=event_repo,
         memory_repo=memory_repo,
+        access_service=project_service,
     )
 
 

@@ -29,3 +29,17 @@ class ThreadCommandService:
             value=value,
         )
         return {"status": "saved"}
+
+    async def update_memory_entry(
+        self,
+        project_id: str,
+        client_id: str,
+        key: str,
+        value: object,
+    ) -> dict[str, str]:
+        return await self.save_memory(
+            project_id=project_id,
+            client_id=client_id,
+            key=key,
+            value=value,
+        )
