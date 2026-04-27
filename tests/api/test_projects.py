@@ -1191,13 +1191,13 @@ class TestProjectsAPI:
         try:
             mock_repo = AsyncMock(spec=ProjectRepository)
             mock_repo.get_project_view = AsyncMock(return_value=_project_view(project_id, user_id))
-            mock_repo.upsert_project_integration = AsyncMock(return_value={
-                "id": str(uuid4()),
-                "project_id": project_id,
-                "provider": "custom_webhook",
-                "status": "enabled",
-                "config_json": {"url": "https://example.com/hook"},
-            })
+            mock_repo.upsert_project_integration = AsyncMock(return_value=ProjectIntegrationView(
+                id=str(uuid4()),
+                project_id=project_id,
+                provider="custom_webhook",
+                status="enabled",
+                config_json={"url": "https://example.com/hook"},
+            ))
 
             app.dependency_overrides[get_project_repo] = lambda: mock_repo
 
@@ -1276,14 +1276,14 @@ class TestProjectsAPI:
         try:
             mock_repo = AsyncMock(spec=ProjectRepository)
             mock_repo.get_project_view = AsyncMock(return_value=_project_view(project_id, user_id))
-            mock_repo.upsert_project_channel = AsyncMock(return_value={
-                "id": str(uuid4()),
-                "project_id": project_id,
-                "kind": "widget",
-                "provider": "web",
-                "status": "active",
-                "config_json": {"allowed_origin": "https://site.example"},
-            })
+            mock_repo.upsert_project_channel = AsyncMock(return_value=ProjectChannelView(
+                id=str(uuid4()),
+                project_id=project_id,
+                kind="widget",
+                provider="web",
+                status="active",
+                config_json={"allowed_origin": "https://site.example"},
+            ))
 
             app.dependency_overrides[get_project_repo] = lambda: mock_repo
 

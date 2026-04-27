@@ -1,4 +1,5 @@
 from src.application.ports.memory_port import MemoryWriterPort
+from src.domain.project_plane.json_types import JsonValue
 from src.application.ports.thread_port import ThreadLifecyclePort
 
 
@@ -20,7 +21,7 @@ class ThreadCommandService:
         project_id: str,
         client_id: str,
         key: str,
-        value: object,
+        value: JsonValue,
     ) -> dict[str, str]:
         await self.memory_repo.update_by_key(
             project_id=project_id,
@@ -35,7 +36,7 @@ class ThreadCommandService:
         project_id: str,
         client_id: str,
         key: str,
-        value: object,
+        value: JsonValue,
     ) -> dict[str, str]:
         return await self.save_memory(
             project_id=project_id,

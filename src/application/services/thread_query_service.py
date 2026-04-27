@@ -1,4 +1,5 @@
 from src.application.ports.event_port import EventReaderPort
+from src.domain.project_plane.json_types import JsonObject
 from src.application.errors import NotFoundError, ValidationError
 from src.application.ports.memory_port import MemoryReaderPort
 from src.application.ports.project_port import ProjectAccessPort
@@ -10,7 +11,7 @@ from src.application.ports.thread_port import (
 from src.domain.control_plane.roles import PROJECT_READ_ROLES, PROJECT_WRITE_ROLES
 
 
-def _event_record(event) -> dict[str, object]:
+def _event_record(event) -> JsonObject:
     return {
         "id": event.id,
         "type": event.type,

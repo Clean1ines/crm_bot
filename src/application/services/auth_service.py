@@ -26,6 +26,7 @@ from src.domain.identity.auth_providers import (
     EMAIL_VERIFICATION_QUERY_KEY,
     PASSWORD_RESET_QUERY_KEY,
 )
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.identity.user_views import AuthMethodsView, UserProfileView
 
 
@@ -165,7 +166,7 @@ class AuthService:
         if not await self.user_repo.has_auth_method(current_user_id, AUTH_PROVIDER_EMAIL):
             raise ValidationError("Email auth must be linked before requesting verification")
 
-        token_data = cast(Mapping[str, object], await self.user_repo.create_email_verification_token(current_user_id, user.email))
+        token_data = cast(JsonObject, await self.user_repo.create_email_verification_token(current_user_id, user.email))
         token = str(token_data["token"])
         return AuthActionDto.create(
             status=AUTH_STATUS_VERIFICATION_REQUESTED,
@@ -180,7 +181,7 @@ class AuthService:
         if not token_value:
             raise ValidationError("token is required")
 
-        payload = cast(Mapping[str, object] | None, await self.user_repo.consume_email_verification_token(token_value))
+        payload = cast(JsonObject | None, await self.user_repo.consume_email_verification_token(token_value))
         if not payload:
             raise ValidationError("Invalid or expired email verification token")
 
@@ -288,7 +289,7 @@ class AuthService:
         if not await self.user_repo.has_auth_method(user.id, AUTH_PROVIDER_EMAIL):
             return response
 
-        token_data = cast(Mapping[str, object], await self.user_repo.create_password_reset_token(user.id))
+        token_data = cast(JsonObject, await self.user_repo.create_password_reset_token(user.id))
         token = str(token_data["token"])
         return AuthActionDto.create(
             status=response.status,
@@ -303,7 +304,7 @@ class AuthService:
         if not token_value:
             raise ValidationError("token is required")
 
-        payload = cast(Mapping[str, object] | None, await self.user_repo.consume_password_reset_token(token_value))
+        payload = cast(JsonObject | None, await self.user_repo.consume_password_reset_token(token_value))
         if not payload:
             raise ValidationError("Invalid or expired password reset token")
 

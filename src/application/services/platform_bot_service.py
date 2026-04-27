@@ -10,9 +10,10 @@ from src.application.ports.project_port import ProjectControlPort
 from src.application.ports.user_port import UserAuthPort
 from src.domain.control_plane.memberships import is_manager_capable_role
 from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
+from src.domain.project_plane.json_types import JsonObject
 
 
-def _project_summary_record(view: ProjectSummaryView) -> dict[str, object]:
+def _project_summary_record(view: ProjectSummaryView) -> JsonObject:
     return {
         "id": view.id,
         "user_id": view.user_id,
@@ -26,7 +27,7 @@ def _project_summary_record(view: ProjectSummaryView) -> dict[str, object]:
     }
 
 
-def _project_member_record(view: ProjectMemberView) -> dict[str, object]:
+def _project_member_record(view: ProjectMemberView) -> JsonObject:
     return {
         "id": getattr(view, "id", None),
         "project_id": getattr(view, "project_id", None),

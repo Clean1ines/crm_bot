@@ -189,7 +189,7 @@ class TestPoolAndOrchestrator:
 class TestRepositoryFactories:
     def test_get_project_repo(self):
         mock_pool = MagicMock()
-        with patch("src.interfaces.http.dependencies.ProjectRepository") as MockRepo:
+        with patch("src.interfaces.composition.project_repositories.ProjectRepository") as MockRepo:
             get_project_repo(pool=mock_pool)
             MockRepo.assert_called_once_with(mock_pool)
 

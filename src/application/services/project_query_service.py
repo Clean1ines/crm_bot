@@ -18,9 +18,10 @@ from src.domain.control_plane.project_configuration import (
 from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
 from src.domain.control_plane.roles import PROJECT_READ_ROLES
 from src.domain.project_plane.manager_reply_history import ManagerReplyHistoryItemView
+from src.domain.project_plane.json_types import JsonObject
 
 
-def _project_summary_record(view: ProjectSummaryView) -> dict[str, object]:
+def _project_summary_record(view: ProjectSummaryView) -> JsonObject:
     return {
         "id": view.id,
         "user_id": view.user_id,
@@ -34,7 +35,7 @@ def _project_summary_record(view: ProjectSummaryView) -> dict[str, object]:
     }
 
 
-def _project_member_record(view: ProjectMemberView) -> dict[str, object]:
+def _project_member_record(view: ProjectMemberView) -> JsonObject:
     return {
         "id": getattr(view, "id", None),
         "project_id": getattr(view, "project_id", None),
@@ -48,10 +49,7 @@ def _project_member_record(view: ProjectMemberView) -> dict[str, object]:
     }
 
 
-def _integration_record(view: ProjectIntegrationView | dict[str, object]) -> dict[str, object]:
-    if isinstance(view, dict):
-        return dict(view)
-
+def _integration_record(view: ProjectIntegrationView) -> JsonObject:
     return {
         "id": view.id,
         "project_id": view.project_id,
@@ -63,10 +61,7 @@ def _integration_record(view: ProjectIntegrationView | dict[str, object]) -> dic
         "updated_at": view.updated_at,
     }
 
-def _channel_record(view: ProjectChannelView | dict[str, object]) -> dict[str, object]:
-    if isinstance(view, dict):
-        return dict(view)
-
+def _channel_record(view: ProjectChannelView) -> JsonObject:
     return {
         "id": view.id,
         "project_id": view.project_id,
@@ -78,7 +73,7 @@ def _channel_record(view: ProjectChannelView | dict[str, object]) -> dict[str, o
         "updated_at": view.updated_at,
     }
 
-def _prompt_version_record(view: ProjectPromptVersionView) -> dict[str, object]:
+def _prompt_version_record(view: ProjectPromptVersionView) -> JsonObject:
     return {
         "id": view.id,
         "name": view.name,
@@ -90,7 +85,7 @@ def _prompt_version_record(view: ProjectPromptVersionView) -> dict[str, object]:
     }
 
 
-def _configuration_record(view: ProjectConfigurationView) -> dict[str, object]:
+def _configuration_record(view: ProjectConfigurationView) -> JsonObject:
     return {
         "project_id": view.project_id,
         "settings": view.settings,
@@ -102,7 +97,7 @@ def _configuration_record(view: ProjectConfigurationView) -> dict[str, object]:
     }
 
 
-def _manager_reply_history_record(view: ManagerReplyHistoryItemView) -> dict[str, object]:
+def _manager_reply_history_record(view: ManagerReplyHistoryItemView) -> JsonObject:
     return {
         "id": view.id,
         "thread_id": view.thread_id,
@@ -147,11 +142,11 @@ class ProjectQueryService:
     async def _load_project_members_view(self, project_id: str) -> list[ProjectMemberView]:
         return await self.repo.get_project_members_view(project_id)
 
-    async def list_projects(self, current_user_id: str) -> list[dict[str, object]]:
+    async def list_projects(self, current_user_id: str) -> list[JsonObject]:
         projects = await self._load_projects_for_user_view(current_user_id)
         return [ProjectSummaryDto.from_record(_project_summary_record(project)).to_dict() for project in projects]
 
-    async def get_project(self, project_id: str, current_user_id: str) -> dict[str, object]:
+    async def get_project(self, project_id: str, current_user_id: str) -> JsonObject:
         project = await self._load_project_view(project_id)
         if not project:
             raise NotFoundError("Project not found")
@@ -168,12 +163,12 @@ class ProjectQueryService:
         members = await self._load_project_members_view(project_id)
         return [ProjectMemberDto.from_record(_project_member_record(member)) for member in members]
 
-    async def get_project_configuration(self, project_id: str, current_user_id: str) -> dict[str, object]:
+    async def get_project_configuration(self, project_id: str, current_user_id: str) -> JsonObject:
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
         configuration = await self._load_project_configuration_view(project_id)
         return ProjectConfigurationDto.from_record(_configuration_record(configuration)).to_dict()
 
-    async def list_project_integrations(self, project_id: str, current_user_id: str) -> list[dict[str, object]]:
+    async def list_project_integrations(self, project_id: str, current_user_id: str) -> list[JsonObject]:
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
         configuration = await self._load_project_configuration_view(project_id)
         return [
@@ -181,7 +176,7 @@ class ProjectQueryService:
             for integration in configuration.integrations
         ]
 
-    async def list_project_channels(self, project_id: str, current_user_id: str) -> list[dict[str, object]]:
+    async def list_project_channels(self, project_id: str, current_user_id: str) -> list[JsonObject]:
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
         configuration = await self._load_project_configuration_view(project_id)
         return [
@@ -196,7 +191,7 @@ class ProjectQueryService:
         manager_user_id: str,
         limit: int,
         offset: int,
-    ) -> dict[str, object]:
+    ) -> JsonObject:
         await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
 
         items = await self.event_reader.get_manager_reply_history(
