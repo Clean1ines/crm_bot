@@ -17,7 +17,6 @@ from contextlib import asynccontextmanager
 import asyncpg
 from fastapi import FastAPI
 
-from src.agent.graph import create_agent
 from src.application.orchestration.conversation_orchestrator import (
     ConversationOrchestrator,
 )
@@ -44,8 +43,6 @@ from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.db.repositories.thread.runtime_state import (
     ThreadRuntimeStateRepository,
 )
-from src.infrastructure.llm.rag_service import KnowledgeSearchRepository, RAGService
-from src.infrastructure.llm.query_expander import GroqQueryExpander
 from src.infrastructure.logging.logger import get_logger
 from src.tools import tool_registry
 from src.tools.builtins import (
@@ -72,6 +69,9 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     This belongs to composition, not infrastructure, because it wires DB-backed
     adapters, LLM services, and the process-wide tool registry together.
     """
+    from src.infrastructure.llm.query_expander import GroqQueryExpander
+    from src.infrastructure.llm.rag_service import KnowledgeSearchRepository, RAGService
+
     knowledge_repo = KnowledgeRepository(db_pool)
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     queue_repo = QueueRepository(db_pool)
@@ -120,6 +120,8 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
 
     The application layer receives narrow thread repositories by injection.
     """
+    from src.agent.graph import create_agent
+
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     thread_message_repo = ThreadMessageRepository(db_pool)
     thread_read_repo = ThreadReadRepository(db_pool)

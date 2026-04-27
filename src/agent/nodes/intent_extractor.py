@@ -4,22 +4,55 @@ Intent extraction node for LangGraph pipeline.
 Uses a lightweight LLM to extract intent, CTA, topic, emotion, and feature hints.
 """
 
-from typing import cast
 import json
-
-from langchain_groq import ChatGroq
+from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_intent_prompt
 from src.agent.state import AgentState
-from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.domain.runtime.intent_extraction import (
     IntentExtractionContext,
     IntentExtractionResult,
 )
+from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
+
+
+class ChatMessageResponse(Protocol):
+    content: str | None
+
+
+class ChatGroqClient(Protocol):
+    async def ainvoke(self, messages: list[tuple[str, str]]) -> ChatMessageResponse: ...
+
+
+class ChatGroqFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        api_key: object,
+    ) -> ChatGroqClient: ...
+
+
+# Test hook and lazy runtime cache.
+# Keep this symbol module-level so existing tests can patch
+# src.agent.nodes.intent_extractor.ChatGroq without importing langchain_groq
+# at import time.
+ChatGroq: ChatGroqFactory | None = None
+
+
+def _chat_groq_class() -> ChatGroqFactory:
+    if ChatGroq is not None:
+        return ChatGroq
+
+    from langchain_groq import ChatGroq as ImportedChatGroq
+
+    return cast(ChatGroqFactory, ImportedChatGroq)
 
 
 def _prompt_memory_from_runtime(
@@ -55,7 +88,7 @@ def _unwrap_json_block(content: str) -> str:
 
 
 def create_intent_extractor_node(
-    llm: ChatGroq | None = None,
+    llm: ChatGroqClient | None = None,
     model_name: str = "llama-3.1-8b-instant",
 ):
     """
@@ -63,7 +96,7 @@ def create_intent_extractor_node(
     """
 
     if llm is None:
-        llm = ChatGroq(
+        llm = _chat_groq_class()(
             model=model_name,
             temperature=0.0,
             max_tokens=150,

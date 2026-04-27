@@ -1,7 +1,6 @@
 import io
 import re
 
-import PyPDF2  # оставляем как у тебя
 
 from src.infrastructure.logging.logger import get_logger
 
@@ -23,7 +22,9 @@ class ChunkerService:
     def extract_text_from_pdf(self, file_bytes: bytes) -> str:
         text = ""
         try:
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            from PyPDF2 import PdfReader
+
+            pdf_reader = PdfReader(io.BytesIO(file_bytes))
             for page in pdf_reader.pages:
                 page_text = page.extract_text()
                 if page_text:
