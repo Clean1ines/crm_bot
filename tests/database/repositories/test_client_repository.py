@@ -17,6 +17,14 @@ class MockAcquire:
         return False
 
 
+class FakeAsyncpgRecord:
+    def __init__(self, values):
+        self._values = values
+
+    def __iter__(self):
+        return iter(self._values.items())
+
+
 @pytest.fixture
 def mock_conn():
     conn = AsyncMock()
@@ -128,3 +136,53 @@ async def test_get_by_id_returns_none_when_missing(client_repo, mock_conn):
     result = await client_repo.get_by_id_view(str(uuid4()), str(uuid4()))
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_list_for_project_accepts_asyncpg_record_like_rows(
+    client_repo, mock_conn
+):
+    project_id = uuid4()
+    client_id = uuid4()
+
+    mock_conn.fetch.return_value = [
+        FakeAsyncpgRecord(
+            {
+                "id": client_id,
+                "user_id": None,
+                "username": "client",
+                "full_name": "Client User",
+                "email": None,
+                "company": None,
+                "phone": None,
+                "metadata": {},
+                "chat_id": 12345,
+                "source": "telegram",
+                "created_at": "2025-01-01T00:00:00",
+                "last_activity_at": None,
+                "threads_count": 0,
+                "latest_thread_id": None,
+            }
+        )
+    ]
+    mock_conn.fetchrow.return_value = FakeAsyncpgRecord(
+        {
+            "total_clients": 1,
+            "new_clients_7d": 1,
+            "active_dialogs": 0,
+        }
+    )
+
+    result = await client_repo.list_for_project_view(
+        str(project_id),
+        limit=50,
+        offset=0,
+        search=None,
+    )
+
+    assert len(result.clients) == 1
+    assert result.clients[0].id == str(client_id)
+    assert result.clients[0].username == "client"
+    assert result.total_clients == 1
+    assert result.new_clients_7d == 1
+    assert result.active_dialogs == 0
