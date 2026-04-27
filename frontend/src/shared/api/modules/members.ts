@@ -19,18 +19,31 @@ export const membersApi = {
 
   remove: (projectId: string, memberUserId: string) =>
     authedDeleteRequest(`/api/projects/${projectId}/members/${memberUserId}`),
-,
-  getReplyHistory: (projectId: string, managerUserId: string, limit?: number, offset?: number) =>
-    client.GET('/api/projects/{project_id}/members/{manager_user_id}/reply-history', {
-      params: {
-        path: {
-          project_id: projectId,
-          manager_user_id: managerUserId,
-        },
-        query: {
-          limit,
-          offset,
-        },
+
+  getReplyHistory: (
+    projectId: string,
+    managerUserId: string,
+    limit?: number,
+    offset?: number,
+  ) => {
+    const params = new URLSearchParams();
+
+    if (limit !== undefined) {
+      params.set('limit', String(limit));
+    }
+
+    if (offset !== undefined) {
+      params.set('offset', String(offset));
+    }
+
+    const query = params.toString();
+    const suffix = query ? `?${query}` : '';
+
+    return authedJsonRequest(
+      `/api/projects/${projectId}/members/${managerUserId}/reply-history${suffix}`,
+      {
+        method: 'GET',
       },
-    }),
+    );
+  },
 };

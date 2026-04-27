@@ -1,4 +1,4 @@
-from typing import Any
+from collections.abc import Mapping
 
 VALID_TOPICS = (
     "pricing",
@@ -33,6 +33,8 @@ RISK_FEATURE_KEYS = {
     "refund",
 }
 
+FeatureMap = Mapping[str, object]
+
 
 def normalize_intent(intent: str | None) -> str:
     value = (intent or "").strip().lower()
@@ -57,8 +59,8 @@ def normalize_intent(intent: str | None) -> str:
     return "other"
 
 
-def resolve_topic(intent: str | None, features: dict[str, Any] | None = None) -> str:
-    if isinstance(features, dict):
+def resolve_topic(intent: str | None, features: FeatureMap | None = None) -> str:
+    if isinstance(features, Mapping):
         topic = features.get("topic")
         if isinstance(topic, str):
             topic_value = topic.strip().lower()
@@ -74,20 +76,26 @@ def resolve_topic(intent: str | None, features: dict[str, Any] | None = None) ->
     return topic if topic in VALID_TOPICS else "other"
 
 
-def feature_risk_detected(features: dict[str, Any] | None) -> bool:
-    if not isinstance(features, dict):
+def _numeric_risk_detected(value: object) -> bool:
+    return isinstance(value, (int, float)) and float(value) >= 0.8
+
+
+def _nested_risk_detected(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+
+    return any(_numeric_risk_detected(nested_value) for nested_value in value.values())
+
+
+def feature_risk_detected(features: FeatureMap | None) -> bool:
+    if not isinstance(features, Mapping):
         return False
 
     for key, value in features.items():
         if key not in RISK_FEATURE_KEYS:
             continue
 
-        if isinstance(value, (int, float)) and float(value) >= 0.8:
+        if _numeric_risk_detected(value) or _nested_risk_detected(value):
             return True
-
-        if isinstance(value, dict):
-            for nested_value in value.values():
-                if isinstance(nested_value, (int, float)) and float(nested_value) >= 0.8:
-                    return True
 
     return False
