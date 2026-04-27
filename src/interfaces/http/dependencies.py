@@ -99,12 +99,26 @@ def get_project_service(
     return ProjectAccessService(project_repo)
 
 
+def get_event_repo(pool: Any = Depends(get_pool)) -> EventRepository:
+    """
+    Return a new EventRepository instance.
+    
+    Args:
+        pool: Database connection pool (injected via Depends).
+    
+    Returns:
+        EventRepository: Repository for event-sourced data access.
+    """
+    return EventRepository(pool)
+
+
 def get_project_query_service(
     project_repo: ProjectRepository = Depends(get_project_repo),
     project_service: ProjectAccessService = Depends(get_project_service),
+    event_repo: EventRepository = Depends(get_event_repo),
 ) -> ProjectQueryService:
     """Return the application query service for project control-plane reads."""
-    return ProjectQueryService(project_repo, project_service)
+    return ProjectQueryService(project_repo, project_service, event_repo)
 
 
 def get_project_command_service(
@@ -134,19 +148,6 @@ def get_queue_repo(pool: Any = Depends(get_pool)) -> QueueRepository:
         QueueRepository: Repository for background job queue operations.
     """
     return QueueRepository(pool)
-
-
-def get_event_repo(pool: Any = Depends(get_pool)) -> EventRepository:
-    """
-    Return a new EventRepository instance.
-    
-    Args:
-        pool: Database connection pool (injected via Depends).
-    
-    Returns:
-        EventRepository: Repository for event-sourced data access.
-    """
-    return EventRepository(pool)
 
 
 def get_user_repository(pool: Any = Depends(get_pool)) -> UserRepository:

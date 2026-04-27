@@ -260,3 +260,35 @@ class TestEventRepository:
         mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn"))
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await event_repo.get_events_for_thread(thread_id)
+
+
+async def test_get_manager_reply_history_filters_by_project_and_manager(mock_pool):
+    from src.infrastructure.db.repositories.event_repository import EventRepository
+
+    repo = EventRepository(mock_pool)
+    rows = [
+        {
+            "id": 1,
+            "stream_id": "thread-1",
+            "project_id": "project-1",
+            "payload": {
+                "manager_user_id": "manager-1",
+                "text": "Ответ",
+                "manager_transport": {"chat_id": "123"},
+            },
+            "created_at": "2026-04-27T12:00:00",
+        }
+    ]
+    mock_pool.fetch.return_value = rows
+
+    result = await repo.get_manager_reply_history(
+        project_id="project-1",
+        manager_user_id="manager-1",
+        limit=30,
+        offset=0,
+    )
+
+    assert len(result) == 1
+    assert result[0].manager_user_id == "manager-1"
+    assert result[0].text == "Ответ"
+    mock_pool.fetch.assert_awaited_once()

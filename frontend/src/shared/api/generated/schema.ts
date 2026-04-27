@@ -96,7 +96,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Knowledge Documents
+         * @description Lists uploaded knowledge documents for a project.
+         */
+        get: operations["list_knowledge_documents_api_projects__project_id__knowledge_get"];
         put?: never;
         /**
          * Upload Knowledge
@@ -672,6 +676,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/members/{manager_user_id}/reply-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Manager Reply History */
+        get: operations["get_manager_reply_history_api_projects__project_id__members__manager_user_id__reply_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads": {
         parameters: {
             query?: never;
@@ -1027,6 +1048,32 @@ export interface components {
         ManagerAddRequest: {
             /** Chat Id */
             chat_id: number;
+        };
+        /** ManagerReplyHistoryItemResponse */
+        ManagerReplyHistoryItemResponse: {
+            /** Id */
+            id: number;
+            /** Thread Id */
+            thread_id: string;
+            /** Project Id */
+            project_id: string;
+            /** Manager User Id */
+            manager_user_id: string;
+            /** Text */
+            text: string;
+            /** Manager Chat Id */
+            manager_chat_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** ManagerReplyHistoryResponse */
+        ManagerReplyHistoryResponse: {
+            /** Items */
+            items: components["schemas"]["ManagerReplyHistoryItemResponse"][];
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
         };
         /** PasswordResetConfirmRequest */
         PasswordResetConfirmRequest: {
@@ -1425,6 +1472,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_knowledge_documents_api_projects__project_id__knowledge_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2835,6 +2918,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectChannelResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_manager_reply_history_api_projects__project_id__members__manager_user_id__reply_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                manager_user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagerReplyHistoryResponse"];
                 };
             };
             /** @description Validation Error */

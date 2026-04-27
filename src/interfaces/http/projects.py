@@ -12,6 +12,23 @@ from src.application.services.project_command_service import ProjectCommandServi
 from src.application.services.project_query_service import ProjectQueryService
 
 logger = get_logger(__name__)
+
+
+class ManagerReplyHistoryItemResponse(BaseModel):
+    id: int
+    thread_id: str
+    project_id: str
+    manager_user_id: str
+    text: str
+    manager_chat_id: str | None = None
+    created_at: str | None = None
+
+
+class ManagerReplyHistoryResponse(BaseModel):
+    items: list[ManagerReplyHistoryItemResponse]
+    limit: int
+    offset: int
+
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
@@ -370,3 +387,25 @@ async def upsert_project_channel(
         current_user_id,
         data.model_dump(exclude_unset=True),
     )
+
+
+@router.get(
+    "/{project_id}/members/{manager_user_id}/reply-history",
+    response_model=ManagerReplyHistoryResponse,
+)
+async def get_manager_reply_history(
+    project_id: str,
+    manager_user_id: str,
+    limit: int = 30,
+    offset: int = 0,
+    current_user_id: str = Depends(get_current_user_id),
+    service: ProjectQueryService = Depends(get_project_query_service),
+) -> dict[str, object]:
+    return await service.get_manager_reply_history(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        manager_user_id=manager_user_id,
+        limit=limit,
+        offset=offset,
+    )
+

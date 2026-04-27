@@ -1,91 +1,43 @@
 """
 Event Repository for Event-Sourced Agent Runtime.
-
-This module provides data access methods for the events table,
-which serves as the source of truth for all conversation state changes.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Optional
 from uuid import UUID
 
 import asyncpg
 
+from src.domain.project_plane.event_views import EventTimelineItemView
+from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.manager_reply_history import ManagerReplyHistoryItemView
 from src.infrastructure.logging.logger import get_logger
-from src.domain.project_plane.repository_record_views import RepositoryRecordView
 
-def _typed_records(items):
-    records = [
-        item if isinstance(item, RepositoryRecordView) else RepositoryRecordView.from_record(item)
-        for item in items
-    ]
-    return records
 
 logger = get_logger(__name__)
 
 
 class EventRepository:
-    """
-    Repository for managing event store operations.
-    
-    The EventRepository handles appending events to the event stream
-    and retrieving events for state reconstruction. This follows the
-    Event Sourcing pattern where all state changes are recorded as
-    immutable events.
-    
-    Attributes:
-        pool: Asyncpg connection pool for database operations.
-    """
-    
     def __init__(self, pool: asyncpg.Pool) -> None:
-        """
-        Initialize the EventRepository with a database connection pool.
-        
-        Args:
-            pool: Asyncpg connection pool for database operations.
-        """
         self.pool = pool
         logger.debug("EventRepository initialized")
-    
+
     async def append(
         self,
         stream_id: UUID,
         project_id: UUID,
         event_type: str,
-        payload: Dict[str, Any]
+        payload: JsonObject,
     ) -> int:
-        """
-        Append a new event to the event stream.
-        
-        This method records a state-changing event in the event store.
-        Events are immutable and should never be updated or deleted.
-        
-        Args:
-            stream_id: The conversation/thread ID (groups events by dialogue).
-            project_id: The project ID for multi-tenant isolation.
-            event_type: Type of event (e.g., 'message_received', 'ai_replied').
-            payload: Event-specific data as a dictionary.
-        
-        Returns:
-            The ID of the newly created event.
-        
-        Example:
-            >>> await repo.append(
-            ...     stream_id=thread_id,
-            ...     project_id=project_id,
-            ...     event_type='message_received',
-            ...     payload={'user_id': 123, 'text': 'Hello'}
-            ... )
-        """
         logger.debug(
             "Appending event",
             extra={
                 "stream_id": str(stream_id),
                 "project_id": str(project_id),
-                "event_type": event_type
-            }
+                "event_type": event_type,
+            },
         )
-        
+
         row = await self.pool.fetchrow(
             """
             INSERT INTO events (stream_id, project_id, event_type, payload)
@@ -95,51 +47,32 @@ class EventRepository:
             stream_id,
             project_id,
             event_type,
-            json.dumps(payload)
+            json.dumps(payload),
         )
-        
-        event_id = row["id"]
+
+        event_id = int(row["id"])
         logger.debug(
             "Event appended successfully",
-            extra={"event_id": event_id, "event_type": event_type}
+            extra={"event_id": event_id, "event_type": event_type},
         )
-        
+
         return event_id
-    
+
     async def get_stream(
         self,
         stream_id: UUID,
         limit: int = 100,
-        after_id: Optional[int] = None
-    ) -> list[RepositoryRecordView]:
-        """
-        Retrieve events from a specific stream for state reconstruction.
-        
-        This method loads events in chronological order to rebuild
-        the conversation state. Supports pagination via after_id.
-        
-        Args:
-            stream_id: The conversation/thread ID to load events for.
-            limit: Maximum number of events to return (default: 100).
-            after_id: Only return events with ID greater than this value.
-        
-        Returns:
-            List of events with type, payload, and timestamp.
-        
-        Example:
-            >>> events = await repo.get_stream(thread_id, limit=50)
-            >>> for event in events:
-            ...     state = apply_event(state, event)
-        """
+        after_id: Optional[int] = None,
+    ) -> list[EventTimelineItemView]:
         logger.debug(
             "Loading event stream",
             extra={
                 "stream_id": str(stream_id),
                 "limit": limit,
-                "after_id": after_id
-            }
+                "after_id": after_id,
+            },
         )
-        
+
         if after_id:
             rows = await self.pool.fetch(
                 """
@@ -151,7 +84,7 @@ class EventRepository:
                 """,
                 stream_id,
                 after_id,
-                limit
+                limit,
             )
         else:
             rows = await self.pool.fetch(
@@ -163,55 +96,41 @@ class EventRepository:
                 LIMIT $2
                 """,
                 stream_id,
-                limit
+                limit,
             )
-        
-        events = [
+
+        records = [
             {
                 "id": row["id"],
                 "type": row["event_type"],
                 "payload": row["payload"],
-                "ts": row["created_at"]
+                "ts": row["created_at"],
             }
             for row in rows
         ]
-        
+
         logger.debug(
             "Event stream loaded",
-            extra={"stream_id": str(stream_id), "event_count": len(events)}
+            extra={"stream_id": str(stream_id), "event_count": len(records)},
         )
-        
-        return _typed_records(events)
-    
+
+        return [EventTimelineItemView.from_record(record) for record in records]
+
     async def get_by_type(
         self,
         project_id: UUID,
         event_type: str,
-        limit: int = 100
-    ) -> list[RepositoryRecordView]:
-        """
-        Retrieve events of a specific type for analytics.
-        
-        This method is useful for generating metrics and reports
-        based on event types (e.g., count of escalations).
-        
-        Args:
-            project_id: The project ID to filter events.
-            event_type: The type of events to retrieve.
-            limit: Maximum number of events to return.
-        
-        Returns:
-            List of events matching the criteria.
-        """
+        limit: int = 100,
+    ) -> list[EventTimelineItemView]:
         logger.debug(
             "Loading events by type",
             extra={
                 "project_id": str(project_id),
                 "event_type": event_type,
-                "limit": limit
-            }
+                "limit": limit,
+            },
         )
-        
+
         rows = await self.pool.fetch(
             """
             SELECT id, stream_id, payload, created_at
@@ -222,47 +141,39 @@ class EventRepository:
             """,
             project_id,
             event_type,
-            limit
+            limit,
         )
-        
-        events = [
+
+        records = [
             {
                 "id": row["id"],
-                "stream_id": row["stream_id"],
+                "type": event_type,
                 "payload": row["payload"],
-                "ts": row["created_at"]
+                "ts": row["created_at"],
+                "stream_id": row["stream_id"],
+                "project_id": project_id,
             }
             for row in rows
         ]
-        
+
         logger.debug(
             "Events by type loaded",
-            extra={"project_id": str(project_id), "event_count": len(events)}
+            extra={"project_id": str(project_id), "event_count": len(records)},
         )
-        
-        return _typed_records(events)
-    
+
+        return [EventTimelineItemView.from_record(record) for record in records]
+
     async def get_events_for_thread(
         self,
         thread_id: str,
         limit: int = 30,
-        offset: int = 0
-    ) -> list[RepositoryRecordView]:
-        """
-        Retrieve events for a specific thread with pagination.
-        
-        This method returns events in descending order (most recent first)
-        for display in the UI timeline.
-        
-        Args:
-            thread_id: UUID of the thread.
-            limit: Maximum number of events to return.
-            offset: Number of events to skip.
-        
-        Returns:
-            List of events with id, type, payload, and created_at.
-        """
-        logger.debug("Fetching events for thread", extra={"thread_id": thread_id, "limit": limit, "offset": offset})
+        offset: int = 0,
+    ) -> list[EventTimelineItemView]:
+        logger.debug(
+            "Fetching events for thread",
+            extra={"thread_id": thread_id, "limit": limit, "offset": offset},
+        )
+
         thread_uuid = UUID(thread_id)
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
@@ -275,21 +186,85 @@ class EventRepository:
                 """,
                 thread_uuid,
                 limit,
-                offset
+                offset,
             )
-        
-        events = [
+
+        records = [
             {
                 "id": row["id"],
                 "type": row["event_type"],
                 "payload": row["payload"],
-                "ts": row["created_at"]
+                "ts": row["created_at"],
             }
             for row in rows
         ]
-        
+
         logger.debug(
             "Events for thread loaded",
-            extra={"thread_id": thread_id, "event_count": len(events)}
+            extra={"thread_id": thread_id, "event_count": len(records)},
         )
-        return _typed_records(events)
+
+        return [EventTimelineItemView.from_record(record) for record in records]
+
+    async def list_for_stream(
+        self,
+        thread_id: str,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[EventTimelineItemView]:
+        return await self.get_events_for_thread(thread_id, limit, offset)
+
+    async def get_manager_reply_history(
+        self,
+        project_id: str,
+        manager_user_id: str,
+        limit: int = 30,
+        offset: int = 0,
+    ) -> list[ManagerReplyHistoryItemView]:
+        logger.debug(
+            "Fetching manager reply history",
+            extra={
+                "project_id": project_id,
+                "manager_user_id": manager_user_id,
+                "limit": limit,
+                "offset": offset,
+            },
+        )
+
+        rows = await self.pool.fetch(
+            """
+            SELECT id, stream_id, project_id, payload, created_at
+            FROM events
+            WHERE project_id = $1
+              AND event_type = 'manager_replied'
+              AND payload->>'manager_user_id' = $2
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+            """,
+            project_id,
+            manager_user_id,
+            limit,
+            offset,
+        )
+
+        records = [
+            {
+                "id": row["id"],
+                "stream_id": row["stream_id"],
+                "project_id": row["project_id"],
+                "payload": row["payload"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+        logger.debug(
+            "Manager reply history loaded",
+            extra={
+                "project_id": project_id,
+                "manager_user_id": manager_user_id,
+                "reply_count": len(records),
+            },
+        )
+
+        return [ManagerReplyHistoryItemView.from_record(record) for record in records]
