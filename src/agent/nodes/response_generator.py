@@ -6,21 +6,55 @@ knowledge, memory, and project runtime configuration.
 """
 
 from collections.abc import Mapping
-from typing import cast
-from langchain_groq import ChatGroq
+from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_response_prompt
 from src.agent.state import AgentState
-from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.response_generation import (
     ResponseGenerationContext,
     ResponseGenerationResult,
 )
+from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
+
+
+class ChatMessageResponse(Protocol):
+    content: str | None
+
+
+class ChatGroqClient(Protocol):
+    async def ainvoke(self, messages: list[tuple[str, str]]) -> ChatMessageResponse: ...
+
+
+class ChatGroqFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        api_key: object,
+    ) -> ChatGroqClient: ...
+
+
+# Test hook and lazy runtime cache.
+# Keep this symbol module-level so existing tests can patch
+# src.agent.nodes.response_generator.ChatGroq without importing langchain_groq
+# at import time.
+ChatGroq: ChatGroqFactory | None = None
+
+
+def _chat_groq_class() -> ChatGroqFactory:
+    if ChatGroq is not None:
+        return ChatGroq
+
+    from langchain_groq import ChatGroq as ImportedChatGroq
+
+    return cast(ChatGroqFactory, ImportedChatGroq)
 
 
 def _merge_dialog_state_into_user_memory(
@@ -117,7 +151,7 @@ def _prompt_features(value: object) -> dict[str, float] | None:
 
 
 def create_response_generator_node(
-    llm: ChatGroq | None = None,
+    llm: ChatGroqClient | None = None,
     model_name: str | None = None,
 ):
     """
@@ -133,7 +167,7 @@ def create_response_generator_node(
 
     base_model = model_name or settings.GROQ_MODEL
     if llm is None:
-        llm = ChatGroq(
+        llm = _chat_groq_class()(
             model=base_model,
             temperature=0.3,
             max_tokens=500,
@@ -178,7 +212,7 @@ def create_response_generator_node(
             selected_model = _resolve_response_model_name(state, base_model)
             llm_for_request = llm
             if selected_model != base_model:
-                llm_for_request = ChatGroq(
+                llm_for_request = _chat_groq_class()(
                     model=selected_model,
                     temperature=0.3,
                     max_tokens=500,
