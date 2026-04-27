@@ -2,11 +2,14 @@
 API endpoints for managing knowledge base (uploading documents).
 """
 
-import uuid
 import jwt
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Header, Query
 
-from src.interfaces.http.dependencies import get_pool, get_project_repo, get_user_repository
+from src.interfaces.http.dependencies import (
+    get_pool,
+    get_project_repo,
+    get_user_repository,
+)
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.user_repository import UserRepository
@@ -32,12 +35,15 @@ async def list_knowledge_documents(
     """
     Lists uploaded knowledge documents for a project.
     """
-    service = KnowledgeService(project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt)
+    service = KnowledgeService(
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt
+    )
     await service.require_access(project_id, authorization)
 
     repo = KnowledgeRepository(pool)
     documents = await repo.get_documents(project_id, limit=limit, offset=offset)
     return {"documents": documents, "items": documents}
+
 
 @router.post("")
 async def upload_knowledge(
@@ -52,7 +58,9 @@ async def upload_knowledge(
     Загружает текстовый файл или PDF, разбивает на чанки, генерирует эмбеддинги
     и сохраняет в базу знаний проекта.
     """
-    service = KnowledgeService(project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt)
+    service = KnowledgeService(
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt
+    )
     try:
         file_content = await file.read()
     except Exception as exc:

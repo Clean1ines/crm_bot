@@ -1,8 +1,17 @@
 from dataclasses import dataclass
 from typing import Mapping, cast
 
-from src.domain.runtime.dialog_state import DialogState, dialog_state_from_memory, merge_dialog_state
-from src.domain.runtime.state_contracts import RuntimeMemory, RuntimeStateInput, RuntimeStatePatch, ToolArguments
+from src.domain.runtime.dialog_state import (
+    DialogState,
+    dialog_state_from_memory,
+    merge_dialog_state,
+)
+from src.domain.runtime.state_contracts import (
+    RuntimeMemory,
+    RuntimeStateInput,
+    RuntimeStatePatch,
+    ToolArguments,
+)
 from src.domain.runtime.value_parsing import coerce_bool, coerce_int
 
 
@@ -87,7 +96,9 @@ class PersistenceContext:
         fallback_lifecycle = self._fallback_lifecycle()
         existing = merge_dialog_state(self.dialog_state, lifecycle=fallback_lifecycle)
         dialog_state = self._dialog_state_from_existing(existing)
-        memory_dialog_state = dialog_state_from_memory(self.user_memory, lifecycle=fallback_lifecycle)
+        memory_dialog_state = dialog_state_from_memory(
+            self.user_memory, lifecycle=fallback_lifecycle
+        )
 
         merged: dict[str, object] = dict(memory_dialog_state)
         merged.update(dialog_state)
@@ -100,7 +111,8 @@ class PersistenceContext:
         dialog_state: DialogState = {
             "last_intent": existing.get("last_intent") or self.intent,
             "last_cta": existing.get("last_cta") or self.cta,
-            "last_topic": existing.get("last_topic") or infer_topic_from_intent(self.intent),
+            "last_topic": existing.get("last_topic")
+            or infer_topic_from_intent(self.intent),
             "repeat_count": coerce_int(existing.get("repeat_count"), 0),
             "lead_status": self._lead_status(existing),
             "lifecycle": self._lifecycle(existing),
@@ -108,10 +120,20 @@ class PersistenceContext:
         return _ensure_repeat_count(dialog_state)
 
     def _lead_status(self, existing: DialogState) -> str:
-        return existing.get("lead_status") or self.lead_status or self.lifecycle or "active_client"
+        return (
+            existing.get("lead_status")
+            or self.lead_status
+            or self.lifecycle
+            or "active_client"
+        )
 
     def _lifecycle(self, existing: DialogState) -> str:
-        return self.lifecycle or existing.get("lifecycle") or self.lead_status or "active_client"
+        return (
+            self.lifecycle
+            or existing.get("lifecycle")
+            or self.lead_status
+            or "active_client"
+        )
 
 
 def _ensure_repeat_count(dialog_state: DialogState) -> DialogState:

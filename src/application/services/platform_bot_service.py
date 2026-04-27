@@ -19,7 +19,9 @@ class PlatformBotService:
     transport adapter instead of carrying domain decisions directly.
     """
 
-    def __init__(self, user_repo: UserAuthPort, project_repo: ProjectControlPort | None = None) -> None:
+    def __init__(
+        self, user_repo: UserAuthPort, project_repo: ProjectControlPort | None = None
+    ) -> None:
         if project_repo is None:
             self.user_repo = user_repo
             self.project_repo = getattr(user_repo, "project_repo", user_repo)
@@ -28,13 +30,17 @@ class PlatformBotService:
         self.user_repo = user_repo
         self.project_repo = project_repo
 
-    async def create_project_for_telegram_user(self, telegram_chat_id: int, name: str) -> str:
+    async def create_project_for_telegram_user(
+        self, telegram_chat_id: int, name: str
+    ) -> str:
         user_id, _ = await self.user_repo.get_or_create_by_telegram(
             telegram_chat_id, first_name="", username=None
         )
         return await self.project_repo.create_project_with_user_id(user_id, name)
 
-    async def list_projects_for_telegram_user(self, telegram_chat_id: int) -> TelegramAdminProjectsDto:
+    async def list_projects_for_telegram_user(
+        self, telegram_chat_id: int
+    ) -> TelegramAdminProjectsDto:
         user_id, _ = await self.user_repo.get_or_create_by_telegram(
             telegram_chat_id, first_name="", username=None
         )
@@ -43,7 +49,9 @@ class PlatformBotService:
             [ProjectSummaryDto.from_view(project) for project in projects]
         )
 
-    async def add_manager_by_chat_id(self, project_id: str, manager_chat_id: str) -> str:
+    async def add_manager_by_chat_id(
+        self, project_id: str, manager_chat_id: str
+    ) -> str:
         normalized_manager_id = manager_chat_id.strip()
         user_id, _ = await self.user_repo.get_or_create_by_telegram(
             int(normalized_manager_id), first_name="", username=None

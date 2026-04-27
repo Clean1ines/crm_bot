@@ -26,7 +26,9 @@ class ProjectSummaryView:
             id=str(record["id"]),
             name=str(record["name"]),
             is_pro_mode=bool(record.get("is_pro_mode")),
-            user_id=str(record["user_id"]) if record.get("user_id") is not None else None,
+            user_id=str(record["user_id"])
+            if record.get("user_id") is not None
+            else None,
             client_bot_username=record.get("client_bot_username"),
             manager_bot_username=record.get("manager_bot_username"),
             access_role=record.get("access_role"),
@@ -68,7 +70,9 @@ class ProjectMemberView:
             username=record.get("username"),
             full_name=record.get("full_name"),
             email=record.get("email"),
-            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
+            project_id=str(record["project_id"])
+            if record.get("project_id") is not None
+            else None,
             created_at=record.get("created_at"),
         )
 
@@ -83,6 +87,7 @@ class ProjectMemberView:
             "project_id": self.project_id,
             "created_at": self.created_at,
         }
+
 
 @dataclass(slots=True)
 class ProjectRuntimeSettingsView:
@@ -228,4 +233,3 @@ class ManagerMembershipMutationView:
             "user_id": self.user_id,
             "role": self.role,
         }
-

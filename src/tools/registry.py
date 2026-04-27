@@ -18,8 +18,7 @@ JsonMap = dict[str, object]
 
 
 class ToolEventEmitter(Protocol):
-    def __call__(self, event_type: str, payload: JsonMap) -> object:
-        ...
+    def __call__(self, event_type: str, payload: JsonMap) -> object: ...
 
 
 class ToolExecutionError(Exception):
@@ -285,7 +284,9 @@ class ToolRegistry:
             },
         )
 
-    def _handle_unexpected_error(self, name: str, context: JsonMap, exc: Exception) -> None:
+    def _handle_unexpected_error(
+        self, name: str, context: JsonMap, exc: Exception
+    ) -> None:
         logger.exception(
             "Tool execution failed with unexpected error",
             extra={

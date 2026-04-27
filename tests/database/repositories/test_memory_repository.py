@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 import asyncpg
 
@@ -36,8 +36,22 @@ class TestMemoryRepository:
         client_id = str(uuid4())
         limit = 10
         rows = [
-            {"id": uuid4(), "key": "a", "value": 1, "type": "preference", "created_at": "2021-01-01", "updated_at": "2021-01-01"},
-            {"id": uuid4(), "key": "b", "value": 2, "type": "fact", "created_at": "2021-01-02", "updated_at": "2021-01-02"},
+            {
+                "id": uuid4(),
+                "key": "a",
+                "value": 1,
+                "type": "preference",
+                "created_at": "2021-01-01",
+                "updated_at": "2021-01-01",
+            },
+            {
+                "id": uuid4(),
+                "key": "b",
+                "value": 2,
+                "type": "fact",
+                "created_at": "2021-01-02",
+                "updated_at": "2021-01-02",
+            },
         ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
@@ -66,10 +80,21 @@ class TestMemoryRepository:
         client_id = str(uuid4())
         limit = 5
         types = ["preference", "fact"]
-        rows = [{"id": uuid4(), "key": "a", "value": 1, "type": "preference", "created_at": "2021-01-01", "updated_at": "2021-01-01"}]
+        rows = [
+            {
+                "id": uuid4(),
+                "key": "a",
+                "value": 1,
+                "type": "preference",
+                "created_at": "2021-01-01",
+                "updated_at": "2021-01-01",
+            }
+        ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
-        result = await memory_repo.get_for_user_view(project_id, client_id, limit=limit, types=types)
+        result = await memory_repo.get_for_user_view(
+            project_id, client_id, limit=limit, types=types
+        )
 
         expected_sql = """
             SELECT id, key, value, type, created_at, updated_at
@@ -83,7 +108,9 @@ class TestMemoryRepository:
 
     @pytest.mark.asyncio
     async def test_get_for_user_limit_zero(self, memory_repo, mock_pool):
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
+        )
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()), limit=0)
 
@@ -142,13 +169,17 @@ class TestMemoryRepository:
 
     @pytest.mark.asyncio
     async def test_set_not_null_error(self, memory_repo, mock_pool):
-        mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.NotNullViolationError("null"))
+        mock_pool.mock_conn.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.NotNullViolationError("null")
+        )
         with pytest.raises(asyncpg.exceptions.NotNullViolationError):
             await memory_repo.set(str(uuid4()), str(uuid4()), "key", "value", "type")
 
     @pytest.mark.asyncio
     async def test_set_foreign_key_error(self, memory_repo, mock_pool):
-        mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk"))
+        mock_pool.mock_conn.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk")
+        )
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
             await memory_repo.set(str(uuid4()), str(uuid4()), "key", "value", "type")
 
@@ -245,7 +276,9 @@ class TestMemoryRepository:
         assert result == "warm"
 
     @pytest.mark.asyncio
-    async def test_get_lifecycle_success_with_string_value(self, memory_repo, mock_pool):
+    async def test_get_lifecycle_success_with_string_value(
+        self, memory_repo, mock_pool
+    ):
         # For backward compatibility: value is a string directly
         project_id = str(uuid4())
         client_id = str(uuid4())
@@ -305,7 +338,11 @@ class TestMemoryRepository:
             """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
             expected_sql,
-            UUID(project_id), UUID(client_id), "stage", {"stage": lifecycle}, "lifecycle"
+            UUID(project_id),
+            UUID(client_id),
+            "stage",
+            {"stage": lifecycle},
+            "lifecycle",
         )
         assert mock_pool.acquire.call_count == 1
 
@@ -352,7 +389,12 @@ class TestMemoryRepository:
                     updated_at = NOW()
             """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_set_sql, UUID(project_id), UUID(client_id), key, value, "original_type"
+            expected_set_sql,
+            UUID(project_id),
+            UUID(client_id),
+            key,
+            value,
+            "original_type",
         )
 
     @pytest.mark.asyncio
@@ -384,7 +426,12 @@ class TestMemoryRepository:
                     updated_at = NOW()
             """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_set_sql, UUID(project_id), UUID(client_id), key, value, "user_edited"
+            expected_set_sql,
+            UUID(project_id),
+            UUID(client_id),
+            key,
+            value,
+            "user_edited",
         )
 
     @pytest.mark.asyncio
@@ -399,12 +446,16 @@ class TestMemoryRepository:
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
     async def test_connection_error(self, memory_repo, mock_pool):
-        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
+        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+            "conn closed"
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()))
 
     @pytest.mark.asyncio
     async def test_undefined_table_error(self, memory_repo, mock_pool):
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.UndefinedTableError("no table"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.UndefinedTableError("no table")
+        )
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
             await memory_repo.get_for_user_view(str(uuid4()), str(uuid4()))

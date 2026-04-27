@@ -5,7 +5,6 @@ The runtime topology is defined by src.domain.runtime.graph_contract.
 This module is only the LangGraph adapter that materializes that contract.
 """
 
-
 from langgraph.graph import END, StateGraph
 
 from src.agent.nodes.escalate import create_escalate_node
@@ -19,7 +18,11 @@ from src.agent.nodes.response_generator import create_response_generator_node
 from src.agent.nodes.rules import rules_node
 from src.agent.nodes.tool_executor import create_tool_executor_node
 from src.agent.state import AgentState
-from src.domain.runtime.graph_contract import AgentGraphDecision, AgentGraphNode, AGENT_GRAPH_CONTRACT
+from src.domain.runtime.graph_contract import (
+    AgentGraphDecision,
+    AgentGraphNode,
+    AGENT_GRAPH_CONTRACT,
+)
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -66,9 +69,15 @@ def create_agent(
     logger.info("Creating state machine agent")
 
     tool_registry = _require_dependency("tool_registry", tool_registry)
-    thread_lifecycle_repo = _require_dependency("thread_lifecycle_repo", thread_lifecycle_repo)
-    thread_message_repo = _require_dependency("thread_message_repo", thread_message_repo)
-    thread_runtime_state_repo = _require_dependency("thread_runtime_state_repo", thread_runtime_state_repo)
+    thread_lifecycle_repo = _require_dependency(
+        "thread_lifecycle_repo", thread_lifecycle_repo
+    )
+    thread_message_repo = _require_dependency(
+        "thread_message_repo", thread_message_repo
+    )
+    thread_runtime_state_repo = _require_dependency(
+        "thread_runtime_state_repo", thread_runtime_state_repo
+    )
     thread_read_repo = _require_dependency("thread_read_repo", thread_read_repo)
     queue_repo = _require_dependency("queue_repo", queue_repo)
 
@@ -87,10 +96,16 @@ def create_agent(
 
     ticket_create_tool = tool_registry.get_tool("ticket.create")
     if ticket_create_tool is None:
-        logger.warning("TicketCreateTool not found in registry, escalation will degrade")
+        logger.warning(
+            "TicketCreateTool not found in registry, escalation will degrade"
+        )
 
-    escalate_node = create_escalate_node(thread_lifecycle_repo, queue_repo, ticket_create_tool)
-    responder_node = create_responder_node(tool_registry, thread_message_repo=thread_message_repo)
+    escalate_node = create_escalate_node(
+        thread_lifecycle_repo, queue_repo, ticket_create_tool
+    )
+    responder_node = create_responder_node(
+        tool_registry, thread_message_repo=thread_message_repo
+    )
     persist_node = create_persist_node(
         thread_message_repo=thread_message_repo,
         thread_runtime_state_repo=thread_runtime_state_repo,
@@ -109,7 +124,9 @@ def create_agent(
     graph_builder.add_node(AgentGraphNode.POLICY_ENGINE.value, policy_engine_node)
     graph_builder.add_node(AgentGraphNode.TOOL_EXECUTOR.value, tool_executor_node)
     graph_builder.add_node(AgentGraphNode.ESCALATE.value, escalate_node)
-    graph_builder.add_node(AgentGraphNode.RESPONSE_GENERATOR.value, response_generator_node)
+    graph_builder.add_node(
+        AgentGraphNode.RESPONSE_GENERATOR.value, response_generator_node
+    )
     graph_builder.add_node(AgentGraphNode.RESPONDER.value, responder_node)
     graph_builder.add_node(AgentGraphNode.PERSIST.value, persist_node)
 
@@ -131,7 +148,9 @@ def create_agent(
         {
             _decision_value(AgentGraphDecision.RESPOND): AgentGraphNode.RESPONDER.value,
             _decision_value(AgentGraphDecision.ESCALATE): AgentGraphNode.ESCALATE.value,
-            _decision_value(AgentGraphDecision.PROCEED_TO_LLM): AgentGraphNode.INTENT_EXTRACTOR.value,
+            _decision_value(
+                AgentGraphDecision.PROCEED_TO_LLM
+            ): AgentGraphNode.INTENT_EXTRACTOR.value,
         },
     )
 
@@ -149,9 +168,15 @@ def create_agent(
         AgentGraphNode.POLICY_ENGINE.value,
         route_from_policy,
         {
-            _decision_value(AgentGraphDecision.LLM_GENERATE): AgentGraphNode.KB_SEARCH.value,
-            _decision_value(AgentGraphDecision.ESCALATE_TO_HUMAN): AgentGraphNode.ESCALATE.value,
-            _decision_value(AgentGraphDecision.CALL_TOOL): AgentGraphNode.TOOL_EXECUTOR.value,
+            _decision_value(
+                AgentGraphDecision.LLM_GENERATE
+            ): AgentGraphNode.KB_SEARCH.value,
+            _decision_value(
+                AgentGraphDecision.ESCALATE_TO_HUMAN
+            ): AgentGraphNode.ESCALATE.value,
+            _decision_value(
+                AgentGraphDecision.CALL_TOOL
+            ): AgentGraphNode.TOOL_EXECUTOR.value,
             _decision_value(AgentGraphDecision.ESCALATE): AgentGraphNode.ESCALATE.value,
         },
     )

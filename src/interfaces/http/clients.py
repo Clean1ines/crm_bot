@@ -10,6 +10,7 @@ from src.infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
+
 @router.get("")
 async def list_clients(
     project_id: str = Query(..., description="Project ID"),
@@ -41,7 +42,9 @@ async def get_client(
     """
     Get detailed client information, including memory.
     """
-    client = await client_queries.get_client_detail(project_id, client_id, current_user_id)
+    client = await client_queries.get_client_detail(
+        project_id, client_id, current_user_id
+    )
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
 

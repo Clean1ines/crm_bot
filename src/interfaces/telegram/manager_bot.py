@@ -1,10 +1,11 @@
 """Manager Bot Router."""
 
-
 from src.application.dto.webhook_dto import WebhookAckDto
 from src.application.services.manager_bot_service import ManagerBotService
 from src.infrastructure.logging.logger import get_logger
-from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 from src.infrastructure.redis.client import get_redis_client
 
 logger = get_logger(__name__)
@@ -14,7 +15,7 @@ async def process_manager_update(
     update: dict[str, object],
     project_id: str,
     orchestrator: ConversationOrchestrator,
-    bot_token: str
+    bot_token: str,
 ) -> dict[str, bool]:
     """
     Process incoming update from a manager.

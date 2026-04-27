@@ -57,6 +57,8 @@ def test_orchestration_does_not_read_project_settings_as_dict():
 
         for fragment in forbidden_fragments:
             if fragment in text:
-                violations.append(f"{rel}: forbidden orchestration dict/config access: {fragment}")
+                violations.append(
+                    f"{rel}: forbidden orchestration dict/config access: {fragment}"
+                )
 
     assert violations == []

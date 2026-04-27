@@ -16,7 +16,10 @@ async def test_escalate_returns_fallback_when_thread_id_missing():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.escalate.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.escalate.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node({"project_id": "project-1"})
 
     assert result["requires_human"] is True
@@ -38,7 +41,10 @@ async def test_escalate_creates_ticket_and_enqueues_notifications():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.escalate.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.escalate.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node(
             {
                 "thread_id": "thread-1",

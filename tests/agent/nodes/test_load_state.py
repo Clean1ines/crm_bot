@@ -76,7 +76,9 @@ async def test_load_state_degrades_to_empty_user_memory_when_memory_repo_fails()
     thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
 
     memory_repo = MagicMock()
-    memory_repo.get_for_user_view = AsyncMock(side_effect=RuntimeError("memory unavailable"))
+    memory_repo.get_for_user_view = AsyncMock(
+        side_effect=RuntimeError("memory unavailable")
+    )
 
     node = create_load_state_node(
         thread_read_repo=thread_read_repo,
@@ -91,4 +93,6 @@ async def test_load_state_degrades_to_empty_user_memory_when_memory_repo_fails()
 
     assert result["user_memory"] == {}
     logger.exception.assert_called_once()
-    assert logger.exception.call_args.kwargs["extra"]["policy"] == "fallback_empty_memory"
+    assert (
+        logger.exception.call_args.kwargs["extra"]["policy"] == "fallback_empty_memory"
+    )

@@ -5,7 +5,6 @@ Adapters should depend on narrow application ports and get concrete
 infrastructure repositories from composition/dependency wiring only.
 """
 
-
 from src.infrastructure.db.repositories.project import (
     ProjectMemberRepository,
     ProjectRepository,

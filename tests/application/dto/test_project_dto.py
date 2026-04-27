@@ -8,14 +8,16 @@ from src.application.dto.project_dto import (
 
 
 def test_project_summary_dto_normalizes_repository_record():
-    dto = ProjectSummaryDto.from_record({
-        "id": "project-1",
-        "name": "Acme",
-        "is_pro_mode": 1,
-        "user_id": "user-1",
-        "client_bot_username": "client_bot",
-        "manager_bot_username": None,
-    })
+    dto = ProjectSummaryDto.from_record(
+        {
+            "id": "project-1",
+            "name": "Acme",
+            "is_pro_mode": 1,
+            "user_id": "user-1",
+            "client_bot_username": "client_bot",
+            "manager_bot_username": None,
+        }
+    )
 
     assert dto.to_dict() == {
         "id": "project-1",
@@ -28,15 +30,17 @@ def test_project_summary_dto_normalizes_repository_record():
 
 
 def test_project_configuration_dto_normalizes_nested_blocks():
-    dto = ProjectConfigurationDto.from_record({
-        "project_id": "project-1",
-        "settings": {"brand_name": "Acme"},
-        "policies": {"escalation_policy_json": {"mode": "manual"}},
-        "limit_profile": {"fallback_model": "llama-3.1-8b-instant"},
-        "integrations": [{"provider": "amo", "status": "active"}],
-        "channels": [{"kind": "widget", "provider": "web"}],
-        "prompt_versions": [{"version": 1, "is_active": True}],
-    })
+    dto = ProjectConfigurationDto.from_record(
+        {
+            "project_id": "project-1",
+            "settings": {"brand_name": "Acme"},
+            "policies": {"escalation_policy_json": {"mode": "manual"}},
+            "limit_profile": {"fallback_model": "llama-3.1-8b-instant"},
+            "integrations": [{"provider": "amo", "status": "active"}],
+            "channels": [{"kind": "widget", "provider": "web"}],
+            "prompt_versions": [{"version": 1, "is_active": True}],
+        }
+    )
 
     assert dto.project_id == "project-1"
     assert dto.settings["brand_name"] == "Acme"

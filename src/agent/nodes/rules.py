@@ -6,8 +6,6 @@ Applies cheap rules (no LLM) to determine the initial decision:
 - Otherwise → PROCEED_TO_LLM
 """
 
-import re
-
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.agent.state import AgentState
 
@@ -15,9 +13,21 @@ logger = get_logger(__name__)
 
 # Simple keyword list (can be extended or loaded from config)
 ANGER_KEYWORDS = [
-    "жрёт", "жрет", "тупит", "бесит", "развод", "мошенник", "недоволен",
-    "верните деньги", "refund", "chargeback", "жалоба", "подавление",
-    "невероятно дорого", "сжигаю контракт", "удалить аккаунт"
+    "жрёт",
+    "жрет",
+    "тупит",
+    "бесит",
+    "развод",
+    "мошенник",
+    "недоволен",
+    "верните деньги",
+    "refund",
+    "chargeback",
+    "жалоба",
+    "подавление",
+    "невероятно дорого",
+    "сжигаю контракт",
+    "удалить аккаунт",
 ]
 
 # Threshold for detecting anger via caps proportion
@@ -71,7 +81,7 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
         return {
             "decision": "ESCALATE",
             "requires_human": True,
-            "response_text": "Извините за неудобства. Я передал ваш запрос менеджеру, он свяжется с вами в ближайшее время."
+            "response_text": "Извините за неудобства. Я передал ваш запрос менеджеру, он свяжется с вами в ближайшее время.",
         }
 
     # Default: proceed to LLM processing (kb_search -> intent_extractor)
@@ -82,9 +92,11 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
 def _get_rules_input_size(state: AgentState) -> int:
     return len(state.get("user_input", ""))
 
+
 def _get_rules_output_size(result: dict[str, object]) -> int:
     # output is a small decision dict, we can return 1 as approximation
     return 1
+
 
 async def rules_node(state: AgentState) -> dict[str, object]:
     return await log_node_execution(
@@ -92,5 +104,5 @@ async def rules_node(state: AgentState) -> dict[str, object]:
         _rules_node_impl,
         state,
         get_input_size=_get_rules_input_size,
-        get_output_size=_get_rules_output_size
+        get_output_size=_get_rules_output_size,
     )

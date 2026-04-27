@@ -10,7 +10,9 @@ def test_rag_service_does_not_instantiate_groq_client_directly():
 
 
 def test_groq_query_expansion_is_isolated_to_adapter():
-    source = Path("src/infrastructure/llm/query_expander.py").read_text(encoding="utf-8")
+    source = Path("src/infrastructure/llm/query_expander.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "class GroqQueryExpander" in source
     assert "AsyncGroq" in source

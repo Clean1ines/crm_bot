@@ -19,13 +19,14 @@ from src.domain.runtime.state_contracts import (
     ToolCallRecord,
 )
 
+
 class AgentState(TypedDict):
     """
     State container for the LangGraph agent runtime.
-    
+
     This TypedDict defines all fields that flow through the agent graph,
     enabling state persistence, event reconstruction, and tool execution tracking.
-    
+
     Fields:
         messages: Annotated list of BaseMessage objects. The add_messages
                   reducer ensures new messages are appended, not replaced.
@@ -33,7 +34,7 @@ class AgentState(TypedDict):
         thread_id: UUID of the conversation thread (string format) for event streaming.
         escalation_requested: Boolean flag indicating if human escalation is needed.
         tool_calls: Optional list of tool call records for audit and replay.
-        
+
         # New fields for enhanced pipeline
         user_input: The original user message text.
         client_profile: Dictionary containing client CRM data (from users table).
@@ -50,19 +51,20 @@ class AgentState(TypedDict):
         trace_id: Unique identifier for tracing the entire graph execution.
         client_id: UUID of the client (string format) for user memory.
         project_configuration: Explicit project settings/policies/integrations/limits.
-        
+
         # Analytics fields
         intent: str | None  # Detected intent (e.g., "pricing", "support", "sales")
         cta: str | None     # Call-to-action type (e.g., "call_manager")
         lifecycle: str | None  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
         features: Dict | None  # Tracked feature interest (e.g., {"auto_reply": True})
-        
+
         # Runtime dialog state fields (loaded from user memory)
         dialog_state: DialogState | None  # Current dialog state snapshot
         topic: str | None                 # Current conversation topic
         lead_status: str | None           # Lead status (e.g., "new", "qualified", "lost")
         repeat_count: int | None          # Number of times user repeated a question
     """
+
     # Core fields (existing)
     messages: Annotated[Sequence[BaseMessage], add_messages]
     project_id: str
@@ -80,25 +82,31 @@ class AgentState(TypedDict):
     tool_name: str | None
     tool_args: ToolArguments | None
     tool_result: object | None
-    user_memory: dict[str, object] | None # Added hidden field discovered during audit
+    user_memory: dict[str, object] | None  # Added hidden field discovered during audit
     response_text: str | None
     requires_human: bool
     confidence: float | None
     chat_id: int | None  # Telegram chat ID of the user, needed for responder
-    message_sent: bool | None  # Flag indicating that the message was already sent by the graph
+    message_sent: (
+        bool | None
+    )  # Flag indicating that the message was already sent by the graph
     trace_id: str | None  # Unique trace identifier for observability
     client_id: str | None  # UUID of the client for memory storage
-    project_configuration: ProjectRuntimeConfigurationState | None  # Explicit project personalization config
-    close_ticket: bool | None # Added hidden field discovered during audit
+    project_configuration: (
+        ProjectRuntimeConfigurationState | None
+    )  # Explicit project personalization config
+    close_ticket: bool | None  # Added hidden field discovered during audit
 
     # Analytics fields
     intent: str | None  # Detected intent (e.g., "pricing", "support", "sales")
-    cta: str | None     # Call-to-action type (e.g., "call_manager")
+    cta: str | None  # Call-to-action type (e.g., "call_manager")
     lifecycle: str | None  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
-    features: dict[str, object] | None  # Tracked feature interest (e.g., {"auto_reply": True})
-    
+    features: (
+        dict[str, object] | None
+    )  # Tracked feature interest (e.g., {"auto_reply": True})
+
     # Runtime dialog state fields (loaded from user memory)
     dialog_state: DialogState | None  # Current dialog state snapshot
-    topic: str | None         # Current conversation topic
-    lead_status: str | None   # Lead status (e.g., "new", "qualified", "lost")
+    topic: str | None  # Current conversation topic
+    lead_status: str | None  # Lead status (e.g., "new", "qualified", "lost")
     repeat_count: int | None  # Number of times user repeated a question

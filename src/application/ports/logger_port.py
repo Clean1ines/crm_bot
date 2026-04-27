@@ -10,8 +10,17 @@ class LoggerPort(Protocol):
 
 
 class NullLogger:
-    def debug(self, message: str, *args: object, **kwargs: object) -> None: pass
-    def info(self, message: str, *args: object, **kwargs: object) -> None: pass
-    def warning(self, message: str, *args: object, **kwargs: object) -> None: pass
-    def error(self, message: str, *args: object, **kwargs: object) -> None: pass
-    def exception(self, message: str, *args: object, **kwargs: object) -> None: pass
+    def debug(self, message: str, *args: object, **kwargs: object) -> None:
+        pass
+
+    def info(self, message: str, *args: object, **kwargs: object) -> None:
+        pass
+
+    def warning(self, message: str, *args: object, **kwargs: object) -> None:
+        pass
+
+    def error(self, message: str, *args: object, **kwargs: object) -> None:
+        pass
+
+    def exception(self, message: str, *args: object, **kwargs: object) -> None:
+        pass

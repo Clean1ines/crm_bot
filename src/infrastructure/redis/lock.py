@@ -60,4 +60,6 @@ async def release_thread_lock(thread_id: str) -> None:
     if deleted:
         logger.debug("Released lock", extra={"thread_id": thread_id})
     else:
-        logger.debug("Lock already released or never held", extra={"thread_id": thread_id})
+        logger.debug(
+            "Lock already released or never held", extra={"thread_id": thread_id}
+        )

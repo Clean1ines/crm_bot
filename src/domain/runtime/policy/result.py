@@ -1,8 +1,17 @@
 from dataclasses import dataclass, field
 from typing import Mapping, cast
 
-from src.domain.runtime.dialog_state import DialogState, default_dialog_state, dialog_state_from_memory, merge_dialog_state
-from src.domain.runtime.state_contracts import RuntimeFeatures, RuntimeStateInput, RuntimeStatePatch
+from src.domain.runtime.dialog_state import (
+    DialogState,
+    default_dialog_state,
+    dialog_state_from_memory,
+    merge_dialog_state,
+)
+from src.domain.runtime.state_contracts import (
+    RuntimeFeatures,
+    RuntimeStateInput,
+    RuntimeStatePatch,
+)
 
 
 @dataclass(slots=True)
@@ -19,7 +28,9 @@ class PolicyDecisionContext:
     def from_state(cls, state: RuntimeStateInput) -> "PolicyDecisionContext":
         raw_dialog_state = state.get("dialog_state")
         if isinstance(raw_dialog_state, Mapping):
-            dialog_state = merge_dialog_state(cast(Mapping[str, object], raw_dialog_state))
+            dialog_state = merge_dialog_state(
+                cast(Mapping[str, object], raw_dialog_state)
+            )
         else:
             dialog_state = dialog_state_from_memory(state.get("user_memory"))
 

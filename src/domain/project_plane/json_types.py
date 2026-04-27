@@ -15,10 +15,7 @@ def json_value_from_unknown(value: object) -> JsonValue:
         return [json_value_from_unknown(item) for item in value]
 
     if isinstance(value, dict):
-        return {
-            str(key): json_value_from_unknown(item)
-            for key, item in value.items()
-        }
+        return {str(key): json_value_from_unknown(item) for key, item in value.items()}
 
     return str(value)
 
@@ -34,7 +31,4 @@ def json_object_from_unknown(value: object) -> JsonObject:
     if not isinstance(value, dict):
         return {}
 
-    return {
-        str(key): json_value_from_unknown(item)
-        for key, item in value.items()
-    }
+    return {str(key): json_value_from_unknown(item) for key, item in value.items()}

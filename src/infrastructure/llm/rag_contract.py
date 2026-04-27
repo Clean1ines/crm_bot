@@ -135,8 +135,7 @@ class QueryExpander(Protocol):
     Tests can use a deterministic fake.
     """
 
-    async def expand(self, query: str, *, max_expansions: int) -> list[str]:
-        ...
+    async def expand(self, query: str, *, max_expansions: int) -> list[str]: ...
 
 
 class KnowledgeSearchRepository(Protocol):
@@ -148,5 +147,4 @@ class KnowledgeSearchRepository(Protocol):
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
-    ) -> list[Mapping[str, object]]:
-        ...
+    ) -> list[Mapping[str, object]]: ...

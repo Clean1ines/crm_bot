@@ -16,16 +16,24 @@ class ThreadMessageRepository:
         logger.info(f"Adding message to thread {thread_id}, role {role}")
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO messages (thread_id, role, content)
                 VALUES ($1, $2, $3)
-            """, ensure_uuid(thread_id), role, content)
+            """,
+                ensure_uuid(thread_id),
+                role,
+                content,
+            )
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET updated_at = NOW()
                 WHERE id = $1
-            """, ensure_uuid(thread_id))
+            """,
+                ensure_uuid(thread_id),
+            )
 
         logger.debug("Message added and thread updated")
 
@@ -34,27 +42,40 @@ class ThreadMessageRepository:
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE threads
                     SET updated_at = NOW()
                     WHERE id = $1
-                """, ensure_uuid(thread_id))
+                """,
+                    ensure_uuid(thread_id),
+                )
 
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO messages (thread_id, role, content)
                     VALUES ($1, $2, $3)
-                """, ensure_uuid(thread_id), "assistant", content)
+                """,
+                    ensure_uuid(thread_id),
+                    "assistant",
+                    content,
+                )
 
-    async def get_messages_for_langgraph(self, thread_id: str) -> list[ThreadRuntimeMessageView]:
+    async def get_messages_for_langgraph(
+        self, thread_id: str
+    ) -> list[ThreadRuntimeMessageView]:
         logger.debug(f"Fetching messages for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT role, content
                 FROM messages
                 WHERE thread_id = $1
                 ORDER BY created_at ASC
-            """, ensure_uuid(thread_id))
+            """,
+                ensure_uuid(thread_id),
+            )
 
         messages = [ThreadRuntimeMessageView.from_record(dict(row)) for row in rows]
         logger.debug(f"Retrieved {len(messages)} messages")
@@ -69,13 +90,18 @@ class ThreadMessageRepository:
         logger.debug(f"Fetching messages for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT id, role, content, created_at, metadata
                 FROM messages
                 WHERE thread_id = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            """, ensure_uuid(thread_id), limit, offset)
+            """,
+                ensure_uuid(thread_id),
+                limit,
+                offset,
+            )
 
         messages = []
         for row in rows:
@@ -83,13 +109,15 @@ class ThreadMessageRepository:
             if created_at:
                 created_at = created_at.isoformat()
 
-            messages.append(ThreadMessageView(
-                id=str(row["id"]),
-                role=row["role"],
-                content=row["content"],
-                created_at=created_at,
-                metadata=row["metadata"] or {},
-            ))
+            messages.append(
+                ThreadMessageView(
+                    id=str(row["id"]),
+                    role=row["role"],
+                    content=row["content"],
+                    created_at=created_at,
+                    metadata=row["metadata"] or {},
+                )
+            )
 
         messages.reverse()
         logger.debug(f"Retrieved {len(messages)} messages")

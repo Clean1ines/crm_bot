@@ -1,11 +1,10 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from unittest.mock import AsyncMock, MagicMock, call
 from uuid import UUID, uuid4
 from datetime import date, datetime
 import asyncpg
 
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
-from src.utils.uuid_utils import ensure_uuid
 
 
 @pytest.fixture
@@ -48,7 +47,7 @@ class TestMetricsRepository:
             ai_messages=ai_messages,
             manager_messages=manager_messages,
             escalated=escalated,
-            resolution_time=resolution_time
+            resolution_time=resolution_time,
         )
 
         assert mock_pool.acquire.call_count == 1
@@ -60,7 +59,12 @@ class TestMetricsRepository:
         """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
             expected_sql,
-            UUID(thread_id), total_messages, ai_messages, manager_messages, escalated, resolution_time
+            UUID(thread_id),
+            total_messages,
+            ai_messages,
+            manager_messages,
+            escalated,
+            resolution_time,
         )
 
     @pytest.mark.asyncio
@@ -71,9 +75,7 @@ class TestMetricsRepository:
         mock_pool.mock_conn.execute = AsyncMock()
 
         await metrics_repo.update_thread_metrics(
-            thread_id=thread_id,
-            total_messages=total_messages,
-            escalated=escalated
+            thread_id=thread_id, total_messages=total_messages, escalated=escalated
         )
 
         expected_sql = """
@@ -106,12 +108,16 @@ class TestMetricsRepository:
     @pytest.mark.asyncio
     async def test_update_thread_metrics_invalid_uuid(self, metrics_repo):
         with pytest.raises(ValueError):
-            await metrics_repo.update_thread_metrics(thread_id="invalid-uuid", total_messages=1)
+            await metrics_repo.update_thread_metrics(
+                thread_id="invalid-uuid", total_messages=1
+            )
 
     @pytest.mark.asyncio
     async def test_update_thread_metrics_db_error(self, metrics_repo, mock_pool):
         thread_id = str(uuid4())
-        mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn"))
+        mock_pool.mock_conn.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn")
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await metrics_repo.update_thread_metrics(thread_id, total_messages=1)
 
@@ -119,7 +125,9 @@ class TestMetricsRepository:
     # update_project_daily_metrics
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
-    async def test_update_project_daily_metrics_insert_new(self, metrics_repo, mock_pool):
+    async def test_update_project_daily_metrics_insert_new(
+        self, metrics_repo, mock_pool
+    ):
         project_id = str(uuid4())
         target_date = date(2025, 1, 1)
         total_threads_delta = 5
@@ -136,7 +144,7 @@ class TestMetricsRepository:
             total_threads_delta=total_threads_delta,
             escalations_delta=escalations_delta,
             tokens_used_delta=tokens_used_delta,
-            avg_messages_to_resolution=avg_messages_to_resolution
+            avg_messages_to_resolution=avg_messages_to_resolution,
         )
 
         assert mock_pool.acquire.call_count == 1
@@ -153,12 +161,19 @@ class TestMetricsRepository:
                     VALUES ($1, $2, $3, $4, $5, $6)
                 """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_insert_sql, UUID(project_id), target_date,
-            total_threads_delta, escalations_delta, avg_messages_to_resolution, tokens_used_delta
+            expected_insert_sql,
+            UUID(project_id),
+            target_date,
+            total_threads_delta,
+            escalations_delta,
+            avg_messages_to_resolution,
+            tokens_used_delta,
         )
 
     @pytest.mark.asyncio
-    async def test_update_project_daily_metrics_update_existing(self, metrics_repo, mock_pool):
+    async def test_update_project_daily_metrics_update_existing(
+        self, metrics_repo, mock_pool
+    ):
         project_id = str(uuid4())
         target_date = date(2025, 1, 1)
         total_threads_delta = 3
@@ -170,7 +185,7 @@ class TestMetricsRepository:
             "total_threads": 10,
             "escalations": 5,
             "avg_messages_to_resolution": 2.5,
-            "tokens_used": 500
+            "tokens_used": 500,
         }
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=existing)
         mock_pool.mock_conn.execute = AsyncMock()
@@ -181,7 +196,7 @@ class TestMetricsRepository:
             total_threads_delta=total_threads_delta,
             escalations_delta=escalations_delta,
             tokens_used_delta=tokens_used_delta,
-            avg_messages_to_resolution=avg_messages_to_resolution
+            avg_messages_to_resolution=avg_messages_to_resolution,
         )
 
         expected_select_sql = """
@@ -204,11 +219,13 @@ class TestMetricsRepository:
             existing["avg_messages_to_resolution"],
             existing["tokens_used"] + tokens_used_delta,
             UUID(project_id),
-            target_date
+            target_date,
         )
 
     @pytest.mark.asyncio
-    async def test_update_project_daily_metrics_with_avg_override(self, metrics_repo, mock_pool):
+    async def test_update_project_daily_metrics_with_avg_override(
+        self, metrics_repo, mock_pool
+    ):
         project_id = str(uuid4())
         target_date = date(2025, 1, 1)
         total_threads_delta = 0
@@ -220,7 +237,7 @@ class TestMetricsRepository:
             "total_threads": 10,
             "escalations": 5,
             "avg_messages_to_resolution": 2.5,
-            "tokens_used": 500
+            "tokens_used": 500,
         }
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=existing)
         mock_pool.mock_conn.execute = AsyncMock()
@@ -231,7 +248,7 @@ class TestMetricsRepository:
             total_threads_delta=total_threads_delta,
             escalations_delta=escalations_delta,
             tokens_used_delta=tokens_used_delta,
-            avg_messages_to_resolution=avg_messages_to_resolution
+            avg_messages_to_resolution=avg_messages_to_resolution,
         )
 
         expected_update_sql = """
@@ -246,16 +263,14 @@ class TestMetricsRepository:
             avg_messages_to_resolution,
             existing["tokens_used"] + tokens_used_delta,
             UUID(project_id),
-            target_date
+            target_date,
         )
 
     @pytest.mark.asyncio
     async def test_update_project_daily_metrics_invalid_uuid(self, metrics_repo):
         with pytest.raises(ValueError):
             await metrics_repo.update_project_daily_metrics(
-                project_id="invalid",
-                date=date.today(),
-                total_threads_delta=1
+                project_id="invalid", date=date.today(), total_threads_delta=1
             )
 
     # --------------------------------------------------------------------------
@@ -268,15 +283,17 @@ class TestMetricsRepository:
         thread_rows = [
             {"id": uuid4(), "created_at": datetime(2025, 1, 1), "project_id": uuid4()},
             {"id": uuid4(), "created_at": datetime(2025, 1, 1), "project_id": uuid4()},
-            {"id": uuid4(), "created_at": datetime(2025, 1, 1), "project_id": uuid4()}
+            {"id": uuid4(), "created_at": datetime(2025, 1, 1), "project_id": uuid4()},
         ]
         # Mock escalations results
         escalation_rows = [
             {"project_id": thread_rows[0]["project_id"], "count": 2},
-            {"project_id": thread_rows[1]["project_id"], "count": 1}
+            {"project_id": thread_rows[1]["project_id"], "count": 1},
         ]
         # Mock fetch, fetchrow, execute in sequence
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=[thread_rows, escalation_rows])
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=[thread_rows, escalation_rows]
+        )
         mock_pool.mock_conn.execute = AsyncMock()
 
         await metrics_repo.aggregate_for_date(target_date)
@@ -312,7 +329,7 @@ class TestMetricsRepository:
         calls = [
             call(expected_insert_sql, thread_rows[0]["project_id"], target_date, 1, 2),
             call(expected_insert_sql, thread_rows[1]["project_id"], target_date, 1, 1),
-            call(expected_insert_sql, thread_rows[2]["project_id"], target_date, 1, 0)
+            call(expected_insert_sql, thread_rows[2]["project_id"], target_date, 1, 0),
         ]
         mock_pool.mock_conn.execute.assert_has_calls(calls, any_order=True)
 
@@ -335,7 +352,9 @@ class TestMetricsRepository:
     @pytest.mark.asyncio
     async def test_aggregate_for_date_db_error(self, metrics_repo, mock_pool):
         target_date = date(2025, 1, 1)
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.UndefinedTableError("no table"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.UndefinedTableError("no table")
+        )
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
             await metrics_repo.aggregate_for_date(target_date)
 
@@ -344,18 +363,26 @@ class TestMetricsRepository:
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
     async def test_connection_error_update_thread(self, metrics_repo, mock_pool):
-        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
+        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+            "conn closed"
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await metrics_repo.update_thread_metrics(str(uuid4()), total_messages=1)
 
     @pytest.mark.asyncio
     async def test_connection_error_update_project(self, metrics_repo, mock_pool):
-        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
+        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+            "conn closed"
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
-            await metrics_repo.update_project_daily_metrics(str(uuid4()), date.today(), total_threads_delta=1)
+            await metrics_repo.update_project_daily_metrics(
+                str(uuid4()), date.today(), total_threads_delta=1
+            )
 
     @pytest.mark.asyncio
     async def test_connection_error_aggregate(self, metrics_repo, mock_pool):
-        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
+        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+            "conn closed"
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await metrics_repo.aggregate_for_date(date.today())

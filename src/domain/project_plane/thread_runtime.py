@@ -32,7 +32,9 @@ class ThreadRuntimeSnapshot:
     chat_id: int | None = None
 
     @classmethod
-    def from_record(cls, record: RuntimeRecord | None) -> "ThreadRuntimeSnapshot | None":
+    def from_record(
+        cls, record: RuntimeRecord | None
+    ) -> "ThreadRuntimeSnapshot | None":
         if not record:
             return None
         return cls(

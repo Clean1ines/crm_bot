@@ -153,7 +153,9 @@ class HTTPTool(Tool):
         except Exception as exc:
             raise self._unexpected_error(project_id, request, exc) from exc
 
-    def _timeout_error(self, project_id: str, request: HTTPRequest) -> ToolExecutionError:
+    def _timeout_error(
+        self, project_id: str, request: HTTPRequest
+    ) -> ToolExecutionError:
         logger.error(
             "HTTP request timed out",
             extra={
@@ -273,11 +275,7 @@ def _string_mapping(value: object) -> dict[str, str]:
     if not isinstance(value, Mapping):
         return {}
 
-    return {
-        str(key): str(item)
-        for key, item in value.items()
-        if item is not None
-    }
+    return {str(key): str(item) for key, item in value.items() if item is not None}
 
 
 def _object_mapping_or_none(value: object) -> dict[str, object] | None:
@@ -303,24 +301,19 @@ def _allowed_domains() -> list[str]:
         return []
 
     if isinstance(raw_domains, str):
-        return [
-            domain.strip()
-            for domain in raw_domains.split(",")
-            if domain.strip()
-        ]
+        return [domain.strip() for domain in raw_domains.split(",") if domain.strip()]
 
     if isinstance(raw_domains, list | tuple | set):
-        return [
-            str(domain).strip()
-            for domain in raw_domains
-            if str(domain).strip()
-        ]
+        return [str(domain).strip() for domain in raw_domains if str(domain).strip()]
 
     return []
 
 
 def _domain_is_allowed(domain: str, allowed_domains: list[str]) -> bool:
-    return any(domain == allowed or domain.endswith(f".{allowed}") for allowed in allowed_domains)
+    return any(
+        domain == allowed or domain.endswith(f".{allowed}")
+        for allowed in allowed_domains
+    )
 
 
 def _elapsed_ms(start_time: float) -> int:

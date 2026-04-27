@@ -70,7 +70,12 @@ def test_build_response_prompt_includes_project_context():
 
 
 def test_build_intent_prompt_uses_clean_fallback_text():
-    prompt = build_intent_prompt(user_input="Need help", conversation_summary=None, history=None, user_memory=None)
+    prompt = build_intent_prompt(
+        user_input="Need help",
+        conversation_summary=None,
+        history=None,
+        user_memory=None,
+    )
 
     assert "User message: Need help" in prompt
     assert "- Summary: none" in prompt

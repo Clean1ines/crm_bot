@@ -16,26 +16,36 @@ def service():
 
 @pytest.mark.asyncio
 async def test_create_project_for_telegram_user_uses_canonical_user_id(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock(return_value=("user-1", True))
-    service.project_repo.create_project_with_user_id = AsyncMock(return_value="project-1")
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        return_value=("user-1", True)
+    )
+    service.project_repo.create_project_with_user_id = AsyncMock(
+        return_value="project-1"
+    )
 
     result = await service.create_project_for_telegram_user(123, "Acme")
 
     assert result == "project-1"
-    service.project_repo.create_project_with_user_id.assert_awaited_once_with("user-1", "Acme")
+    service.project_repo.create_project_with_user_id.assert_awaited_once_with(
+        "user-1", "Acme"
+    )
 
 
 @pytest.mark.asyncio
 async def test_list_projects_for_telegram_user_uses_typed_membership_lookup(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock(return_value=("user-1", False))
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        return_value=("user-1", False)
+    )
     service.project_repo.get_projects_for_user_view = AsyncMock(
         return_value=[
-            ProjectSummaryView.from_record({
-                "id": "p1",
-                "name": "P1",
-                "is_pro_mode": False,
-                "user_id": "user-1",
-            })
+            ProjectSummaryView.from_record(
+                {
+                    "id": "p1",
+                    "name": "P1",
+                    "is_pro_mode": False,
+                    "user_id": "user-1",
+                }
+            )
         ]
     )
 
@@ -55,8 +65,12 @@ async def test_list_projects_for_telegram_user_uses_typed_membership_lookup(serv
 
 
 @pytest.mark.asyncio
-async def test_list_projects_for_telegram_user_creates_platform_user_when_missing(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock(return_value=("user-1", True))
+async def test_list_projects_for_telegram_user_creates_platform_user_when_missing(
+    service,
+):
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        return_value=("user-1", True)
+    )
     service.project_repo.get_projects_for_user_view = AsyncMock(return_value=[])
 
     result = await service.list_projects_for_telegram_user(123)
@@ -67,22 +81,32 @@ async def test_list_projects_for_telegram_user_creates_platform_user_when_missin
 
 @pytest.mark.asyncio
 async def test_add_manager_by_chat_id_links_existing_platform_user(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock(return_value=("user-2", False))
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        return_value=("user-2", False)
+    )
     service.project_repo.add_project_member = AsyncMock()
 
     result = await service.add_manager_by_chat_id("project-1", "456")
 
     assert "добавлен как manager" in result
-    service.project_repo.add_project_member.assert_awaited_once_with("project-1", "user-2", "manager")
+    service.project_repo.add_project_member.assert_awaited_once_with(
+        "project-1", "user-2", "manager"
+    )
 
 
 @pytest.mark.asyncio
 async def test_get_project_team_filters_project_member_roles(service):
     service.project_repo.get_project_members_view = AsyncMock(
         return_value=[
-            ProjectMemberView.from_record({"project_id": "project-1", "user_id": "u1", "role": "owner"}),
-            ProjectMemberView.from_record({"project_id": "project-1", "user_id": "u2", "role": "manager"}),
-            ProjectMemberView.from_record({"project_id": "project-1", "user_id": "u3", "role": "viewer"}),
+            ProjectMemberView.from_record(
+                {"project_id": "project-1", "user_id": "u1", "role": "owner"}
+            ),
+            ProjectMemberView.from_record(
+                {"project_id": "project-1", "user_id": "u2", "role": "manager"}
+            ),
+            ProjectMemberView.from_record(
+                {"project_id": "project-1", "user_id": "u3", "role": "viewer"}
+            ),
         ]
     )
 

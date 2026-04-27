@@ -3,11 +3,11 @@ Client Bot Router.
 Wraps ConversationOrchestrator to handle end-user Telegram messages.
 """
 
-
-import asyncpg
 import httpx
 
-from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.redis.client import get_redis_client
 
@@ -15,7 +15,9 @@ logger = get_logger(__name__)
 
 OK_RESPONSE: dict[str, bool] = {"ok": True}
 IDEMPOTENCY_TTL_SECONDS = 3600
-CLIENT_ERROR_MESSAGE = "❌ Произошла ошибка при обработке вашего запроса. Попробуйте позже."
+CLIENT_ERROR_MESSAGE = (
+    "❌ Произошла ошибка при обработке вашего запроса. Попробуйте позже."
+)
 
 
 def _extract_message(update: dict[str, object]) -> dict[str, object] | None:
@@ -54,7 +56,9 @@ async def _skip_duplicate_update(update: dict[str, object]) -> bool:
     try:
         return await _is_duplicate_update(update.get("update_id"))
     except Exception as exc:
-        logger.warning("Redis unavailable for idempotency check", extra={"error": str(exc)})
+        logger.warning(
+            "Redis unavailable for idempotency check", extra={"error": str(exc)}
+        )
         return False
 
 

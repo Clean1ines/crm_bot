@@ -171,10 +171,12 @@ def test_thread_runtime_message_view_exposes_typed_attributes():
     assert view.content == "hello"
     assert view.to_record() == {"role": "user", "content": "hello"}
 
+
 def test_thread_runtime_message_view_does_not_expose_mapping_compatibility():
     view = ThreadRuntimeMessageView(role="user", content="hello")
 
     assert not hasattr(view, "__getitem__")
+
 
 def test_thread_status_summary_view_normalizes_record():
     thread_id = uuid4()

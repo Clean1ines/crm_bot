@@ -42,6 +42,8 @@ def test_agent_layer_does_not_import_legacy_agent_tools():
             text = path.read_text(encoding="utf-8")
             for marker in FORBIDDEN_IMPORT_MARKERS:
                 if marker in text:
-                    violations.append(f"{path} imports removed legacy agent tools module")
+                    violations.append(
+                        f"{path} imports removed legacy agent tools module"
+                    )
 
     assert violations == []

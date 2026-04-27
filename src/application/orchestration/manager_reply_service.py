@@ -31,7 +31,9 @@ class ManagerReplyService:
         project_id: str,
         manager_chat_id: str,
     ) -> str | None:
-        return await self.projects.resolve_manager_user_id_by_telegram(project_id, manager_chat_id)
+        return await self.projects.resolve_manager_user_id_by_telegram(
+            project_id, manager_chat_id
+        )
 
     async def resolve_manager_display_name(
         self,
@@ -91,7 +93,9 @@ class ManagerReplyService:
             manager_chat_id=manager_chat_id,
         )
 
-        self.logger.info("Manager reply sent successfully", extra={"thread_id": thread_id})
+        self.logger.info(
+            "Manager reply sent successfully", extra={"thread_id": thread_id}
+        )
         return True
 
     def _log_manager_reply_started(
@@ -110,7 +114,9 @@ class ManagerReplyService:
             },
         )
 
-    async def _platform_manager_display_name(self, manager_user_id: str | None) -> str | None:
+    async def _platform_manager_display_name(
+        self, manager_user_id: str | None
+    ) -> str | None:
         if not manager_user_id:
             return None
 
@@ -160,20 +166,28 @@ class ManagerReplyService:
         chat_data = response.get("result") or {}
         return chat_data.get("first_name") or chat_data.get("username")
 
-    async def _load_manual_thread_snapshot(self, thread_id: str) -> ThreadRuntimeSnapshot:
+    async def _load_manual_thread_snapshot(
+        self, thread_id: str
+    ) -> ThreadRuntimeSnapshot:
         thread_snapshot = await self._load_thread_snapshot(thread_id)
         if thread_snapshot.status != ThreadStatus.MANUAL.value:
-            raise ValueError(f"Thread {thread_id} status is {thread_snapshot.status}, expected MANUAL")
+            raise ValueError(
+                f"Thread {thread_id} status is {thread_snapshot.status}, expected MANUAL"
+            )
         return thread_snapshot
 
     async def _load_thread_snapshot(self, thread_id: str) -> ThreadRuntimeSnapshot:
         thread_view = await self.threads.get_thread_with_project_view(thread_id)
-        thread_snapshot = ThreadRuntimeSnapshot.from_record(thread_view.to_record() if thread_view else None)
+        thread_snapshot = ThreadRuntimeSnapshot.from_record(
+            thread_view.to_record() if thread_view else None
+        )
         if not thread_snapshot:
             raise ValueError(f"Thread {thread_id} not found")
         return thread_snapshot
 
-    def _require_project_id(self, thread_snapshot: ThreadRuntimeSnapshot, thread_id: str) -> str:
+    def _require_project_id(
+        self, thread_snapshot: ThreadRuntimeSnapshot, thread_id: str
+    ) -> str:
         if not thread_snapshot.project_id:
             raise RuntimeError(f"Project id not found for thread {thread_id}")
         return thread_snapshot.project_id
@@ -194,7 +208,9 @@ class ManagerReplyService:
             manager_user_id=manager_user_id,
         )
         if not resolved_manager_user_id:
-            raise PermissionError("Canonical manager_user_id is required for manager replies")
+            raise PermissionError(
+                "Canonical manager_user_id is required for manager replies"
+            )
         return resolved_manager_user_id
 
     async def _resolve_manager_user_id(
@@ -210,7 +226,9 @@ class ManagerReplyService:
         if thread_snapshot.manager_user_id:
             return thread_snapshot.manager_user_id
         if manager_chat_id:
-            return await self.resolve_manager_user_id_by_telegram(project_id, manager_chat_id)
+            return await self.resolve_manager_user_id_by_telegram(
+                project_id, manager_chat_id
+            )
         return None
 
     async def _prefixed_manager_text(
@@ -260,7 +278,9 @@ class ManagerReplyService:
             raise RuntimeError(f"Client chat_id not found for thread {thread_id}")
         return chat_id
 
-    def _ensure_telegram_response_ok(self, thread_id: str, response: dict[str, object]) -> None:
+    def _ensure_telegram_response_ok(
+        self, thread_id: str, response: dict[str, object]
+    ) -> None:
         if response.get("ok") is not False:
             return
 

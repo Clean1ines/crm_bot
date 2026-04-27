@@ -30,7 +30,9 @@ def _row_mapping(row: object) -> Mapping[str, object]:
     return {}
 
 
-def _search_filter(search: str | None, param_idx: int) -> tuple[list[str], list[object], int]:
+def _search_filter(
+    search: str | None, param_idx: int
+) -> tuple[list[str], list[object], int]:
     if not search:
         return [], [], param_idx
 
@@ -51,7 +53,9 @@ def _list_where_clause(search: str | None) -> tuple[str, list[object], int]:
     return " AND ".join(where_parts), search_params, param_idx
 
 
-def _client_list_query(where_clause: str, *, limit_param: int, offset_param: int) -> str:
+def _client_list_query(
+    where_clause: str, *, limit_param: int, offset_param: int
+) -> str:
     return f"""
         SELECT
             c.id,
@@ -182,7 +186,9 @@ class ClientRepository:
             _row_mapping(stats_row) if stats_row else None,
         )
 
-    async def get_by_id_view(self, project_id: str, client_id: str) -> ClientDetailView | None:
+    async def get_by_id_view(
+        self, project_id: str, client_id: str
+    ) -> ClientDetailView | None:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """

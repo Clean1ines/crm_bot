@@ -33,18 +33,26 @@ class QueueRepository:
     ) -> str:
         logger.info(
             "Enqueuing job",
-            extra={"task_type": task_type, "payload_keys": list(payload.keys()) if payload else None},
+            extra={
+                "task_type": task_type,
+                "payload_keys": list(payload.keys()) if payload else None,
+            },
         )
         async with self.pool.acquire() as conn:
             payload_json = json.dumps(payload) if payload else None
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 INSERT INTO public.execution_queue (
                     id, task_type, payload, status, 
                     attempts, max_attempts, created_at, updated_at
                 )
                 VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
                 RETURNING id
-            """, task_type, payload_json, max_attempts)
+            """,
+                task_type,
+                payload_json,
+                max_attempts,
+            )
             job_id = str(row["id"])
             logger.info("Job enqueued successfully", extra={"job_id": job_id})
             return job_id
@@ -55,7 +63,8 @@ class QueueRepository:
             await conn.fetchval("SELECT current_schema()")
 
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 UPDATE public.execution_queue
                 SET 
                     status = 'processing',
@@ -72,7 +81,9 @@ class QueueRepository:
                     FOR UPDATE SKIP LOCKED
                 )
                 RETURNING id, task_type, payload, attempts, max_attempts, created_at
-            """, worker_id)
+            """,
+                worker_id,
+            )
 
             if not row:
                 return None
@@ -94,18 +105,25 @@ class QueueRepository:
 
             logger.info(
                 "Job claimed successfully",
-                extra={"job_id": job.id, "task_type": job.task_type, "worker_id": worker_id},
+                extra={
+                    "job_id": job.id,
+                    "task_type": job.task_type,
+                    "worker_id": worker_id,
+                },
             )
             return job
 
-    async def complete_job(self, job_id: str, success: bool, error: str | None = None) -> None:
+    async def complete_job(
+        self, job_id: str, success: bool, error: str | None = None
+    ) -> None:
         new_status = "done" if success else "failed"
         logger.info(
             "Completing job",
             extra={"job_id": job_id, "status": new_status, "error": error},
         )
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE public.execution_queue
                 SET 
                     status = $1, 
@@ -114,7 +132,11 @@ class QueueRepository:
                     worker_id = NULL,
                     error = $2
                 WHERE id = $3
-            """, new_status, error, job_id)
+            """,
+                new_status,
+                error,
+                job_id,
+            )
 
     async def release_job(self, job_id: str, reason: str = "timeout") -> bool:
         logger.info(
@@ -122,7 +144,8 @@ class QueueRepository:
             extra={"job_id": job_id, "reason": reason},
         )
         async with self.pool.acquire() as conn:
-            result = await conn.execute("""
+            result = await conn.execute(
+                """
                 UPDATE public.execution_queue
                 SET 
                     status = 'pending',
@@ -130,7 +153,9 @@ class QueueRepository:
                     locked_at = NULL,
                     worker_id = NULL
                 WHERE id = $1 AND status = 'processing'
-            """, job_id)
+            """,
+                job_id,
+            )
 
             released = result == "UPDATE 1"
             if released:
@@ -142,14 +167,21 @@ class QueueRepository:
                 )
             return released
 
-    async def fail_job(self, job_id: str, error: str, increment_attempt: bool = True) -> bool:
+    async def fail_job(
+        self, job_id: str, error: str, increment_attempt: bool = True
+    ) -> bool:
         logger.info(
             "Failing job",
-            extra={"job_id": job_id, "error": error, "increment_attempt": increment_attempt},
+            extra={
+                "job_id": job_id,
+                "error": error,
+                "increment_attempt": increment_attempt,
+            },
         )
         async with self.pool.acquire() as conn:
             if increment_attempt:
-                result = await conn.execute("""
+                result = await conn.execute(
+                    """
                     UPDATE public.execution_queue
                     SET 
                         attempts = attempts + 1,
@@ -162,9 +194,13 @@ class QueueRepository:
                             ELSE 'pending'
                         END
                     WHERE id = $2
-                """, error, job_id)
+                """,
+                    error,
+                    job_id,
+                )
             else:
-                result = await conn.execute("""
+                result = await conn.execute(
+                    """
                     UPDATE public.execution_queue
                     SET 
                         error = $1,
@@ -173,7 +209,10 @@ class QueueRepository:
                         worker_id = NULL,
                         status = 'failed'
                     WHERE id = $2
-                """, error, job_id)
+                """,
+                    error,
+                    job_id,
+                )
 
             updated = result == "UPDATE 1"
             if updated:
@@ -185,15 +224,20 @@ class QueueRepository:
     async def increment_attempts(self, job_id: str) -> int | None:
         logger.debug("Incrementing attempts", extra={"job_id": job_id})
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 UPDATE public.execution_queue
                 SET attempts = attempts + 1, updated_at = NOW()
                 WHERE id = $1
                 RETURNING attempts, max_attempts
-            """, job_id)
+            """,
+                job_id,
+            )
 
             if not row:
-                logger.warning("Job not found for attempt increment", extra={"job_id": job_id})
+                logger.warning(
+                    "Job not found for attempt increment", extra={"job_id": job_id}
+                )
                 return None
 
             attempts = row["attempts"]
@@ -201,16 +245,23 @@ class QueueRepository:
 
             logger.debug(
                 "Attempts incremented",
-                extra={"job_id": job_id, "attempts": attempts, "max_attempts": max_attempts},
+                extra={
+                    "job_id": job_id,
+                    "attempts": attempts,
+                    "max_attempts": max_attempts,
+                },
             )
             return attempts
 
     async def get_stale_locked_jobs(self, timeout_minutes: int = 5) -> list[str]:
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT id FROM public.execution_queue
-                WHERE status = 'processing'
-                AND locked_at < NOW() - INTERVAL '%s minutes'
-            """ % timeout_minutes)
+            rows = await conn.fetch(
+                """
+                    SELECT id FROM public.execution_queue
+                    WHERE status = 'processing'
+                    AND locked_at < NOW() - ($1::int * INTERVAL '1 minute')
+                    """,
+                timeout_minutes,
+            )
 
             return [str(row["id"]) for row in rows]

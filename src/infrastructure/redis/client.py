@@ -10,6 +10,7 @@ logger = get_logger(__name__)
 
 _redis_client = None
 
+
 async def get_redis_client() -> redis.Redis:
     """
     Return a singleton async Redis client connected to the URL from settings.
@@ -22,6 +23,6 @@ async def get_redis_client() -> redis.Redis:
         logger.info("Creating Redis client")
         _redis_client = await redis.from_url(
             settings.REDIS_URL,
-            decode_responses=True  # so we get strings, not bytes
+            decode_responses=True,  # so we get strings, not bytes
         )
     return _redis_client

@@ -5,7 +5,6 @@ The heavy logic lives in small orchestration services. This class remains the
 public application service used by existing HTTP/Telegram entrypoints.
 """
 
-
 from src.application.ports.cache_port import CacheFactoryPort
 from src.application.ports.lock_port import NullThreadLock, ThreadLockPort
 from src.application.ports.agent_runtime_port import AgentFactoryPort
@@ -13,11 +12,14 @@ from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.application.services.project_runtime_guards import ProjectRuntimeGuards
 from src.utils.uuid_utils import ensure_uuid
 
-from src.application.orchestration.client_message_service import ClientMessageService, split_questions
+from src.application.orchestration.client_message_service import ClientMessageService
 from src.application.orchestration.graph_factory import GraphExecutor, GraphFactory
 from src.application.orchestration.manager_reply_service import ManagerReplyService
 from src.application.orchestration.project_runtime_loader import ProjectRuntimeLoader
-from src.application.orchestration.transport_sender_port import NullTelegramClient, TelegramClientPort
+from src.application.orchestration.transport_sender_port import (
+    NullTelegramClient,
+    TelegramClientPort,
+)
 
 
 class EventEmitter:
@@ -50,7 +52,11 @@ class EventEmitter:
         except Exception as exc:
             self.logger.error(
                 "Failed to emit event",
-                extra={"stream_id": stream_id, "event_type": event_type, "error": str(exc)},
+                extra={
+                    "stream_id": stream_id,
+                    "event_type": event_type,
+                    "error": str(exc),
+                },
             )
 
 
@@ -88,9 +94,13 @@ class ConversationOrchestrator:
         self.telegram_client = telegram_client or NullTelegramClient()
         self.logger = logger or NullLogger()
 
-        self.runtime_guards = ProjectRuntimeGuards(cache_factory=cache_factory, logger=self.logger)
+        self.runtime_guards = ProjectRuntimeGuards(
+            cache_factory=cache_factory, logger=self.logger
+        )
         self.event_emitter = EventEmitter(event_repo=event_repo, logger=self.logger)
-        self.runtime_loader = ProjectRuntimeLoader(projects=project_repo, logger=self.logger)
+        self.runtime_loader = ProjectRuntimeLoader(
+            projects=project_repo, logger=self.logger
+        )
         if agent_factory is None:
             raise ValueError("agent_factory is required")
 
@@ -133,7 +143,13 @@ class ConversationOrchestrator:
 
         self.logger.debug("ConversationOrchestrator initialized")
 
-    async def _emit_event(self, stream_id: str, project_id: str, event_type: str, payload: dict[str, object]) -> None:
+    async def _emit_event(
+        self,
+        stream_id: str,
+        project_id: str,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> None:
         await self.event_emitter.emit_event(stream_id, project_id, event_type, payload)
 
     def _build_graph_from_json(self, graph_json):
@@ -149,7 +165,9 @@ class ConversationOrchestrator:
     def _outcome(text: str, *, delivered: bool = False):
         return GraphExecutor.outcome(text, delivered=delivered)
 
-    def _trim_recent_history(self, recent_messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    def _trim_recent_history(
+        self, recent_messages: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
         return self.graph_executor.trim_recent_history(recent_messages)
 
     def _create_graph_execution_request(self, **kwargs):
@@ -159,7 +177,9 @@ class ConversationOrchestrator:
         return self.graph_executor.build_agent_state(request=request)
 
     def _extract_graph_result(self, result_state, *, question: str, thread_id: str):
-        return self.graph_executor.extract_graph_result(result_state, question=question, thread_id=thread_id)
+        return self.graph_executor.extract_graph_result(
+            result_state, question=question, thread_id=thread_id
+        )
 
     async def _invoke_graph(self, *, graph, request):
         return await self.graph_executor.invoke_graph(graph=graph, request=request)
@@ -190,7 +210,9 @@ class ConversationOrchestrator:
         project_id: str,
         manager_chat_id: str,
     ) -> str | None:
-        return await self.manager_replies.resolve_manager_user_id_by_telegram(project_id, manager_chat_id)
+        return await self.manager_replies.resolve_manager_user_id_by_telegram(
+            project_id, manager_chat_id
+        )
 
     async def _resolve_manager_display_name(
         self,

@@ -1,7 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
-from uuid import uuid4
 
 from src.interfaces.http.app import app
 from src.interfaces.http.dependencies import require_platform_admin
@@ -34,7 +33,7 @@ class TestRateLimitsAPI:
         # Мокируем ModelRegistry и RateLimitTracker
         mock_models = [
             {"id": "model1", "name": "Model One"},
-            {"id": "model2", "name": "Model Two"}
+            {"id": "model2", "name": "Model Two"},
         ]
         mock_limits = {
             "model1": {
@@ -42,15 +41,15 @@ class TestRateLimitsAPI:
                 "requests_reset": "1m30s",
                 "tokens_remaining": "5000",
                 "tokens_reset": "45s",
-                "last_update": "1712345678.123"
+                "last_update": "1712345678.123",
             },
             "model2": {
                 "requests_remaining": "50",
                 "requests_reset": "2m",
                 "tokens_remaining": "2500",
                 "tokens_reset": "60s",
-                "last_update": "1712345679.456"
-            }
+                "last_update": "1712345679.456",
+            },
         }
 
         with patch("src.interfaces.http.limits.ModelRegistry") as MockRegistry:

@@ -8,7 +8,10 @@ from typing import Awaitable, Callable, Mapping
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.application.ports.project_port import ProjectNotificationPort
 from src.application.ports.thread_port import ThreadReadPort
-from src.infrastructure.queue.handlers.metrics import handle_aggregate_metrics, handle_update_metrics
+from src.infrastructure.queue.handlers.metrics import (
+    handle_aggregate_metrics,
+    handle_update_metrics,
+)
 from src.infrastructure.queue.handlers.notify_manager import handle_notify_manager
 from src.infrastructure.queue.job_exceptions import PermanentJobError
 from src.infrastructure.queue.job_types import (

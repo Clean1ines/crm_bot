@@ -48,7 +48,9 @@ class ThreadQueryService:
         current_user_id: str | None = None,
     ):
         if current_user_id is not None:
-            await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+            await self.access_service.require_project_role(
+                project_id, current_user_id, PROJECT_READ_ROLES
+            )
 
         return await self.thread_read_repo.get_dialogs(
             project_id,
@@ -63,7 +65,6 @@ class ThreadQueryService:
 
     async def get_thread(self, thread_id: str):
         return await self.get_thread_view(thread_id)
-
 
     async def require_thread_access(
         self,
@@ -111,21 +112,31 @@ class ThreadQueryService:
         *,
         limit: int = 100,
     ) -> dict:
-        thread = await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+        thread = await self.require_thread_access(
+            thread_id, current_user_id, PROJECT_READ_ROLES
+        )
         return await self.get_memory(thread.project_id, thread.client_id, limit=limit)
 
     async def get_state_for_user(self, thread_id: str, current_user_id: str) -> dict:
         await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
         return await self.get_state(thread_id)
 
-    async def get_manual_reply_thread_for_user(self, thread_id: str, current_user_id: str):
-        thread = await self.require_thread_access(thread_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def get_manual_reply_thread_for_user(
+        self, thread_id: str, current_user_id: str
+    ):
+        thread = await self.require_thread_access(
+            thread_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         if thread.status != "manual":
             raise ValidationError("Thread is not in manual mode")
         return thread
 
-    async def get_memory_update_target_for_user(self, thread_id: str, current_user_id: str):
-        thread = await self.require_thread_access(thread_id, current_user_id, PROJECT_READ_ROLES)
+    async def get_memory_update_target_for_user(
+        self, thread_id: str, current_user_id: str
+    ):
+        thread = await self.require_thread_access(
+            thread_id, current_user_id, PROJECT_READ_ROLES
+        )
         if not thread.client_id:
             raise ValidationError("No client associated with thread")
         return thread
@@ -143,14 +154,20 @@ class ThreadQueryService:
         events = await self.event_repo.get_events_for_thread(thread_id, limit, offset)
         return {"events": [_event_record(event) for event in events]}
 
-    async def get_memory(self, project_id: str, client_id: str | None, *, limit: int = 100) -> dict:
+    async def get_memory(
+        self, project_id: str, client_id: str | None, *, limit: int = 100
+    ) -> dict:
         if not client_id:
             return {"items": []}
 
         if hasattr(self.memory_repo, "list_for_client"):
-            items = await self.memory_repo.list_for_client(project_id, client_id, limit=limit)
+            items = await self.memory_repo.list_for_client(
+                project_id, client_id, limit=limit
+            )
         else:
-            items = await self.memory_repo.get_for_client(project_id, client_id, limit=limit)
+            items = await self.memory_repo.get_for_client(
+                project_id, client_id, limit=limit
+            )
 
         return {"items": items}
 

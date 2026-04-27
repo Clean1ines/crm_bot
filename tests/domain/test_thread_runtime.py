@@ -32,7 +32,12 @@ def test_thread_runtime_snapshot_normalizes_repository_record():
 
 def test_thread_analytics_snapshot_emits_state_patch_only_for_present_values():
     snapshot = ThreadAnalyticsSnapshot.from_record(
-        {"intent": "pricing", "lifecycle": None, "cta": "book_consultation", "decision": "CALL_TOOL"}
+        {
+            "intent": "pricing",
+            "lifecycle": None,
+            "cta": "book_consultation",
+            "decision": "CALL_TOOL",
+        }
     )
 
     assert snapshot.to_state_patch() == {

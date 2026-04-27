@@ -5,7 +5,6 @@ Uses the configured LLM to craft the final answer from decision, history,
 knowledge, memory, and project runtime configuration.
 """
 
-
 from langchain_groq import ChatGroq
 
 from src.agent.router.prompt_builder import build_response_prompt
@@ -45,7 +44,9 @@ def _merge_dialog_state_into_user_memory(
 
 
 def _resolve_response_model_name(state: AgentState, default_model: str) -> str:
-    profile = ProjectRuntimeProfile.from_configuration(state.get("project_configuration"))
+    profile = ProjectRuntimeProfile.from_configuration(
+        state.get("project_configuration")
+    )
     return profile.fallback_model or default_model
 
 

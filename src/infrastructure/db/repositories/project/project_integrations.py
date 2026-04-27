@@ -2,7 +2,6 @@
 Project integration command operations.
 """
 
-
 from src.domain.control_plane.project_configuration import ProjectIntegrationView
 
 from .base import JsonMap, ProjectId, ProjectRepositoryBase, ensure_uuid

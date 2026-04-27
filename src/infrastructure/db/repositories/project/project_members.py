@@ -2,15 +2,19 @@
 Project membership and manager identity operations.
 """
 
-
-from src.domain.control_plane.project_views import ManagerMembershipMutationView, ProjectMemberView
+from src.domain.control_plane.project_views import (
+    ManagerMembershipMutationView,
+    ProjectMemberView,
+)
 from src.domain.project_plane.manager_notifications import ManagerNotificationTarget
 
-from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid, logger
+from .base import ProjectRepositoryBase, ProjectId, ensure_uuid, logger
 
 
 class ProjectMemberRepository(ProjectRepositoryBase):
-    async def get_manager_notification_targets(self, project_id: ProjectId) -> list[str]:
+    async def get_manager_notification_targets(
+        self, project_id: ProjectId
+    ) -> list[str]:
         targets = await self.get_manager_notification_recipients(project_id)
         telegram_chat_ids = [target.telegram_chat_id for target in targets]
         return telegram_chat_ids
@@ -19,9 +23,13 @@ class ProjectMemberRepository(ProjectRepositoryBase):
         self,
         project_id: ProjectId,
     ) -> list[ManagerNotificationTarget]:
-        logger.debug("Fetching manager notification targets", extra={"project_id": str(project_id)})
+        logger.debug(
+            "Fetching manager notification targets",
+            extra={"project_id": str(project_id)},
+        )
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT
                     pm.user_id,
                     CAST(u.telegram_id AS TEXT) AS manager_chat_id
@@ -30,7 +38,9 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                 WHERE pm.project_id = $1
                   AND pm.role IN ('owner', 'admin', 'manager')
                   AND u.telegram_id IS NOT NULL
-            """, ensure_uuid(project_id))
+            """,
+                ensure_uuid(project_id),
+            )
 
         recipients = [
             ManagerNotificationTarget(
@@ -50,33 +60,48 @@ class ProjectMemberRepository(ProjectRepositoryBase):
         project_uuid = ensure_uuid(project_id)
 
         async with self.pool.acquire() as conn:
-            user_row = await conn.fetchrow("""
+            user_row = await conn.fetchrow(
+                """
                 SELECT id
                 FROM users
                 WHERE telegram_id = $1
-            """, int(manager_chat_id))
+            """,
+                int(manager_chat_id),
+            )
 
             if user_row:
                 user_id = user_row["id"]
             else:
-                user_id = await conn.fetchval("""
+                user_id = await conn.fetchval(
+                    """
                     INSERT INTO users (id, telegram_id, full_name)
                     VALUES (gen_random_uuid(), $1, $2)
                     RETURNING id
-                """, int(manager_chat_id), "")
+                """,
+                    int(manager_chat_id),
+                    "",
+                )
 
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO auth_identities (user_id, provider, provider_id)
                     VALUES ($1, 'telegram', $2)
                     ON CONFLICT (provider, provider_id) DO NOTHING
-                """, user_id, manager_chat_id)
+                """,
+                    user_id,
+                    manager_chat_id,
+                )
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO project_members (project_id, user_id, role)
                 VALUES ($1, $2, 'manager')
                 ON CONFLICT (project_id, user_id)
                 DO UPDATE SET role = EXCLUDED.role
-            """, project_uuid, user_id)
+            """,
+                project_uuid,
+                user_id,
+            )
 
         return ManagerMembershipMutationView(
             status="added",
@@ -91,14 +116,18 @@ class ProjectMemberRepository(ProjectRepositoryBase):
         manager_chat_id: str,
     ) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 DELETE FROM project_members pm
                 USING users u
                 WHERE pm.project_id = $1
                   AND pm.user_id = u.id
                   AND u.telegram_id = $2
                   AND pm.role = 'manager'
-            """, ensure_uuid(project_id), int(manager_chat_id))
+            """,
+                ensure_uuid(project_id),
+                int(manager_chat_id),
+            )
 
     async def resolve_manager_user_id_by_telegram(
         self,
@@ -106,7 +135,8 @@ class ProjectMemberRepository(ProjectRepositoryBase):
         manager_chat_id: str,
     ) -> str | None:
         async with self.pool.acquire() as conn:
-            user_id = await conn.fetchval("""
+            user_id = await conn.fetchval(
+                """
                 SELECT u.id
                 FROM project_members pm
                 JOIN users u ON u.id = pm.user_id
@@ -120,25 +150,35 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                       OR ai.provider_id = $3
                   )
                 LIMIT 1
-            """, ensure_uuid(project_id), int(manager_chat_id), str(manager_chat_id))
+            """,
+                ensure_uuid(project_id),
+                int(manager_chat_id),
+                str(manager_chat_id),
+            )
 
         return str(user_id) if user_id else None
 
     async def get_user_display_name(self, user_id: ProjectId) -> str | None:
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT full_name, username, email
                 FROM users
                 WHERE id = $1
-            """, ensure_uuid(user_id))
+            """,
+                ensure_uuid(user_id),
+            )
 
         if not row:
             return None
         return row["full_name"] or row["username"] or row["email"]
 
-    async def get_project_members_view(self, project_id: ProjectId) -> list[ProjectMemberView]:
+    async def get_project_members_view(
+        self, project_id: ProjectId
+    ) -> list[ProjectMemberView]:
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 WITH owner_member AS (
                     SELECT
                         p.user_id AS id,
@@ -183,7 +223,9 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                     FROM owner_member
                 ) members
                 ORDER BY members.created_at ASC
-            """, ensure_uuid(project_id))
+            """,
+                ensure_uuid(project_id),
+            )
 
         members: list[ProjectMemberView] = []
         for row in rows:
@@ -195,28 +237,47 @@ class ProjectMemberRepository(ProjectRepositoryBase):
             members.append(ProjectMemberView.from_record(member))
         return members
 
-    async def add_project_member(self, project_id: ProjectId, user_id: ProjectId, role: str) -> None:
+    async def add_project_member(
+        self, project_id: ProjectId, user_id: ProjectId, role: str
+    ) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO project_members (project_id, user_id, role)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (project_id, user_id)
                 DO UPDATE SET role = EXCLUDED.role
-            """, ensure_uuid(project_id), ensure_uuid(user_id), role)
+            """,
+                ensure_uuid(project_id),
+                ensure_uuid(user_id),
+                role,
+            )
 
-    async def remove_project_member(self, project_id: ProjectId, user_id: ProjectId) -> None:
+    async def remove_project_member(
+        self, project_id: ProjectId, user_id: ProjectId
+    ) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 DELETE FROM project_members
                 WHERE project_id = $1 AND user_id = $2
-            """, ensure_uuid(project_id), ensure_uuid(user_id))
+            """,
+                ensure_uuid(project_id),
+                ensure_uuid(user_id),
+            )
 
-    async def get_project_member_role(self, project_id: ProjectId, user_id: ProjectId) -> str | None:
+    async def get_project_member_role(
+        self, project_id: ProjectId, user_id: ProjectId
+    ) -> str | None:
         async with self.pool.acquire() as conn:
-            role = await conn.fetchval("""
+            role = await conn.fetchval(
+                """
                 SELECT role
                 FROM project_members
                 WHERE project_id = $1 AND user_id = $2
-            """, ensure_uuid(project_id), ensure_uuid(user_id))
+            """,
+                ensure_uuid(project_id),
+                ensure_uuid(user_id),
+            )
 
         return str(role) if role else None

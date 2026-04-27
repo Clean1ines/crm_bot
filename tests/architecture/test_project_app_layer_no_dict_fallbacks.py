@@ -28,4 +28,6 @@ def test_project_app_services_do_not_accept_typed_or_dict_fallbacks():
             if pattern in text:
                 violations.append(f"{path}: forbidden fallback pattern: {pattern}")
 
-    assert not violations, "Project app-layer typed/dict fallback debt found:\n" + "\n".join(violations)
+    assert not violations, (
+        "Project app-layer typed/dict fallback debt found:\n" + "\n".join(violations)
+    )

@@ -2,19 +2,21 @@ from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 
 
 def test_project_runtime_profile_extracts_limits_and_settings():
-    profile = ProjectRuntimeProfile.from_configuration({
-        "settings": {
-            "default_language": "ru",
-            "default_timezone": "Europe/Moscow",
-            "tone_of_voice": "warm",
-            "system_prompt_override": "Уточняй город клиента.",
-        },
-        "limit_profile": {
-            "requests_per_minute": 25,
-            "max_concurrent_threads": 3,
-            "fallback_model": "llama-3.1-8b-instant",
-        },
-    })
+    profile = ProjectRuntimeProfile.from_configuration(
+        {
+            "settings": {
+                "default_language": "ru",
+                "default_timezone": "Europe/Moscow",
+                "tone_of_voice": "warm",
+                "system_prompt_override": "Уточняй город клиента.",
+            },
+            "limit_profile": {
+                "requests_per_minute": 25,
+                "max_concurrent_threads": 3,
+                "fallback_model": "llama-3.1-8b-instant",
+            },
+        }
+    )
 
     assert profile.requests_per_minute == 25
     assert profile.max_concurrent_threads == 3
@@ -26,16 +28,18 @@ def test_project_runtime_profile_extracts_limits_and_settings():
 
 
 def test_project_runtime_profile_ignores_invalid_values():
-    profile = ProjectRuntimeProfile.from_configuration({
-        "settings": {
-            "default_language": "",
-        },
-        "limit_profile": {
-            "requests_per_minute": "bad",
-            "max_concurrent_threads": 0,
-            "fallback_model": " ",
-        },
-    })
+    profile = ProjectRuntimeProfile.from_configuration(
+        {
+            "settings": {
+                "default_language": "",
+            },
+            "limit_profile": {
+                "requests_per_minute": "bad",
+                "max_concurrent_threads": 0,
+                "fallback_model": " ",
+            },
+        }
+    )
 
     assert profile.requests_per_minute is None
     assert profile.max_concurrent_threads is None

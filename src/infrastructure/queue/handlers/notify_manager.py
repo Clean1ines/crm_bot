@@ -20,6 +20,7 @@ from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
+
 class RedisExistsPort(Protocol):
     async def exists(self, key: str) -> object: ...
 
@@ -61,7 +62,9 @@ def _parse_payload(job: Mapping[str, object]) -> NotifyManagerPayload:
     if not thread_id_raw:
         raise PermanentJobError("notify_manager job missing thread_id")
 
-    target_chat_id = payload.get("target_manager_telegram_chat_id") or payload.get("manager_chat_id")
+    target_chat_id = payload.get("target_manager_telegram_chat_id") or payload.get(
+        "manager_chat_id"
+    )
     target_user_id = payload.get("manager_user_id")
 
     return NotifyManagerPayload(
@@ -72,7 +75,9 @@ def _parse_payload(job: Mapping[str, object]) -> NotifyManagerPayload:
     )
 
 
-async def get_client_display_name(pool: asyncpg.Pool, project_id: str, client_id: str) -> str:
+async def get_client_display_name(
+    pool: asyncpg.Pool, project_id: str, client_id: str
+) -> str:
     """Resolve a readable client name for notification text."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -97,7 +102,9 @@ async def _load_thread_context(
 ) -> NotifyThreadContext:
     thread_info = await thread_read_repo.get_thread_with_project_view(thread_id)
     if not thread_info:
-        logger.error("Thread not found", extra={"thread_id": thread_id, "job_id": _job_id(job)})
+        logger.error(
+            "Thread not found", extra={"thread_id": thread_id, "job_id": _job_id(job)}
+        )
         raise TransientJobError("Thread not found for notify_manager")
 
     project_id = _view_get(thread_info, "project_id")
@@ -108,7 +115,9 @@ async def _load_thread_context(
 
     client_name = "Клиент"
     if client_id:
-        client_name = await get_client_display_name(db_pool, str(project_id), str(client_id))
+        client_name = await get_client_display_name(
+            db_pool, str(project_id), str(client_id)
+        )
 
     return NotifyThreadContext(
         project_id=str(project_id),
@@ -160,15 +169,21 @@ async def _load_manager_targets(
     return selected_targets
 
 
-def build_manager_reply_markup(*, thread_id: str, is_claimed: bool) -> dict[str, object]:
+def build_manager_reply_markup(
+    *, thread_id: str, is_claimed: bool
+) -> dict[str, object]:
     buttons: list[list[dict[str, str]]] = []
     if not is_claimed:
         buttons.append([{"text": "✏️ Ответить", "callback_data": f"reply:{thread_id}"}])
-    buttons.append([{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}])
+    buttons.append(
+        [{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}]
+    )
     return {"inline_keyboard": buttons}
 
 
-async def _build_reply_markup(*, thread_id: str, redis_getter: RedisGetter) -> dict[str, object]:
+async def _build_reply_markup(
+    *, thread_id: str, redis_getter: RedisGetter
+) -> dict[str, object]:
     redis = await redis_getter()
     is_claimed = bool(await redis.exists(f"awaiting_reply_thread:{thread_id}"))
     return build_manager_reply_markup(thread_id=thread_id, is_claimed=is_claimed)

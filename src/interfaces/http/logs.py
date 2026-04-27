@@ -19,7 +19,9 @@ async def frontend_logs(request: Request):
     level = data.get("level", "info")
     message = data.get("message", "")
     # Extract extra fields (everything except level, message, timestamp)
-    extra = {k: v for k, v in data.items() if k not in ("level", "message", "timestamp")}
+    extra = {
+        k: v for k, v in data.items() if k not in ("level", "message", "timestamp")
+    }
     # Map frontend log levels to backend log methods
     if level == "debug":
         logger.debug(message, extra=extra)

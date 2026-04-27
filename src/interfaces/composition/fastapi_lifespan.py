@@ -17,7 +17,9 @@ import asyncpg
 from fastapi import FastAPI
 
 from src.agent.graph import create_agent
-from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 from src.infrastructure.app.resources import (
     bootstrap_platform_owner,
     init_db,
@@ -25,7 +27,6 @@ from src.infrastructure.app.resources import (
 )
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.event_repository import EventRepository
-from src.infrastructure.db.repositories.client_repository import ClientRepository
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.project import (
@@ -34,10 +35,14 @@ from src.infrastructure.db.repositories.project import (
     ProjectTokenRepository,
 )
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
-from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
+from src.infrastructure.db.repositories.thread.lifecycle import (
+    ThreadLifecycleRepository,
+)
 from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
-from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
+from src.infrastructure.db.repositories.thread.runtime_state import (
+    ThreadRuntimeStateRepository,
+)
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.llm.query_expander import GroqQueryExpander
 from src.infrastructure.logging.logger import get_logger

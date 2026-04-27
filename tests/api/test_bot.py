@@ -19,24 +19,22 @@ def client():
 
 
 class TestBotAPI:
-
     def test_get_bot_username_success(self, client):
         """Успешное получение username бота."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "ok": True,
-            "result": {
-                "username": "test_bot",
-                "id": 123456789
-            }
+            "result": {"username": "test_bot", "id": 123456789},
         }
 
         with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
-                mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
                 mock_client_class.return_value = mock_client
 
                 response = client.get("/api/bot/username")
@@ -61,16 +59,15 @@ class TestBotAPI:
         """Telegram вернул ok=false."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "ok": False,
-            "description": "Not Found"
-        }
+        mock_response.json.return_value = {"ok": False, "description": "Not Found"}
 
         with patch("src.interfaces.http.bot.settings") as mock_settings:
             mock_settings.ADMIN_BOT_TOKEN = "invalid_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
-                mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
                 mock_client_class.return_value = mock_client
                 with patch("src.interfaces.http.bot.logger") as mock_logger:
                     response = client.get("/api/bot/username")
@@ -85,7 +82,9 @@ class TestBotAPI:
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
                 mock_client.__aenter__.return_value.get = AsyncMock(
-                    side_effect=httpx.RequestError("Connection failed", request=MagicMock())
+                    side_effect=httpx.RequestError(
+                        "Connection failed", request=MagicMock()
+                    )
                 )
                 mock_client_class.return_value = mock_client
                 with patch("src.interfaces.http.app.logger") as mock_global_logger:
@@ -109,7 +108,9 @@ class TestBotAPI:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
-                mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
                 mock_client_class.return_value = mock_client
                 with patch("src.interfaces.http.app.logger") as mock_global_logger:
                     try:
@@ -133,7 +134,9 @@ class TestBotAPI:
             mock_settings.ADMIN_BOT_TOKEN = "test_token"
             with patch("httpx.AsyncClient") as mock_client_class:
                 mock_client = AsyncMock()
-                mock_client.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+                mock_client.__aenter__.return_value.get = AsyncMock(
+                    return_value=mock_response
+                )
                 mock_client_class.return_value = mock_client
                 with patch("src.interfaces.http.app.logger") as mock_global_logger:
                     try:

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 from datetime import datetime
 import asyncpg
@@ -56,7 +56,9 @@ class TestEventRepository:
         project_id = uuid4()
         event_type = "message_received"
         payload = {"text": "Hello"}
-        mock_pool.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk"))
+        mock_pool.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk")
+        )
 
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
             await event_repo.append(stream_id, project_id, event_type, payload)
@@ -67,7 +69,9 @@ class TestEventRepository:
         project_id = uuid4()
         event_type = "message_received"
         payload = {"text": "Hello"}
-        mock_pool.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.NotNullViolationError("not null"))
+        mock_pool.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.NotNullViolationError("not null")
+        )
 
         with pytest.raises(asyncpg.exceptions.NotNullViolationError):
             await event_repo.append(stream_id, project_id, event_type, payload)
@@ -86,8 +90,18 @@ class TestEventRepository:
         stream_id = uuid4()
         limit = 100
         expected_rows = [
-            {"id": 1, "event_type": "type1", "payload": {"a": 1}, "created_at": "2021-01-01"},
-            {"id": 2, "event_type": "type2", "payload": {"b": 2}, "created_at": "2021-01-02"},
+            {
+                "id": 1,
+                "event_type": "type1",
+                "payload": {"a": 1},
+                "created_at": "2021-01-01",
+            },
+            {
+                "id": 2,
+                "event_type": "type2",
+                "payload": {"b": 2},
+                "created_at": "2021-01-02",
+            },
         ]
         mock_pool.fetch = AsyncMock(return_value=expected_rows)
 
@@ -112,7 +126,9 @@ class TestEventRepository:
         stream_id = uuid4()
         after_id = 50
         limit = 100
-        expected_rows = [{"id": 51, "event_type": "type", "payload": {}, "created_at": "2021-01-01"}]
+        expected_rows = [
+            {"id": 51, "event_type": "type", "payload": {}, "created_at": "2021-01-01"}
+        ]
         mock_pool.fetch = AsyncMock(return_value=expected_rows)
 
         events = await event_repo.get_stream(stream_id, limit, after_id)
@@ -124,14 +140,18 @@ class TestEventRepository:
                 ORDER BY created_at ASC
                 LIMIT $3
                 """
-        mock_pool.fetch.assert_awaited_once_with(expected_sql, stream_id, after_id, limit)
+        mock_pool.fetch.assert_awaited_once_with(
+            expected_sql, stream_id, after_id, limit
+        )
         assert len(events) == 1
 
     @pytest.mark.asyncio
     async def test_get_stream_limit_zero(self, event_repo, mock_pool):
         stream_id = uuid4()
         limit = 0
-        mock_pool.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
+        mock_pool.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
+        )
 
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await event_repo.get_stream(stream_id, limit)
@@ -147,7 +167,9 @@ class TestEventRepository:
     @pytest.mark.asyncio
     async def test_get_stream_connection_error(self, event_repo, mock_pool):
         stream_id = uuid4()
-        mock_pool.fetch = AsyncMock(side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn"))
+        mock_pool.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn")
+        )
 
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await event_repo.get_stream(stream_id)
@@ -158,7 +180,12 @@ class TestEventRepository:
         event_type = "ai_replied"
         limit = 100
         expected_rows = [
-            {"id": 1, "stream_id": uuid4(), "payload": {"a": 1}, "created_at": "2021-01-01"},
+            {
+                "id": 1,
+                "stream_id": uuid4(),
+                "payload": {"a": 1},
+                "created_at": "2021-01-01",
+            },
         ]
         mock_pool.fetch = AsyncMock(return_value=expected_rows)
 
@@ -171,7 +198,9 @@ class TestEventRepository:
             ORDER BY created_at DESC
             LIMIT $3
             """
-        mock_pool.fetch.assert_awaited_once_with(expected_sql, project_id, event_type, limit)
+        mock_pool.fetch.assert_awaited_once_with(
+            expected_sql, project_id, event_type, limit
+        )
         assert len(events) == 1
         assert events[0].id == 1
         assert events[0].stream_id == str(expected_rows[0]["stream_id"])
@@ -183,7 +212,9 @@ class TestEventRepository:
         project_id = uuid4()
         event_type = "type"
         limit = 0
-        mock_pool.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
+        mock_pool.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
+        )
 
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await event_repo.get_by_type(project_id, event_type, limit)
@@ -203,7 +234,12 @@ class TestEventRepository:
         limit = 30
         offset = 0
         expected_rows = [
-            {"id": 1, "event_type": "type1", "payload": {"a": 1}, "created_at": "2021-01-01"},
+            {
+                "id": 1,
+                "event_type": "type1",
+                "payload": {"a": 1},
+                "created_at": "2021-01-01",
+            },
         ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=expected_rows)
 
@@ -235,7 +271,9 @@ class TestEventRepository:
     async def test_get_events_for_thread_limit_zero(self, event_repo, mock_pool):
         thread_id = str(uuid4())
         limit = 0
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
+        )
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await event_repo.get_events_for_thread(thread_id, limit)
 
@@ -243,7 +281,9 @@ class TestEventRepository:
     async def test_get_events_for_thread_negative_offset(self, event_repo, mock_pool):
         thread_id = str(uuid4())
         offset = -1
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("OFFSET -1"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("OFFSET -1")
+        )
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await event_repo.get_events_for_thread(thread_id, offset=offset)
 
@@ -257,7 +297,9 @@ class TestEventRepository:
     @pytest.mark.asyncio
     async def test_get_events_for_thread_connection_error(self, event_repo, mock_pool):
         thread_id = str(uuid4())
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn")
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await event_repo.get_events_for_thread(thread_id)
 

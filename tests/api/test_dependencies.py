@@ -21,12 +21,14 @@ from src.interfaces.http.dependencies import (
     get_tool_registry,
     get_redis,
 )
-from src.infrastructure.db.repositories.project import ProjectRepository
-from src.infrastructure.db.repositories.memory_repository import MemoryRepository
-from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
+from src.infrastructure.db.repositories.thread.lifecycle import (
+    ThreadLifecycleRepository,
+)
 from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
-from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
+from src.infrastructure.db.repositories.thread.runtime_state import (
+    ThreadRuntimeStateRepository,
+)
 
 
 class TestGetCurrentUserId:
@@ -149,7 +151,10 @@ class TestVerifyProModeAccess:
         with pytest.raises(HTTPException) as exc:
             await check_pro_mode("project-id")
         assert exc.value.status_code == 403
-        assert exc.value.detail == "Pro mode required. Upgrade your plan to access this feature."
+        assert (
+            exc.value.detail
+            == "Pro mode required. Upgrade your plan to access this feature."
+        )
 
     @pytest.mark.asyncio
     async def test_pro_mode_repository_error_fails_closed(self):
@@ -166,22 +171,34 @@ class TestVerifyProModeAccess:
 
 class TestPoolAndOrchestrator:
     def test_get_pool_success(self):
-        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.pool", "mock_pool"):
+        with patch(
+            "src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.pool",
+            "mock_pool",
+        ):
             result = get_pool()
             assert result == "mock_pool"
 
     def test_get_pool_not_initialized(self):
-        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.pool", None):
+        with patch(
+            "src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.pool",
+            None,
+        ):
             with pytest.raises(RuntimeError, match="Database pool not initialized"):
                 get_pool()
 
     def test_get_orchestrator_success(self):
-        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.orchestrator", "mock_orch"):
+        with patch(
+            "src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.orchestrator",
+            "mock_orch",
+        ):
             result = get_orchestrator()
             assert result == "mock_orch"
 
     def test_get_orchestrator_not_initialized(self):
-        with patch("src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.orchestrator", None):
+        with patch(
+            "src.interfaces.http.dependencies.src.interfaces.composition.fastapi_lifespan.orchestrator",
+            None,
+        ):
             with pytest.raises(RuntimeError, match="Orchestrator not initialized"):
                 get_orchestrator()
 
@@ -189,7 +206,9 @@ class TestPoolAndOrchestrator:
 class TestRepositoryFactories:
     def test_get_project_repo(self):
         mock_pool = MagicMock()
-        with patch("src.interfaces.composition.project_repositories.ProjectRepository") as MockRepo:
+        with patch(
+            "src.interfaces.composition.project_repositories.ProjectRepository"
+        ) as MockRepo:
             get_project_repo(pool=mock_pool)
             MockRepo.assert_called_once_with(mock_pool)
 
@@ -241,7 +260,10 @@ class TestGetRedis:
     @pytest.mark.asyncio
     async def test_get_redis(self):
         mock_client = AsyncMock()
-        with patch("src.interfaces.http.dependencies.get_redis_client", return_value=mock_client) as mock_get:
+        with patch(
+            "src.interfaces.http.dependencies.get_redis_client",
+            return_value=mock_client,
+        ) as mock_get:
             result = await get_redis()
             assert result is mock_client
             mock_get.assert_awaited_once()
@@ -252,6 +274,7 @@ class TestGlobalExceptionHandler:
         route_path = "/__test_global_exception_handler_safe_500"
 
         if not any(route.path == route_path for route in app.routes):
+
             @app.get(route_path)
             async def _raise_unhandled_error():
                 raise RuntimeError("secret internal database failure")

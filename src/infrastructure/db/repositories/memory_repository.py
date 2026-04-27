@@ -26,7 +26,7 @@ def _ensure_uuid(value: str | uuid.UUID) -> uuid.UUID:
 class MemoryRepository:
     """
     Repository for managing user memory (long-term facts).
-    
+
     Each memory entry has a key (e.g., "preferred_discount"), value (JSON),
     and a type for filtering.
     """
@@ -34,7 +34,7 @@ class MemoryRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         """
         Initialize the MemoryRepository with a database connection pool.
-        
+
         Args:
             pool: Asyncpg connection pool.
         """
@@ -47,7 +47,7 @@ class MemoryRepository:
         client_id: str | uuid.UUID,
         *,
         limit: int = 50,
-        types: list[str] | None = None
+        types: list[str] | None = None,
     ) -> list[MemoryEntryView]:
         """
         Retrieve memory entries for a specific user.
@@ -72,7 +72,7 @@ class MemoryRepository:
         params = [project_uuid, client_uuid]
 
         if types:
-            placeholders = [f"${i+3}" for i in range(len(types))]
+            placeholders = [f"${i + 3}" for i in range(len(types))]
             query += f" AND type IN ({','.join(placeholders)})"
             params.extend(types)
 
@@ -86,10 +86,9 @@ class MemoryRepository:
         logger.debug(
             "Loaded %d memory entries for user",
             len(memories),
-            extra={"project_id": str(project_id), "client_id": str(client_id)}
+            extra={"project_id": str(project_id), "client_id": str(client_id)},
         )
         return memories
-
 
     async def set(
         self,
@@ -97,7 +96,7 @@ class MemoryRepository:
         client_id: str | uuid.UUID,
         key: str,
         value: object,
-        type_: str
+        type_: str,
     ) -> None:
         """
         Insert or update a memory entry for a user.
@@ -116,21 +115,35 @@ class MemoryRepository:
         client_uuid = _ensure_uuid(client_id)
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO user_memory (project_id, client_id, key, value, type, updated_at)
                 VALUES ($1, $2, $3, $4, $5, NOW())
                 ON CONFLICT (project_id, client_id, key) DO UPDATE
                 SET value = EXCLUDED.value,
                     type = EXCLUDED.type,
                     updated_at = NOW()
-            """, project_uuid, client_uuid, key, value, type_)
+            """,
+                project_uuid,
+                client_uuid,
+                key,
+                value,
+                type_,
+            )
 
         logger.debug(
             "Memory set",
-            extra={"project_id": str(project_id), "client_id": str(client_id), "key": key, "type": type_}
+            extra={
+                "project_id": str(project_id),
+                "client_id": str(client_id),
+                "key": key,
+                "type": type_,
+            },
         )
 
-    async def delete(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID, key: str) -> bool:
+    async def delete(
+        self, project_id: str | uuid.UUID, client_id: str | uuid.UUID, key: str
+    ) -> bool:
         """
         Delete a specific memory entry.
 
@@ -146,19 +159,30 @@ class MemoryRepository:
         client_uuid = _ensure_uuid(client_id)
 
         async with self.pool.acquire() as conn:
-            result = await conn.execute("""
+            result = await conn.execute(
+                """
                 DELETE FROM user_memory
                 WHERE project_id = $1 AND client_id = $2 AND key = $3
-            """, project_uuid, client_uuid, key)
+            """,
+                project_uuid,
+                client_uuid,
+                key,
+            )
             deleted = result == "DELETE 1"
             if deleted:
                 logger.debug(
                     "Memory deleted",
-                    extra={"project_id": str(project_id), "client_id": str(client_id), "key": key}
+                    extra={
+                        "project_id": str(project_id),
+                        "client_id": str(client_id),
+                        "key": key,
+                    },
                 )
             return deleted
 
-    async def clear_for_user(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID) -> None:
+    async def clear_for_user(
+        self, project_id: str | uuid.UUID, client_id: str | uuid.UUID
+    ) -> None:
         """
         Delete all memory for a user (e.g., if user requests data deletion).
 
@@ -170,16 +194,22 @@ class MemoryRepository:
         client_uuid = _ensure_uuid(client_id)
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 DELETE FROM user_memory
                 WHERE project_id = $1 AND client_id = $2
-            """, project_uuid, client_uuid)
+            """,
+                project_uuid,
+                client_uuid,
+            )
         logger.info(
             "All memory cleared for user",
-            extra={"project_id": str(project_id), "client_id": str(client_id)}
+            extra={"project_id": str(project_id), "client_id": str(client_id)},
         )
 
-    async def get_lifecycle(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID) -> str | None:
+    async def get_lifecycle(
+        self, project_id: str | uuid.UUID, client_id: str | uuid.UUID
+    ) -> str | None:
         """
         Retrieve the current lifecycle stage for a user from long-term memory.
 
@@ -194,27 +224,44 @@ class MemoryRepository:
         client_uuid = _ensure_uuid(client_id)
 
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT value
                 FROM user_memory
                 WHERE project_id = $1 AND client_id = $2 AND type = 'lifecycle' AND key = 'stage'
                 ORDER BY updated_at DESC
                 LIMIT 1
-            """, project_uuid, client_uuid)
+            """,
+                project_uuid,
+                client_uuid,
+            )
 
         if row:
             # value is JSON, we store as {"stage": "warm"}
-            stage = row["value"].get("stage") if isinstance(row["value"], dict) else row["value"]
+            stage = (
+                row["value"].get("stage")
+                if isinstance(row["value"], dict)
+                else row["value"]
+            )
             if isinstance(stage, str):
                 logger.debug(
                     "Retrieved lifecycle",
-                    extra={"project_id": str(project_id), "client_id": str(client_id), "lifecycle": stage}
+                    extra={
+                        "project_id": str(project_id),
+                        "client_id": str(client_id),
+                        "lifecycle": stage,
+                    },
                 )
                 return stage
-        logger.debug("No lifecycle found", extra={"project_id": str(project_id), "client_id": str(client_id)})
+        logger.debug(
+            "No lifecycle found",
+            extra={"project_id": str(project_id), "client_id": str(client_id)},
+        )
         return None
 
-    async def set_lifecycle(self, project_id: str | uuid.UUID, client_id: str | uuid.UUID, lifecycle: str) -> None:
+    async def set_lifecycle(
+        self, project_id: str | uuid.UUID, client_id: str | uuid.UUID, lifecycle: str
+    ) -> None:
         """
         Store the lifecycle stage for a user in long-term memory.
 
@@ -224,10 +271,16 @@ class MemoryRepository:
             lifecycle: Lifecycle stage (e.g., "cold", "warm", "hot").
         """
         # Store as a dict under key 'stage'
-        await self.set(project_id, client_id, "stage", {"stage": lifecycle}, "lifecycle")
+        await self.set(
+            project_id, client_id, "stage", {"stage": lifecycle}, "lifecycle"
+        )
         logger.info(
             "Lifecycle stored",
-            extra={"project_id": str(project_id), "client_id": str(client_id), "lifecycle": lifecycle}
+            extra={
+                "project_id": str(project_id),
+                "client_id": str(client_id),
+                "lifecycle": lifecycle,
+            },
         )
 
     async def update_by_key(
@@ -235,12 +288,12 @@ class MemoryRepository:
         project_id: str | uuid.UUID,
         client_id: str | uuid.UUID,
         key: str,
-        value: object
+        value: object,
     ) -> None:
         """
         Update a memory entry by key (preserves type). If the entry does not exist,
         it will be created with a default type 'user_edited'.
-        
+
         Args:
             project_id: UUID of the project (string or UUID object).
             client_id: UUID of the client (string or UUID object).
@@ -251,14 +304,23 @@ class MemoryRepository:
         project_uuid = _ensure_uuid(project_id)
         client_uuid = _ensure_uuid(client_id)
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT type FROM user_memory
                 WHERE project_id = $1 AND client_id = $2 AND key = $3
-            """, project_uuid, client_uuid, key)
+            """,
+                project_uuid,
+                client_uuid,
+                key,
+            )
             type_ = row["type"] if row else "user_edited"
-        
+
         await self.set(project_id, client_id, key, value, type_)
         logger.debug(
             "Memory updated by key",
-            extra={"project_id": str(project_id), "client_id": str(client_id), "key": key}
+            extra={
+                "project_id": str(project_id),
+                "client_id": str(client_id),
+                "key": key,
+            },
         )

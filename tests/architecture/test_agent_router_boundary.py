@@ -73,7 +73,9 @@ def test_legacy_router_symbols_are_not_reintroduced():
         source = path.read_text(encoding="utf-8")
         for symbol in FORBIDDEN_SYMBOLS:
             if symbol in source:
-                violations.append(f"{rel} references removed legacy router symbol {symbol!r}")
+                violations.append(
+                    f"{rel} references removed legacy router symbol {symbol!r}"
+                )
 
     assert violations == []
 

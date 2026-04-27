@@ -5,8 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from src.interfaces.http.dependencies import get_orchestrator, get_project_existence_repo
-from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.interfaces.http.dependencies import (
+    get_orchestrator,
+    get_project_existence_repo,
+)
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 from src.application.ports.project_port import ProjectExistencePort
 from src.infrastructure.logging.logger import get_logger
 
@@ -24,7 +29,9 @@ class ChatMessageRequest(BaseModel):
 
 def _visitor_chat_id(project_id: str, visitor_id: str | None) -> int:
     stable_visitor_id = visitor_id or "anonymous"
-    digest = hashlib.sha256(f"{project_id}:{stable_visitor_id}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        f"{project_id}:{stable_visitor_id}".encode("utf-8")
+    ).hexdigest()
     return int(digest[:15], 16)
 
 
@@ -33,7 +40,7 @@ async def client_chat(
     project_id: str,
     request: ChatMessageRequest,
     orchestrator: ConversationOrchestrator = Depends(get_orchestrator),
-    project_repo: ProjectExistencePort = Depends(get_project_existence_repo)
+    project_repo: ProjectExistencePort = Depends(get_project_existence_repo),
 ):
     if not await project_repo.project_exists(project_id):
         raise HTTPException(status_code=404, detail="Project not found")

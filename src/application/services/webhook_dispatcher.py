@@ -1,5 +1,9 @@
 from src.application.dto.webhook_dto import WebhookAckDto
-from src.application.errors import InternalServiceError, NotFoundError, UnauthorizedError
+from src.application.errors import (
+    InternalServiceError,
+    NotFoundError,
+    UnauthorizedError,
+)
 from src.application.ports.telegram_port import NullTelegramClient, TelegramClientPort
 
 
@@ -22,7 +26,9 @@ class WebhookDispatcher:
             return update["callback_query"].get("from", {}).get("id")
         return None
 
-    async def verify_project_secret(self, project_id: str, secret_token: str | None, project_tokens) -> None:
+    async def verify_project_secret(
+        self, project_id: str, secret_token: str | None, project_tokens
+    ) -> None:
         if not secret_token:
             raise UnauthorizedError("Missing secret token")
         if secret_token != await project_tokens.get_webhook_secret(project_id):
@@ -35,7 +41,15 @@ class WebhookDispatcher:
         if secret_token != expected_secret:
             raise UnauthorizedError("Invalid secret token")
 
-    async def handle_platform_surface(self, update: dict, secret_token: str | None, *, pool, process_admin_update, logger):
+    async def handle_platform_surface(
+        self,
+        update: dict,
+        secret_token: str | None,
+        *,
+        pool,
+        process_admin_update,
+        logger,
+    ):
         await self.verify_platform_secret(secret_token)
         if not self.admin_bot_token:
             raise InternalServiceError("Platform bot token is not configured")
@@ -84,17 +98,25 @@ class WebhookDispatcher:
             else await project_tokens.get_manager_webhook_secret(project_id)
         )
         if secret_token != expected_secret:
-            logger.warning("Invalid manager webhook secret", extra={"project_id": project_id})
+            logger.warning(
+                "Invalid manager webhook secret", extra={"project_id": project_id}
+            )
             raise UnauthorizedError("Invalid secret token")
 
         manager_bot_token = await project_tokens.get_manager_bot_token(project_id)
         if not manager_bot_token:
-            logger.error("Manager token not found after project match", extra={"project_id": project_id})
+            logger.error(
+                "Manager token not found after project match",
+                extra={"project_id": project_id},
+            )
             raise InternalServiceError("Manager token error")
 
         chat_id = self.extract_sender_chat_id(update)
         if not chat_id:
-            logger.warning("No chat_id in update", extra={"update": update, "project_id": project_id})
+            logger.warning(
+                "No chat_id in update",
+                extra={"update": update, "project_id": project_id},
+            )
             return WebhookAckDto()
 
         manager_user_id = await project_members.resolve_manager_user_id_by_telegram(
@@ -109,7 +131,10 @@ class WebhookDispatcher:
             await self.telegram_client.post_json(
                 manager_bot_token,
                 "sendMessage",
-                {"chat_id": chat_id, "text": "⛔ Доступ запрещён. Вы не являетесь менеджером этого проекта."},
+                {
+                    "chat_id": chat_id,
+                    "text": "⛔ Доступ запрещён. Вы не являетесь менеджером этого проекта.",
+                },
             )
             return WebhookAckDto()
 
@@ -123,4 +148,6 @@ class WebhookDispatcher:
                 "has_manager_chat_id": bool(chat_id),
             },
         )
-        return await process_manager_update(update, project_id, orchestrator, manager_bot_token)
+        return await process_manager_update(
+            update, project_id, orchestrator, manager_bot_token
+        )

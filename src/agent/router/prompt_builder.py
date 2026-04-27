@@ -7,15 +7,26 @@ from pathlib import Path
 from typing import Sequence
 
 from src.agent.router.utils import compact_whitespace, extract_kb_text, truncate_text
-from src.domain.runtime.prompting import NO_DATA_TEXT, NO_KNOWLEDGE_TEXT, ProjectPromptContext
-from src.domain.runtime.state_contracts import HistoryMessage, ProjectRuntimeConfigurationState
+from src.domain.runtime.prompting import (
+    NO_DATA_TEXT,
+    NO_KNOWLEDGE_TEXT,
+    ProjectPromptContext,
+)
+from src.domain.runtime.state_contracts import (
+    HistoryMessage,
+    ProjectRuntimeConfigurationState,
+)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_KB_THRESHOLD = float(getattr(settings, "ROUTER_KB_THRESHOLD", getattr(settings, "KB_THRESHOLD", 0.78)))
-DEFAULT_LLM_THRESHOLD = float(getattr(settings, "ROUTER_LLM_THRESHOLD", getattr(settings, "LLM_THRESHOLD", 0.70)))
+DEFAULT_KB_THRESHOLD = float(
+    getattr(settings, "ROUTER_KB_THRESHOLD", getattr(settings, "KB_THRESHOLD", 0.78))
+)
+DEFAULT_LLM_THRESHOLD = float(
+    getattr(settings, "ROUTER_LLM_THRESHOLD", getattr(settings, "LLM_THRESHOLD", 0.70))
+)
 DEFAULT_KB_LIMIT = int(getattr(settings, "ROUTER_KB_LIMIT", 5))
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -30,11 +41,16 @@ def _load_prompt_template(filename: str) -> str:
     try:
         return filepath.read_text(encoding="utf-8")
     except Exception as exc:
-        logger.error("Failed to load prompt template", extra={"file": filename, "error": str(exc)})
+        logger.error(
+            "Failed to load prompt template",
+            extra={"file": filename, "error": str(exc)},
+        )
         return ""
 
 
-def format_kb_results(kb_results: Sequence[object], limit: int = DEFAULT_KB_LIMIT) -> tuple[str, float, int]:
+def format_kb_results(
+    kb_results: Sequence[object], limit: int = DEFAULT_KB_LIMIT
+) -> tuple[str, float, int]:
     if not kb_results:
         return "[]", 0.0, 0
 
@@ -90,7 +106,9 @@ def format_history(history: Sequence[object], limit: int = 5) -> str:
     return "\n".join(lines) if lines else "[]"
 
 
-def infer_routing_mode(kb_count: int, top_score: float, question_count: int, kb_threshold: float) -> str:
+def infer_routing_mode(
+    kb_count: int, top_score: float, question_count: int, kb_threshold: float
+) -> str:
     if kb_count <= 0:
         return "LLM_ONLY"
     if top_score >= kb_threshold and question_count <= 1:
@@ -110,7 +128,11 @@ def _format_memory(memory_by_type: dict[str, list[dict[str, object]]]) -> str:
         for item in items:
             key = item.get("key", "?")
             value = item.get("value")
-            value_text = json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else str(value)
+            value_text = (
+                json.dumps(value, ensure_ascii=False)
+                if isinstance(value, dict)
+                else str(value)
+            )
             lines.append(f"  {key}: {truncate_text(value_text, 200)}")
     return "\n".join(lines)
 
@@ -118,10 +140,14 @@ def _format_memory(memory_by_type: dict[str, list[dict[str, object]]]) -> str:
 def _format_features(features: dict[str, float] | None) -> str:
     if not features:
         return NO_DATA_TEXT
-    return ", ".join(f"{name} (interest: {score:.1f})" for name, score in features.items())
+    return ", ".join(
+        f"{name} (interest: {score:.1f})" for name, score in features.items()
+    )
 
 
-def format_project_configuration(project_configuration: dict[str, object] | None) -> str:
+def format_project_configuration(
+    project_configuration: dict[str, object] | None,
+) -> str:
     context = ProjectPromptContext.from_configuration(project_configuration)
     lines = context.format_lines(truncate=truncate_text)
     return "\n".join(lines) if lines else NO_DATA_TEXT

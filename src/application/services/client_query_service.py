@@ -20,19 +20,13 @@ def _serialize_timestamp(value):
 
 def _serialize_value(value):
     if is_dataclass(value):
-        return {
-            key: _serialize_value(item)
-            for key, item in asdict(value).items()
-        }
+        return {key: _serialize_value(item) for key, item in asdict(value).items()}
     if isinstance(value, list):
         return [_serialize_value(item) for item in value]
     if isinstance(value, tuple):
         return [_serialize_value(item) for item in value]
     if isinstance(value, dict):
-        return {
-            str(key): _serialize_value(item)
-            for key, item in value.items()
-        }
+        return {str(key): _serialize_value(item) for key, item in value.items()}
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return value
@@ -60,7 +54,9 @@ class ClientQueryService:
         search: str | None,
         current_user_id: str,
     ) -> dict:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
 
         result: ClientListView = await self.client_repo.list_for_project_view(
             project_id,
@@ -70,10 +66,16 @@ class ClientQueryService:
         )
         return _serialize_value(result)
 
-    async def get_client_detail(self, project_id: str, client_id: str, current_user_id: str) -> dict | None:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+    async def get_client_detail(
+        self, project_id: str, client_id: str, current_user_id: str
+    ) -> dict | None:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
 
-        result: ClientDetailView | None = await self.client_repo.get_by_id_view(project_id, client_id)
+        result: ClientDetailView | None = await self.client_repo.get_by_id_view(
+            project_id, client_id
+        )
         if result is None:
             return None
 
@@ -84,7 +86,9 @@ class ClientQueryService:
         memory = await self._load_memory_records(project_id, client_id, limit=100)
         client["memory"] = memory
 
-        threads = await self.thread_read_repo.get_dialogs(project_id, client_id=client_id)
+        threads = await self.thread_read_repo.get_dialogs(
+            project_id, client_id=client_id
+        )
         client["threads"] = [_serialize_value(thread) for thread in threads]
 
         for thread in client["threads"]:
@@ -106,5 +110,7 @@ class ClientQueryService:
         *,
         limit: int,
     ) -> list[dict]:
-        result = await self.memory_repo.get_for_user_view(project_id, client_id, limit=limit)
+        result = await self.memory_repo.get_for_user_view(
+            project_id, client_id, limit=limit
+        )
         return [_serialize_value(entry) for entry in result]

@@ -1,4 +1,7 @@
-from src.application.dto.control_plane_dto import ProjectMemberDto, ProjectMutationResultDto
+from src.application.dto.control_plane_dto import (
+    ProjectMemberDto,
+    ProjectMutationResultDto,
+)
 
 
 def test_project_member_dto_normalizes_identity_fields():

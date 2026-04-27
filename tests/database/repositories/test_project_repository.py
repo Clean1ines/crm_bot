@@ -103,7 +103,10 @@ class TestProjectRepository:
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
         mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
 
-        with patch("src.infrastructure.db.repositories.project.base.decrypt_token", return_value=None):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            return_value=None,
+        ):
             result = await project_repo.get_project_settings(str(uuid4()))
 
         assert result.manager_notification_targets == []
@@ -114,7 +117,10 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.fetchval = AsyncMock(return_value="encrypted_token")
 
-        with patch("src.infrastructure.db.repositories.project.base.decrypt_token", return_value="decrypted_token"):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            return_value="decrypted_token",
+        ):
             token = await project_repo.get_bot_token(project_id)
 
         assert token == "decrypted_token"
@@ -132,8 +138,15 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        with patch("src.infrastructure.db.repositories.project.base.encrypt_token", return_value="encrypted_token"):
-            with patch.object(project_repo, "_get_bot_username", AsyncMock(return_value="bot_username")):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.encrypt_token",
+            return_value="encrypted_token",
+        ):
+            with patch.object(
+                project_repo,
+                "_get_bot_username",
+                AsyncMock(return_value="bot_username"),
+            ):
                 await project_repo.set_bot_token(project_id, "real_token")
 
         mock_pool.mock_conn.execute.assert_awaited_once()
@@ -146,7 +159,10 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        with patch("src.infrastructure.db.repositories.project.base.encrypt_token", return_value=None):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.encrypt_token",
+            return_value=None,
+        ):
             await project_repo.set_bot_token(project_id, None)
 
         args = mock_pool.mock_conn.execute.await_args.args
@@ -157,7 +173,10 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.fetchval = AsyncMock(return_value="encrypted")
 
-        with patch("src.infrastructure.db.repositories.project.base.decrypt_token", return_value="decrypted"):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            return_value="decrypted",
+        ):
             token = await project_repo.get_manager_bot_token(project_id)
 
         assert token == "decrypted"
@@ -175,8 +194,15 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        with patch("src.infrastructure.db.repositories.project.base.encrypt_token", return_value="encrypted_token"):
-            with patch.object(project_repo, "_get_bot_username", AsyncMock(return_value="manager_username")):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.encrypt_token",
+            return_value="encrypted_token",
+        ):
+            with patch.object(
+                project_repo,
+                "_get_bot_username",
+                AsyncMock(return_value="manager_username"),
+            ):
                 await project_repo.set_manager_bot_token(project_id, "real_token")
 
         args = mock_pool.mock_conn.execute.await_args.args
@@ -187,7 +213,10 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        with patch("src.infrastructure.db.repositories.project.base.encrypt_token", return_value=None):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.encrypt_token",
+            return_value=None,
+        ):
             await project_repo.set_manager_bot_token(project_id, None)
 
         args = mock_pool.mock_conn.execute.await_args.args
@@ -224,10 +253,14 @@ class TestProjectRepository:
         assert result == ["111", "222"]
 
     @pytest.mark.asyncio
-    async def test_get_manager_notification_recipients_returns_canonical_targets(self, project_repo, mock_pool):
+    async def test_get_manager_notification_recipients_returns_canonical_targets(
+        self, project_repo, mock_pool
+    ):
         project_id = str(uuid4())
         user_id = uuid4()
-        mock_pool.mock_conn.fetch = AsyncMock(return_value=[{"user_id": user_id, "manager_chat_id": "111"}])
+        mock_pool.mock_conn.fetch = AsyncMock(
+            return_value=[{"user_id": user_id, "manager_chat_id": "111"}]
+        )
 
         result = await project_repo.get_manager_notification_recipients(project_id)
 
@@ -236,7 +269,9 @@ class TestProjectRepository:
         assert result[0].telegram_chat_id == "111"
 
     @pytest.mark.asyncio
-    async def test_add_manager_by_telegram_identity_uses_project_members_for_platform_user(self, project_repo, mock_pool):
+    async def test_add_manager_by_telegram_identity_uses_project_members_for_platform_user(
+        self, project_repo, mock_pool
+    ):
         project_id = str(uuid4())
         user_id = uuid4()
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"id": user_id})
@@ -252,20 +287,26 @@ class TestProjectRepository:
         }
 
     @pytest.mark.asyncio
-    async def test_add_manager_by_telegram_identity_creates_platform_user_when_missing(self, project_repo, mock_pool):
+    async def test_add_manager_by_telegram_identity_creates_platform_user_when_missing(
+        self, project_repo, mock_pool
+    ):
         user_id = uuid4()
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
         mock_pool.mock_conn.fetchval = AsyncMock(return_value=user_id)
         mock_pool.mock_conn.execute = AsyncMock()
 
-        result = await project_repo.add_manager_by_telegram_identity(str(uuid4()), "123")
+        result = await project_repo.add_manager_by_telegram_identity(
+            str(uuid4()), "123"
+        )
 
         assert result.status == "added"
         assert result.user_id == str(user_id)
         assert result.role == "manager"
 
     @pytest.mark.asyncio
-    async def test_remove_manager_by_telegram_identity_removes_member(self, project_repo, mock_pool):
+    async def test_remove_manager_by_telegram_identity_removes_member(
+        self, project_repo, mock_pool
+    ):
         mock_pool.mock_conn.execute = AsyncMock()
 
         await project_repo.remove_manager_by_telegram_identity(str(uuid4()), "123")
@@ -273,22 +314,30 @@ class TestProjectRepository:
         mock_pool.mock_conn.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_resolve_manager_user_id_by_telegram_uses_membership(self, project_repo, mock_pool):
+    async def test_resolve_manager_user_id_by_telegram_uses_membership(
+        self, project_repo, mock_pool
+    ):
         user_id = uuid4()
         mock_pool.mock_conn.fetchval = AsyncMock(return_value=user_id)
 
-        result = await project_repo.resolve_manager_user_id_by_telegram(str(uuid4()), "123")
+        result = await project_repo.resolve_manager_user_id_by_telegram(
+            str(uuid4()), "123"
+        )
 
         assert result == str(user_id)
 
     @pytest.mark.asyncio
-    async def test_get_user_display_name_prefers_full_name(self, project_repo, mock_pool):
+    async def test_get_user_display_name_prefers_full_name(
+        self, project_repo, mock_pool
+    ):
         user_id = str(uuid4())
-        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={
-            "full_name": "Alice Manager",
-            "username": "alice",
-            "email": "alice@example.com",
-        })
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "full_name": "Alice Manager",
+                "username": "alice",
+                "email": "alice@example.com",
+            }
+        )
 
         result = await project_repo.get_user_display_name(user_id)
 
@@ -329,12 +378,19 @@ class TestProjectRepository:
         assert result == str(rows[1]["id"])
 
     @pytest.mark.asyncio
-    async def test_find_project_by_manager_token_not_found(self, project_repo, mock_pool):
-        mock_pool.mock_conn.fetch = AsyncMock(return_value=[
-            {"id": uuid4(), "manager_bot_token": "enc1"},
-        ])
+    async def test_find_project_by_manager_token_not_found(
+        self, project_repo, mock_pool
+    ):
+        mock_pool.mock_conn.fetch = AsyncMock(
+            return_value=[
+                {"id": uuid4(), "manager_bot_token": "enc1"},
+            ]
+        )
 
-        with patch("src.infrastructure.db.repositories.project.base.decrypt_token", return_value="different"):
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            return_value="different",
+        ):
             result = await project_repo.find_project_by_manager_token("nonexistent")
 
         assert result is None
@@ -366,7 +422,9 @@ class TestProjectRepository:
         assert args[1:] == ("new_secret", UUID(project_id))
 
     @pytest.mark.asyncio
-    async def test_find_project_by_manager_webhook_secret_found(self, project_repo, mock_pool):
+    async def test_find_project_by_manager_webhook_secret_found(
+        self, project_repo, mock_pool
+    ):
         row = {"id": uuid4()}
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
 
@@ -375,7 +433,9 @@ class TestProjectRepository:
         assert result == str(row["id"])
 
     @pytest.mark.asyncio
-    async def test_find_project_by_manager_webhook_secret_not_found(self, project_repo, mock_pool):
+    async def test_find_project_by_manager_webhook_secret_not_found(
+        self, project_repo, mock_pool
+    ):
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=None)
 
         result = await project_repo.find_project_by_manager_webhook_secret("secret")
@@ -412,8 +472,22 @@ class TestProjectRepository:
     @pytest.mark.asyncio
     async def test_get_all_projects(self, project_repo, mock_pool):
         rows = [
-            {"id": uuid4(), "user_id": uuid4(), "name": "p1", "is_pro_mode": False, "created_at": datetime.now(), "updated_at": datetime.now()},
-            {"id": uuid4(), "user_id": None, "name": "p2", "is_pro_mode": True, "created_at": datetime.now(), "updated_at": datetime.now()},
+            {
+                "id": uuid4(),
+                "user_id": uuid4(),
+                "name": "p1",
+                "is_pro_mode": False,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            },
+            {
+                "id": uuid4(),
+                "user_id": None,
+                "name": "p2",
+                "is_pro_mode": True,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+            },
         ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
@@ -487,15 +561,17 @@ class TestProjectRepository:
     @pytest.mark.asyncio
     async def test_get_projects_by_user_id(self, project_repo, mock_pool):
         user_id = str(uuid4())
-        rows = [{
-            "id": uuid4(),
-            "name": "p1",
-            "is_pro_mode": False,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now(),
-            "client_bot_username": None,
-            "manager_bot_username": None,
-        }]
+        rows = [
+            {
+                "id": uuid4(),
+                "name": "p1",
+                "is_pro_mode": False,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                "client_bot_username": None,
+                "manager_bot_username": None,
+            }
+        ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
         result = await project_repo.get_projects_by_user_id(user_id)
@@ -508,17 +584,19 @@ class TestProjectRepository:
     @pytest.mark.asyncio
     async def test_get_projects_for_user_view(self, project_repo, mock_pool):
         user_id = str(uuid4())
-        rows = [{
-            "id": uuid4(),
-            "name": "p1",
-            "is_pro_mode": False,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now(),
-            "client_bot_username": "client_bot",
-            "manager_bot_username": "manager_bot",
-            "user_id": UUID(user_id),
-            "access_role": "owner",
-        }]
+        rows = [
+            {
+                "id": uuid4(),
+                "name": "p1",
+                "is_pro_mode": False,
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                "client_bot_username": "client_bot",
+                "manager_bot_username": "manager_bot",
+                "user_id": UUID(user_id),
+                "access_role": "owner",
+            }
+        ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
         result = await project_repo.get_projects_for_user_view(user_id)
@@ -529,20 +607,24 @@ class TestProjectRepository:
         assert result[0].access_role == "owner"
 
     @pytest.mark.asyncio
-    async def test_get_project_members_includes_owner_when_missing(self, project_repo, mock_pool):
+    async def test_get_project_members_includes_owner_when_missing(
+        self, project_repo, mock_pool
+    ):
         project_id = str(uuid4())
         owner_user_id = uuid4()
-        rows = [{
-            "id": owner_user_id,
-            "project_id": UUID(project_id),
-            "user_id": owner_user_id,
-            "role": "owner",
-            "created_at": datetime.now(),
-            "telegram_id": 123456,
-            "username": "owner",
-            "full_name": "Owner User",
-            "email": "owner@example.com",
-        }]
+        rows = [
+            {
+                "id": owner_user_id,
+                "project_id": UUID(project_id),
+                "user_id": owner_user_id,
+                "role": "owner",
+                "created_at": datetime.now(),
+                "telegram_id": 123456,
+                "username": "owner",
+                "full_name": "Owner User",
+                "email": "owner@example.com",
+            }
+        ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
         result = await project_repo.get_project_members_view(project_id)
@@ -553,7 +635,9 @@ class TestProjectRepository:
         assert result[0].telegram_id == 123456
 
     @pytest.mark.asyncio
-    async def test_get_project_configuration_normalizes_blocks(self, project_repo, mock_pool):
+    async def test_get_project_configuration_normalizes_blocks(
+        self, project_repo, mock_pool
+    ):
         project_id = uuid4()
         integration_id = uuid4()
         channel_id = uuid4()
@@ -561,64 +645,74 @@ class TestProjectRepository:
         created_at = datetime.now()
         updated_at = datetime.now()
 
-        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=[
-            {
-                "brand_name": "Acme",
-                "industry": "services",
-                "tone_of_voice": "warm",
-                "default_language": "ru",
-                "default_timezone": "Europe/Moscow",
-                "system_prompt_override": None,
-                "created_at": created_at,
-                "updated_at": updated_at,
-            },
-            {
-                "escalation_policy_json": {"mode": "manager"},
-                "routing_policy_json": {},
-                "crm_policy_json": {},
-                "response_policy_json": {},
-                "privacy_policy_json": {},
-                "created_at": created_at,
-                "updated_at": updated_at,
-            },
-            {
-                "monthly_token_limit": 100000,
-                "requests_per_minute": 30,
-                "max_concurrent_threads": 5,
-                "priority": 1,
-                "fallback_model": "llama-3.1-8b-instant",
-                "created_at": created_at,
-                "updated_at": updated_at,
-            },
-        ])
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=[
-            [{
-                "id": integration_id,
-                "provider": "amo_crm",
-                "status": "active",
-                "config_json": {"base_url": "https://crm.example"},
-                "created_at": created_at,
-                "updated_at": updated_at,
-            }],
-            [{
-                "id": channel_id,
-                "kind": "client",
-                "provider": "telegram",
-                "status": "active",
-                "config_json": {"bot": "client"},
-                "created_at": created_at,
-                "updated_at": updated_at,
-            }],
-            [{
-                "id": prompt_id,
-                "name": "default",
-                "prompt_json": {"system": "hello"},
-                "version": 1,
-                "is_active": True,
-                "created_at": created_at,
-                "updated_at": updated_at,
-            }],
-        ])
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            side_effect=[
+                {
+                    "brand_name": "Acme",
+                    "industry": "services",
+                    "tone_of_voice": "warm",
+                    "default_language": "ru",
+                    "default_timezone": "Europe/Moscow",
+                    "system_prompt_override": None,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                },
+                {
+                    "escalation_policy_json": {"mode": "manager"},
+                    "routing_policy_json": {},
+                    "crm_policy_json": {},
+                    "response_policy_json": {},
+                    "privacy_policy_json": {},
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                },
+                {
+                    "monthly_token_limit": 100000,
+                    "requests_per_minute": 30,
+                    "max_concurrent_threads": 5,
+                    "priority": 1,
+                    "fallback_model": "llama-3.1-8b-instant",
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                },
+            ]
+        )
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=[
+                [
+                    {
+                        "id": integration_id,
+                        "provider": "amo_crm",
+                        "status": "active",
+                        "config_json": {"base_url": "https://crm.example"},
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                    }
+                ],
+                [
+                    {
+                        "id": channel_id,
+                        "kind": "client",
+                        "provider": "telegram",
+                        "status": "active",
+                        "config_json": {"bot": "client"},
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                    }
+                ],
+                [
+                    {
+                        "id": prompt_id,
+                        "name": "default",
+                        "prompt_json": {"system": "hello"},
+                        "version": 1,
+                        "is_active": True,
+                        "created_at": created_at,
+                        "updated_at": updated_at,
+                    }
+                ],
+            ]
+        )
 
         result = await project_repo.get_project_configuration_view(project_id)
 
@@ -636,14 +730,17 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        await project_repo.update_project_settings(project_id, {
-            "brand_name": "Acme",
-            "industry": "services",
-            "tone_of_voice": "warm",
-            "default_language": "ru",
-            "default_timezone": "Europe/Moscow",
-            "system_prompt_override": "Custom prompt",
-        })
+        await project_repo.update_project_settings(
+            project_id,
+            {
+                "brand_name": "Acme",
+                "industry": "services",
+                "tone_of_voice": "warm",
+                "default_language": "ru",
+                "default_timezone": "Europe/Moscow",
+                "system_prompt_override": "Custom prompt",
+            },
+        )
 
         args = mock_pool.mock_conn.execute.await_args.args
         assert "INSERT INTO project_settings" in args[0]
@@ -654,13 +751,16 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        await project_repo.update_project_policies(project_id, {
-            "escalation_policy_json": {"after_minutes": 3},
-            "routing_policy_json": {"default": "manager"},
-            "crm_policy_json": {"sync": True},
-            "response_policy_json": {"max_length": 500},
-            "privacy_policy_json": {"mask_phone": True},
-        })
+        await project_repo.update_project_policies(
+            project_id,
+            {
+                "escalation_policy_json": {"after_minutes": 3},
+                "routing_policy_json": {"default": "manager"},
+                "crm_policy_json": {"sync": True},
+                "response_policy_json": {"max_length": 500},
+                "privacy_policy_json": {"mask_phone": True},
+            },
+        )
 
         args = mock_pool.mock_conn.execute.await_args.args
         assert "INSERT INTO project_policies" in args[0]
@@ -671,34 +771,41 @@ class TestProjectRepository:
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()
 
-        await project_repo.update_project_limit_profile(project_id, {
-            "monthly_token_limit": 100000,
-            "requests_per_minute": 60,
-            "max_concurrent_threads": 10,
-            "priority": 2,
-            "fallback_model": "llama-3.1-8b-instant",
-        })
+        await project_repo.update_project_limit_profile(
+            project_id,
+            {
+                "monthly_token_limit": 100000,
+                "requests_per_minute": 60,
+                "max_concurrent_threads": 10,
+                "priority": 2,
+                "fallback_model": "llama-3.1-8b-instant",
+            },
+        )
 
         args = mock_pool.mock_conn.execute.await_args.args
         assert "INSERT INTO project_limit_profiles" in args[0]
         assert args[1] == UUID(project_id)
 
     @pytest.mark.asyncio
-    async def test_upsert_project_integration_normalizes_result(self, project_repo, mock_pool):
+    async def test_upsert_project_integration_normalizes_result(
+        self, project_repo, mock_pool
+    ):
         project_id = uuid4()
         integration_id = uuid4()
         created_at = datetime.now()
         updated_at = datetime.now()
 
-        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={
-            "id": integration_id,
-            "project_id": project_id,
-            "provider": "amo_crm",
-            "status": "active",
-            "config_json": {"webhook_url": "https://crm.example/hook"},
-            "created_at": created_at,
-            "updated_at": updated_at,
-        })
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "id": integration_id,
+                "project_id": project_id,
+                "provider": "amo_crm",
+                "status": "active",
+                "config_json": {"webhook_url": "https://crm.example/hook"},
+                "created_at": created_at,
+                "updated_at": updated_at,
+            }
+        )
 
         result = await project_repo.upsert_project_integration(
             project_id,
@@ -715,22 +822,26 @@ class TestProjectRepository:
         assert result.updated_at == updated_at.isoformat()
 
     @pytest.mark.asyncio
-    async def test_upsert_project_channel_normalizes_result(self, project_repo, mock_pool):
+    async def test_upsert_project_channel_normalizes_result(
+        self, project_repo, mock_pool
+    ):
         project_id = uuid4()
         channel_id = uuid4()
         created_at = datetime.now()
         updated_at = datetime.now()
 
-        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={
-            "id": channel_id,
-            "project_id": project_id,
-            "kind": "widget",
-            "provider": "web",
-            "status": "active",
-            "config_json": {"allowed_origin": "https://site.example"},
-            "created_at": created_at,
-            "updated_at": updated_at,
-        })
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "id": channel_id,
+                "project_id": project_id,
+                "kind": "widget",
+                "provider": "web",
+                "status": "active",
+                "config_json": {"allowed_origin": "https://site.example"},
+                "created_at": created_at,
+                "updated_at": updated_at,
+            }
+        )
 
         result = await project_repo.upsert_project_channel(
             project_id,
@@ -763,14 +874,18 @@ class TestProjectRepository:
 
     @pytest.mark.asyncio
     async def test_connection_error(self, project_repo, mock_pool):
-        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
+        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+            "conn closed"
+        )
 
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await project_repo.get_project_settings(str(uuid4()))
 
     @pytest.mark.asyncio
     async def test_undefined_table_error(self, project_repo, mock_pool):
-        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.UndefinedTableError("no table"))
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.UndefinedTableError("no table")
+        )
 
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
             await project_repo.get_project_settings(str(uuid4()))

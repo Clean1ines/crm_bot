@@ -12,7 +12,10 @@ async def test_tool_executor_returns_human_fallback_when_tool_missing():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.tool_executor.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.tool_executor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node({"project_id": "project-1"})
 
     assert result["requires_human"] is True
@@ -28,7 +31,10 @@ async def test_tool_executor_returns_tool_result_on_success():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.tool_executor.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.tool_executor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node(
             {
                 "tool_name": "crm.create",

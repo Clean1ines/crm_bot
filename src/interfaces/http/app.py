@@ -9,7 +9,11 @@ from fastapi.responses import JSONResponse
 from src.application.errors import ApplicationError
 from src.interfaces.composition.fastapi_lifespan import lifespan
 from src.infrastructure.config.settings import settings
-from src.infrastructure.logging.logger import CorrelationIdMiddleware, configure_logging, get_logger
+from src.infrastructure.logging.logger import (
+    CorrelationIdMiddleware,
+    configure_logging,
+    get_logger,
+)
 from src.interfaces.http.auth import router as auth_router
 from src.interfaces.http.bot import router as bot_router
 from src.interfaces.http.chat import router as chat_router
@@ -43,7 +47,11 @@ app.add_middleware(CorrelationIdMiddleware)
 
 
 def _cors_headers() -> dict[str, str]:
-    return {"Access-Control-Allow-Origin": settings.FRONTEND_URL if settings.FRONTEND_URL else "*"}
+    return {
+        "Access-Control-Allow-Origin": settings.FRONTEND_URL
+        if settings.FRONTEND_URL
+        else "*"
+    }
 
 
 def _request_id_from_request(request: Request) -> str:

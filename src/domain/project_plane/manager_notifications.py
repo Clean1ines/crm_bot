@@ -33,13 +33,16 @@ def select_manager_notification_targets(
 
     normalized_targets = list(targets)
     if manager_user_id:
-        matched = [target for target in normalized_targets if target.user_id == manager_user_id]
+        matched = [
+            target for target in normalized_targets if target.user_id == manager_user_id
+        ]
         if matched:
             return matched
 
     if manager_chat_id:
         matched = [
-            target for target in normalized_targets
+            target
+            for target in normalized_targets
             if target.telegram_chat_id == str(manager_chat_id)
         ]
         if matched:

@@ -2,7 +2,6 @@
 Thin LangGraph adapter for the pure domain policy engine.
 """
 
-
 from src.agent.state import AgentState
 from src.domain.runtime.policy.decision_engine import get_decision
 from src.domain.runtime.policy.intent_topic import normalize_intent, resolve_topic
@@ -53,9 +52,14 @@ def create_policy_engine_node(event_repo: EventRepository | None = None):
                     event_type="policy_decision",
                     payload=result.to_event_payload(confidence=context.confidence),
                 )
-                logger.debug("Policy decision event emitted", extra={"thread_id": context.thread_id})
+                logger.debug(
+                    "Policy decision event emitted",
+                    extra={"thread_id": context.thread_id},
+                )
             except Exception as exc:
-                logger.warning("Failed to emit policy_decision event", extra={"error": str(exc)})
+                logger.warning(
+                    "Failed to emit policy_decision event", extra={"error": str(exc)}
+                )
 
         logger.debug(
             "Policy decision finalized",
@@ -74,10 +78,10 @@ def create_policy_engine_node(event_repo: EventRepository | None = None):
 
     def _get_policy_input_size(state: AgentState) -> int:
         return (
-            len(str(state.get("features") or "")) +
-            len(str(state.get("intent") or "")) +
-            len(str(state.get("dialog_state") or "")) +
-            len(str((state.get("user_memory") or {}).get("dialog_state") or ""))
+            len(str(state.get("features") or ""))
+            + len(str(state.get("intent") or ""))
+            + len(str(state.get("dialog_state") or ""))
+            + len(str((state.get("user_memory") or {}).get("dialog_state") or ""))
         )
 
     def _get_policy_output_size(result: dict[str, object]) -> int:

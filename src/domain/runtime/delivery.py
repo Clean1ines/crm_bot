@@ -1,7 +1,11 @@
 from dataclasses import dataclass
 from typing import Mapping, cast
 
-from src.domain.runtime.state_contracts import RuntimeStateInput, RuntimeStatePatch, ToolResultPayload
+from src.domain.runtime.state_contracts import (
+    RuntimeStateInput,
+    RuntimeStatePatch,
+    ToolResultPayload,
+)
 
 
 @dataclass(slots=True)
@@ -15,7 +19,11 @@ class ResponseDeliveryContext:
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "ResponseDeliveryContext":
         raw_tool_result = state.get("tool_result")
-        tool_result = cast(ToolResultPayload, raw_tool_result) if isinstance(raw_tool_result, Mapping) else None
+        tool_result = (
+            cast(ToolResultPayload, raw_tool_result)
+            if isinstance(raw_tool_result, Mapping)
+            else None
+        )
         return cls(
             chat_id=state.get("chat_id"),
             project_id=state.get("project_id"),

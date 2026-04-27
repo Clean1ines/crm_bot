@@ -69,7 +69,9 @@ class KnowledgeRepositoryFactoryPort(Protocol):
 
 
 class KnowledgeChunkerPort(Protocol):
-    async def process_file(self, file_content: bytes, file_name: str) -> list[str | JsonObject]: ...
+    async def process_file(
+        self, file_content: bytes, file_name: str
+    ) -> list[str | JsonObject]: ...
 
 
 class KnowledgeChunkerFactoryPort(Protocol):

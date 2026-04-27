@@ -14,7 +14,9 @@ def test_response_delivery_context_prefers_tool_text():
 
 
 def test_response_delivery_result_serializes_requires_human_only_when_needed():
-    result = ResponseDeliveryResult(message_sent=False, response_text="error", requires_human=True)
+    result = ResponseDeliveryResult(
+        message_sent=False, response_text="error", requires_human=True
+    )
 
     assert result.to_state_patch() == {
         "message_sent": False,

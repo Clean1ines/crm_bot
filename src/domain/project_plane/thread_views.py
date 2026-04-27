@@ -20,19 +20,29 @@ class ThreadWithProjectView:
     chat_id: int | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, object] | None) -> "ThreadWithProjectView | None":
+    def from_record(
+        cls, record: dict[str, object] | None
+    ) -> "ThreadWithProjectView | None":
         if not record:
             return None
         return cls(
             thread_id=str(record.get("id") or record.get("thread_id") or ""),
-            client_id=str(record["client_id"]) if record.get("client_id") is not None else None,
+            client_id=str(record["client_id"])
+            if record.get("client_id") is not None
+            else None,
             status=record.get("status"),
-            manager_user_id=str(record["manager_user_id"]) if record.get("manager_user_id") is not None else None,
-            manager_chat_id=str(record["manager_chat_id"]) if record.get("manager_chat_id") is not None else None,
+            manager_user_id=str(record["manager_user_id"])
+            if record.get("manager_user_id") is not None
+            else None,
+            manager_chat_id=str(record["manager_chat_id"])
+            if record.get("manager_chat_id") is not None
+            else None,
             context_summary=record.get("context_summary"),
             created_at=record.get("created_at"),
             updated_at=record.get("updated_at"),
-            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
+            project_id=str(record["project_id"])
+            if record.get("project_id") is not None
+            else None,
             full_name=record.get("full_name"),
             username=record.get("username"),
             chat_id=record.get("chat_id"),
@@ -63,7 +73,9 @@ class ThreadAnalyticsView:
     decision: str | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, object] | None) -> "ThreadAnalyticsView | None":
+    def from_record(
+        cls, record: dict[str, object] | None
+    ) -> "ThreadAnalyticsView | None":
         if not record:
             return None
         return cls(
@@ -103,6 +115,7 @@ class ThreadMessageCounts:
             "ai": self.ai,
             "manager": self.manager,
         }
+
 
 @dataclass(slots=True)
 class ThreadDialogClientView:
@@ -151,7 +164,9 @@ class ThreadDialogView:
             "thread_created_at": self.thread_created_at,
             "thread_updated_at": self.thread_updated_at,
             "client": self.client.to_record(),
-            "last_message": self.last_message.to_record() if self.last_message else None,
+            "last_message": self.last_message.to_record()
+            if self.last_message
+            else None,
             "unread_count": self.unread_count,
         }
 
@@ -221,4 +236,3 @@ class ThreadStatusSummaryView:
             "status": self.status,
             "client_name": self.client_name,
         }
-

@@ -36,7 +36,9 @@ class ResponseGenerationContext:
             history=list(state.get("history") or []),
             knowledge_chunks=list(state.get("knowledge_chunks") or []),
             user_memory=state.get("user_memory"),
-            dialog_state=state.get("dialog_state") if isinstance(state.get("dialog_state"), dict) else None,
+            dialog_state=state.get("dialog_state")
+            if isinstance(state.get("dialog_state"), dict)
+            else None,
             features=state.get("features"),
             project_configuration=state.get("project_configuration"),
             intent=str(state.get("intent") or ""),

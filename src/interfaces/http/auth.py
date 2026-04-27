@@ -1,4 +1,3 @@
-import jwt
 import hashlib
 import hmac
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,7 +26,9 @@ def build_auth_service(user_repo: UserRepository) -> AuthService:
     return AuthService(
         user_repo,
         config=config,
-        google_verifier=HttpGoogleIdentityVerifier(google_client_id=settings.GOOGLE_CLIENT_ID),
+        google_verifier=HttpGoogleIdentityVerifier(
+            google_client_id=settings.GOOGLE_CLIENT_ID
+        ),
     )
 
 
@@ -39,7 +40,7 @@ class TelegramAuthData(BaseModel):
     auth_date: int
     hash: str
     # Позволяет принимать любые доп. поля от ТГ (типа last_name), не ломая валидацию
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
 
 
 class AuthMethodsResponse(BaseModel):
@@ -97,7 +98,7 @@ def verify(data: dict, token: str | None):
     if not token:
         logger.error("ADMIN_BOT_TOKEN is missing in settings!")
         return False
-    
+
     data_to_check = data.copy()
     received_hash = data_to_check.pop("hash", None)
     if not received_hash:
@@ -105,12 +106,13 @@ def verify(data: dict, token: str | None):
 
     # Собираем строку: ключ=значение, отсортировано, через \n
     check_string = "\n".join(f"{k}={v}" for k, v in sorted(data_to_check.items()))
-    
+
     # Секретный ключ — это SHA256 от токена бота
     secret = hashlib.sha256(token.encode()).digest()
     computed_hash = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
 
     return hmac.compare_digest(computed_hash, received_hash)
+
 
 @router.post("/telegram")
 async def telegram_auth(
@@ -119,7 +121,11 @@ async def telegram_auth(
 ):
     auth_service = build_auth_service(user_repo)
     # Универсальный способ получить словарь из Pydantic
-    auth_data = data.model_dump(exclude_none=True) if hasattr(data, "model_dump") else data.dict(exclude_none=True)
+    auth_data = (
+        data.model_dump(exclude_none=True)
+        if hasattr(data, "model_dump")
+        else data.dict(exclude_none=True)
+    )
 
     if not verify(auth_data, settings.ADMIN_BOT_TOKEN):
         logger.error(f"AUTH_FAILED for user {auth_data.get('id')}")
@@ -135,7 +141,7 @@ async def telegram_auth(
     )
     logger.info(
         "User authenticated",
-        extra={"user_id": user_id, "telegram_id": telegram_id, "created": created}
+        extra={"user_id": user_id, "telegram_id": telegram_id, "created": created},
     )
 
     return auth_service.build_auth_session(
@@ -155,7 +161,9 @@ async def email_register(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.email_register(data.email, data.password, data.full_name)).to_dict()
+    return (
+        await auth_service.email_register(data.email, data.password, data.full_name)
+    ).to_dict()
 
 
 @router.post("/email/login")
@@ -174,7 +182,9 @@ async def link_email(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.link_email(current_user_id, data.email, data.password)).to_dict()
+    return (
+        await auth_service.link_email(current_user_id, data.email, data.password)
+    ).to_dict()
 
 
 @router.post("/email/verification/request")
@@ -201,7 +211,11 @@ async def google_login(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.google_login(data.provider_subject, data.email, data.full_name)).to_dict()
+    return (
+        await auth_service.google_login(
+            data.provider_subject, data.email, data.full_name
+        )
+    ).to_dict()
 
 
 @router.post("/google/login/id-token")
@@ -220,7 +234,11 @@ async def link_google(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.link_google(current_user_id, data.provider_subject, data.email)).to_dict()
+    return (
+        await auth_service.link_google(
+            current_user_id, data.provider_subject, data.email
+        )
+    ).to_dict()
 
 
 @router.post("/link/google/id-token")
@@ -230,7 +248,9 @@ async def link_google_id_token(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.link_google_with_id_token(current_user_id, data.id_token)).to_dict()
+    return (
+        await auth_service.link_google_with_id_token(current_user_id, data.id_token)
+    ).to_dict()
 
 
 @router.get("/me")
@@ -258,11 +278,13 @@ async def change_password(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.change_password(
-        current_user_id,
-        data.new_password,
-        current_password=data.current_password,
-    )).to_dict()
+    return (
+        await auth_service.change_password(
+            current_user_id,
+            data.new_password,
+            current_password=data.current_password,
+        )
+    ).to_dict()
 
 
 @router.post("/password/reset/request")
@@ -280,7 +302,9 @@ async def confirm_password_reset(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.confirm_password_reset(data.token, data.new_password)).to_dict()
+    return (
+        await auth_service.confirm_password_reset(data.token, data.new_password)
+    ).to_dict()
 
 
 @router.delete("/methods/{provider}", response_model=AuthMethodsResponse)

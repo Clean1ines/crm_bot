@@ -13,10 +13,20 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from src.domain.identity.auth_providers import AUTH_PROVIDER_EMAIL, AUTH_PROVIDER_TELEGRAM
-from src.domain.identity.user_views import AuthMethodView, AuthMethodsView, UserProfileView, EmailVerificationTokenView, PasswordResetTokenView, ConsumedEmailVerificationToken, ConsumedPasswordResetToken
+from src.domain.identity.auth_providers import (
+    AUTH_PROVIDER_EMAIL,
+    AUTH_PROVIDER_TELEGRAM,
+)
+from src.domain.identity.user_views import (
+    AuthMethodView,
+    AuthMethodsView,
+    UserProfileView,
+    EmailVerificationTokenView,
+    PasswordResetTokenView,
+    ConsumedEmailVerificationToken,
+    ConsumedPasswordResetToken,
+)
 from src.infrastructure.logging.logger import get_logger
-from src.infrastructure.config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -47,8 +57,9 @@ def _safe_metadata_dict(value) -> dict:
     return {}
 
 
-
-def _hash_password(password: str, salt: bytes | None = None, iterations: int = 210_000) -> str:
+def _hash_password(
+    password: str, salt: bytes | None = None, iterations: int = 210_000
+) -> str:
     """
     Hash a password using PBKDF2-SHA256 with an encoded random salt.
 
@@ -72,7 +83,9 @@ def _verify_password(password: str, stored_hash: str) -> bool:
         iterations = int(iterations_s)
         salt = base64.b64decode(salt_b64.encode("ascii"))
         expected = base64.b64decode(hash_b64.encode("ascii"))
-        derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations
+        )
         return secrets.compare_digest(derived, expected)
     except (ValueError, UnicodeEncodeError, binascii.Error):
         return False
@@ -81,18 +94,18 @@ def _verify_password(password: str, stored_hash: str) -> bool:
 class UserRepository:
     """
     Repository for managing user accounts and authentication identities.
-    
+
     Supports creating users, linking identities, and retrieving users
     by various identifiers (telegram, email, etc.).
-    
+
     Attributes:
         pool: Asyncpg connection pool for database operations.
     """
-    
+
     def __init__(self, pool: asyncpg.Pool) -> None:
         """
         Initialize the UserRepository with a database connection pool.
-        
+
         Args:
             pool: Asyncpg connection pool for database operations.
         """
@@ -100,83 +113,104 @@ class UserRepository:
         logger.debug("UserRepository initialized")
 
     async def get_or_create_by_telegram(
-        self,
-        telegram_id: int,
-        first_name: str,
-        username: str | None = None
+        self, telegram_id: int, first_name: str, username: str | None = None
     ) -> tuple[str, bool]:
         """
         Get or create a user by Telegram ID.
-        
+
         If the user already exists (by auth_identity or users.telegram_id),
         returns the existing user ID. Otherwise, creates a new user and
         adds a Telegram identity.
-        
+
         Args:
             telegram_id: Telegram chat ID.
             first_name: User's first name from Telegram.
             username: Telegram username (optional).
-        
+
         Returns:
             Tuple of (user_id (str), created (bool)).
         """
         logger.info(
-            "Getting or creating user by telegram",
-            extra={"telegram_id": telegram_id}
+            "Getting or creating user by telegram", extra={"telegram_id": telegram_id}
         )
-        
+
         async with self.pool.acquire() as conn:
             # Try to find existing identity
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT user_id
                 FROM auth_identities
                 WHERE provider = 'telegram' AND provider_id = $1
-            """, str(telegram_id))
-            
+            """,
+                str(telegram_id),
+            )
+
             if row:
-                user_id = str(row['user_id'])
-                logger.debug("Existing user found via identity", extra={"user_id": user_id})
+                user_id = str(row["user_id"])
+                logger.debug(
+                    "Existing user found via identity", extra={"user_id": user_id}
+                )
                 return user_id, False
-            
+
             # Check legacy users table (telegram_id column)
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT id FROM users WHERE telegram_id = $1
-            """, telegram_id)
-            
+            """,
+                telegram_id,
+            )
+
             if row:
-                user_id = str(row['id'])
+                user_id = str(row["id"])
                 # Migrate to new identity system
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO auth_identities (user_id, provider, provider_id)
                     VALUES ($1, 'telegram', $2)
                     ON CONFLICT (provider, provider_id) DO NOTHING
-                """, user_id, str(telegram_id))
-                logger.info("Migrated legacy user to auth_identities", extra={"user_id": user_id})
+                """,
+                    user_id,
+                    str(telegram_id),
+                )
+                logger.info(
+                    "Migrated legacy user to auth_identities",
+                    extra={"user_id": user_id},
+                )
                 return user_id, False
-            
+
             # Create new user
             full_name = first_name
             # Optionally append last_name if available, but we don't have it here
-            user_id = await conn.fetchval("""
+            user_id = await conn.fetchval(
+                """
                 INSERT INTO users (id, telegram_id, username, full_name)
                 VALUES (gen_random_uuid(), $1, $2, $3)
                 RETURNING id
-            """, telegram_id, username, full_name)
+            """,
+                telegram_id,
+                username,
+                full_name,
+            )
             user_id = str(user_id)
-            
+
             # Create identity
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO auth_identities (user_id, provider, provider_id)
                 VALUES ($1, 'telegram', $2)
-            """, user_id, str(telegram_id))
-            
-            logger.info("New user created", extra={"user_id": user_id, "telegram_id": telegram_id})
+            """,
+                user_id,
+                str(telegram_id),
+            )
+
+            logger.info(
+                "New user created",
+                extra={"user_id": user_id, "telegram_id": telegram_id},
+            )
             return user_id, True
 
     async def get_or_create_by_email(
-        self,
-        email: str,
-        full_name: str | None = None
+        self, email: str, full_name: str | None = None
     ) -> tuple[str, bool]:
         """
         Get or create a user by canonical email identity.
@@ -200,17 +234,28 @@ class UserRepository:
             return str(legacy_user.id), False
 
         async with self.pool.acquire() as conn:
-            user_id = await conn.fetchval("""
+            user_id = await conn.fetchval(
+                """
                 INSERT INTO users (id, email, full_name)
                 VALUES (gen_random_uuid(), $1, $2)
                 RETURNING id
-            """, normalized_email, full_name)
+            """,
+                normalized_email,
+                full_name,
+            )
             user_id = str(user_id)
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO auth_identities (user_id, provider, provider_id)
                 VALUES ($1, 'email', $2)
-            """, user_id, normalized_email)
-            logger.info("New email user created", extra={"user_id": user_id, "email": normalized_email})
+            """,
+                user_id,
+                normalized_email,
+            )
+            logger.info(
+                "New email user created",
+                extra={"user_id": user_id, "email": normalized_email},
+            )
             return user_id, True
 
     async def create_user(
@@ -227,22 +272,22 @@ class UserRepository:
         """
         normalized_email = email.strip().lower() if email else None
         async with self.pool.acquire() as conn:
-            user_id = await conn.fetchval("""
+            user_id = await conn.fetchval(
+                """
                 INSERT INTO users (id, email, username, full_name)
                 VALUES (gen_random_uuid(), $1, $2, $3)
                 RETURNING id
-            """, normalized_email, username, full_name)
+            """,
+                normalized_email,
+                username,
+                full_name,
+            )
             return str(user_id)
 
-    async def add_identity(
-        self,
-        user_id: str,
-        provider: str,
-        provider_id: str
-    ) -> None:
+    async def add_identity(self, user_id: str, provider: str, provider_id: str) -> None:
         """
         Add an authentication identity for an existing user.
-        
+
         Args:
             user_id: UUID of the user.
             provider: Provider name (e.g., 'telegram', 'email', 'google').
@@ -251,10 +296,7 @@ class UserRepository:
         await self.link_identity(user_id, provider, provider_id)
 
     async def link_identity(
-        self,
-        user_id: str,
-        provider: str,
-        provider_id: str
+        self, user_id: str, provider: str, provider_id: str
     ) -> bool:
         """
         Link an auth identity to an existing user.
@@ -265,73 +307,95 @@ class UserRepository:
         """
         logger.info(
             "Adding identity",
-            extra={"user_id": user_id, "provider": provider, "provider_id": provider_id}
+            extra={
+                "user_id": user_id,
+                "provider": provider,
+                "provider_id": provider_id,
+            },
         )
         async with self.pool.acquire() as conn:
-            existing = await conn.fetchrow("""
+            existing = await conn.fetchrow(
+                """
                 SELECT user_id
                 FROM auth_identities
                 WHERE provider = $1 AND provider_id = $2
-            """, provider, provider_id)
+            """,
+                provider,
+                provider_id,
+            )
             if existing:
                 if str(existing["user_id"]) != str(user_id):
                     raise ValueError(
                         f"Auth identity {provider}:{provider_id} is already linked to another user"
                     )
                 return False
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO auth_identities (user_id, provider, provider_id)
                 VALUES ($1, $2, $3)
-            """, user_id, provider, provider_id)
+            """,
+                user_id,
+                provider,
+                provider_id,
+            )
         return True
 
-    async def get_user_by_identity_view(self, provider: str, provider_id: str) -> UserProfileView | None:
+    async def get_user_by_identity_view(
+        self, provider: str, provider_id: str
+    ) -> UserProfileView | None:
         """
         Retrieve a user by external auth identity.
         """
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT u.*
                 FROM users u
                 JOIN auth_identities ai ON ai.user_id = u.id
                 WHERE ai.provider = $1 AND ai.provider_id = $2
-            """, provider, provider_id)
+            """,
+                provider,
+                provider_id,
+            )
             if not row:
                 return None
             return UserProfileView.from_record(dict(row))
 
-
-    async def get_user_by_telegram_view(self, telegram_id: int) -> UserProfileView | None:
+    async def get_user_by_telegram_view(
+        self, telegram_id: int
+    ) -> UserProfileView | None:
         """
         Retrieve a user by Telegram ID using auth_identities.
-        
+
         Args:
             telegram_id: Telegram chat ID.
-        
+
         Returns:
             User record as dict, or None if not found.
         """
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT u.*
                 FROM users u
                 JOIN auth_identities ai ON ai.user_id = u.id
                 WHERE ai.provider = 'telegram' AND ai.provider_id = $1
-            """, str(telegram_id))
-            
+            """,
+                str(telegram_id),
+            )
+
             if not row:
                 return None
 
             return UserProfileView.from_record(dict(row))
 
-
     async def get_user_by_id_view(self, user_id: str) -> UserProfileView | None:
         """
         Retrieve a user by UUID.
-        
+
         Args:
             user_id: User UUID (string).
-        
+
         Returns:
             User record as dict, or None if not found.
         """
@@ -340,7 +404,6 @@ class UserRepository:
             if not row:
                 return None
             return UserProfileView.from_record(dict(row))
-
 
     async def is_platform_admin(self, user_id: str) -> bool:
         """
@@ -356,50 +419,65 @@ class UserRepository:
     async def get_user_by_email_view(self, email: str) -> UserProfileView | None:
         """
         Retrieve a user by email address.
-        
+
         Args:
             email: User's email address.
-        
+
         Returns:
             User record as dict, or None if not found.
         """
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
             if not row:
-                row = await conn.fetchrow("""
+                row = await conn.fetchrow(
+                    """
                     SELECT u.*
                     FROM users u
                     JOIN auth_identities ai ON ai.user_id = u.id
                     WHERE ai.provider = 'email' AND ai.provider_id = $1
-            """, email)
+            """,
+                    email,
+                )
             if not row:
                 return None
             return UserProfileView.from_record(dict(row))
-
 
     async def list_auth_methods_view(self, user_id: str) -> AuthMethodsView:
         """
         Return all auth methods linked to a user and whether a local password is set.
         """
         async with self.pool.acquire() as conn:
-            user_row = await conn.fetchrow("""
+            user_row = await conn.fetchrow(
+                """
                 SELECT email, user_metadata
                 FROM users
                 WHERE id = $1
-            """, user_id)
-            identity_rows = await conn.fetch("""
+            """,
+                user_id,
+            )
+            identity_rows = await conn.fetch(
+                """
                 SELECT provider, provider_id, created_at
                 FROM auth_identities
                 WHERE user_id = $1
                 ORDER BY created_at ASC
-            """, user_id)
-            has_password = await conn.fetchval("""
+            """,
+                user_id,
+            )
+            has_password = await conn.fetchval(
+                """
                 SELECT 1 FROM user_credentials WHERE user_id = $1
-            """, user_id)
+            """,
+                user_id,
+            )
 
             methods: list[AuthMethodView] = []
-            metadata = _safe_metadata_dict(user_row["user_metadata"] if user_row else None)
-            verified_email = str(metadata.get("email_verified_address") or "").strip().lower()
+            metadata = _safe_metadata_dict(
+                user_row["user_metadata"] if user_row else None
+            )
+            verified_email = (
+                str(metadata.get("email_verified_address") or "").strip().lower()
+            )
             verified_at = metadata.get("email_verified_at")
             for row in identity_rows:
                 verified = None
@@ -411,7 +489,9 @@ class UserRepository:
                 method = AuthMethodView(
                     provider=row["provider"],
                     provider_id=row["provider_id"],
-                    created_at=row["created_at"].isoformat() if row["created_at"] else None,
+                    created_at=row["created_at"].isoformat()
+                    if row["created_at"]
+                    else None,
                     verified=verified,
                     verified_at=verified_at_value,
                 )
@@ -424,17 +504,19 @@ class UserRepository:
                 verified_email=verified_email or None,
             )
 
-
     async def count_auth_methods(self, user_id: str) -> int:
         """
         Return the number of auth identities currently linked to a user.
         """
         async with self.pool.acquire() as conn:
-            value = await conn.fetchval("""
+            value = await conn.fetchval(
+                """
                 SELECT COUNT(*)
                 FROM auth_identities
                 WHERE user_id = $1
-            """, user_id)
+            """,
+                user_id,
+            )
             return int(value or 0)
 
     async def has_auth_method(self, user_id: str, provider: str) -> bool:
@@ -442,12 +524,16 @@ class UserRepository:
         Return whether the user has an auth identity for the given provider.
         """
         async with self.pool.acquire() as conn:
-            value = await conn.fetchval("""
+            value = await conn.fetchval(
+                """
                 SELECT 1
                 FROM auth_identities
                 WHERE user_id = $1 AND provider = $2
                 LIMIT 1
-            """, user_id, provider)
+            """,
+                user_id,
+                provider,
+            )
             return bool(value)
 
     async def set_password(self, user_id: str, password: str) -> None:
@@ -456,27 +542,28 @@ class UserRepository:
         """
         password_hash = _hash_password(password)
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO user_credentials (user_id, password_hash, password_updated_at)
                 VALUES ($1, $2, NOW())
                 ON CONFLICT (user_id)
                 DO UPDATE SET password_hash = EXCLUDED.password_hash,
                               password_updated_at = NOW()
-            """, user_id, password_hash)
+            """,
+                user_id,
+                password_hash,
+            )
 
-    async def link_email_auth(
-        self,
-        user_id: str,
-        email: str,
-        password: str
-    ) -> None:
+    async def link_email_auth(self, user_id: str, email: str, password: str) -> None:
         """
         Link an email identity to an existing user and set a local password.
         """
         normalized_email = email.strip().lower()
         await self.link_identity(user_id, "email", normalized_email)
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT user_metadata FROM users WHERE id = $1", user_id)
+            row = await conn.fetchrow(
+                "SELECT user_metadata FROM users WHERE id = $1", user_id
+            )
             metadata = _safe_metadata_dict(row["user_metadata"] if row else None)
             metadata.pop("email_verified_at", None)
             metadata.pop("email_verified_address", None)
@@ -493,11 +580,14 @@ class UserRepository:
         Validate a local password credential for a user.
         """
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT password_hash
                 FROM user_credentials
                 WHERE user_id = $1
-            """, user_id)
+            """,
+                user_id,
+            )
             if not row:
                 return False
             return _verify_password(password, row["password_hash"])
@@ -507,12 +597,15 @@ class UserRepository:
         Return whether the user currently has a local password credential.
         """
         async with self.pool.acquire() as conn:
-            value = await conn.fetchval("""
+            value = await conn.fetchval(
+                """
                 SELECT 1
                 FROM user_credentials
                 WHERE user_id = $1
                 LIMIT 1
-            """, user_id)
+            """,
+                user_id,
+            )
             return bool(value)
 
     async def unlink_identity(self, user_id: str, provider: str) -> bool:
@@ -524,60 +617,75 @@ class UserRepository:
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                deleted = await conn.fetchval("""
+                deleted = await conn.fetchval(
+                    """
                     DELETE FROM auth_identities
                     WHERE user_id = $1 AND provider = $2
                     RETURNING provider
-                """, user_id, provider)
+                """,
+                    user_id,
+                    provider,
+                )
                 if not deleted:
                     return False
 
                 if provider == AUTH_PROVIDER_EMAIL:
-                    row = await conn.fetchrow("SELECT user_metadata FROM users WHERE id = $1", user_id)
-                    metadata = _safe_metadata_dict(row["user_metadata"] if row else None)
+                    row = await conn.fetchrow(
+                        "SELECT user_metadata FROM users WHERE id = $1", user_id
+                    )
+                    metadata = _safe_metadata_dict(
+                        row["user_metadata"] if row else None
+                    )
                     metadata.pop("email_verified_at", None)
                     metadata.pop("email_verified_address", None)
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE users
                         SET email = NULL, user_metadata = $2, updated_at = NOW()
                         WHERE id = $1
-                    """, user_id, metadata)
+                    """,
+                        user_id,
+                        metadata,
+                    )
 
                 if provider == AUTH_PROVIDER_TELEGRAM:
-                    await conn.execute("""
+                    await conn.execute(
+                        """
                         UPDATE users
                         SET telegram_id = NULL, updated_at = NOW()
                         WHERE id = $1
-                    """, user_id)
+                    """,
+                        user_id,
+                    )
 
                 return True
 
     async def update_user(self, user_id: str, data: dict[str, object]) -> bool:
         """
         Update user fields.
-        
+
         Args:
             user_id: User UUID.
             data: Dictionary of fields to update (e.g., {'full_name': 'New Name'}).
-        
+
         Returns:
             True if updated, False if user not found.
         """
         if not data:
             return True
-        
+
         sets = []
         params = [user_id]
         for idx, (key, value) in enumerate(data.items(), start=2):
             sets.append(f"{key} = ${idx}")
             params.append(value)
-        
+
         query = f"""
             UPDATE users
-            SET {', '.join(sets)}, updated_at = NOW()
+            SET {", ".join(sets)}, updated_at = NOW()
             WHERE id = $1
         """
-        
+
         async with self.pool.acquire() as conn:
             result = await conn.execute(query, *params)
             return result == "UPDATE 1"
@@ -597,40 +705,62 @@ class UserRepository:
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE email_verification_tokens
                     SET used_at = NOW()
                     WHERE user_id = $1 AND email = $2 AND used_at IS NULL
-                """, user_id, normalized_email)
-                await conn.execute("""
+                """,
+                    user_id,
+                    normalized_email,
+                )
+                await conn.execute(
+                    """
                     INSERT INTO email_verification_tokens (user_id, email, token, expires_at)
                     VALUES ($1, $2, $3, $4)
-                """, user_id, normalized_email, token, expires_at)
+                """,
+                    user_id,
+                    normalized_email,
+                    token,
+                    expires_at,
+                )
 
-        return EmailVerificationTokenView(token=token, expires_at=expires_at.isoformat())
+        return EmailVerificationTokenView(
+            token=token, expires_at=expires_at.isoformat()
+        )
 
-    async def consume_email_verification_token(self, token: str) -> ConsumedEmailVerificationToken | None:
+    async def consume_email_verification_token(
+        self, token: str
+    ) -> ConsumedEmailVerificationToken | None:
         """
         Mark an email verification token as used and return its payload when valid.
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                row = await conn.fetchrow("""
+                row = await conn.fetchrow(
+                    """
                     SELECT user_id, email
                     FROM email_verification_tokens
                     WHERE token = $1
                       AND used_at IS NULL
                       AND expires_at > NOW()
                     FOR UPDATE
-                """, token)
+                """,
+                    token,
+                )
                 if not row:
                     return None
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE email_verification_tokens
                     SET used_at = NOW()
                     WHERE token = $1
-                """, token)
-                return ConsumedEmailVerificationToken(user_id=str(row["user_id"]), email=row["email"])
+                """,
+                    token,
+                )
+                return ConsumedEmailVerificationToken(
+                    user_id=str(row["user_id"]), email=row["email"]
+                )
 
     async def mark_email_verified(self, user_id: str, email: str) -> None:
         """
@@ -639,15 +769,21 @@ class UserRepository:
         normalized_email = email.strip().lower()
         verified_at = datetime.now(timezone.utc).isoformat()
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT user_metadata FROM users WHERE id = $1", user_id)
+            row = await conn.fetchrow(
+                "SELECT user_metadata FROM users WHERE id = $1", user_id
+            )
             metadata = _safe_metadata_dict(row["user_metadata"] if row else None)
             metadata["email_verified_address"] = normalized_email
             metadata["email_verified_at"] = verified_at
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE users
                 SET user_metadata = $2, updated_at = NOW()
                 WHERE id = $1
-            """, user_id, metadata)
+            """,
+                user_id,
+                metadata,
+            )
 
     async def create_password_reset_token(
         self,
@@ -662,37 +798,55 @@ class UserRepository:
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE password_reset_tokens
                     SET used_at = NOW()
                     WHERE user_id = $1 AND used_at IS NULL
-                """, user_id)
-                await conn.execute("""
+                """,
+                    user_id,
+                )
+                await conn.execute(
+                    """
                     INSERT INTO password_reset_tokens (user_id, token, expires_at)
                     VALUES ($1, $2, $3)
-                """, user_id, token, expires_at)
+                """,
+                    user_id,
+                    token,
+                    expires_at,
+                )
 
-        return EmailVerificationTokenView(token=token, expires_at=expires_at.isoformat())
+        return EmailVerificationTokenView(
+            token=token, expires_at=expires_at.isoformat()
+        )
 
-    async def consume_password_reset_token(self, token: str) -> ConsumedPasswordResetToken | None:
+    async def consume_password_reset_token(
+        self, token: str
+    ) -> ConsumedPasswordResetToken | None:
         """
         Mark a password reset token as used and return its payload when valid.
         """
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                row = await conn.fetchrow("""
+                row = await conn.fetchrow(
+                    """
                     SELECT user_id
                     FROM password_reset_tokens
                     WHERE token = $1
                       AND used_at IS NULL
                       AND expires_at > NOW()
                     FOR UPDATE
-                """, token)
+                """,
+                    token,
+                )
                 if not row:
                     return None
-                await conn.execute("""
+                await conn.execute(
+                    """
                     UPDATE password_reset_tokens
                     SET used_at = NOW()
                     WHERE token = $1
-                """, token)
+                """,
+                    token,
+                )
                 return ConsumedPasswordResetToken(user_id=str(row["user_id"]))

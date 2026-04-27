@@ -1,5 +1,8 @@
 from src.domain.runtime.dialog_state import default_dialog_state
-from src.domain.runtime.policy_decision import PolicyDecisionContext, PolicyDecisionResult
+from src.domain.runtime.policy_decision import (
+    PolicyDecisionContext,
+    PolicyDecisionResult,
+)
 
 
 def test_policy_decision_context_loads_dialog_state_from_memory():
@@ -32,7 +35,11 @@ def test_policy_decision_result_serializes_state_patch_and_event_payload():
         cta="call_manager",
         topic="handoff",
         lead_status="handoff_to_manager",
-        dialog_state={"last_intent": "handoff_request", "repeat_count": 3, "lead_status": "handoff_to_manager"},
+        dialog_state={
+            "last_intent": "handoff_request",
+            "repeat_count": 3,
+            "lead_status": "handoff_to_manager",
+        },
     )
 
     assert result.to_state_patch(previous_lifecycle="warm") == {
@@ -40,7 +47,11 @@ def test_policy_decision_result_serializes_state_patch_and_event_payload():
         "cta": "call_manager",
         "topic": "handoff",
         "lead_status": "handoff_to_manager",
-        "dialog_state": {"last_intent": "handoff_request", "repeat_count": 3, "lead_status": "handoff_to_manager"},
+        "dialog_state": {
+            "last_intent": "handoff_request",
+            "repeat_count": 3,
+            "lead_status": "handoff_to_manager",
+        },
         "lifecycle": "handoff_to_manager",
     }
     assert result.to_event_payload(confidence=0.8) == {

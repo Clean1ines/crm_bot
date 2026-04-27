@@ -1,4 +1,4 @@
-from typing import Mapping, NotRequired, TypedDict
+from typing import Mapping, TypedDict
 
 
 class RuntimeHistoryMessage(TypedDict):
@@ -120,6 +120,7 @@ class RuntimeStatePatch(TypedDict, total=False):
     features: Mapping[str, object]
     dialog_state: object
     tool_result: object
+
 
 # Backward-compatible aliases for existing agent/runtime imports.
 HistoryMessage = RuntimeHistoryMessage

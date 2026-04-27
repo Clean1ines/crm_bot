@@ -17,7 +17,9 @@ class ProjectRuntimeContextDto:
     channels: list[ProjectChannelState] = field(default_factory=list)
 
     @classmethod
-    def from_record(cls, record: dict[str, object] | None) -> "ProjectRuntimeContextDto":
+    def from_record(
+        cls, record: dict[str, object] | None
+    ) -> "ProjectRuntimeContextDto":
         payload = record or {}
         return cls(
             settings=dict(payload.get("settings") or {}),
@@ -37,7 +39,9 @@ class MessageProcessingOutcomeDto:
     delivered: bool = False
 
     @classmethod
-    def create(cls, text: str, *, delivered: bool = False) -> "MessageProcessingOutcomeDto":
+    def create(
+        cls, text: str, *, delivered: bool = False
+    ) -> "MessageProcessingOutcomeDto":
         return cls(text=text, delivered=delivered)
 
 
@@ -48,7 +52,9 @@ class GraphExecutionRequestDto:
     chat_id: int
     question: str
     recent_history: list[HistoryMessage] = field(default_factory=list)
-    runtime_context: ProjectRuntimeContextDto = field(default_factory=ProjectRuntimeContextDto)
+    runtime_context: ProjectRuntimeContextDto = field(
+        default_factory=ProjectRuntimeContextDto
+    )
     trace_id: str = ""
 
 
@@ -58,7 +64,9 @@ class GraphExecutionResultDto:
     delivered: bool = False
 
     @classmethod
-    def from_graph_state(cls, state: dict[str, object] | None) -> "GraphExecutionResultDto":
+    def from_graph_state(
+        cls, state: dict[str, object] | None
+    ) -> "GraphExecutionResultDto":
         payload = state or {}
         if payload.get("message_sent"):
             return cls(response_text="", delivered=True)

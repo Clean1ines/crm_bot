@@ -2,12 +2,16 @@ from dataclasses import dataclass, field
 from typing import Mapping, cast
 import hashlib
 
-from src.domain.runtime.state_contracts import KnowledgeChunkPayload, RuntimeStateInput, RuntimeStatePatch
+from src.domain.runtime.state_contracts import (
+    KnowledgeChunkPayload,
+    RuntimeStateInput,
+    RuntimeStatePatch,
+)
 from src.domain.runtime.value_parsing import coerce_float
 
 
 def hash_query(query: str) -> str:
-    return hashlib.md5(query.encode("utf-8")).hexdigest()
+    return hashlib.md5(query.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 @dataclass(slots=True)
@@ -46,7 +50,9 @@ class KnowledgeSearchResult:
     chunks: list[KnowledgeChunk] = field(default_factory=list)
 
     @classmethod
-    def from_tool_payload(cls, payload: Mapping[str, object] | None) -> "KnowledgeSearchResult":
+    def from_tool_payload(
+        cls, payload: Mapping[str, object] | None
+    ) -> "KnowledgeSearchResult":
         raw_chunks = payload.get("results") if payload else []
         if not isinstance(raw_chunks, list):
             raw_chunks = []
@@ -72,4 +78,6 @@ class KnowledgeSearchResult:
         return [chunk.score for chunk in self.chunks]
 
     def to_state_patch(self) -> RuntimeStatePatch:
-        return {"knowledge_chunks": [chunk.to_prompt_payload() for chunk in self.chunks]}
+        return {
+            "knowledge_chunks": [chunk.to_prompt_payload() for chunk in self.chunks]
+        }

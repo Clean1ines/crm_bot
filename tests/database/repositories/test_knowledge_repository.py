@@ -32,7 +32,9 @@ class TestKnowledgeRepository:
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
-    async def test_search_success_hybrid_true(self, mock_embed_text, knowledge_repo, mock_pool):
+    async def test_search_success_hybrid_true(
+        self, mock_embed_text, knowledge_repo, mock_pool
+    ):
         project_id = str(uuid4())
         query = "test query"
         limit = 10
@@ -51,7 +53,9 @@ class TestKnowledgeRepository:
 
         mock_pool.mock_conn.fetch = AsyncMock(side_effect=[vector_rows, fts_rows])
 
-        result = await knowledge_repo.search(project_id, query, limit, hybrid_fallback=True)
+        result = await knowledge_repo.search(
+            project_id, query, limit, hybrid_fallback=True
+        )
 
         # Embedding call
         mock_embed_text.assert_awaited_once_with(query)
@@ -67,7 +71,9 @@ class TestKnowledgeRepository:
                 ORDER BY embedding <=> $1
                 LIMIT $3
                 """
-        mock_pool.mock_conn.fetch.assert_any_call(vector_sql, ANY, UUID(project_id), limit * 2)
+        mock_pool.mock_conn.fetch.assert_any_call(
+            vector_sql, ANY, UUID(project_id), limit * 2
+        )
 
         # Second fetch (FTS)
         fts_sql = """
@@ -79,7 +85,9 @@ class TestKnowledgeRepository:
                 ORDER BY score DESC
                 LIMIT $3
                 """
-        mock_pool.mock_conn.fetch.assert_any_call(fts_sql, query, UUID(project_id), limit * 2)
+        mock_pool.mock_conn.fetch.assert_any_call(
+            fts_sql, query, UUID(project_id), limit * 2
+        )
 
         # Expected result: merged and sorted
         # The result should have 3 items (two from vector + one FTS-only)
@@ -93,7 +101,9 @@ class TestKnowledgeRepository:
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
-    async def test_search_success_hybrid_false(self, mock_embed_text, knowledge_repo, mock_pool):
+    async def test_search_success_hybrid_false(
+        self, mock_embed_text, knowledge_repo, mock_pool
+    ):
         project_id = str(uuid4())
         query = "test"
         limit = 5
@@ -104,7 +114,9 @@ class TestKnowledgeRepository:
         ]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=vector_rows)
 
-        result = await knowledge_repo.search(project_id, query, limit, hybrid_fallback=False)
+        result = await knowledge_repo.search(
+            project_id, query, limit, hybrid_fallback=False
+        )
 
         assert mock_pool.acquire.call_count == 1
         mock_embed_text.assert_awaited_once_with(query)
@@ -119,13 +131,17 @@ class TestKnowledgeRepository:
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_limit_zero(self, mock_embed_text, knowledge_repo, mock_pool):
         mock_embed_text.return_value = [0.1]
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
+        )
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await knowledge_repo.search(str(uuid4()), "q", limit=0)
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
-    async def test_search_empty_vector_results(self, mock_embed_text, knowledge_repo, mock_pool):
+    async def test_search_empty_vector_results(
+        self, mock_embed_text, knowledge_repo, mock_pool
+    ):
         mock_embed_text.return_value = [0.1]
         mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
         result = await knowledge_repo.search(str(uuid4()), "q")
@@ -133,7 +149,9 @@ class TestKnowledgeRepository:
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
-    async def test_search_embed_text_error(self, mock_embed_text, knowledge_repo, mock_pool):
+    async def test_search_embed_text_error(
+        self, mock_embed_text, knowledge_repo, mock_pool
+    ):
         mock_embed_text.side_effect = TypeError("embed failed")
         with pytest.raises(TypeError):
             await knowledge_repo.search(str(uuid4()), "q")
@@ -143,7 +161,9 @@ class TestKnowledgeRepository:
     # --------------------------------------------------------------------------
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-    async def test_add_knowledge_batch_success(self, mock_embed_batch, knowledge_repo, mock_pool):
+    async def test_add_knowledge_batch_success(
+        self, mock_embed_batch, knowledge_repo, mock_pool
+    ):
         project_id = str(uuid4())
         chunks = [{"content": "chunk1"}, {"content": "chunk2"}]
         document_id = str(uuid4())
@@ -158,7 +178,9 @@ class TestKnowledgeRepository:
 
         mock_pool.mock_conn.execute = AsyncMock()
 
-        result = await knowledge_repo.add_knowledge_batch(project_id, chunks, document_id)
+        result = await knowledge_repo.add_knowledge_batch(
+            project_id, chunks, document_id
+        )
 
         assert mock_pool.acquire.call_count == 1
         mock_embed_batch.assert_awaited_once_with(["chunk1", "chunk2"])
@@ -185,32 +207,42 @@ class TestKnowledgeRepository:
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-    async def test_add_knowledge_batch_embed_batch_error(self, mock_embed_batch, knowledge_repo):
+    async def test_add_knowledge_batch_embed_batch_error(
+        self, mock_embed_batch, knowledge_repo
+    ):
         mock_embed_batch.side_effect = ValueError("embed batch failed")
         with pytest.raises(ValueError):
             await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "x"}])
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-    async def test_add_knowledge_batch_foreign_key_error(self, mock_embed_batch, knowledge_repo, mock_pool):
+    async def test_add_knowledge_batch_foreign_key_error(
+        self, mock_embed_batch, knowledge_repo, mock_pool
+    ):
         mock_embed_batch.return_value = [[0.1]]
         mock_transaction = AsyncMock()
         mock_transaction.__aenter__.return_value = mock_pool.mock_conn
         mock_transaction.__aexit__.return_value = None
         mock_pool.mock_conn.transaction = MagicMock(return_value=mock_transaction)
-        mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk"))
+        mock_pool.mock_conn.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk")
+        )
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
             await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "x"}])
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-    async def test_add_knowledge_batch_not_null_error(self, mock_embed_batch, knowledge_repo, mock_pool):
+    async def test_add_knowledge_batch_not_null_error(
+        self, mock_embed_batch, knowledge_repo, mock_pool
+    ):
         mock_embed_batch.return_value = [[0.1]]
         mock_transaction = AsyncMock()
         mock_transaction.__aenter__.return_value = mock_pool.mock_conn
         mock_transaction.__aexit__.return_value = None
         mock_pool.mock_conn.transaction = MagicMock(return_value=mock_transaction)
-        mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.NotNullViolationError("null"))
+        mock_pool.mock_conn.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.NotNullViolationError("null")
+        )
         with pytest.raises(asyncpg.exceptions.NotNullViolationError):
             await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "x"}])
 
@@ -226,7 +258,9 @@ class TestKnowledgeRepository:
         expected_id = uuid4()
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"id": expected_id})
 
-        result = await knowledge_repo.create_document(project_id, file_name, file_size, uploaded_by)
+        result = await knowledge_repo.create_document(
+            project_id, file_name, file_size, uploaded_by
+        )
 
         expected_sql = """
                 INSERT INTO knowledge_documents (project_id, file_name, file_size, uploaded_by)
@@ -239,20 +273,28 @@ class TestKnowledgeRepository:
         assert result == str(expected_id)
 
     @pytest.mark.asyncio
-    async def test_create_document_project_id_none_raises_type_error(self, knowledge_repo):
+    async def test_create_document_project_id_none_raises_type_error(
+        self, knowledge_repo
+    ):
         with pytest.raises(TypeError):
             await knowledge_repo.create_document(None, "doc.pdf")
 
     @pytest.mark.asyncio
-    async def test_create_document_file_name_none_raises_not_null(self, knowledge_repo, mock_pool):
+    async def test_create_document_file_name_none_raises_not_null(
+        self, knowledge_repo, mock_pool
+    ):
         project_id = str(uuid4())
-        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.NotNullViolationError("null"))
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.NotNullViolationError("null")
+        )
         with pytest.raises(asyncpg.exceptions.NotNullViolationError):
             await knowledge_repo.create_document(project_id, None)
 
     @pytest.mark.asyncio
     async def test_create_document_foreign_key_error(self, knowledge_repo, mock_pool):
-        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk"))
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.ForeignKeyViolationError("fk")
+        )
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
             await knowledge_repo.create_document(str(uuid4()), "doc.pdf")
 
@@ -265,10 +307,26 @@ class TestKnowledgeRepository:
         limit = 20
         offset = 0
         rows = [
-            {"id": uuid4(), "file_name": "a.pdf", "file_size": 100, "status": "pending",
-             "error": None, "uploaded_by": "admin", "created_at": "2021-01-01", "updated_at": "2021-01-01"},
-            {"id": uuid4(), "file_name": "b.pdf", "file_size": 200, "status": "completed",
-             "error": None, "uploaded_by": "admin", "created_at": "2021-01-02", "updated_at": "2021-01-02"},
+            {
+                "id": uuid4(),
+                "file_name": "a.pdf",
+                "file_size": 100,
+                "status": "pending",
+                "error": None,
+                "uploaded_by": "admin",
+                "created_at": "2021-01-01",
+                "updated_at": "2021-01-01",
+            },
+            {
+                "id": uuid4(),
+                "file_name": "b.pdf",
+                "file_size": 200,
+                "status": "completed",
+                "error": None,
+                "uploaded_by": "admin",
+                "created_at": "2021-01-02",
+                "updated_at": "2021-01-02",
+            },
         ]
         # Mock fetch for documents
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
@@ -284,7 +342,9 @@ class TestKnowledgeRepository:
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
             """
-        mock_pool.mock_conn.fetch.assert_awaited_once_with(expected_sql, UUID(project_id), limit, offset)
+        mock_pool.mock_conn.fetch.assert_awaited_once_with(
+            expected_sql, UUID(project_id), limit, offset
+        )
         assert len(result) == len(rows)
         for i, doc in enumerate(result):
             assert doc.chunk_count == (5 if i == 0 else 10)
@@ -293,7 +353,9 @@ class TestKnowledgeRepository:
 
     @pytest.mark.asyncio
     async def test_get_documents_limit_zero(self, knowledge_repo, mock_pool):
-        mock_pool.mock_conn.fetch = AsyncMock(side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0"))
+        mock_pool.mock_conn.fetch = AsyncMock(
+            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
+        )
         with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
             await knowledge_repo.get_documents(str(uuid4()), limit=0)
 
@@ -330,7 +392,9 @@ class TestKnowledgeRepository:
                 FROM knowledge_documents
                 WHERE id = $1
             """
-        mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, UUID(doc_id))
+        mock_pool.mock_conn.fetchrow.assert_awaited_once_with(
+            expected_sql, UUID(doc_id)
+        )
         assert result is not None
         assert result.id == doc_id
         assert result.chunk_count == 42
@@ -358,7 +422,9 @@ class TestKnowledgeRepository:
                 SET status = $1, error = $2, updated_at = NOW()
                 WHERE id = $3
             """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, status, error, UUID(doc_id))
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, status, error, UUID(doc_id)
+        )
 
     @pytest.mark.asyncio
     async def test_update_document_status_with_error(self, knowledge_repo, mock_pool):
@@ -374,11 +440,15 @@ class TestKnowledgeRepository:
                 SET status = $1, error = $2, updated_at = NOW()
                 WHERE id = $3
             """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, status, error, UUID(doc_id))
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, status, error, UUID(doc_id)
+        )
 
     @pytest.mark.asyncio
     async def test_update_document_status_error_db(self, knowledge_repo, mock_pool):
-        mock_pool.mock_conn.execute = AsyncMock(side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn"))
+        mock_pool.mock_conn.execute = AsyncMock(
+            side_effect=asyncpg.exceptions.ConnectionDoesNotExistError("conn")
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await knowledge_repo.update_document_status(str(uuid4()), "failed")
 
@@ -404,5 +474,9 @@ class TestKnowledgeRepository:
         mock_pool.mock_conn.execute = AsyncMock()  # no exception
         await knowledge_repo.delete_document(doc_id)
         # Should succeed even if no rows affected
-        mock_pool.mock_conn.execute.assert_any_call("DELETE FROM knowledge_base WHERE document_id = $1", UUID(doc_id))
-        mock_pool.mock_conn.execute.assert_any_call("DELETE FROM knowledge_documents WHERE id = $1", UUID(doc_id))
+        mock_pool.mock_conn.execute.assert_any_call(
+            "DELETE FROM knowledge_base WHERE document_id = $1", UUID(doc_id)
+        )
+        mock_pool.mock_conn.execute.assert_any_call(
+            "DELETE FROM knowledge_documents WHERE id = $1", UUID(doc_id)
+        )

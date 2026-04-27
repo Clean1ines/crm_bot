@@ -17,8 +17,10 @@ class TestMetricsAggregate:
 
     def _override_auth(self):
         """Временно разрешаем platform-admin доступ."""
+
         async def dummy_auth():
             return "platform-admin"
+
         self._original_auth = app.dependency_overrides.get(require_platform_admin)
         app.dependency_overrides[require_platform_admin] = dummy_auth
 
@@ -36,7 +38,9 @@ class TestMetricsAggregate:
             # Подменяем глобальный пул в lifespan
             with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
                 # Мокаем QueueRepository по полному пути
-                with patch("src.infrastructure.db.repositories.queue_repository.QueueRepository") as MockQueueRepo:
+                with patch(
+                    "src.infrastructure.db.repositories.queue_repository.QueueRepository"
+                ) as MockQueueRepo:
                     mock_queue = AsyncMock()
                     MockQueueRepo.return_value = mock_queue
                     mock_queue.enqueue = AsyncMock(return_value=str(uuid4()))
@@ -50,8 +54,7 @@ class TestMetricsAggregate:
             assert data["message"] == "Aggregation for 2025-01-15 enqueued."
 
             mock_queue.enqueue.assert_awaited_once_with(
-                task_type="aggregate_metrics",
-                payload={"date": "2025-01-15"}
+                task_type="aggregate_metrics", payload={"date": "2025-01-15"}
             )
         finally:
             self._restore_auth()
@@ -60,18 +63,23 @@ class TestMetricsAggregate:
         self._override_auth()
         try:
             with patch("src.interfaces.composition.fastapi_lifespan.pool", MagicMock()):
-                with patch("src.infrastructure.db.repositories.queue_repository.QueueRepository") as MockQueueRepo:
+                with patch(
+                    "src.infrastructure.db.repositories.queue_repository.QueueRepository"
+                ) as MockQueueRepo:
                     mock_queue = AsyncMock()
                     MockQueueRepo.return_value = mock_queue
                     mock_queue.enqueue = AsyncMock(return_value=str(uuid4()))
 
-                    payload = {"date": "2025-01-15", "extra": "ignored", "another": "field"}
+                    payload = {
+                        "date": "2025-01-15",
+                        "extra": "ignored",
+                        "another": "field",
+                    }
                     response = client.post("/api/admin/metrics/aggregate", json=payload)
 
             assert response.status_code == 202
             mock_queue.enqueue.assert_awaited_once_with(
-                task_type="aggregate_metrics",
-                payload={"date": "2025-01-15"}
+                task_type="aggregate_metrics", payload={"date": "2025-01-15"}
             )
         finally:
             self._restore_auth()
@@ -110,13 +118,17 @@ class TestMetricsAggregate:
     def test_aggregate_metrics_invalid_token_format(self, client):
         payload = {"date": "2025-01-15"}
         headers = {"Authorization": "InvalidToken"}
-        response = client.post("/api/admin/metrics/aggregate", json=payload, headers=headers)
+        response = client.post(
+            "/api/admin/metrics/aggregate", json=payload, headers=headers
+        )
         assert response.status_code == 401
         assert response.json()["detail"] == "Invalid token format. Use 'Bearer <token>'"
 
     def test_aggregate_metrics_wrong_token(self, client):
         payload = {"date": "2025-01-15"}
         headers = {"Authorization": "Bearer wrong-token"}
-        response = client.post("/api/admin/metrics/aggregate", json=payload, headers=headers)
+        response = client.post(
+            "/api/admin/metrics/aggregate", json=payload, headers=headers
+        )
         assert response.status_code == 401
         assert response.json()["detail"] == "Invalid token"

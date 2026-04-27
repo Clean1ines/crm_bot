@@ -4,7 +4,10 @@ from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
 from src.application.ports.telegram_port import TelegramClientPort
 from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.manager_assignments import ManagerActor, ManagerReplySession
+from src.domain.project_plane.manager_assignments import (
+    ManagerActor,
+    ManagerReplySession,
+)
 from src.domain.runtime.dialog_state import default_dialog_state
 
 
@@ -56,14 +59,20 @@ class ManagerBotService:
         manager_chat_id: str,
         manager_user_id: str | None = None,
     ) -> WebhookAckDto:
-        manager_user_id = manager_user_id or await self.orchestrator.resolve_manager_user_id_by_telegram(
-            self.project_id,
-            manager_chat_id,
+        manager_user_id = (
+            manager_user_id
+            or await self.orchestrator.resolve_manager_user_id_by_telegram(
+                self.project_id,
+                manager_chat_id,
+            )
         )
         if not manager_user_id:
             self.logger.info(
                 "Manager claim denied because Telegram chat is not a project member",
-                extra={"project_id": self.project_id, "manager_chat_id": manager_chat_id},
+                extra={
+                    "project_id": self.project_id,
+                    "manager_chat_id": manager_chat_id,
+                },
             )
             return await self._deny_unauthorized_manager(manager_chat_id)
 
@@ -103,7 +112,14 @@ class ManagerBotService:
                 "chat_id": manager_chat_id,
                 "text": f"Тикет {thread_id} взят в работу. Чтобы вернуть диалог AI, нажмите «Закрыть тикет».",
                 "reply_markup": {
-                    "inline_keyboard": [[{"text": "✅ Закрыть тикет", "callback_data": f"close:{thread_id}"}]],
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": "✅ Закрыть тикет",
+                                "callback_data": f"close:{thread_id}",
+                            }
+                        ]
+                    ],
                 },
             },
         )
@@ -117,14 +133,20 @@ class ManagerBotService:
         manager_chat_id: str,
         manager_user_id: str | None = None,
     ) -> WebhookAckDto:
-        manager_user_id = manager_user_id or await self.orchestrator.resolve_manager_user_id_by_telegram(
-            self.project_id,
-            manager_chat_id,
+        manager_user_id = (
+            manager_user_id
+            or await self.orchestrator.resolve_manager_user_id_by_telegram(
+                self.project_id,
+                manager_chat_id,
+            )
         )
         if not manager_user_id:
             self.logger.info(
                 "Manager close denied because Telegram chat is not a project member",
-                extra={"project_id": self.project_id, "manager_chat_id": manager_chat_id},
+                extra={
+                    "project_id": self.project_id,
+                    "manager_chat_id": manager_chat_id,
+                },
             )
             return await self._deny_unauthorized_manager(manager_chat_id)
 
@@ -148,17 +170,26 @@ class ManagerBotService:
                 intent=None,
                 cta=None,
             )
-            self.logger.info("Thread analytics reset after ticket closure", extra={"thread_id": thread_id})
+            self.logger.info(
+                "Thread analytics reset after ticket closure",
+                extra={"thread_id": thread_id},
+            )
         except Exception as exc:
-            self.logger.warning("Failed to reset thread analytics", extra={"error": str(exc)})
+            self.logger.warning(
+                "Failed to reset thread analytics", extra={"error": str(exc)}
+            )
 
         try:
-            thread = await self.orchestrator.threads.get_thread_with_project_view(thread_id)
+            thread = await self.orchestrator.threads.get_thread_with_project_view(
+                thread_id
+            )
             if thread and self.orchestrator.memory_repo:
                 client_id = thread.client_id
                 project_id = thread.project_id
                 if client_id and project_id:
-                    await self.orchestrator.memory_repo.set_lifecycle(project_id, client_id, "active_client")
+                    await self.orchestrator.memory_repo.set_lifecycle(
+                        project_id, client_id, "active_client"
+                    )
                     await self.orchestrator.memory_repo.set(
                         project_id,
                         client_id,
@@ -166,9 +197,15 @@ class ManagerBotService:
                         default_dialog_state(lifecycle="active_client"),
                         "dialog_state",
                     )
-                    self.logger.info("User memory reset after ticket closure", extra={"client_id": client_id})
+                    self.logger.info(
+                        "User memory reset after ticket closure",
+                        extra={"client_id": client_id},
+                    )
         except Exception as exc:
-            self.logger.warning("Failed to reset user memory after ticket closure", extra={"error": str(exc)})
+            self.logger.warning(
+                "Failed to reset user memory after ticket closure",
+                extra={"error": str(exc)},
+            )
 
         await self._post_telegram(
             "answerCallbackQuery",
@@ -187,14 +224,20 @@ class ManagerBotService:
         text: str,
         manager_user_id: str | None = None,
     ) -> WebhookAckDto:
-        manager_user_id = manager_user_id or await self.orchestrator.resolve_manager_user_id_by_telegram(
-            self.project_id,
-            manager_chat_id,
+        manager_user_id = (
+            manager_user_id
+            or await self.orchestrator.resolve_manager_user_id_by_telegram(
+                self.project_id,
+                manager_chat_id,
+            )
         )
         if not manager_user_id:
             self.logger.info(
                 "Manager reply denied because Telegram chat is not a project member",
-                extra={"project_id": self.project_id, "manager_chat_id": manager_chat_id},
+                extra={
+                    "project_id": self.project_id,
+                    "manager_chat_id": manager_chat_id,
+                },
             )
             return await self._deny_unauthorized_manager(manager_chat_id)
 
@@ -229,7 +272,9 @@ class ManagerBotService:
                 "sendMessage",
                 {
                     "chat_id": manager_chat_id,
-                    "text": "✅ Ответ успешно отправлен клиенту." if success else "❌ Не удалось отправить ответ.",
+                    "text": "✅ Ответ успешно отправлен клиенту."
+                    if success
+                    else "❌ Не удалось отправить ответ.",
                 },
             )
         except Exception as exc:

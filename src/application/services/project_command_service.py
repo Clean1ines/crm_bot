@@ -54,21 +54,31 @@ class ProjectCommandService:
             raise InternalServiceError("Project creation failed")
         return self._ensure_project_payload(project)
 
-    async def update_project(self, project_id: str, current_user_id: str, name: str | None):
+    async def update_project(
+        self, project_id: str, current_user_id: str, name: str | None
+    ):
         await self._require_existing_project(project_id)
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.update_project(project_id, name)
         updated = await self.query_service._load_project_view(project_id)
         return self._ensure_project_payload(updated)
 
     async def delete_project(self, project_id: str, current_user_id: str) -> None:
         await self._require_existing_project(project_id)
-        await self.access_service.require_project_role(project_id, current_user_id, [PROJECT_OWNER])
+        await self.access_service.require_project_role(
+            project_id, current_user_id, [PROJECT_OWNER]
+        )
         await self.repo.delete_project(project_id)
 
-    async def set_client_bot_token(self, project_id: str, current_user_id: str, token: str):
+    async def set_client_bot_token(
+        self, project_id: str, current_user_id: str, token: str
+    ):
         await self._require_existing_project(project_id)
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         token = self._normalize_bot_token(token)
         await self.repo.set_bot_token(project_id, token)
         await self.repo.upsert_project_channel(
@@ -80,9 +90,13 @@ class ProjectCommandService:
         )
         return ProjectMutationResultDto.create(status="ok")
 
-    async def set_manager_bot_token(self, project_id: str, current_user_id: str, token: str):
+    async def set_manager_bot_token(
+        self, project_id: str, current_user_id: str, token: str
+    ):
         await self._require_existing_project(project_id)
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         token = self._normalize_bot_token(token)
         await self.repo.set_manager_bot_token(project_id, token)
         await self.repo.upsert_project_channel(
@@ -96,7 +110,9 @@ class ProjectCommandService:
 
     async def clear_client_bot_token(self, project_id: str, current_user_id: str):
         await self._require_existing_project(project_id)
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.set_bot_token(project_id, None)
         await self.repo.upsert_project_channel(
             project_id,
@@ -109,7 +125,9 @@ class ProjectCommandService:
 
     async def clear_manager_bot_token(self, project_id: str, current_user_id: str):
         await self._require_existing_project(project_id)
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.set_manager_bot_token(project_id, None)
         await self.repo.upsert_project_channel(
             project_id,
@@ -121,16 +139,28 @@ class ProjectCommandService:
         return ProjectMutationResultDto.create(status="ok", type=CHANNEL_MANAGER)
 
     async def add_manager(self, project_id: str, current_user_id: str, chat_id: int):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
-        result = await self.repo.add_manager_by_telegram_identity(project_id, str(chat_id))
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
+        result = await self.repo.add_manager_by_telegram_identity(
+            project_id, str(chat_id)
+        )
         return ProjectMutationResultDto.from_record(result)
 
-    async def remove_manager(self, project_id: str, current_user_id: str, chat_id: int) -> None:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def remove_manager(
+        self, project_id: str, current_user_id: str, chat_id: int
+    ) -> None:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.remove_manager_by_telegram_identity(project_id, str(chat_id))
 
-    async def connect_bot(self, project_id: str, current_user_id: str, token: str, bot_type: str):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def connect_bot(
+        self, project_id: str, current_user_id: str, token: str, bot_type: str
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         if bot_type == CHANNEL_CLIENT:
             token = self._normalize_bot_token(token)
             await self.repo.set_bot_token(project_id, token)
@@ -155,37 +185,67 @@ class ProjectCommandService:
             raise ValidationError("Invalid bot type")
         return ProjectMutationResultDto.create(status="ok", type=bot_type)
 
-    async def upsert_project_member(self, project_id: str, current_user_id: str, user_id: str, role: str):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def upsert_project_member(
+        self, project_id: str, current_user_id: str, user_id: str, role: str
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         if role not in ALLOWED_PROJECT_ROLES:
             raise ValidationError("Invalid project role")
         await self.repo.add_project_member(project_id, user_id, role)
         return ProjectMutationResultDto.create(status="ok", user_id=user_id, role=role)
 
-    async def delete_project_member(self, project_id: str, current_user_id: str, member_user_id: str) -> None:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def delete_project_member(
+        self, project_id: str, current_user_id: str, member_user_id: str
+    ) -> None:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.remove_project_member(project_id, member_user_id)
 
-    async def update_project_settings(self, project_id: str, current_user_id: str, data: dict):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def update_project_settings(
+        self, project_id: str, current_user_id: str, data: dict
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.update_project_settings(project_id, data)
-        configuration = await self.query_service._load_project_configuration_view(project_id)
+        configuration = await self.query_service._load_project_configuration_view(
+            project_id
+        )
         return ProjectConfigurationDto.from_view(configuration).to_dict()
 
-    async def update_project_policies(self, project_id: str, current_user_id: str, data: dict):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def update_project_policies(
+        self, project_id: str, current_user_id: str, data: dict
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.update_project_policies(project_id, data)
-        configuration = await self.query_service._load_project_configuration_view(project_id)
+        configuration = await self.query_service._load_project_configuration_view(
+            project_id
+        )
         return ProjectConfigurationDto.from_view(configuration).to_dict()
 
-    async def update_project_limit_profile(self, project_id: str, current_user_id: str, data: dict):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def update_project_limit_profile(
+        self, project_id: str, current_user_id: str, data: dict
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         await self.repo.update_project_limit_profile(project_id, data)
-        configuration = await self.query_service._load_project_configuration_view(project_id)
+        configuration = await self.query_service._load_project_configuration_view(
+            project_id
+        )
         return ProjectConfigurationDto.from_view(configuration).to_dict()
 
-    async def upsert_project_integration(self, project_id: str, current_user_id: str, data: dict):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def upsert_project_integration(
+        self, project_id: str, current_user_id: str, data: dict
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         provider = (data.get("provider") or "").strip()
         if not provider:
             raise ValidationError("Integration provider is required")
@@ -199,8 +259,12 @@ class ProjectCommandService:
         )
         return ProjectIntegrationDto.from_view(integration).to_dict()
 
-    async def upsert_project_channel(self, project_id: str, current_user_id: str, data: dict):
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_WRITE_ROLES)
+    async def upsert_project_channel(
+        self, project_id: str, current_user_id: str, data: dict
+    ):
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_WRITE_ROLES
+        )
         kind = (data.get("kind") or "").strip()
         provider = (data.get("provider") or "").strip()
         if kind not in ALLOWED_CHANNEL_KINDS:

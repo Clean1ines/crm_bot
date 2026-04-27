@@ -45,11 +45,15 @@ def test_application_and_interfaces_do_not_call_legacy_project_repo_facades():
             # project_queries.get_project_configuration(...)
             # Запрещаем именно repo/mock_repo/self.repo.<legacy>()
             if base in {"repo", "mock_repo", "project_repo"}:
-                violations.append(f"{path}:{node.lineno} calls {base}.{node.func.attr}(")
+                violations.append(
+                    f"{path}:{node.lineno} calls {base}.{node.func.attr}("
+                )
 
             if isinstance(node.func.value, ast.Attribute):
                 if node.func.value.attr == "repo":
-                    violations.append(f"{path}:{node.lineno} calls *.repo.{node.func.attr}(")
+                    violations.append(
+                        f"{path}:{node.lineno} calls *.repo.{node.func.attr}("
+                    )
 
     assert not violations, "\n".join(violations)
 

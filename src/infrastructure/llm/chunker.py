@@ -86,7 +86,7 @@ class ChunkerService:
         return len(text) >= self.chunk_size and "\n#" not in text
 
     def _chunk_markdown_sections(self, text: str) -> list[str]:
-        sections = re.split(r'(?:^|\n)(#{1,3}\s[^\n]+)', text)
+        sections = re.split(r"(?:^|\n)(#{1,3}\s[^\n]+)", text)
 
         builder = _SectionChunkBuilder(chunker=self)
         for part in sections:
@@ -146,11 +146,11 @@ class ChunkerService:
     async def process_file(self, file_bytes: bytes, filename: str) -> list[str]:
         filename_lower = filename.lower()
 
-        if filename_lower.endswith(('.txt', '.md')):
-            text = file_bytes.decode('utf-8', errors='ignore')
+        if filename_lower.endswith((".txt", ".md")):
+            text = file_bytes.decode("utf-8", errors="ignore")
             text = self._clean_text(text)
 
-        elif filename_lower.endswith('.pdf'):
+        elif filename_lower.endswith(".pdf"):
             text = self.extract_text_from_pdf(file_bytes)
 
         else:
@@ -203,7 +203,9 @@ class _SectionChunkBuilder:
         return f"{self._current_header}\n{part}".strip()
 
     def _append_to_buffer(self, combined: str) -> None:
-        next_buffer = f"{self._buffer}\n\n{combined}".strip() if self._buffer else combined
+        next_buffer = (
+            f"{self._buffer}\n\n{combined}".strip() if self._buffer else combined
+        )
 
         if len(next_buffer) >= self._chunker.chunk_size:
             self._flush_buffer()
@@ -221,7 +223,7 @@ class _SectionChunkBuilder:
 
 
 def _is_markdown_header(text: str) -> bool:
-    return re.match(r'^#{1,3}\s', text) is not None
+    return re.match(r"^#{1,3}\s", text) is not None
 
 
 def _header_text(text: str) -> str:

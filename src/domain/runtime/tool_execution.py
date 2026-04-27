@@ -1,7 +1,12 @@
 from dataclasses import dataclass
 from typing import Mapping
 
-from src.domain.runtime.state_contracts import RuntimeStateInput, RuntimeStatePatch, ToolArguments, ToolResultPayload
+from src.domain.runtime.state_contracts import (
+    RuntimeStateInput,
+    RuntimeStatePatch,
+    ToolArguments,
+    ToolResultPayload,
+)
 
 
 @dataclass(slots=True)

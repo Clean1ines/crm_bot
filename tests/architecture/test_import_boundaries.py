@@ -43,9 +43,12 @@ FORBIDDEN_IMPORTS = (
     "src.main",
 )
 
+
 def _is_legacy_facade(path: Path) -> bool:
     rel = path.relative_to(ROOT).as_posix()
-    return any(rel == prefix or rel.startswith(prefix) for prefix in LEGACY_FACADE_PREFIXES)
+    return any(
+        rel == prefix or rel.startswith(prefix) for prefix in LEGACY_FACADE_PREFIXES
+    )
 
 
 def test_production_code_does_not_import_legacy_facades() -> None:
@@ -65,7 +68,9 @@ def test_production_code_does_not_import_legacy_facades() -> None:
 
 
 def test_legacy_facade_paths_are_absent() -> None:
-    leftovers = [prefix for prefix in LEGACY_FACADE_PREFIXES if (ROOT / prefix).exists()]
+    leftovers = [
+        prefix for prefix in LEGACY_FACADE_PREFIXES if (ROOT / prefix).exists()
+    ]
     assert leftovers == []
 
 
@@ -90,9 +95,12 @@ def test_application_and_domain_do_not_import_http_framework_primitives() -> Non
                     module = node.module or ""
                     if module.startswith("fastapi") or module.startswith("starlette"):
                         imported_names = ", ".join(alias.name for alias in node.names)
-                        offenders.append(f"{rel}: from {module} import {imported_names}")
+                        offenders.append(
+                            f"{rel}: from {module} import {imported_names}"
+                        )
 
     assert offenders == []
+
 
 def test_legacy_agent_tools_module_is_removed():
     """Legacy LangChain tool wrappers must not exist in the agent layer."""
@@ -125,7 +133,6 @@ def test_infrastructure_layer_does_not_import_agent_runtime():
     assert violations == []
 
 
-
 def test_application_does_not_import_agent_runtime():
     forbidden = ("from src.agent", "import src.agent")
     root = Path("src/application")
@@ -146,7 +153,11 @@ def test_only_interfaces_composition_imports_agent_runtime_for_wiring():
     violations: list[str] = []
     allowed_root = Path("src/interfaces/composition")
 
-    for root in (Path("src/application"), Path("src/infrastructure"), Path("src/interfaces")):
+    for root in (
+        Path("src/application"),
+        Path("src/infrastructure"),
+        Path("src/interfaces"),
+    ):
         for path in root.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue

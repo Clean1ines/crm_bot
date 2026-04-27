@@ -5,9 +5,11 @@ Performs project-scoped knowledge retrieval through the tool registry and
 stores normalized chunks in graph state.
 """
 
-
 from src.agent.state import AgentState
-from src.domain.runtime.knowledge_search import KnowledgeSearchContext, KnowledgeSearchResult
+from src.domain.runtime.knowledge_search import (
+    KnowledgeSearchContext,
+    KnowledgeSearchResult,
+)
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -75,10 +77,15 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                 )
 
             if len(set(result.ids())) != len(result.ids()):
-                logger.error("KB duplicate ids detected", extra={"chunk_ids": result.ids()})
+                logger.error(
+                    "KB duplicate ids detected", extra={"chunk_ids": result.ids()}
+                )
 
             if result.chunks and any(score is None for score in result.scores()):
-                logger.warning("KB missing scores detected", extra={"chunk_scores": result.scores()})
+                logger.warning(
+                    "KB missing scores detected",
+                    extra={"chunk_scores": result.scores()},
+                )
 
             return result.to_state_patch()
         except Exception as exc:

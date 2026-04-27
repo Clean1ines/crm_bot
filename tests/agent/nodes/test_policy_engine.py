@@ -14,7 +14,10 @@ async def test_policy_engine_returns_typed_state_patch_and_emits_event():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.policy_engine.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node(
             {
                 "thread_id": "thread-1",
@@ -40,7 +43,10 @@ async def test_policy_engine_loads_dialog_state_from_user_memory_when_missing_di
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.policy_engine.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node(
             {
                 "thread_id": "thread-1",
@@ -49,7 +55,13 @@ async def test_policy_engine_loads_dialog_state_from_user_memory_when_missing_di
                 "intent": "ask_integration",
                 "user_memory": {
                     "dialog_state": [
-                        {"key": "dialog_state", "value": {"last_intent": "ask_integration", "repeat_count": 2}}
+                        {
+                            "key": "dialog_state",
+                            "value": {
+                                "last_intent": "ask_integration",
+                                "repeat_count": 2,
+                            },
+                        }
                     ]
                 },
             }

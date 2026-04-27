@@ -86,7 +86,9 @@ class KnowledgeService:
     ) -> KnowledgeUploadResultDto:
         uploaded_by = await self.require_access(project_id, authorization)
         normalized_file_name = file_name or UPLOAD_FALLBACK_NAME
-        logger.info(f"Knowledge upload requested for project {project_id}, file: {normalized_file_name}")
+        logger.info(
+            f"Knowledge upload requested for project {project_id}, file: {normalized_file_name}"
+        )
 
         await self._ensure_project_exists(project_id, logger)
 
@@ -98,9 +100,11 @@ class KnowledgeService:
         )
         if not chunks:
             logger.warning("No text extracted from file")
-            return KnowledgeUploadResultDto.create(message="No text extracted", chunks=0)
+            return KnowledgeUploadResultDto.create(
+                message="No text extracted", chunks=0
+            )
 
-        document_id = await self._create_and_process_document(
+        await self._create_and_process_document(
             project_id=project_id,
             file_name=normalized_file_name,
             file_size=len(file_content),
@@ -110,8 +114,12 @@ class KnowledgeService:
             logger=logger,
         )
 
-        logger.info(f"Successfully uploaded {len(chunks)} chunks to project {project_id}")
-        return KnowledgeUploadResultDto.create(message=f"Uploaded {len(chunks)} chunks", chunks=len(chunks))
+        logger.info(
+            f"Successfully uploaded {len(chunks)} chunks to project {project_id}"
+        )
+        return KnowledgeUploadResultDto.create(
+            message=f"Uploaded {len(chunks)} chunks", chunks=len(chunks)
+        )
 
     async def _ensure_project_exists(self, project_id: str, logger: LoggerPort) -> None:
         if await self.project_repo.project_exists(project_id):

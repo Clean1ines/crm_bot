@@ -43,7 +43,11 @@ class ProjectMemberDto:
             username=view.username,
             full_name=view.full_name,
             email=view.email,
-            created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at) if created_at else None,
+            created_at=created_at.isoformat()
+            if hasattr(created_at, "isoformat")
+            else str(created_at)
+            if created_at
+            else None,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -69,7 +73,9 @@ class ProjectMutationResultDto:
         user_id: str | None = None,
         role: str | None = None,
     ) -> "ProjectMutationResultDto":
-        return cls(status=status, type=type, storage=storage, user_id=user_id, role=role)
+        return cls(
+            status=status, type=type, storage=storage, user_id=user_id, role=role
+        )
 
     @classmethod
     def from_record(cls, record: dict[str, object]) -> "ProjectMutationResultDto":

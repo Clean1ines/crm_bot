@@ -117,7 +117,9 @@ class AgentGraphRuntimeContract:
             raise ValueError(f"Graph entrypoint is not declared: {self.entrypoint}")
 
         if self.terminal_node not in declared_nodes:
-            raise ValueError(f"Graph terminal node is not declared: {self.terminal_node}")
+            raise ValueError(
+                f"Graph terminal node is not declared: {self.terminal_node}"
+            )
 
         missing_contracts = declared_nodes - set(self.node_contracts)
         if missing_contracts:
@@ -125,10 +127,17 @@ class AgentGraphRuntimeContract:
 
         for transition in self.transitions:
             if transition.source not in declared_nodes:
-                raise ValueError(f"Transition source is not declared: {transition.source}")
+                raise ValueError(
+                    f"Transition source is not declared: {transition.source}"
+                )
 
-            if transition.target is not None and transition.target not in declared_nodes:
-                raise ValueError(f"Transition target is not declared: {transition.target}")
+            if (
+                transition.target is not None
+                and transition.target not in declared_nodes
+            ):
+                raise ValueError(
+                    f"Transition target is not declared: {transition.target}"
+                )
 
             if transition.terminal and transition.target is not None:
                 raise ValueError("Terminal transitions must not have a target node")
@@ -187,7 +196,9 @@ AGENT_GRAPH_TRANSITIONS: tuple[AgentGraphTransition, ...] = (
         AgentGraphDecision.ESCALATE,
     ),
     AgentGraphTransition(AgentGraphNode.KB_SEARCH, AgentGraphNode.RESPONSE_GENERATOR),
-    AgentGraphTransition(AgentGraphNode.TOOL_EXECUTOR, AgentGraphNode.RESPONSE_GENERATOR),
+    AgentGraphTransition(
+        AgentGraphNode.TOOL_EXECUTOR, AgentGraphNode.RESPONSE_GENERATOR
+    ),
     AgentGraphTransition(AgentGraphNode.TOOL_EXECUTOR, AgentGraphNode.ESCALATE),
     AgentGraphTransition(AgentGraphNode.ESCALATE, AgentGraphNode.RESPONDER),
     AgentGraphTransition(AgentGraphNode.RESPONSE_GENERATOR, AgentGraphNode.RESPONDER),

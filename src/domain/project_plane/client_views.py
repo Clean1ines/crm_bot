@@ -8,6 +8,7 @@ def _ensure_metadata_dict(metadata: JsonObject | str | None) -> JsonObject:
         return {}
     return json_object_from_unknown(metadata)
 
+
 @dataclass(slots=True)
 class ClientListItemView:
     id: str

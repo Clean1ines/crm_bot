@@ -28,11 +28,15 @@ class ManagerThreadCoordinatorPort(Protocol):
         decision: str | None = None,
     ) -> None: ...
 
-    async def get_thread_with_project_view(self, thread_id: str) -> ThreadWithProjectView | None: ...
+    async def get_thread_with_project_view(
+        self, thread_id: str
+    ) -> ThreadWithProjectView | None: ...
 
 
 class ManagerMemoryResetPort(Protocol):
-    async def set_lifecycle(self, project_id: str, client_id: str, lifecycle: str) -> None: ...
+    async def set_lifecycle(
+        self, project_id: str, client_id: str, lifecycle: str
+    ) -> None: ...
 
     async def set(
         self,

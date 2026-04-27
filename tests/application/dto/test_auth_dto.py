@@ -1,4 +1,9 @@
-from src.application.dto.auth_dto import AuthActionDto, AuthMethodsDto, AuthSessionDto, UserProfileDto
+from src.application.dto.auth_dto import (
+    AuthActionDto,
+    AuthMethodsDto,
+    AuthSessionDto,
+    UserProfileDto,
+)
 
 
 def test_auth_methods_dto_omits_optional_fields_when_missing():
@@ -58,7 +63,9 @@ def test_auth_session_dto_omits_empty_fields():
 
 
 def test_auth_action_dto_omits_missing_optional_fields():
-    dto = AuthActionDto.create(status="password_reset_requested", delivery="manual_link")
+    dto = AuthActionDto.create(
+        status="password_reset_requested", delivery="manual_link"
+    )
 
     assert dto.to_dict() == {
         "status": "password_reset_requested",

@@ -3,7 +3,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.agent.nodes.persist import create_persist_node
-from src.domain.project_plane.thread_views import ThreadMessageCounts, ThreadWithProjectView
+from src.domain.project_plane.thread_views import (
+    ThreadMessageCounts,
+    ThreadWithProjectView,
+)
 
 
 @pytest.mark.asyncio
@@ -97,7 +100,9 @@ async def test_persist_saves_state_emits_events_and_updates_analytics():
 @pytest.mark.asyncio
 async def test_persist_degrades_when_assistant_message_save_fails():
     thread_message_repo = MagicMock()
-    thread_message_repo.add_message = AsyncMock(side_effect=RuntimeError("message write failed"))
+    thread_message_repo.add_message = AsyncMock(
+        side_effect=RuntimeError("message write failed")
+    )
     thread_message_repo.get_message_counts_view = AsyncMock(
         return_value=ThreadMessageCounts(total=0, ai=0, manager=0)
     )

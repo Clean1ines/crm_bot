@@ -11,12 +11,16 @@ from src.domain.project_plane.manager_assignments import ManagerReplySession
 from src.domain.project_plane.thread_runtime import ThreadRuntimeSnapshot
 from src.domain.project_plane.thread_status import ThreadStatus
 
-THREAD_ALREADY_PROCESSING_TEXT = "Your request is already being processed. Please wait a moment."
-PROJECT_RATE_LIMIT_TEXT = "This project is receiving too many messages right now. Please try again later."
-PROJECT_CONCURRENCY_LIMIT_TEXT = (
-    "This project already has too many active conversations in progress. Please try again later."
+THREAD_ALREADY_PROCESSING_TEXT = (
+    "Your request is already being processed. Please wait a moment."
 )
-MANAGER_HANDOFF_TEXT = "Your message has been handed off to a manager. Please wait for a reply."
+PROJECT_RATE_LIMIT_TEXT = (
+    "This project is receiving too many messages right now. Please try again later."
+)
+PROJECT_CONCURRENCY_LIMIT_TEXT = "This project already has too many active conversations in progress. Please try again later."
+MANAGER_HANDOFF_TEXT = (
+    "Your message has been handed off to a manager. Please wait for a reply."
+)
 GRAPH_FAILURE_TEXT = "Something went wrong while processing the request."
 
 
@@ -120,7 +124,9 @@ class ClientMessageService:
         )
 
     async def _get_or_create_thread(self, client_id):
-        return await self.threads.get_active_thread(client_id) or await self.threads.create_thread(client_id)
+        return await self.threads.get_active_thread(
+            client_id
+        ) or await self.threads.create_thread(client_id)
 
     def _locked_response(self, thread_id: str) -> str:
         self.logger.warning(
@@ -138,13 +144,17 @@ class ClientMessageService:
         thread_id,
         thread_id_str: str,
     ) -> str:
-        runtime_context = await self.runtime_loader.load_project_configuration(project_id)
+        runtime_context = await self.runtime_loader.load_project_configuration(
+            project_id
+        )
         runtime_payload = runtime_context.to_dict()
 
         if not await self._request_allowed(project_id, thread_id_str, runtime_payload):
             return self.graph_executor.outcome(PROJECT_RATE_LIMIT_TEXT).text
 
-        slot_acquired = await self._acquire_thread_slot(project_id, thread_id_str, runtime_payload)
+        slot_acquired = await self._acquire_thread_slot(
+            project_id, thread_id_str, runtime_payload
+        )
         if not slot_acquired:
             return self.graph_executor.outcome(PROJECT_CONCURRENCY_LIMIT_TEXT).text
 
@@ -160,7 +170,9 @@ class ClientMessageService:
         finally:
             await self.runtime_guards.release_thread_slot(project_id, thread_id_str)
 
-    async def _request_allowed(self, project_id: str, thread_id: str, runtime_payload: dict[str, object]) -> bool:
+    async def _request_allowed(
+        self, project_id: str, thread_id: str, runtime_payload: dict[str, object]
+    ) -> bool:
         allowed = await self.runtime_guards.allow_request(project_id, runtime_payload)
         if not allowed:
             self.logger.warning(
@@ -169,7 +181,9 @@ class ClientMessageService:
             )
         return bool(allowed)
 
-    async def _acquire_thread_slot(self, project_id: str, thread_id: str, runtime_payload: dict[str, object]) -> bool:
+    async def _acquire_thread_slot(
+        self, project_id: str, thread_id: str, runtime_payload: dict[str, object]
+    ) -> bool:
         acquired = await self.runtime_guards.try_acquire_thread_slot(
             project_id,
             thread_id,
@@ -216,7 +230,9 @@ class ClientMessageService:
             runtime_context=runtime_context,
         )
 
-    async def _try_redirect_to_manager(self, *, project_id: str, thread_id_str: str, text: str) -> str | None:
+    async def _try_redirect_to_manager(
+        self, *, project_id: str, thread_id_str: str, text: str
+    ) -> str | None:
         redis = await self.cache()
         awaiting_reply_key = f"awaiting_reply_thread:{thread_id_str}"
         raw_session = await redis.get(awaiting_reply_key)
@@ -254,7 +270,9 @@ class ClientMessageService:
             return manager_session
 
         thread_view = await self.threads.get_thread_with_project_view(thread_id_str)
-        thread_snapshot = ThreadRuntimeSnapshot.from_record(thread_view.to_record() if thread_view else None)
+        thread_snapshot = ThreadRuntimeSnapshot.from_record(
+            thread_view.to_record() if thread_view else None
+        )
         if not thread_snapshot or thread_snapshot.status != ThreadStatus.ACTIVE.value:
             return manager_session
 
@@ -371,7 +389,9 @@ class ClientMessageService:
     ) -> str | None:
         graph = await self.graph_factory.get_graph_for_project(project_id)
         if graph is None:
-            self.logger.error("Failed to load graph for project", extra={"project_id": project_id})
+            self.logger.error(
+                "Failed to load graph for project", extra={"project_id": project_id}
+            )
             return GRAPH_FAILURE_TEXT
 
         graph_request = await self._create_graph_request(

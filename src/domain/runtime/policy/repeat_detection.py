@@ -28,7 +28,9 @@ def _normalized_previous_value(
     return str(previous_dialog_state.get(key) or "").strip().lower()
 
 
-def calculate_repeat_count(previous_dialog_state: DialogStateMap, intent: str, topic: str) -> int:
+def calculate_repeat_count(
+    previous_dialog_state: DialogStateMap, intent: str, topic: str
+) -> int:
     prev_intent = _normalized_previous_value(previous_dialog_state, "last_intent")
     prev_topic = _normalized_previous_value(previous_dialog_state, "last_topic")
     previous_count = _coerce_int(previous_dialog_state.get("repeat_count"), 0)
@@ -69,9 +71,11 @@ def _remember_latest_signals(
 
 
 def _initial_lead_status(dialog_state: DialogStateMap, lifecycle: str) -> str:
-    lead_status = str(
-        dialog_state.get("lead_status") or lifecycle or DEFAULT_LIFECYCLE
-    ).strip().lower()
+    lead_status = (
+        str(dialog_state.get("lead_status") or lifecycle or DEFAULT_LIFECYCLE)
+        .strip()
+        .lower()
+    )
 
     if lead_status == "hot":
         return "warm"

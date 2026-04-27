@@ -27,8 +27,13 @@ async def test_process_client_update_passes_profile_to_orchestrator():
         },
     }
 
-    with patch("src.interfaces.telegram.client_bot.get_redis_client", AsyncMock(return_value=redis)):
-        result = await process_client_update(update, "project-1", orchestrator, "bot-token")
+    with patch(
+        "src.interfaces.telegram.client_bot.get_redis_client",
+        AsyncMock(return_value=redis),
+    ):
+        result = await process_client_update(
+            update, "project-1", orchestrator, "bot-token"
+        )
 
     assert result == {"ok": True}
     orchestrator.process_message.assert_awaited_once_with(

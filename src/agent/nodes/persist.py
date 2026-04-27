@@ -13,7 +13,9 @@ from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
-from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
+from src.infrastructure.db.repositories.thread.runtime_state import (
+    ThreadRuntimeStateRepository,
+)
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
@@ -46,7 +48,9 @@ def create_persist_node(
                     role="assistant",
                     content=context.response_text,
                 )
-                logger.debug("Assistant message saved", extra={"thread_id": context.thread_id})
+                logger.debug(
+                    "Assistant message saved", extra={"thread_id": context.thread_id}
+                )
             except Exception as exc:
                 logger.exception(
                     "Failed to save assistant message",
@@ -59,7 +63,9 @@ def create_persist_node(
                 )
 
         try:
-            await thread_runtime_state_repo.save_state_json(context.thread_id, context.state_payload or {})
+            await thread_runtime_state_repo.save_state_json(
+                context.thread_id, context.state_payload or {}
+            )
             logger.debug("State JSON saved", extra={"thread_id": context.thread_id})
         except Exception as exc:
             logger.exception(
@@ -114,7 +120,10 @@ def create_persist_node(
                         stream_id=context.thread_id,
                         project_id=context.project_id,
                         event_type="ticket_created",
-                        payload={"reason": "Human escalation requested", "manager_notified": True},
+                        payload={
+                            "reason": "Human escalation requested",
+                            "manager_notified": True,
+                        },
                     )
                 except Exception as exc:
                     logger.warning(
@@ -133,7 +142,9 @@ def create_persist_node(
                     type_="dialog_state",
                 )
 
-                lifecycle_stage = dialog_state.get("lifecycle") or dialog_state.get("lead_status")
+                lifecycle_stage = dialog_state.get("lifecycle") or dialog_state.get(
+                    "lead_status"
+                )
                 if lifecycle_stage:
                     await memory_repo.set(
                         project_id=context.project_id,
@@ -153,7 +164,10 @@ def create_persist_node(
                             type_="rejection",
                         )
 
-                    if any(phrase in context.user_input for phrase in ["дорого", "слишком дорого"]):
+                    if any(
+                        phrase in context.user_input
+                        for phrase in ["дорого", "слишком дорого"]
+                    ):
                         await memory_repo.set(
                             project_id=context.project_id,
                             client_id=context.client_id,
@@ -162,7 +176,10 @@ def create_persist_node(
                             type_="behavior",
                         )
 
-                    if any(phrase in context.user_input for phrase in ["у меня салон", "мой бизнес", "я из"]):
+                    if any(
+                        phrase in context.user_input
+                        for phrase in ["у меня салон", "мой бизнес", "я из"]
+                    ):
                         await memory_repo.set(
                             project_id=context.project_id,
                             client_id=context.client_id,
@@ -171,7 +188,10 @@ def create_persist_node(
                             type_="context",
                         )
 
-                    if any(kw in context.user_input for kw in ["не работает", "бесит", "ошибка", "жалоба"]):
+                    if any(
+                        kw in context.user_input
+                        for kw in ["не работает", "бесит", "ошибка", "жалоба"]
+                    ):
                         await memory_repo.set(
                             project_id=context.project_id,
                             client_id=context.client_id,
@@ -208,17 +228,22 @@ def create_persist_node(
 
         if context.close_ticket and queue_repo:
             try:
-                counts = await thread_message_repo.get_message_counts_view(context.thread_id)
+                counts = await thread_message_repo.get_message_counts_view(
+                    context.thread_id
+                )
                 total_messages = counts.total
                 ai_messages = counts.ai
                 manager_messages = counts.manager
 
-                thread_info = await thread_read_repo.get_thread_with_project_view(context.thread_id)
+                thread_info = await thread_read_repo.get_thread_with_project_view(
+                    context.thread_id
+                )
                 created_at = thread_info.created_at if thread_info else None
                 resolution_time = None
                 if created_at:
                     resolution_time = (
-                        datetime.datetime.now(datetime.UTC) - created_at.astimezone(datetime.UTC)
+                        datetime.datetime.now(datetime.UTC)
+                        - created_at.astimezone(datetime.UTC)
                     ).total_seconds()
 
                 await queue_repo.enqueue(

@@ -28,9 +28,15 @@ def test_telegram_http_transport_is_isolated_to_sender():
             continue
         rel = path.as_posix()
         source = path.read_text(encoding="utf-8")
-        if "api.telegram.org" in source and rel != "src/infrastructure/queue/telegram_sender.py":
+        if (
+            "api.telegram.org" in source
+            and rel != "src/infrastructure/queue/telegram_sender.py"
+        ):
             offenders.append(rel)
-        if "import httpx" in source and rel != "src/infrastructure/queue/telegram_sender.py":
+        if (
+            "import httpx" in source
+            and rel != "src/infrastructure/queue/telegram_sender.py"
+        ):
             offenders.append(rel)
 
     assert offenders == []

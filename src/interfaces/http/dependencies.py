@@ -14,7 +14,6 @@ All dependencies use the global pool from lifespan management.
 """
 
 from typing import Callable, Awaitable
-from datetime import datetime
 import jwt
 
 from fastapi import Header, HTTPException, Depends
@@ -31,10 +30,14 @@ from src.interfaces.composition.project_repositories import (
     build_project_repository,
     build_project_token_repository,
 )
-from src.infrastructure.db.repositories.thread.lifecycle import ThreadLifecycleRepository
+from src.infrastructure.db.repositories.thread.lifecycle import (
+    ThreadLifecycleRepository,
+)
 from src.infrastructure.db.repositories.thread.messages import ThreadMessageRepository
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
-from src.infrastructure.db.repositories.thread.runtime_state import ThreadRuntimeStateRepository
+from src.infrastructure.db.repositories.thread.runtime_state import (
+    ThreadRuntimeStateRepository,
+)
 from src.infrastructure.db.repositories.client_repository import ClientRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.event_repository import EventRepository
@@ -57,10 +60,10 @@ logger = get_logger(__name__)
 def get_pool() -> object:
     """
     Return the global database connection pool.
-    
+
     Raises:
         RuntimeError: If pool is not initialized (called before lifespan startup).
-    
+
     Returns:
         asyncpg.Pool: The global database connection pool.
     """
@@ -73,10 +76,10 @@ def get_pool() -> object:
 def get_orchestrator() -> object:
     """
     Return the global orchestrator instance.
-    
+
     Raises:
         RuntimeError: If orchestrator is not initialized.
-    
+
     Returns:
         OrchestratorService: The global orchestrator instance.
     """
@@ -96,7 +99,7 @@ def get_project_repo(pool: object = Depends(get_pool)):
 
 
 def get_project_existence_repo(
-    project_repo = Depends(get_project_repo),
+    project_repo=Depends(get_project_repo),
 ) -> ProjectExistencePort:
     return project_repo
 
@@ -105,12 +108,14 @@ def get_project_token_repo(pool: object = Depends(get_pool)) -> ProjectTokenPort
     return build_project_token_repository(pool)
 
 
-def get_project_member_repo(pool: object = Depends(get_pool)) -> ProjectMemberResolverPort:
+def get_project_member_repo(
+    pool: object = Depends(get_pool),
+) -> ProjectMemberResolverPort:
     return build_project_member_repository(pool)
 
 
 def get_project_service(
-    project_repo = Depends(get_project_repo),
+    project_repo=Depends(get_project_repo),
 ) -> ProjectAccessService:
     """
     Return the application service for project control-plane operations.
@@ -121,10 +126,10 @@ def get_project_service(
 def get_event_repo(pool: object = Depends(get_pool)) -> EventRepository:
     """
     Return a new EventRepository instance.
-    
+
     Args:
         pool: Database connection pool (injected via Depends).
-    
+
     Returns:
         EventRepository: Repository for event-sourced data access.
     """
@@ -132,7 +137,7 @@ def get_event_repo(pool: object = Depends(get_pool)) -> EventRepository:
 
 
 def get_project_query_service(
-    project_repo = Depends(get_project_repo),
+    project_repo=Depends(get_project_repo),
     project_service: ProjectAccessService = Depends(get_project_service),
     event_repo: EventRepository = Depends(get_event_repo),
 ) -> ProjectQueryService:
@@ -141,7 +146,7 @@ def get_project_query_service(
 
 
 def get_project_command_service(
-    project_repo = Depends(get_project_repo),
+    project_repo=Depends(get_project_repo),
     project_service: ProjectAccessService = Depends(get_project_service),
     project_query_service: ProjectQueryService = Depends(get_project_query_service),
 ) -> ProjectCommandService:
@@ -159,10 +164,10 @@ def get_client_repo(pool: object = Depends(get_pool)) -> ClientRepository:
 def get_queue_repo(pool: object = Depends(get_pool)) -> QueueRepository:
     """
     Return a new QueueRepository instance.
-    
+
     Args:
         pool: Database connection pool (injected via Depends).
-    
+
     Returns:
         QueueRepository: Repository for background job queue operations.
     """
@@ -172,10 +177,10 @@ def get_queue_repo(pool: object = Depends(get_pool)) -> QueueRepository:
 def get_user_repository(pool: object = Depends(get_pool)) -> UserRepository:
     """
     Return a new UserRepository instance.
-    
+
     Args:
         pool: Database connection pool (injected via Depends).
-    
+
     Returns:
         UserRepository: Repository for user and auth identity operations.
     """
@@ -185,22 +190,26 @@ def get_user_repository(pool: object = Depends(get_pool)) -> UserRepository:
 def get_metrics_repository(pool: object = Depends(get_pool)) -> MetricsRepository:
     """
     Return a new MetricsRepository instance.
-    
+
     Args:
         pool: Database connection pool (injected via Depends).
-    
+
     Returns:
         MetricsRepository: Repository for thread and project metrics.
     """
     return MetricsRepository(pool)
 
 
-def get_thread_lifecycle_repo(pool: object = Depends(get_pool)) -> ThreadLifecycleRepository:
+def get_thread_lifecycle_repo(
+    pool: object = Depends(get_pool),
+) -> ThreadLifecycleRepository:
     """Return repository for thread lifecycle operations."""
     return ThreadLifecycleRepository(pool)
 
 
-def get_thread_message_repo(pool: object = Depends(get_pool)) -> ThreadMessageRepository:
+def get_thread_message_repo(
+    pool: object = Depends(get_pool),
+) -> ThreadMessageRepository:
     """Return repository for thread message operations."""
     return ThreadMessageRepository(pool)
 
@@ -210,7 +219,9 @@ def get_thread_read_repo(pool: object = Depends(get_pool)) -> ThreadReadReposito
     return ThreadReadRepository(pool)
 
 
-def get_thread_runtime_state_repo(pool: object = Depends(get_pool)) -> ThreadRuntimeStateRepository:
+def get_thread_runtime_state_repo(
+    pool: object = Depends(get_pool),
+) -> ThreadRuntimeStateRepository:
     """Return repository for thread runtime state operations."""
     return ThreadRuntimeStateRepository(pool)
 
@@ -218,10 +229,10 @@ def get_thread_runtime_state_repo(pool: object = Depends(get_pool)) -> ThreadRun
 def get_memory_repository(pool: object = Depends(get_pool)) -> MemoryRepository:
     """
     Return a new MemoryRepository instance.
-    
+
     Args:
         pool: Database connection pool (injected via Depends).
-    
+
     Returns:
         MemoryRepository: Repository for user memory (long-term facts).
     """
@@ -235,13 +246,17 @@ def get_client_query_service(
     project_service: ProjectAccessService = Depends(get_project_service),
 ) -> ClientQueryService:
     """Return the application read service for client-focused queries."""
-    return ClientQueryService(client_repo, thread_read_repo, memory_repo, project_service)
+    return ClientQueryService(
+        client_repo, thread_read_repo, memory_repo, project_service
+    )
 
 
 def get_thread_query_service(
     thread_read_repo: ThreadReadRepository = Depends(get_thread_read_repo),
     thread_message_repo: ThreadMessageRepository = Depends(get_thread_message_repo),
-    thread_runtime_state_repo: ThreadRuntimeStateRepository = Depends(get_thread_runtime_state_repo),
+    thread_runtime_state_repo: ThreadRuntimeStateRepository = Depends(
+        get_thread_runtime_state_repo
+    ),
     event_repo: EventRepository = Depends(get_event_repo),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
     project_service: ProjectAccessService = Depends(get_project_service),
@@ -258,7 +273,9 @@ def get_thread_query_service(
 
 
 def get_thread_command_service(
-    thread_lifecycle_repo: ThreadLifecycleRepository = Depends(get_thread_lifecycle_repo),
+    thread_lifecycle_repo: ThreadLifecycleRepository = Depends(
+        get_thread_lifecycle_repo
+    ),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
 ) -> ThreadCommandService:
     """Return the application write service for thread-focused mutations."""
@@ -268,30 +285,30 @@ def get_thread_command_service(
 def get_tool_registry() -> object:
     """
     Return the global ToolRegistry singleton instance.
-    
+
     This dependency provides access to the ToolRegistry for dynamic
     tool execution from API endpoints.
-    
+
     Returns:
         ToolRegistry: The global tool registry singleton.
-    
+
     Raises:
         RuntimeError: If tool_registry is not initialized.
     """
     # Lazy import to avoid circular dependencies
     from src.tools import tool_registry
-    
+
     if tool_registry is None:
         logger.error("ToolRegistry requested before initialization")
         raise RuntimeError("ToolRegistry not initialized")
-    
+
     return tool_registry
 
 
 async def get_redis() -> object:
     """
     Return the Redis client instance.
-    
+
     Returns:
         aioredis.Redis: Async Redis client for temporary state storage.
     """
@@ -301,28 +318,30 @@ async def get_redis() -> object:
 async def get_current_user_id(authorization: str | None = Header(default=None)) -> str:
     """
     Dependency that validates JWT and returns the user's UUID.
-    
+
     The JWT must contain a 'sub' claim with the user's UUID.
-    
+
     Args:
         authorization: Bearer token from Authorization header.
-    
+
     Returns:
         str: User ID (UUID) extracted from the token.
-    
+
     Raises:
         HTTPException: If token is missing, invalid, or expired.
     """
     if not authorization:
         logger.warning("Authorization header missing")
         raise HTTPException(status_code=401, detail="Authorization header required")
-    
+
     if not authorization.startswith("Bearer "):
         logger.warning("Invalid token format")
-        raise HTTPException(status_code=401, detail="Invalid token format. Use 'Bearer <token>'")
-    
+        raise HTTPException(
+            status_code=401, detail="Invalid token format. Use 'Bearer <token>'"
+        )
+
     token = authorization[7:]
-    
+
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("sub")
@@ -359,29 +378,30 @@ async def require_platform_admin(
 
 
 def verify_pro_mode_access(
-    project_repo = Depends(get_project_repo)
+    project_repo=Depends(get_project_repo),
 ) -> Callable[[str], Awaitable[bool]]:
     """
     Dependency factory for checking Pro mode access.
-    
+
     Returns a dependency function that checks if a project has Pro mode enabled.
-    
+
     Args:
         project_repo: ProjectRepository instance (injected).
-    
+
     Returns:
         Callable: Dependency function that takes project_id and checks is_pro_mode.
     """
+
     async def check_pro_mode(project_id: str) -> bool:
         """
         Check if project has Pro mode enabled.
-        
+
         Args:
             project_id: UUID of the project to check.
-        
+
         Returns:
             bool: True if Pro mode is enabled.
-        
+
         Raises:
             HTTPException: If project not found or Pro mode not enabled.
         """
@@ -401,14 +421,11 @@ def verify_pro_mode_access(
             ) from exc
 
         if not is_pro:
-            logger.warning(
-                "Pro mode access denied",
-                extra={"project_id": project_id}
-            )
+            logger.warning("Pro mode access denied", extra={"project_id": project_id})
             raise HTTPException(
                 status_code=403,
-                detail="Pro mode required. Upgrade your plan to access this feature."
+                detail="Pro mode required. Upgrade your plan to access this feature.",
             )
         return True
-    
+
     return check_pro_mode

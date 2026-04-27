@@ -15,7 +15,9 @@ class ProjectAccessService:
         user_id: str,
         allowed_roles: list[str],
     ) -> None:
-        has_role = await self.repo.user_has_project_role(project_id, user_id, allowed_roles)
+        has_role = await self.repo.user_has_project_role(
+            project_id, user_id, allowed_roles
+        )
         if has_role is True:
             return
 

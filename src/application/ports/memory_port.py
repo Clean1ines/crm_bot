@@ -2,7 +2,6 @@ from typing import Protocol
 
 from src.domain.project_plane.json_types import JsonValue
 from src.domain.project_plane.memory_views import MemoryEntryView
-from src.domain.project_plane.json_types import JsonValue
 
 
 class MemoryReaderPort(Protocol):

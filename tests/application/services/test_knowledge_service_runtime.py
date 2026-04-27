@@ -102,4 +102,6 @@ async def test_upload_marks_document_error_when_batch_processing_fails():
             logger=Mock(),
         )
 
-    repo.update_document_status.assert_awaited_once_with("doc-err", "error", "embed failed")
+    repo.update_document_status.assert_awaited_once_with(
+        "doc-err", "error", "embed failed"
+    )

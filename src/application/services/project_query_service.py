@@ -36,16 +36,22 @@ class ProjectQueryService:
                 continue
         return serialized
 
-    async def _load_project_configuration_view(self, project_id: str) -> ProjectConfigurationView:
+    async def _load_project_configuration_view(
+        self, project_id: str
+    ) -> ProjectConfigurationView:
         return await self.repo.get_project_configuration_view(project_id)
 
     async def _load_project_view(self, project_id: str) -> ProjectSummaryView | None:
         return await self.repo.get_project_view(project_id)
 
-    async def _load_projects_for_user_view(self, user_id: str) -> list[ProjectSummaryView]:
+    async def _load_projects_for_user_view(
+        self, user_id: str
+    ) -> list[ProjectSummaryView]:
         return await self.repo.get_projects_for_user_view(user_id)
 
-    async def _load_project_members_view(self, project_id: str) -> list[ProjectMemberView]:
+    async def _load_project_members_view(
+        self, project_id: str
+    ) -> list[ProjectMemberView]:
         return await self.repo.get_project_members_view(project_id)
 
     async def list_projects(self, current_user_id: str) -> list[JsonObject]:
@@ -57,33 +63,55 @@ class ProjectQueryService:
         if not project:
             raise NotFoundError("Project not found")
         if project.user_id != current_user_id:
-            await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+            await self.access_service.require_project_role(
+                project_id, current_user_id, PROJECT_READ_ROLES
+            )
         return ProjectSummaryDto.from_view(project).to_dict()
 
     async def get_managers(self, project_id: str, current_user_id: str) -> list[int]:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
-        return self._serialize_manager_targets(await self.repo.get_manager_notification_targets(project_id))
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
+        return self._serialize_manager_targets(
+            await self.repo.get_manager_notification_targets(project_id)
+        )
 
-    async def list_project_members(self, project_id: str, current_user_id: str) -> list[ProjectMemberDto]:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+    async def list_project_members(
+        self, project_id: str, current_user_id: str
+    ) -> list[ProjectMemberDto]:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
         members = await self._load_project_members_view(project_id)
         return [ProjectMemberDto.from_view(member) for member in members]
 
-    async def get_project_configuration(self, project_id: str, current_user_id: str) -> JsonObject:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+    async def get_project_configuration(
+        self, project_id: str, current_user_id: str
+    ) -> JsonObject:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
         configuration = await self._load_project_configuration_view(project_id)
         return ProjectConfigurationDto.from_view(configuration).to_dict()
 
-    async def list_project_integrations(self, project_id: str, current_user_id: str) -> list[JsonObject]:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+    async def list_project_integrations(
+        self, project_id: str, current_user_id: str
+    ) -> list[JsonObject]:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
         configuration = await self._load_project_configuration_view(project_id)
         return [
             ProjectIntegrationDto.from_view(integration).to_dict()
             for integration in configuration.integrations
         ]
 
-    async def list_project_channels(self, project_id: str, current_user_id: str) -> list[JsonObject]:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+    async def list_project_channels(
+        self, project_id: str, current_user_id: str
+    ) -> list[JsonObject]:
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
         configuration = await self._load_project_configuration_view(project_id)
         return [
             ProjectChannelDto.from_view(channel).to_dict()
@@ -98,7 +126,9 @@ class ProjectQueryService:
         limit: int,
         offset: int,
     ) -> JsonObject:
-        await self.access_service.require_project_role(project_id, current_user_id, PROJECT_READ_ROLES)
+        await self.access_service.require_project_role(
+            project_id, current_user_id, PROJECT_READ_ROLES
+        )
 
         items = await self.event_reader.get_manager_reply_history(
             project_id=project_id,

@@ -8,7 +8,6 @@ from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import require_platform_admin
 from src.infrastructure.llm.model_registry import ModelRegistry
 from src.infrastructure.llm.rate_limit_tracker import RateLimitTracker
-from src.infrastructure.redis.client import get_redis_client
 
 logger = get_logger(__name__)
 router = APIRouter()

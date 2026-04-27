@@ -4,7 +4,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.interfaces.http.chat import _visitor_chat_id
-from src.interfaces.http.dependencies import get_orchestrator, get_project_existence_repo
+from src.interfaces.http.dependencies import (
+    get_orchestrator,
+    get_project_existence_repo,
+)
 from src.interfaces.http.app import app
 
 

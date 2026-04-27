@@ -7,7 +7,9 @@ from src.application.ports.google_identity_port import GoogleIdentityClaims
 
 
 class HttpGoogleIdentityVerifier:
-    def __init__(self, *, google_client_id: str | None = None, timeout_seconds: float = 10) -> None:
+    def __init__(
+        self, *, google_client_id: str | None = None, timeout_seconds: float = 10
+    ) -> None:
         self.google_client_id = google_client_id
         self.timeout_seconds = timeout_seconds
 

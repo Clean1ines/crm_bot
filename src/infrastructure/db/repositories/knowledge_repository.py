@@ -6,8 +6,6 @@ Clean Architecture contract:
 - Repository read methods do not return dict/Mapping compatibility objects.
 """
 
-from uuid import UUID
-
 import asyncpg
 
 from src.domain.project_plane.knowledge_views import (
@@ -151,7 +149,9 @@ class KnowledgeRepository:
             async with conn.transaction():
                 for index, chunk in enumerate(chunks):
                     embedding = embeddings[index]
-                    embedding_as_pg_vector = "[" + ",".join(str(x) for x in embedding) + "]"
+                    embedding_as_pg_vector = (
+                        "[" + ",".join(str(x) for x in embedding) + "]"
+                    )
 
                     await conn.execute(
                         """
@@ -231,10 +231,14 @@ class KnowledgeRepository:
                     KnowledgeDocumentView(
                         id=str(row["id"]),
                         file_name=str(row["file_name"]),
-                        file_size=int(row["file_size"]) if row["file_size"] is not None else None,
+                        file_size=int(row["file_size"])
+                        if row["file_size"] is not None
+                        else None,
                         status=str(row["status"]),
                         error=str(row["error"]) if row["error"] is not None else None,
-                        uploaded_by=str(row["uploaded_by"]) if row["uploaded_by"] is not None else None,
+                        uploaded_by=str(row["uploaded_by"])
+                        if row["uploaded_by"] is not None
+                        else None,
                         created_at=_normalize_timestamp(row["created_at"]),
                         updated_at=_normalize_timestamp(row["updated_at"]),
                         chunk_count=int(chunk_count or 0),
@@ -244,7 +248,9 @@ class KnowledgeRepository:
         logger.debug("Retrieved knowledge documents", extra={"count": len(documents)})
         return documents
 
-    async def get_document(self, document_id: str) -> KnowledgeDocumentDetailView | None:
+    async def get_document(
+        self, document_id: str
+    ) -> KnowledgeDocumentDetailView | None:
         logger.debug("Fetching knowledge document", extra={"document_id": document_id})
 
         async with self.pool.acquire() as conn:
@@ -272,7 +278,9 @@ class KnowledgeRepository:
             file_size=int(row["file_size"]) if row["file_size"] is not None else None,
             status=str(row["status"]),
             error=str(row["error"]) if row["error"] is not None else None,
-            uploaded_by=str(row["uploaded_by"]) if row["uploaded_by"] is not None else None,
+            uploaded_by=str(row["uploaded_by"])
+            if row["uploaded_by"] is not None
+            else None,
             created_at=_normalize_timestamp(row["created_at"]),
             updated_at=_normalize_timestamp(row["updated_at"]),
             chunk_count=int(chunk_count or 0),

@@ -11,6 +11,7 @@ logger = get_logger(__name__)
 
 _model = None
 
+
 def _get_model():
     global _model
     if _model is None:
@@ -18,15 +19,14 @@ def _get_model():
         _model = TextEmbedding("BAAI/bge-small-en-v1.5")
     return _model
 
+
 async def embed_text(text: str) -> list[float]:
     logger.debug(f"Generating embedding for text of length {len(text)}")
     loop = asyncio.get_event_loop()
     model = _get_model()
-    embedding = await loop.run_in_executor(
-        None, 
-        lambda: list(model.embed([text]))[0]
-    )
+    embedding = await loop.run_in_executor(None, lambda: list(model.embed([text]))[0])
     return embedding.tolist()
+
 
 async def embed_batch(texts: list[str]) -> list[list[float]]:
     if not texts:
@@ -34,8 +34,5 @@ async def embed_batch(texts: list[str]) -> list[list[float]]:
     logger.debug(f"Generating embeddings for batch of {len(texts)} texts")
     loop = asyncio.get_event_loop()
     model = _get_model()
-    embeddings = await loop.run_in_executor(
-        None,
-        lambda: list(model.embed(texts))
-    )
+    embeddings = await loop.run_in_executor(None, lambda: list(model.embed(texts)))
     return [emb.tolist() for emb in embeddings]

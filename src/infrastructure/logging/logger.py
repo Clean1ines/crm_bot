@@ -3,17 +3,16 @@ Structured logging configuration using structlog.
 Provides a middleware for FastAPI to inject correlation IDs.
 """
 
-import asyncio
 import logging
 import sys
 import time
 import uuid
-from functools import wraps
 from typing import Callable, Mapping
 
 import structlog
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+
 
 def configure_logging():
     """Configure structlog for JSON output with timestamps and levels."""

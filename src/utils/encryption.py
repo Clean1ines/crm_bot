@@ -11,6 +11,7 @@ logger = get_logger(__name__)
 
 _fernet = None
 
+
 def _get_fernet() -> Fernet:
     """Lazily initialise and return the Fernet cipher."""
     global _fernet
@@ -25,6 +26,7 @@ def _get_fernet() -> Fernet:
             raise RuntimeError("Invalid TOKEN_ENCRYPTION_KEY") from e
     return _fernet
 
+
 def encrypt_token(token: str) -> str:
     """
     Encrypt a bot token and return it as a base64 string.
@@ -34,6 +36,7 @@ def encrypt_token(token: str) -> str:
     fernet = _get_fernet()
     encrypted = fernet.encrypt(token.encode("utf-8"))
     return encrypted.decode("utf-8")
+
 
 def decrypt_token(encrypted: str) -> str:
     """

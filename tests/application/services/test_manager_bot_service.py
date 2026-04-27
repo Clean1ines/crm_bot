@@ -32,7 +32,9 @@ async def test_claim_thread_starts_reply_session():
         json.dumps({"manager_chat_id": "12345", "manager_user_id": "user-1"}),
     )
     redis.setex.assert_any_await("awaiting_reply:12345", 600, "thread-1")
-    orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with("project-1", "12345")
+    orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with(
+        "project-1", "12345"
+    )
     orchestrator.threads.claim_for_manager.assert_awaited_once_with(
         "thread-1",
         manager=ManagerActor(user_id="user-1", telegram_chat_id="12345"),
@@ -55,7 +57,9 @@ async def test_reply_from_manager_without_active_session_sends_hint():
         result = await service.reply_from_manager(manager_chat_id="12345", text="hello")
 
     assert result.to_dict() == {"ok": True}
-    orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with("project-1", "12345")
+    orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with(
+        "project-1", "12345"
+    )
     orchestrator.manager_reply.assert_not_called()
     http_client.post.assert_awaited_once()
 
@@ -82,7 +86,9 @@ async def test_close_thread_releases_manager_assignment():
         )
 
     assert result.to_dict() == {"ok": True}
-    orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with("project-1", "12345")
+    orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with(
+        "project-1", "12345"
+    )
     redis.delete.assert_any_await("awaiting_reply_thread:thread-1")
     redis.delete.assert_any_await("awaiting_reply:12345")
     orchestrator.threads.release_manager_assignment.assert_awaited_once_with("thread-1")

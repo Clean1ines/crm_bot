@@ -44,7 +44,15 @@ def normalize_intent(intent: str | None) -> str:
     if value in INTENT_TO_TOPIC:
         return value
 
-    if value in {"pricing", "sales", "support", "feedback", "other", "angry", "handoff_request"}:
+    if value in {
+        "pricing",
+        "sales",
+        "support",
+        "feedback",
+        "other",
+        "angry",
+        "handoff_request",
+    }:
         return value
 
     if value in {"ask_price", "price", "cost", "pricing_question"}:

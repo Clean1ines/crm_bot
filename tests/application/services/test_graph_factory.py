@@ -2,7 +2,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.application.dto.runtime_dto import GraphExecutionRequestDto, ProjectRuntimeContextDto
+from src.application.dto.runtime_dto import (
+    GraphExecutionRequestDto,
+    ProjectRuntimeContextDto,
+)
 from src.application.orchestration.graph_factory import (
     GRAPH_EMPTY_RESPONSE_FALLBACK_TEXT,
     GraphExecutor,
@@ -51,7 +54,9 @@ def test_build_agent_state_uses_explicit_runtime_context_and_full_contract_defau
         chat_id=123,
         question="hello",
         recent_history=[{"role": "user", "content": "old"}],
-        runtime_context=ProjectRuntimeContextDto.from_record({"settings": {"brand_name": "Brand"}}),
+        runtime_context=ProjectRuntimeContextDto.from_record(
+            {"settings": {"brand_name": "Brand"}}
+        ),
         trace_id="trace-id",
     )
 
@@ -117,7 +122,9 @@ def test_extract_graph_result_falls_back_when_graph_returns_no_text():
 async def test_invoke_graph_returns_outcome_from_graph_result():
     executor = make_executor()
     graph = AsyncMock()
-    graph.ainvoke = AsyncMock(return_value={"response_text": "answer", "delivered": False})
+    graph.ainvoke = AsyncMock(
+        return_value={"response_text": "answer", "delivered": False}
+    )
 
     request = GraphExecutionRequestDto(
         project_id="project-id",

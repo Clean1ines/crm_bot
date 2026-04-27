@@ -12,7 +12,10 @@ async def test_kb_search_returns_empty_chunks_when_context_missing():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.kb_search.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.kb_search.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node({})
 
     assert result == {"knowledge_chunks": []}
@@ -34,7 +37,10 @@ async def test_kb_search_normalizes_tool_results():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.kb_search.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.kb_search.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node({"project_id": "project-1", "user_input": "hello"})
 
     assert result == {

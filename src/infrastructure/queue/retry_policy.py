@@ -22,7 +22,7 @@ class RetryDecision:
 def calculate_backoff(attempt: int) -> float:
     """Calculate exponential backoff with small jitter."""
     safe_attempt = max(int(attempt or 0), 0)
-    delay = min(INITIAL_BACKOFF_SECONDS * (2 ** safe_attempt), MAX_BACKOFF_SECONDS)
+    delay = min(INITIAL_BACKOFF_SECONDS * (2**safe_attempt), MAX_BACKOFF_SECONDS)
     jitter = random.uniform(0, delay * 0.1)
     return delay + jitter
 

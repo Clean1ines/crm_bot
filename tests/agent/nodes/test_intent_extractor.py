@@ -14,7 +14,10 @@ async def test_intent_extractor_returns_empty_when_no_input():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.intent_extractor.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node({})
 
     assert result == {}
@@ -26,7 +29,7 @@ async def test_intent_extractor_parses_json_block_into_state_patch():
     llm = AsyncMock()
     llm.ainvoke = AsyncMock(
         return_value=SimpleNamespace(
-            content='''```json\n{"intent":"support","cta":"none","features":{"crm":0.8},"topic":"support","cta_hint":null,"emotion":"negative","is_repeat_like":true}\n```'''
+            content="""```json\n{"intent":"support","cta":"none","features":{"crm":0.8},"topic":"support","cta_hint":null,"emotion":"negative","is_repeat_like":true}\n```"""
         )
     )
     node = create_intent_extractor_node(llm=llm)
@@ -34,7 +37,10 @@ async def test_intent_extractor_parses_json_block_into_state_patch():
     async def passthrough(_name, impl, state, **_kwargs):
         return await impl(state)
 
-    with patch("src.agent.nodes.intent_extractor.log_node_execution", AsyncMock(side_effect=passthrough)):
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
         result = await node({"user_input": "help"})
 
     assert result["intent"] == "support"

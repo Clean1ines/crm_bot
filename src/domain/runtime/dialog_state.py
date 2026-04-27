@@ -80,6 +80,8 @@ def dialog_state_from_memory(
     for item in user_memory.get("dialog_state", []):
         value = item.get("value")
         if isinstance(value, Mapping):
-            return dialog_state_from_mapping(cast(Mapping[str, object], value), lifecycle=lifecycle)
+            return dialog_state_from_mapping(
+                cast(Mapping[str, object], value), lifecycle=lifecycle
+            )
 
     return default_dialog_state(lifecycle=lifecycle)

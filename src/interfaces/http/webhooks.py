@@ -7,7 +7,12 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from src.application.errors import ApplicationError
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
-from src.interfaces.http.dependencies import get_pool, get_orchestrator, get_project_member_repo, get_project_token_repo
+from src.interfaces.http.dependencies import (
+    get_pool,
+    get_orchestrator,
+    get_project_member_repo,
+    get_project_token_repo,
+)
 from src.interfaces.telegram.platform_bot import process_admin_update
 from src.interfaces.telegram.client_bot import process_client_update
 from src.interfaces.telegram.manager_bot import process_manager_update
@@ -91,8 +96,13 @@ async def telegram_webhook(
         bot_token = await project_tokens.get_bot_token(project_id)
         if not bot_token:
             raise HTTPException(status_code=404, detail="Project not found")
-        if settings.ADMIN_BOT_TOKEN and bot_token.strip() == settings.ADMIN_BOT_TOKEN.strip():
-            raise HTTPException(status_code=409, detail="Platform bot must use /webhooks/platform")
+        if (
+            settings.ADMIN_BOT_TOKEN
+            and bot_token.strip() == settings.ADMIN_BOT_TOKEN.strip()
+        ):
+            raise HTTPException(
+                status_code=409, detail="Platform bot must use /webhooks/platform"
+            )
 
         result = await _get_dispatcher().handle_client_surface(
             project_id,
@@ -131,7 +141,9 @@ async def manager_webhook(
     if not secret_token:
         raise HTTPException(status_code=401, detail="Missing secret token")
 
-    project_id = await project_tokens.find_project_by_manager_webhook_secret(secret_token)
+    project_id = await project_tokens.find_project_by_manager_webhook_secret(
+        secret_token
+    )
     if not project_id:
         logger.warning("Invalid manager webhook secret")
         raise HTTPException(status_code=401, detail="Invalid secret token")

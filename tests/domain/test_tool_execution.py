@@ -19,7 +19,9 @@ def test_tool_execution_context_builds_registry_context():
 
 
 def test_tool_execution_result_serializes_optional_response_text():
-    result = ToolExecutionResult(tool_result=None, requires_human=True, response_text="failed")
+    result = ToolExecutionResult(
+        tool_result=None, requires_human=True, response_text="failed"
+    )
 
     assert result.to_state_patch() == {
         "tool_result": None,

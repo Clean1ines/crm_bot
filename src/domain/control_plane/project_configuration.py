@@ -22,7 +22,9 @@ class ProjectIntegrationView:
     def from_record(cls, record: dict[str, object]) -> "ProjectIntegrationView":
         return cls(
             id=str(record["id"]) if record.get("id") is not None else None,
-            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
+            project_id=str(record["project_id"])
+            if record.get("project_id") is not None
+            else None,
             provider=str(record.get("provider") or ""),
             status=_optional_text(record.get("status")),
             config_json=json_object_from_unknown(record.get("config_json")),
@@ -60,7 +62,9 @@ class ProjectChannelView:
     def from_record(cls, record: dict[str, object]) -> "ProjectChannelView":
         return cls(
             id=str(record["id"]) if record.get("id") is not None else None,
-            project_id=str(record["project_id"]) if record.get("project_id") is not None else None,
+            project_id=str(record["project_id"])
+            if record.get("project_id") is not None
+            else None,
             kind=str(record.get("kind") or ""),
             provider=str(record.get("provider") or ""),
             status=_optional_text(record.get("status")),

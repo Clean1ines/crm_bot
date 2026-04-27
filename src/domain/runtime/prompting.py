@@ -2,7 +2,11 @@ from dataclasses import dataclass, field
 from typing import Mapping, Protocol
 
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
-from src.domain.runtime.state_contracts import ProjectChannelState, ProjectIntegrationState, ProjectRuntimeConfigurationState
+from src.domain.runtime.state_contracts import (
+    ProjectChannelState,
+    ProjectIntegrationState,
+    ProjectRuntimeConfigurationState,
+)
 
 
 NO_DATA_TEXT = "none"
@@ -26,8 +30,7 @@ POLICY_KEYS = (
 
 
 class TruncateText(Protocol):
-    def __call__(self, value: str, limit: int) -> str:
-        ...
+    def __call__(self, value: str, limit: int) -> str: ...
 
 
 @dataclass(slots=True)
@@ -36,10 +39,14 @@ class ProjectPromptContext:
     policies: Mapping[str, object] = field(default_factory=dict)
     integrations: list[ProjectIntegrationState] = field(default_factory=list)
     channels: list[ProjectChannelState] = field(default_factory=list)
-    runtime_profile: ProjectRuntimeProfile = field(default_factory=ProjectRuntimeProfile)
+    runtime_profile: ProjectRuntimeProfile = field(
+        default_factory=ProjectRuntimeProfile
+    )
 
     @classmethod
-    def from_configuration(cls, configuration: ProjectRuntimeConfigurationState | None) -> "ProjectPromptContext":
+    def from_configuration(
+        cls, configuration: ProjectRuntimeConfigurationState | None
+    ) -> "ProjectPromptContext":
         payload = configuration or {}
         return cls(
             settings=payload.get("settings") or {},
@@ -60,7 +67,9 @@ class ProjectPromptContext:
         ]
 
 
-def _format_settings(settings: Mapping[str, object], truncate: TruncateText) -> list[str]:
+def _format_settings(
+    settings: Mapping[str, object], truncate: TruncateText
+) -> list[str]:
     return [
         f"- {label}: {truncate(str(value), limit)}"
         for key, label, limit in SETTING_LABELS
@@ -68,7 +77,9 @@ def _format_settings(settings: Mapping[str, object], truncate: TruncateText) -> 
     ]
 
 
-def _format_prompt_override(settings: Mapping[str, object], truncate: TruncateText) -> list[str]:
+def _format_prompt_override(
+    settings: Mapping[str, object], truncate: TruncateText
+) -> list[str]:
     prompt_override = settings.get("system_prompt_override")
     if not prompt_override:
         return []
@@ -76,7 +87,9 @@ def _format_prompt_override(settings: Mapping[str, object], truncate: TruncateTe
     return [f"- project instruction: {truncate(str(prompt_override), 500)}"]
 
 
-def _format_policies(policies: Mapping[str, object], truncate: TruncateText) -> list[str]:
+def _format_policies(
+    policies: Mapping[str, object], truncate: TruncateText
+) -> list[str]:
     return [
         f"- {key}: {truncate(str(value), 350)}"
         for key in POLICY_KEYS
@@ -84,7 +97,9 @@ def _format_policies(policies: Mapping[str, object], truncate: TruncateText) -> 
     ]
 
 
-def _format_runtime_profile(profile: ProjectRuntimeProfile, truncate: TruncateText) -> list[str]:
+def _format_runtime_profile(
+    profile: ProjectRuntimeProfile, truncate: TruncateText
+) -> list[str]:
     lines: list[str] = []
 
     if profile.fallback_model:
@@ -97,7 +112,9 @@ def _format_runtime_profile(profile: ProjectRuntimeProfile, truncate: TruncateTe
     return lines
 
 
-def _format_active_integrations(integrations: list[ProjectIntegrationState]) -> list[str]:
+def _format_active_integrations(
+    integrations: list[ProjectIntegrationState],
+) -> list[str]:
     providers = [
         str(provider)
         for item in integrations

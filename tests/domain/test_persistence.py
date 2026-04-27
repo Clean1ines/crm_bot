@@ -34,7 +34,11 @@ def test_persistence_context_builds_normalized_dialog_state():
             "lifecycle": "warm",
             "cta": "call_manager",
             "dialog_state": {"repeat_count": 0},
-            "user_memory": {"dialog_state": [{"key": "dialog_state", "value": {"lead_status": "interested"}}]},
+            "user_memory": {
+                "dialog_state": [
+                    {"key": "dialog_state", "value": {"lead_status": "interested"}}
+                ]
+            },
         }
     )
 

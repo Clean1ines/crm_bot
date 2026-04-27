@@ -1,9 +1,13 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from uuid import uuid4
 
-from src.domain.project_plane.client_views import ClientDetailView, ClientListItemView, ClientListView
+from src.domain.project_plane.client_views import (
+    ClientDetailView,
+    ClientListItemView,
+    ClientListView,
+)
 from src.domain.project_plane.memory_views import MemoryEntryView
 from src.interfaces.http.app import app
 from src.interfaces.http.dependencies import (
@@ -46,7 +50,11 @@ def mock_client_repo():
 
 @pytest.fixture(autouse=True)
 def override_dependencies(
-    mock_current_user_id, mock_project_repo, mock_thread_repo, mock_client_repo, mock_memory_repo
+    mock_current_user_id,
+    mock_project_repo,
+    mock_thread_repo,
+    mock_client_repo,
+    mock_memory_repo,
 ):
     # Save original overrides
     original_overrides = app.dependency_overrides.copy()
@@ -165,7 +173,12 @@ class TestClientsAPI:
     # ==================== GET /api/clients/{client_id} ====================
 
     def test_get_client_success(
-        self, client, mock_project_repo, mock_client_repo, mock_thread_repo, mock_memory_repo
+        self,
+        client,
+        mock_project_repo,
+        mock_client_repo,
+        mock_thread_repo,
+        mock_memory_repo,
     ):
         project_id = str(uuid4())
         client_id = str(uuid4())
@@ -182,7 +195,9 @@ class TestClientsAPI:
 
         # Mock memory and threads
         mock_memory_repo.get_for_user_view.return_value = [
-            MemoryEntryView(id=str(uuid4()), key="preference", value="test", type="user_edited")
+            MemoryEntryView(
+                id=str(uuid4()), key="preference", value="test", type="user_edited"
+            )
         ]
         mock_thread_repo.get_dialogs.return_value = [{"thread_id": "thread-1"}]
 
@@ -194,8 +209,12 @@ class TestClientsAPI:
         assert data["username"] == "client1"
         assert "memory" in data
         assert "threads" in data
-        mock_memory_repo.get_for_user_view.assert_called_once_with(project_id, client_id, limit=100)
-        mock_thread_repo.get_dialogs.assert_called_once_with(project_id, client_id=client_id)
+        mock_memory_repo.get_for_user_view.assert_called_once_with(
+            project_id, client_id, limit=100
+        )
+        mock_thread_repo.get_dialogs.assert_called_once_with(
+            project_id, client_id=client_id
+        )
 
     def test_get_client_forbidden_project_not_found(self, client, mock_project_repo):
         mock_project_repo.user_has_project_role = AsyncMock(return_value=False)

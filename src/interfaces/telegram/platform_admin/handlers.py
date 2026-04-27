@@ -45,7 +45,9 @@ STATE_AWAIT_KNOWLEDGE_FILE = "await_knowledge_file"
 async def _get_state(chat_id: str) -> str:
     redis = await get_redis_client()
     state = await redis.get(f"{STATE_PREFIX}{chat_id}")
-    return state.decode() if state and isinstance(state, bytes) else (state or STATE_IDLE)
+    return (
+        state.decode() if state and isinstance(state, bytes) else (state or STATE_IDLE)
+    )
 
 
 async def _set_state(chat_id: str, state: str):
@@ -74,7 +76,9 @@ async def _get_data(chat_id: str) -> dict[str, object]:
 async def _set_data(chat_id: str, data: dict[str, object]):
     redis = await get_redis_client()
     await redis.setex(f"{DATA_PREFIX}{chat_id}", 600, json.dumps(data))
-    logger.debug("Data stored", extra={"chat_id": chat_id, "data_keys": list(data.keys())})
+    logger.debug(
+        "Data stored", extra={"chat_id": chat_id, "data_keys": list(data.keys())}
+    )
 
 
 async def handle_admin_command(text: str, pool) -> AdminResponse:
@@ -97,11 +101,7 @@ async def _cmd_start() -> AdminResponse:
 
 
 def _cmd_help() -> str:
-    return (
-        "**Справка**\n"
-        "/start - Главное меню\n"
-        "Используйте кнопки для управления."
-    )
+    return "**Справка**\n/start - Главное меню\nИспользуйте кнопки для управления."
 
 
 async def handle_admin_step(chat_id: str, text: str, pool) -> AdminResponse | None:
@@ -124,7 +124,9 @@ async def _process_admin_step(
     if chat_id is None or state is None:
         return "Ошибка состояния. Напишите /start.", None
 
-    logger.debug("Processing step", extra={"chat_id": chat_id, "state": state, "text": text[:30]})
+    logger.debug(
+        "Processing step", extra={"chat_id": chat_id, "state": state, "text": text[:30]}
+    )
 
     if text.strip() == "/start":
         await _clear_state(chat_id)
@@ -157,7 +159,11 @@ async def _reset_unknown_admin_step(chat_id: str) -> AdminResponse:
 async def _step_await_project_name(chat_id: str, name: str, pool) -> AdminResponse:
     service = PlatformBotService(pool)
     projects = (await service.list_projects_for_telegram_user(int(chat_id))).projects
-    if any(project.name == name for project in projects if str(project.id) != str(settings.ADMIN_PROJECT_ID)):
+    if any(
+        project.name == name
+        for project in projects
+        if str(project.id) != str(settings.ADMIN_PROJECT_ID)
+    ):
         return "У вас уже есть проект с таким именем. Придумайте другое.", None
 
     project_id = await service.create_project_for_telegram_user(int(chat_id), name)
@@ -213,7 +219,9 @@ async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminR
         return "ChatID должен быть числом. Попробуйте еще раз.", None
 
     try:
-        success_text = await PlatformBotService(pool).add_manager_by_chat_id(project_id, manager_id)
+        success_text = await PlatformBotService(pool).add_manager_by_chat_id(
+            project_id, manager_id
+        )
     except Exception as exc:
         logger.exception(
             "Failed to add manager",
@@ -244,8 +252,13 @@ async def _step_delete_confirm(chat_id: str, text: str, pool) -> AdminResponse:
     if text.strip().lower() == "да":
         try:
             async with pool.acquire() as conn:
-                await conn.execute("DELETE FROM projects WHERE id = $1", ensure_uuid(project_id))
-            logger.info("Project deleted", extra={"project_id": project_id, "name": project_name})
+                await conn.execute(
+                    "DELETE FROM projects WHERE id = $1", ensure_uuid(project_id)
+                )
+            logger.info(
+                "Project deleted",
+                extra={"project_id": project_id, "name": project_name},
+            )
             await _clear_state(chat_id)
             return f"Проект «{project_name}» ({project_id}) успешно удален.", None
         except Exception as exc:
@@ -276,21 +289,40 @@ async def _step_detach_choice(chat_id: str, choice: str, pool) -> AdminResponse:
     project_repo = ProjectRepository(pool)
     if choice == "client":
         await project_repo.set_bot_token(project_id, None)
-        await project_repo.upsert_project_channel(project_id, kind="client", provider="telegram", status="disabled", config_json={"token_configured": False})
+        await project_repo.upsert_project_channel(
+            project_id,
+            kind="client",
+            provider="telegram",
+            status="disabled",
+            config_json={"token_configured": False},
+        )
         await _clear_state(chat_id)
-        return "Клиентский бот откреплен.", await _get_project_menu_keyboard(project_id, pool)
+        return "Клиентский бот откреплен.", await _get_project_menu_keyboard(
+            project_id, pool
+        )
     if choice == "manager":
         await project_repo.set_manager_bot_token(project_id, None)
-        await project_repo.upsert_project_channel(project_id, kind="manager", provider="telegram", status="disabled", config_json={"token_configured": False})
+        await project_repo.upsert_project_channel(
+            project_id,
+            kind="manager",
+            provider="telegram",
+            status="disabled",
+            config_json={"token_configured": False},
+        )
         await _clear_state(chat_id)
-        return "Менеджерский бот откреплен.", await _get_project_menu_keyboard(project_id, pool)
+        return "Менеджерский бот откреплен.", await _get_project_menu_keyboard(
+            project_id, pool
+        )
 
     await _clear_state(chat_id)
     return "Отмена.", await _get_project_menu_keyboard(project_id, pool)
 
 
 async def _step_await_knowledge_file(chat_id: str, text: str, pool) -> AdminResponse:
-    return "Ожидаю файл со знаниями, а не текст. Отправьте PDF, DOCX или TXT.", make_back_keyboard()
+    return (
+        "Ожидаю файл со знаниями, а не текст. Отправьте PDF, DOCX или TXT.",
+        make_back_keyboard(),
+    )
 
 
 def _callback_project_id(callback_data: str) -> str:
@@ -299,18 +331,25 @@ def _callback_project_id(callback_data: str) -> str:
 
 async def _handle_new_project_callback(chat_id: str, pool) -> AdminResponse:
     await _set_state(chat_id, STATE_AWAIT_PROJECT_NAME)
-    return "Введите название нового проекта (например: Идея на миллион):", make_back_keyboard()
+    return (
+        "Введите название нового проекта (например: Идея на миллион):",
+        make_back_keyboard(),
+    )
 
 
 async def _handle_list_projects_callback(chat_id: str, pool) -> AdminResponse:
     return await _show_projects_list(chat_id, pool)
 
 
-async def _handle_project_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_project_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     return await _show_project_menu(chat_id, _callback_project_id(callback_data), pool)
 
 
-async def _handle_create_client_bot_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_create_client_bot_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
     await _set_data(chat_id, {"project_id": project_id})
     await _set_state(chat_id, STATE_AWAIT_CLIENT_TOKEN)
@@ -321,7 +360,9 @@ async def _handle_create_client_bot_callback(callback_data: str, chat_id: str, p
     )
 
 
-async def _handle_create_manager_bot_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_create_manager_bot_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
     await _set_data(chat_id, {"project_id": project_id})
     await _set_state(chat_id, STATE_AWAIT_MANAGER_TOKEN)
@@ -332,7 +373,9 @@ async def _handle_create_manager_bot_callback(callback_data: str, chat_id: str, 
     )
 
 
-async def _handle_knowledge_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_knowledge_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
     await _set_data(chat_id, {"project_id": project_id})
     await _set_state(chat_id, STATE_AWAIT_KNOWLEDGE_FILE)
@@ -362,7 +405,9 @@ def _format_project_team_lines(manager_members, legacy_targets) -> str:
     return "\n".join(lines) + "\n\nВведите ChatID нового менеджера:"
 
 
-async def _handle_managers_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_managers_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
     team = await PlatformBotService(pool).get_project_team(project_id)
 
@@ -376,13 +421,25 @@ async def _handle_managers_callback(callback_data: str, chat_id: str, pool) -> A
     return text, make_back_keyboard(f"project:{project_id}")
 
 
-async def _handle_detach_bot_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_detach_bot_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Клиентского", callback_data=f"detach_client:{project_id}")],
-        [InlineKeyboardButton("Менеджерского", callback_data=f"detach_manager:{project_id}")],
-        [InlineKeyboardButton("Назад", callback_data=f"project:{project_id}")],
-    ])
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Клиентского", callback_data=f"detach_client:{project_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Менеджерского", callback_data=f"detach_manager:{project_id}"
+                )
+            ],
+            [InlineKeyboardButton("Назад", callback_data=f"project:{project_id}")],
+        ]
+    )
     return "Какого бота открепить?", keyboard
 
 
@@ -406,19 +463,31 @@ async def _detach_project_bot(project_id: str, pool, *, kind: str) -> AdminRespo
     return message, await _get_project_menu_keyboard(project_id, pool)
 
 
-async def _handle_detach_client_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
-    return await _detach_project_bot(_callback_project_id(callback_data), pool, kind="client")
+async def _handle_detach_client_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
+    return await _detach_project_bot(
+        _callback_project_id(callback_data), pool, kind="client"
+    )
 
 
-async def _handle_detach_manager_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
-    return await _detach_project_bot(_callback_project_id(callback_data), pool, kind="manager")
+async def _handle_detach_manager_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
+    return await _detach_project_bot(
+        _callback_project_id(callback_data), pool, kind="manager"
+    )
 
 
-async def _handle_delete_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_delete_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
 
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id))
+        row = await conn.fetchrow(
+            "SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id)
+        )
         if not row:
             return "Проект не найден.", None
         project_name = row["name"]
@@ -441,7 +510,9 @@ async def _handle_back_to_main_callback(chat_id: str, pool) -> AdminResponse:
     return await _cmd_start()
 
 
-async def _handle_back_to_project_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def _handle_back_to_project_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
     await _clear_state(chat_id)
     return await _show_project_menu(chat_id, project_id, pool)
@@ -461,7 +532,9 @@ PREFIX_CALLBACK_HANDLERS = (
 )
 
 
-async def handle_admin_callback(callback_data: str, chat_id: str, pool) -> AdminResponse:
+async def handle_admin_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
     logger.info("Callback", extra={"data": callback_data, "chat_id": chat_id})
 
     if callback_data == "newproject":
@@ -483,7 +556,9 @@ async def handle_admin_callback(callback_data: str, chat_id: str, pool) -> Admin
 async def _verify_token(token: str) -> str | None:
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
+            resp = await client.get(
+                f"https://api.telegram.org/bot{token}/getMe", timeout=10
+            )
             if resp.status_code == 200 and resp.json().get("ok"):
                 return resp.json()["result"]["username"]
         except httpx.HTTPError as exc:
@@ -526,11 +601,15 @@ async def _set_project_token(project_id: str, token: str, pool) -> None:
             raise Exception(f"Webhook setup failed: {resp.text}")
 
 
-async def _set_manager_token(project_id: str, token: str, admin_chat_id: str, pool) -> None:
+async def _set_manager_token(
+    project_id: str, token: str, admin_chat_id: str, pool
+) -> None:
     project_repo = ProjectRepository(pool)
     await project_repo.set_manager_bot_token(project_id, token)
     user_repo = UserRepository(pool)
-    admin_user_id, _ = await user_repo.get_or_create_by_telegram(int(admin_chat_id), first_name="", username=None)
+    admin_user_id, _ = await user_repo.get_or_create_by_telegram(
+        int(admin_chat_id), first_name="", username=None
+    )
     await project_repo.add_project_member(project_id, admin_user_id, "owner")
 
     manager_secret = uuid.uuid4().hex
@@ -560,7 +639,9 @@ async def _set_manager_token(project_id: str, token: str, admin_chat_id: str, po
 async def _get_bot_username(token: str) -> str | None:
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
+            resp = await client.get(
+                f"https://api.telegram.org/bot{token}/getMe", timeout=5
+            )
             if resp.status_code == 200 and resp.json().get("ok"):
                 return resp.json()["result"]["username"]
         except httpx.HTTPError as exc:
@@ -579,13 +660,17 @@ async def _get_bot_username(token: str) -> str | None:
 async def _show_projects_list(chat_id: str, pool) -> AdminResponse:
     rows = [
         {"id": project.id, "name": project.name}
-        for project in (await PlatformBotService(pool).list_projects_for_telegram_user(int(chat_id))).projects
+        for project in (
+            await PlatformBotService(pool).list_projects_for_telegram_user(int(chat_id))
+        ).projects
         if str(project.id) != str(settings.ADMIN_PROJECT_ID)
     ]
 
     if not rows:
         text = "У вас пока нет проектов. Создайте первый."
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Новый проект", callback_data="newproject")]])
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("Новый проект", callback_data="newproject")]]
+        )
         return text, keyboard
 
     projects = [(str(row["id"]), row["name"]) for row in rows]
@@ -614,7 +699,9 @@ async def _show_project_menu(chat_id: str, project_id: str, pool) -> AdminRespon
 
 async def _project_name(project_id: str, pool) -> str | None:
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id))
+        row = await conn.fetchrow(
+            "SELECT name FROM projects WHERE id = $1", ensure_uuid(project_id)
+        )
     return str(row["name"]) if row else None
 
 
@@ -635,13 +722,17 @@ async def _project_menu_text(
     return "\n".join(lines)
 
 
-def _project_setup_status(*, client_token: str | None, manager_token: str | None) -> str:
+def _project_setup_status(
+    *, client_token: str | None, manager_token: str | None
+) -> str:
     if client_token and manager_token:
         return "Проект настроен полностью."
     return "Проект настроен не полностью."
 
 
-async def _append_bot_status_line(lines: list[str], *, label: str, token: str | None) -> None:
+async def _append_bot_status_line(
+    lines: list[str], *, label: str, token: str | None
+) -> None:
     if not token:
         return
 

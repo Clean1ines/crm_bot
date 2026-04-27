@@ -15,7 +15,10 @@ from src.application.dto.runtime_dto import (
     GraphExecutionResultDto,
     MessageProcessingOutcomeDto,
 )
-from src.application.ports.agent_runtime_port import AgentFactoryPort, AgentGraphRuntimePort
+from src.application.ports.agent_runtime_port import (
+    AgentFactoryPort,
+    AgentGraphRuntimePort,
+)
 
 
 GRAPH_EMPTY_RESPONSE_FALLBACK_TEXT = "Sorry, I couldn't generate a response."
@@ -50,7 +53,9 @@ class GraphFactory:
             memory_repo=memory_repo,
         )
 
-    def build_graph_from_json(self, graph_json: str | dict[str, object]) -> AgentGraphRuntimePort:
+    def build_graph_from_json(
+        self, graph_json: str | dict[str, object]
+    ) -> AgentGraphRuntimePort:
         """
         Return the project graph.
 
@@ -61,7 +66,9 @@ class GraphFactory:
             try:
                 graph_dict = json.loads(graph_json)
             except json.JSONDecodeError as exc:
-                self.logger.error("Invalid JSON in graph definition", extra={"error": str(exc)})
+                self.logger.error(
+                    "Invalid JSON in graph definition", extra={"error": str(exc)}
+                )
                 return self.agent
         else:
             graph_dict = graph_json
@@ -92,10 +99,12 @@ class GraphExecutor:
     def outcome(text: str, *, delivered: bool = False) -> MessageProcessingOutcomeDto:
         return MessageProcessingOutcomeDto.create(text=text, delivered=delivered)
 
-    def trim_recent_history(self, recent_messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    def trim_recent_history(
+        self, recent_messages: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
         if len(recent_messages) <= self.RECENT_MESSAGES_LIMIT:
             return recent_messages
-        return recent_messages[-self.RECENT_MESSAGES_LIMIT:]
+        return recent_messages[-self.RECENT_MESSAGES_LIMIT :]
 
     def create_graph_execution_request(
         self,
@@ -118,7 +127,9 @@ class GraphExecutor:
             trace_id=trace_id,
         )
 
-    def build_agent_state(self, *, request: GraphExecutionRequestDto) -> dict[str, object]:
+    def build_agent_state(
+        self, *, request: GraphExecutionRequestDto
+    ) -> dict[str, object]:
         """
         Convert the typed application request into the graph state contract.
         """

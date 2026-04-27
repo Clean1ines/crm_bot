@@ -19,11 +19,15 @@ class ThreadRuntimeStateRepository:
         logger.info(f"Updating summary for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET context_summary = $1, updated_at = NOW()
                 WHERE id = $2
-            """, summary, ensure_uuid(thread_id))
+            """,
+                summary,
+                ensure_uuid(thread_id),
+            )
 
         logger.debug("Summary updated")
 
@@ -31,11 +35,14 @@ class ThreadRuntimeStateRepository:
         logger.debug(f"Fetching state_json for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT state_json
                 FROM threads
                 WHERE id = $1
-            """, ensure_uuid(thread_id))
+            """,
+                ensure_uuid(thread_id),
+            )
 
         if row and row["state_json"] is not None:
             logger.debug(f"State_json retrieved for thread {thread_id}")
@@ -48,11 +55,15 @@ class ThreadRuntimeStateRepository:
         logger.info(f"Saving state_json for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET state_json = $1, updated_at = NOW()
                 WHERE id = $2
-            """, json.dumps(state, ensure_ascii=False), ensure_uuid(thread_id))
+            """,
+                json.dumps(state, ensure_ascii=False),
+                ensure_uuid(thread_id),
+            )
 
         logger.debug("State_json saved")
 
@@ -86,7 +97,9 @@ class ThreadRuntimeStateRepository:
             params.append(decision)
 
         if not updates:
-            logger.debug("No analytics fields to update", extra={"thread_id": thread_id})
+            logger.debug(
+                "No analytics fields to update", extra={"thread_id": thread_id}
+            )
             return
 
         query = f"""
@@ -114,11 +127,14 @@ class ThreadRuntimeStateRepository:
         logger.debug(f"Fetching analytics for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT intent, lifecycle, cta, decision
                 FROM threads
                 WHERE id = $1
-            """, ensure_uuid(thread_id))
+            """,
+                ensure_uuid(thread_id),
+            )
 
         if not row:
             logger.warning(f"Thread {thread_id} not found for analytics fetch")
@@ -131,13 +147,16 @@ class ThreadRuntimeStateRepository:
         logger.debug(f"Fetching message counts for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT
                     COUNT(*) AS total,
                     COUNT(CASE WHEN role = 'assistant' THEN 1 END) AS ai,
                     COUNT(CASE WHEN role = 'user' THEN 1 END) AS manager
                 FROM messages
                 WHERE thread_id = $1
-            """, ensure_uuid(thread_id))
+            """,
+                ensure_uuid(thread_id),
+            )
 
         return ThreadMessageCounts.from_record(dict(row) if row else None)

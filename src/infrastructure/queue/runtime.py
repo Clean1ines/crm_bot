@@ -60,7 +60,9 @@ async def main() -> None:
     shutdown_event = asyncio.Event()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda event=shutdown_event: request_shutdown(event))
+        loop.add_signal_handler(
+            sig, lambda event=shutdown_event: request_shutdown(event)
+        )
 
     db_url = settings.DATABASE_URL
     if not db_url:
@@ -75,7 +77,7 @@ async def main() -> None:
 
         dispatcher = JobDispatcher(
             thread_read_repo=thread_read_repo,
-        db_pool=pool,
+            db_pool=pool,
             project_repo=project_repo,
             metrics_repo=metrics_repo,
             telegram_sender=TelegramSender(),

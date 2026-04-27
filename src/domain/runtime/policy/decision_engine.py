@@ -1,6 +1,11 @@
 from collections.abc import Mapping
 
-from .intent_topic import FeatureMap, feature_risk_detected, normalize_intent, resolve_topic
+from .intent_topic import (
+    FeatureMap,
+    feature_risk_detected,
+    normalize_intent,
+    resolve_topic,
+)
 from .lifecycle import normalize_lifecycle
 from .repeat_detection import (
     REPEAT_ESCALATION_THRESHOLD,
@@ -130,7 +135,9 @@ def get_decision(
     topic = resolve_topic(normalized_intent, features)
 
     previous_dialog_state = _previous_dialog_state(dialog_state)
-    repeat_count = calculate_repeat_count(previous_dialog_state, normalized_intent, topic)
+    repeat_count = calculate_repeat_count(
+        previous_dialog_state, normalized_intent, topic
+    )
 
     handoff_decision = _requires_human_handoff(
         normalized_lifecycle,
@@ -143,7 +150,9 @@ def get_decision(
         return handoff_decision
 
     decision = _transition_decision(normalized_lifecycle, topic)
-    decision = _apply_soft_repeat_progression(normalized_lifecycle, topic, repeat_count, decision)
+    decision = _apply_soft_repeat_progression(
+        normalized_lifecycle, topic, repeat_count, decision
+    )
     decision = _active_client_decision(normalized_lifecycle, decision)
     decision = _llm_topic_decision(topic, decision)
 

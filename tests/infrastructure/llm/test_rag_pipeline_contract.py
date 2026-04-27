@@ -172,7 +172,9 @@ async def test_rag_pipeline_returns_empty_for_empty_query_or_missing_project():
     service = RAGService(repo)
 
     assert await service.search_with_expansion(project_id="", query="crm") == []
-    assert await service.search_with_expansion(project_id="project-1", query="   ") == []
+    assert (
+        await service.search_with_expansion(project_id="project-1", query="   ") == []
+    )
     assert repo.calls == []
 
 

@@ -8,71 +8,100 @@ from .base import ProjectRepositoryBase, JsonMap, ProjectId, ensure_uuid
 
 
 class ProjectConfigurationRepository(ProjectRepositoryBase):
-    async def get_project_configuration_view(self, project_id: ProjectId) -> ProjectConfigurationView:
+    async def get_project_configuration_view(
+        self, project_id: ProjectId
+    ) -> ProjectConfigurationView:
         project_uuid = ensure_uuid(project_id)
 
         async with self.pool.acquire() as conn:
-            settings_row = await conn.fetchrow("""
+            settings_row = await conn.fetchrow(
+                """
                 SELECT brand_name, industry, tone_of_voice, default_language,
                        default_timezone, system_prompt_override, created_at, updated_at
                 FROM project_settings
                 WHERE project_id = $1
-            """, project_uuid)
+            """,
+                project_uuid,
+            )
 
-            policies_row = await conn.fetchrow("""
+            policies_row = await conn.fetchrow(
+                """
                 SELECT escalation_policy_json, routing_policy_json, crm_policy_json,
                        response_policy_json, privacy_policy_json, created_at, updated_at
                 FROM project_policies
                 WHERE project_id = $1
-            """, project_uuid)
+            """,
+                project_uuid,
+            )
 
-            limit_row = await conn.fetchrow("""
+            limit_row = await conn.fetchrow(
+                """
                 SELECT monthly_token_limit, requests_per_minute, max_concurrent_threads,
                        priority, fallback_model, created_at, updated_at
                 FROM project_limit_profiles
                 WHERE project_id = $1
-            """, project_uuid)
+            """,
+                project_uuid,
+            )
 
-            integrations_rows = await conn.fetch("""
+            integrations_rows = await conn.fetch(
+                """
                 SELECT id, provider, status, config_json, created_at, updated_at
                 FROM project_integrations
                 WHERE project_id = $1
                 ORDER BY created_at ASC
-            """, project_uuid)
+            """,
+                project_uuid,
+            )
 
-            channels_rows = await conn.fetch("""
+            channels_rows = await conn.fetch(
+                """
                 SELECT id, kind, provider, status, config_json, created_at, updated_at
                 FROM project_channels
                 WHERE project_id = $1
                 ORDER BY created_at ASC
-            """, project_uuid)
+            """,
+                project_uuid,
+            )
 
-            prompt_rows = await conn.fetch("""
+            prompt_rows = await conn.fetch(
+                """
                 SELECT id, name, prompt_json, version, is_active, created_at, updated_at
                 FROM project_prompt_versions
                 WHERE project_id = $1
                 ORDER BY version DESC, created_at DESC
-            """, project_uuid)
+            """,
+                project_uuid,
+            )
 
-        return ProjectConfigurationView.from_record({
-            "project_id": str(project_uuid),
-            "settings": self._normalize_record(settings_row),
-            "policies": self._normalize_record(policies_row),
-            "limit_profile": self._normalize_record(limit_row),
-            "integrations": [self._normalize_record(row) for row in integrations_rows],
-            "channels": [self._normalize_record(row) for row in channels_rows],
-            "prompt_versions": [
-                {
-                    **self._normalize_record(row),
-                    "prompt_bundle": self._normalize_record(row).get("prompt_json", {}),
-                }
-                for row in prompt_rows
-            ],
-        })
+        return ProjectConfigurationView.from_record(
+            {
+                "project_id": str(project_uuid),
+                "settings": self._normalize_record(settings_row),
+                "policies": self._normalize_record(policies_row),
+                "limit_profile": self._normalize_record(limit_row),
+                "integrations": [
+                    self._normalize_record(row) for row in integrations_rows
+                ],
+                "channels": [self._normalize_record(row) for row in channels_rows],
+                "prompt_versions": [
+                    {
+                        **self._normalize_record(row),
+                        "prompt_bundle": self._normalize_record(row).get(
+                            "prompt_json", {}
+                        ),
+                    }
+                    for row in prompt_rows
+                ],
+            }
+        )
 
-    async def update_project_settings(self, project_id: ProjectId, data: JsonMap) -> None:
+    async def update_project_settings(
+        self, project_id: ProjectId, data: JsonMap
+    ) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO project_settings (
                     project_id, brand_name, industry, tone_of_voice,
                     default_language, default_timezone, system_prompt_override
@@ -97,9 +126,12 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 data.get("system_prompt_override"),
             )
 
-    async def update_project_policies(self, project_id: ProjectId, data: JsonMap) -> None:
+    async def update_project_policies(
+        self, project_id: ProjectId, data: JsonMap
+    ) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO project_policies (
                     project_id, escalation_policy_json, routing_policy_json,
                     crm_policy_json, response_policy_json, privacy_policy_json
@@ -122,9 +154,12 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 data.get("privacy_policy_json"),
             )
 
-    async def update_project_limit_profile(self, project_id: ProjectId, data: JsonMap) -> None:
+    async def update_project_limit_profile(
+        self, project_id: ProjectId, data: JsonMap
+    ) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO project_limit_profiles (
                     project_id, monthly_token_limit, requests_per_minute,
                     max_concurrent_threads, priority, fallback_model

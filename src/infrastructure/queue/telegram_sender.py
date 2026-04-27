@@ -56,9 +56,13 @@ class TelegramSender:
             )
 
         except httpx.RequestError as exc:
-            logger.error("Request error sending Telegram message", extra={"error": str(exc)})
+            logger.error(
+                "Request error sending Telegram message", extra={"error": str(exc)}
+            )
             return TelegramSendResult(ok=False, error=str(exc))
 
         except Exception as exc:
-            logger.error("Unexpected error sending Telegram message", extra={"error": str(exc)})
+            logger.error(
+                "Unexpected error sending Telegram message", extra={"error": str(exc)}
+            )
             return TelegramSendResult(ok=False, error=str(exc))

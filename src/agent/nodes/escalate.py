@@ -4,7 +4,6 @@ Escalation node for the LangGraph pipeline.
 Creates escalation side effects and returns a typed human-handoff state patch.
 """
 
-
 from src.agent.state import AgentState
 from src.domain.runtime.escalation import EscalationContext, EscalationResult
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
@@ -55,7 +54,10 @@ def create_escalate_node(
             )
             logger.info(
                 "Ticket created",
-                extra={"ticket_id": result.get("ticket_id"), "thread_id": context.thread_id},
+                extra={
+                    "ticket_id": result.get("ticket_id"),
+                    "thread_id": context.thread_id,
+                },
             )
         except Exception as exc:
             logger.exception(
@@ -71,7 +73,9 @@ def create_escalate_node(
 
         try:
             await queue_repo.enqueue("notify_manager", context.notification_payload())
-            logger.debug("Manager notification enqueued", extra={"thread_id": context.thread_id})
+            logger.debug(
+                "Manager notification enqueued", extra={"thread_id": context.thread_id}
+            )
         except Exception as exc:
             logger.exception(
                 "Failed to enqueue manager notification",
@@ -89,7 +93,9 @@ def create_escalate_node(
                 "update_metrics",
                 {"thread_id": context.thread_id, "escalated": True},
             )
-            logger.debug("Metrics update enqueued", extra={"thread_id": context.thread_id})
+            logger.debug(
+                "Metrics update enqueued", extra={"thread_id": context.thread_id}
+            )
         except Exception as exc:
             logger.exception(
                 "Failed to enqueue metrics update",

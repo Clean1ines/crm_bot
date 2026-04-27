@@ -1,8 +1,9 @@
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Json
 
-from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 from src.application.services.thread_command_service import ThreadCommandService
 from src.application.services.thread_query_service import ThreadQueryService
 from src.infrastructure.logging.logger import get_logger
@@ -42,7 +43,9 @@ async def list_dialogs(
     project_id: str = Query(..., description="Project ID to filter threads"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    status_filter: str | None = Query(None, description="Filter by thread status (active, manual, closed)"),
+    status_filter: str | None = Query(
+        None, description="Filter by thread status (active, manual, closed)"
+    ),
     search: str | None = Query(None, description="Search by client name or username"),
     current_user_id: str = Depends(get_current_user_id),
     thread_queries: ThreadQueryService = Depends(get_thread_query_service),
@@ -74,7 +77,9 @@ async def get_messages(
     thread_queries: ThreadQueryService = Depends(get_thread_query_service),
 ):
     """Get paginated messages for a thread."""
-    return await thread_queries.get_messages_for_user(thread_id, current_user_id, limit, offset)
+    return await thread_queries.get_messages_for_user(
+        thread_id, current_user_id, limit, offset
+    )
 
 
 @router.post("/{thread_id}/reply")
@@ -106,7 +111,9 @@ async def get_timeline(
     thread_queries: ThreadQueryService = Depends(get_thread_query_service),
 ):
     """Get paginated timeline of events for a thread."""
-    return await thread_queries.get_timeline_for_user(thread_id, current_user_id, limit, offset)
+    return await thread_queries.get_timeline_for_user(
+        thread_id, current_user_id, limit, offset
+    )
 
 
 @router.get("/{thread_id}/memory")
@@ -116,7 +123,9 @@ async def get_memory(
     thread_queries: ThreadQueryService = Depends(get_thread_query_service),
 ):
     """Get client memory for this thread."""
-    return await thread_queries.get_memory_for_user(thread_id, current_user_id, limit=100)
+    return await thread_queries.get_memory_for_user(
+        thread_id, current_user_id, limit=100
+    )
 
 
 @router.patch("/{thread_id}/memory")
@@ -131,7 +140,9 @@ async def update_memory_entry(
     Update a specific memory entry for the client of this thread.
     If the key does not exist, it will be created with type 'user_edited'.
     """
-    thread = await thread_queries.get_memory_update_target_for_user(thread_id, current_user_id)
+    thread = await thread_queries.get_memory_update_target_for_user(
+        thread_id, current_user_id
+    )
 
     return await thread_commands.update_memory_entry(
         project_id=thread.project_id,
@@ -149,5 +160,3 @@ async def get_state(
 ):
     """Get the persisted LangGraph state for a thread."""
     return await thread_queries.get_state_for_user(thread_id, current_user_id)
-
-

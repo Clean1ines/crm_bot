@@ -18,9 +18,7 @@ MISSING_TOOL_TEXT = (
     "The requested action could not be executed because no tool was selected. "
     "The conversation has been handed off to a manager."
 )
-TOOL_FAILED_TEXT = (
-    "An error occurred while executing the requested action. The conversation has been handed off to a manager."
-)
+TOOL_FAILED_TEXT = "An error occurred while executing the requested action. The conversation has been handed off to a manager."
 
 
 def create_tool_executor_node(tool_registry: ToolRegistry):
@@ -52,8 +50,12 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
                 context.tool_args,
                 context.execution_context(),
             )
-            logger.debug("Tool executed successfully", extra={"tool_name": context.tool_name})
-            return ToolExecutionResult(tool_result=result, requires_human=False).to_state_patch()
+            logger.debug(
+                "Tool executed successfully", extra={"tool_name": context.tool_name}
+            )
+            return ToolExecutionResult(
+                tool_result=result, requires_human=False
+            ).to_state_patch()
         except Exception as exc:
             logger.exception(
                 "Tool execution failed",
@@ -70,7 +72,11 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
         return len(json.dumps(context.tool_args))
 
     def _get_tool_executor_output_size(result: dict[str, object]) -> int:
-        return len(json.dumps(result.get("tool_result", ""))) if result.get("tool_result") else 0
+        return (
+            len(json.dumps(result.get("tool_result", "")))
+            if result.get("tool_result")
+            else 0
+        )
 
     async def tool_executor_node(state: AgentState) -> dict[str, object]:
         return await log_node_execution(

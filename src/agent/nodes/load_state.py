@@ -69,7 +69,9 @@ def create_load_state_node(
             patch["cta"] = _read_value(analytics_view, "cta")
             patch["decision"] = _read_value(analytics_view, "decision")
 
-        recent_messages = await thread_message_repo.get_messages_for_langgraph(thread_id)
+        recent_messages = await thread_message_repo.get_messages_for_langgraph(
+            thread_id
+        )
         patch["history"] = recent_messages
 
         persisted_state = await thread_runtime_state_repo.get_state_json(thread_id)
@@ -82,11 +84,17 @@ def create_load_state_node(
         if memory_repo and project_id and client_id:
             try:
                 if hasattr(memory_repo, "get_for_user_view"):
-                    patch["user_memory"] = await memory_repo.get_for_user_view(project_id, client_id)
+                    patch["user_memory"] = await memory_repo.get_for_user_view(
+                        project_id, client_id
+                    )
                 elif hasattr(memory_repo, "get_for_client"):
-                    patch["user_memory"] = await memory_repo.get_for_client(project_id, client_id, limit=20)
+                    patch["user_memory"] = await memory_repo.get_for_client(
+                        project_id, client_id, limit=20
+                    )
                 elif hasattr(memory_repo, "list_for_client"):
-                    patch["user_memory"] = await memory_repo.list_for_client(project_id, client_id, limit=20)
+                    patch["user_memory"] = await memory_repo.list_for_client(
+                        project_id, client_id, limit=20
+                    )
             except Exception as exc:
                 logger.exception(
                     "Failed to load client memory",

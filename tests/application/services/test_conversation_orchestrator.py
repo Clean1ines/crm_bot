@@ -1,26 +1,27 @@
-
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.application.orchestration.conversation_orchestrator import ConversationOrchestrator
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 
 
 def make_orchestrator():
     return ConversationOrchestrator(
-            db_conn=MagicMock(),
-            project_repo=MagicMock(),
-            thread_lifecycle_repo=MagicMock(),
-            thread_message_repo=MagicMock(),
-            thread_runtime_state_repo=MagicMock(),
-            thread_read_repo=MagicMock(),
-            queue_repo=MagicMock(),
-            event_repo=MagicMock(),
-            tool_registry=MagicMock(),
-            memory_repo=MagicMock(),
-            logger=MagicMock(),
-            agent_factory=MagicMock(return_value=MagicMock()),
-        )
+        db_conn=MagicMock(),
+        project_repo=MagicMock(),
+        thread_lifecycle_repo=MagicMock(),
+        thread_message_repo=MagicMock(),
+        thread_runtime_state_repo=MagicMock(),
+        thread_read_repo=MagicMock(),
+        queue_repo=MagicMock(),
+        event_repo=MagicMock(),
+        tool_registry=MagicMock(),
+        memory_repo=MagicMock(),
+        logger=MagicMock(),
+        agent_factory=MagicMock(return_value=MagicMock()),
+    )
 
 
 @pytest.mark.asyncio

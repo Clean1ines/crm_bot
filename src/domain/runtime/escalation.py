@@ -48,7 +48,9 @@ class EscalationContext:
 @dataclass(slots=True)
 class EscalationResult:
     requires_human: bool = True
-    response_text: str = "Your request has been handed off to a manager. Please wait for a reply."
+    response_text: str = (
+        "Your request has been handed off to a manager. Please wait for a reply."
+    )
     tool_result: ToolResultPayload | object | None = None
 
     def to_state_patch(self) -> RuntimeStatePatch:

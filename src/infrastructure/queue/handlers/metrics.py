@@ -25,7 +25,9 @@ async def handle_update_metrics(
 
     thread_id = payload.get("thread_id")
     if not thread_id:
-        logger.error("update_metrics job missing thread_id", extra={"job_id": job.get("id")})
+        logger.error(
+            "update_metrics job missing thread_id", extra={"job_id": job.get("id")}
+        )
         raise PermanentJobError("update_metrics job missing thread_id")
 
     await metrics_repo.update_thread_metrics(
@@ -38,9 +40,14 @@ async def handle_update_metrics(
     )
 
     if payload.get("close_ticket"):
-        thread_info = await thread_read_repo.get_thread_with_project_view(str(thread_id))
+        thread_info = await thread_read_repo.get_thread_with_project_view(
+            str(thread_id)
+        )
         if not thread_info:
-            logger.warning("Thread not found for project daily update", extra={"thread_id": thread_id})
+            logger.warning(
+                "Thread not found for project daily update",
+                extra={"thread_id": thread_id},
+            )
             return
 
         project_id = getattr(thread_info, "project_id", None)
@@ -67,13 +74,17 @@ async def handle_aggregate_metrics(
 
     date_str = payload.get("date")
     if not date_str:
-        logger.error("aggregate_metrics job missing date", extra={"job_id": job.get("id")})
+        logger.error(
+            "aggregate_metrics job missing date", extra={"job_id": job.get("id")}
+        )
         raise PermanentJobError("aggregate_metrics job missing date")
 
     try:
         target_date = datetime.strptime(str(date_str), "%Y-%m-%d").date()
     except ValueError as exc:
         logger.error("Invalid aggregate_metrics date format", extra={"date": date_str})
-        raise PermanentJobError(f"Invalid aggregate_metrics date format: {date_str}") from exc
+        raise PermanentJobError(
+            f"Invalid aggregate_metrics date format: {date_str}"
+        ) from exc
 
     await metrics_repo.aggregate_for_date(target_date)

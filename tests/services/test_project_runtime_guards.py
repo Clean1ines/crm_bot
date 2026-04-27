@@ -97,7 +97,9 @@ async def test_release_thread_slot_clears_runtime_slot(redis):
 @pytest.mark.asyncio
 async def test_project_runtime_loader_fails_closed_when_configuration_load_fails():
     projects = AsyncMock()
-    projects.get_project_configuration_view = AsyncMock(side_effect=RuntimeError("db down"))
+    projects.get_project_configuration_view = AsyncMock(
+        side_effect=RuntimeError("db down")
+    )
     logger = MagicMock()
     loader = ProjectRuntimeLoader(projects, logger)
 

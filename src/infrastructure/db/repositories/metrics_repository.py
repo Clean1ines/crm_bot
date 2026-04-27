@@ -3,9 +3,8 @@ Metrics Repository for aggregating thread and project metrics.
 Provides methods to update thread_metrics and project_metrics_daily tables.
 """
 
-import uuid
 import asyncpg
-from datetime import datetime, date
+from datetime import date
 
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
@@ -16,15 +15,15 @@ logger = get_logger(__name__)
 class MetricsRepository:
     """
     Repository for managing thread and project metrics.
-    
+
     This repository handles incremental updates to thread_metrics and
     daily aggregates in project_metrics_daily.
     """
-    
+
     def __init__(self, pool: asyncpg.Pool) -> None:
         """
         Initialize the MetricsRepository with a database connection pool.
-        
+
         Args:
             pool: Asyncpg connection pool for database operations.
         """
@@ -38,11 +37,11 @@ class MetricsRepository:
         ai_messages: int | None = None,
         manager_messages: int | None = None,
         escalated: bool | None = None,
-        resolution_time: float | None = None  # in seconds
+        resolution_time: float | None = None,  # in seconds
     ) -> None:
         """
         Update thread_metrics for a given thread. Uses ON CONFLICT to handle upsert.
-        
+
         Args:
             thread_id: UUID of the thread.
             total_messages: Increment total messages by this amount.
@@ -56,9 +55,11 @@ class MetricsRepository:
         updates = []
         params = [thread_uuid]
         param_idx = 2
-        
+
         if total_messages is not None:
-            updates.append(f"total_messages = COALESCE(total_messages, 0) + ${param_idx}")
+            updates.append(
+                f"total_messages = COALESCE(total_messages, 0) + ${param_idx}"
+            )
             params.append(total_messages)
             param_idx += 1
         if ai_messages is not None:
@@ -66,7 +67,9 @@ class MetricsRepository:
             params.append(ai_messages)
             param_idx += 1
         if manager_messages is not None:
-            updates.append(f"manager_messages = COALESCE(manager_messages, 0) + ${param_idx}")
+            updates.append(
+                f"manager_messages = COALESCE(manager_messages, 0) + ${param_idx}"
+            )
             params.append(manager_messages)
             param_idx += 1
         if escalated is not None:
@@ -77,21 +80,23 @@ class MetricsRepository:
             updates.append(f"resolution_time = ${param_idx} * interval '1 second'")
             params.append(resolution_time)
             param_idx += 1
-        
+
         # Always update updated_at
-        updates.append(f"updated_at = NOW()")
-        
+        updates.append("updated_at = NOW()")
+
         if not updates:
-            logger.debug("No updates to apply for thread_metrics", extra={"thread_id": thread_id})
+            logger.debug(
+                "No updates to apply for thread_metrics", extra={"thread_id": thread_id}
+            )
             return
-        
+
         query = f"""
             INSERT INTO thread_metrics (thread_id, total_messages, ai_messages, manager_messages, escalated, resolution_time, updated_at)
             VALUES ($1, 0, 0, 0, false, NULL, NOW())
             ON CONFLICT (thread_id) DO UPDATE SET
-            {', '.join(updates)}
+            {", ".join(updates)}
         """
-        
+
         async with self.pool.acquire() as conn:
             await conn.execute(query, *params)
         logger.debug("Thread metrics updated", extra={"thread_id": thread_id})
@@ -103,11 +108,11 @@ class MetricsRepository:
         total_threads_delta: int = 0,
         escalations_delta: int = 0,
         tokens_used_delta: int = 0,
-        avg_messages_to_resolution: float | None = None
+        avg_messages_to_resolution: float | None = None,
     ) -> None:
         """
         Update project_metrics_daily for a given project and date.
-        
+
         Args:
             project_id: UUID of the project.
             date: The date for which to update.
@@ -118,36 +123,63 @@ class MetricsRepository:
         """
         async with self.pool.acquire() as conn:
             # First, get current values (if any)
-            current = await conn.fetchrow("""
+            current = await conn.fetchrow(
+                """
                 SELECT total_threads, escalations, avg_messages_to_resolution, tokens_used
                 FROM project_metrics_daily
                 WHERE project_id = $1 AND date = $2
-            """, ensure_uuid(project_id), date)
-            
+            """,
+                ensure_uuid(project_id),
+                date,
+            )
+
             if current:
-                new_total = current['total_threads'] + total_threads_delta
-                new_escalations = current['escalations'] + escalations_delta
-                new_tokens = current['tokens_used'] + tokens_used_delta
-                new_avg = avg_messages_to_resolution if avg_messages_to_resolution is not None else current['avg_messages_to_resolution']
-                await conn.execute("""
+                new_total = current["total_threads"] + total_threads_delta
+                new_escalations = current["escalations"] + escalations_delta
+                new_tokens = current["tokens_used"] + tokens_used_delta
+                new_avg = (
+                    avg_messages_to_resolution
+                    if avg_messages_to_resolution is not None
+                    else current["avg_messages_to_resolution"]
+                )
+                await conn.execute(
+                    """
                     UPDATE project_metrics_daily
                     SET total_threads = $1, escalations = $2, avg_messages_to_resolution = $3, tokens_used = $4
                     WHERE project_id = $5 AND date = $6
-                """, new_total, new_escalations, new_avg, new_tokens, ensure_uuid(project_id), date)
+                """,
+                    new_total,
+                    new_escalations,
+                    new_avg,
+                    new_tokens,
+                    ensure_uuid(project_id),
+                    date,
+                )
             else:
                 # Insert new row with deltas as initial values
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO project_metrics_daily (project_id, date, total_threads, escalations, avg_messages_to_resolution, tokens_used)
                     VALUES ($1, $2, $3, $4, $5, $6)
-                """, ensure_uuid(project_id), date, total_threads_delta, escalations_delta, avg_messages_to_resolution, tokens_used_delta)
-        
-        logger.debug("Project daily metrics updated", extra={"project_id": project_id, "date": date})
+                """,
+                    ensure_uuid(project_id),
+                    date,
+                    total_threads_delta,
+                    escalations_delta,
+                    avg_messages_to_resolution,
+                    tokens_used_delta,
+                )
+
+        logger.debug(
+            "Project daily metrics updated",
+            extra={"project_id": project_id, "date": date},
+        )
 
     async def aggregate_for_date(self, target_date: date) -> None:
         """
         Recalculate all project_metrics_daily for a specific date from events.
         This is an idempotent operation that can be used to fix discrepancies.
-        
+
         Args:
             target_date: The date to aggregate.
         """
@@ -159,37 +191,51 @@ class MetricsRepository:
         # - tokens_used: not available from events currently; we can skip or set to 0
         async with self.pool.acquire() as conn:
             # Get threads created on this date
-            rows = await conn.fetch("""
+            rows = await conn.fetch(
+                """
                 SELECT t.id, t.created_at, c.project_id
                 FROM threads t
                 JOIN clients c ON t.client_id = c.id
                 WHERE t.created_at::date = $1
-            """, target_date)
+            """,
+                target_date,
+            )
             thread_counts = {}
             for row in rows:
-                pid = row['project_id']
+                pid = row["project_id"]
                 thread_counts[pid] = thread_counts.get(pid, 0) + 1
-            
+
             # Get escalations on this date
-            escalations = await conn.fetch("""
+            escalations = await conn.fetch(
+                """
                 SELECT project_id, COUNT(*) as count
                 FROM events
                 WHERE event_type = 'ticket_created' AND created_at::date = $1
                 GROUP BY project_id
-            """, target_date)
-            escal_counts = {row['project_id']: row['count'] for row in escalations}
-            
+            """,
+                target_date,
+            )
+            escal_counts = {row["project_id"]: row["count"] for row in escalations}
+
             # For each project, update the daily metrics
             # We'll first delete existing rows for this date to avoid double counting
-            await conn.execute("DELETE FROM project_metrics_daily WHERE date = $1", target_date)
-            
+            await conn.execute(
+                "DELETE FROM project_metrics_daily WHERE date = $1", target_date
+            )
+
             all_projects = set(thread_counts.keys()) | set(escal_counts.keys())
             for pid in all_projects:
                 total = thread_counts.get(pid, 0)
                 esc = escal_counts.get(pid, 0)
-                await conn.execute("""
+                await conn.execute(
+                    """
                     INSERT INTO project_metrics_daily (project_id, date, total_threads, escalations, avg_messages_to_resolution, tokens_used)
                     VALUES ($1, $2, $3, $4, NULL, 0)
-                """, pid, target_date, total, esc)
-        
+                """,
+                    pid,
+                    target_date,
+                    total,
+                    esc,
+                )
+
         logger.info("Metrics aggregated", extra={"date": target_date})

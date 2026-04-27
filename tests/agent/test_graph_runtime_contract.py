@@ -36,7 +36,10 @@ def test_agent_graph_contract_declares_allowed_states_and_entrypoint():
 def test_agent_graph_contract_declares_transitions():
     transition_map = AGENT_GRAPH_CONTRACT.transition_map()
 
-    assert transition_map[AgentGraphNode.LOAD_STATE][0].target == AgentGraphNode.RULES_CHECK
+    assert (
+        transition_map[AgentGraphNode.LOAD_STATE][0].target
+        == AgentGraphNode.RULES_CHECK
+    )
 
     rules_targets = {
         transition.decision: transition.target
@@ -44,7 +47,10 @@ def test_agent_graph_contract_declares_transitions():
     }
     assert rules_targets[AgentGraphDecision.RESPOND] == AgentGraphNode.RESPONDER
     assert rules_targets[AgentGraphDecision.ESCALATE] == AgentGraphNode.ESCALATE
-    assert rules_targets[AgentGraphDecision.PROCEED_TO_LLM] == AgentGraphNode.INTENT_EXTRACTOR
+    assert (
+        rules_targets[AgentGraphDecision.PROCEED_TO_LLM]
+        == AgentGraphNode.INTENT_EXTRACTOR
+    )
 
     policy_targets = {
         transition.decision: transition.target
@@ -52,7 +58,9 @@ def test_agent_graph_contract_declares_transitions():
     }
     assert policy_targets[AgentGraphDecision.LLM_GENERATE] == AgentGraphNode.KB_SEARCH
     assert policy_targets[AgentGraphDecision.CALL_TOOL] == AgentGraphNode.TOOL_EXECUTOR
-    assert policy_targets[AgentGraphDecision.ESCALATE_TO_HUMAN] == AgentGraphNode.ESCALATE
+    assert (
+        policy_targets[AgentGraphDecision.ESCALATE_TO_HUMAN] == AgentGraphNode.ESCALATE
+    )
 
     terminal = transition_map[AgentGraphNode.PERSIST][0]
     assert terminal.terminal is True
@@ -62,30 +70,75 @@ def test_agent_graph_contract_declares_transitions():
 def test_agent_graph_contract_declares_side_effects_and_fallbacks():
     contracts = AGENT_GRAPH_CONTRACT.node_contracts
 
-    assert AgentGraphSideEffect.LOAD_THREAD_STATE in contracts[AgentGraphNode.LOAD_STATE].side_effects
-    assert AgentGraphFallback.EMPTY_USER_MEMORY in contracts[AgentGraphNode.LOAD_STATE].fallbacks
+    assert (
+        AgentGraphSideEffect.LOAD_THREAD_STATE
+        in contracts[AgentGraphNode.LOAD_STATE].side_effects
+    )
+    assert (
+        AgentGraphFallback.EMPTY_USER_MEMORY
+        in contracts[AgentGraphNode.LOAD_STATE].fallbacks
+    )
 
-    assert AgentGraphSideEffect.SEARCH_KNOWLEDGE in contracts[AgentGraphNode.KB_SEARCH].side_effects
-    assert AgentGraphFallback.EMPTY_KNOWLEDGE in contracts[AgentGraphNode.KB_SEARCH].fallbacks
+    assert (
+        AgentGraphSideEffect.SEARCH_KNOWLEDGE
+        in contracts[AgentGraphNode.KB_SEARCH].side_effects
+    )
+    assert (
+        AgentGraphFallback.EMPTY_KNOWLEDGE
+        in contracts[AgentGraphNode.KB_SEARCH].fallbacks
+    )
 
-    assert AgentGraphSideEffect.EXECUTE_TOOL in contracts[AgentGraphNode.TOOL_EXECUTOR].side_effects
-    assert AgentGraphFallback.HUMAN_HANDOFF in contracts[AgentGraphNode.TOOL_EXECUTOR].fallbacks
+    assert (
+        AgentGraphSideEffect.EXECUTE_TOOL
+        in contracts[AgentGraphNode.TOOL_EXECUTOR].side_effects
+    )
+    assert (
+        AgentGraphFallback.HUMAN_HANDOFF
+        in contracts[AgentGraphNode.TOOL_EXECUTOR].fallbacks
+    )
 
-    assert AgentGraphSideEffect.SEND_TELEGRAM_MESSAGE in contracts[AgentGraphNode.RESPONDER].side_effects
-    assert AgentGraphFallback.DELIVERED_WITH_PERSISTENCE_DEGRADED in contracts[AgentGraphNode.RESPONDER].fallbacks
+    assert (
+        AgentGraphSideEffect.SEND_TELEGRAM_MESSAGE
+        in contracts[AgentGraphNode.RESPONDER].side_effects
+    )
+    assert (
+        AgentGraphFallback.DELIVERED_WITH_PERSISTENCE_DEGRADED
+        in contracts[AgentGraphNode.RESPONDER].fallbacks
+    )
 
-    assert AgentGraphSideEffect.SAVE_GRAPH_STATE in contracts[AgentGraphNode.PERSIST].side_effects
-    assert AgentGraphSideEffect.UPDATE_ANALYTICS in contracts[AgentGraphNode.PERSIST].side_effects
+    assert (
+        AgentGraphSideEffect.SAVE_GRAPH_STATE
+        in contracts[AgentGraphNode.PERSIST].side_effects
+    )
+    assert (
+        AgentGraphSideEffect.UPDATE_ANALYTICS
+        in contracts[AgentGraphNode.PERSIST].side_effects
+    )
 
 
 def test_agent_graph_contract_declares_dependency_injection_requirements():
     contracts = AGENT_GRAPH_CONTRACT.node_contracts
 
-    assert AgentGraphDependency.THREAD_REPOSITORY in contracts[AgentGraphNode.LOAD_STATE].required_dependencies
-    assert AgentGraphDependency.TOOL_REGISTRY in contracts[AgentGraphNode.KB_SEARCH].required_dependencies
-    assert AgentGraphDependency.TOOL_REGISTRY in contracts[AgentGraphNode.TOOL_EXECUTOR].required_dependencies
-    assert AgentGraphDependency.QUEUE_REPOSITORY in contracts[AgentGraphNode.ESCALATE].required_dependencies
-    assert AgentGraphDependency.THREAD_REPOSITORY in contracts[AgentGraphNode.PERSIST].required_dependencies
+    assert (
+        AgentGraphDependency.THREAD_REPOSITORY
+        in contracts[AgentGraphNode.LOAD_STATE].required_dependencies
+    )
+    assert (
+        AgentGraphDependency.TOOL_REGISTRY
+        in contracts[AgentGraphNode.KB_SEARCH].required_dependencies
+    )
+    assert (
+        AgentGraphDependency.TOOL_REGISTRY
+        in contracts[AgentGraphNode.TOOL_EXECUTOR].required_dependencies
+    )
+    assert (
+        AgentGraphDependency.QUEUE_REPOSITORY
+        in contracts[AgentGraphNode.ESCALATE].required_dependencies
+    )
+    assert (
+        AgentGraphDependency.THREAD_REPOSITORY
+        in contracts[AgentGraphNode.PERSIST].required_dependencies
+    )
 
 
 def test_create_agent_requires_core_injected_dependencies():
@@ -132,7 +185,9 @@ def test_create_agent_materializes_contract_as_langgraph_runtime():
 
     with (
         patch("src.agent.graph.create_intent_extractor_node", return_value=MagicMock()),
-        patch("src.agent.graph.create_response_generator_node", return_value=MagicMock()),
+        patch(
+            "src.agent.graph.create_response_generator_node", return_value=MagicMock()
+        ),
     ):
         graph = create_agent(
             tool_registry=tool_registry,

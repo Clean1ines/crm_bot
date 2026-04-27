@@ -5,7 +5,9 @@ from src.domain.runtime.knowledge_search import (
 
 
 def test_knowledge_search_context_hashes_query():
-    context = KnowledgeSearchContext.from_state({"project_id": "project-1", "user_input": "hello"})
+    context = KnowledgeSearchContext.from_state(
+        {"project_id": "project-1", "user_input": "hello"}
+    )
 
     assert context.project_id == "project-1"
     assert context.query == "hello"

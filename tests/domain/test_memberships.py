@@ -1,6 +1,9 @@
 import pytest
 
-from src.domain.control_plane.memberships import is_manager_capable_role, normalize_project_role
+from src.domain.control_plane.memberships import (
+    is_manager_capable_role,
+    normalize_project_role,
+)
 
 
 def test_normalize_project_role_accepts_known_roles():

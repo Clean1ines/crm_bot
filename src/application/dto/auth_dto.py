@@ -45,13 +45,17 @@ class AuthMethodsDto:
     def from_record(cls, record: dict[str, object]) -> "AuthMethodsDto":
         return cls(
             user_id=str(record["user_id"]),
-            methods=[AuthMethodDto.from_record(item) for item in record.get("methods", [])],
+            methods=[
+                AuthMethodDto.from_record(item) for item in record.get("methods", [])
+            ],
             has_password=bool(record.get("has_password")),
             verified_email=record.get("verified_email"),
         )
 
     @classmethod
-    def from_view(cls, view: object, *, verified_email: str | None = None) -> "AuthMethodsDto":
+    def from_view(
+        cls, view: object, *, verified_email: str | None = None
+    ) -> "AuthMethodsDto":
         return cls(
             user_id=str(view.user_id),
             methods=[AuthMethodDto.from_view(method) for method in view.methods],
@@ -86,7 +90,12 @@ class AuthSessionDto:
         username: str | None = None,
         full_name: str | None = None,
     ) -> "AuthSessionDto":
-        return cls(access_token=access_token, user_id=user_id, username=username, full_name=full_name)
+        return cls(
+            access_token=access_token,
+            user_id=user_id,
+            username=username,
+            full_name=full_name,
+        )
 
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
@@ -113,7 +122,14 @@ class AuthActionDto:
         url: str | None = None,
         user_id: str | None = None,
     ) -> "AuthActionDto":
-        return cls(status=status, delivery=delivery, expires_at=expires_at, token=token, url=url, user_id=user_id)
+        return cls(
+            status=status,
+            delivery=delivery,
+            expires_at=expires_at,
+            token=token,
+            url=url,
+            user_id=user_id,
+        )
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

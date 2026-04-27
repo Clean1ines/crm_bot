@@ -1,7 +1,12 @@
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeMemory, RuntimeStateInput, RuntimeStatePatch
+from src.domain.runtime.state_contracts import (
+    RuntimeHistoryMessage,
+    RuntimeMemory,
+    RuntimeStateInput,
+    RuntimeStatePatch,
+)
 
 
 @dataclass(slots=True)
@@ -66,7 +71,9 @@ class IntentExtractionResult:
     is_repeat_like: bool
 
     @classmethod
-    def from_llm_payload(cls, payload: Mapping[str, object]) -> "IntentExtractionResult":
+    def from_llm_payload(
+        cls, payload: Mapping[str, object]
+    ) -> "IntentExtractionResult":
         validated = IntentExtractionPayload.from_mapping(payload)
         return cls(
             intent=validated.intent,

@@ -75,7 +75,9 @@ class RAGService:
         if not isinstance(data, list):
             return []
 
-        if not all(isinstance(item, int) and not isinstance(item, bool) for item in data):
+        if not all(
+            isinstance(item, int) and not isinstance(item, bool) for item in data
+        ):
             return []
 
         return list(data)

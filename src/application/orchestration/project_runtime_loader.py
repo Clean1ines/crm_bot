@@ -14,7 +14,9 @@ class ProjectRuntimeLoader:
         self.projects = projects
         self.logger = logger
 
-    async def load_project_configuration(self, project_id: str) -> ProjectRuntimeContextDto:
+    async def load_project_configuration(
+        self, project_id: str
+    ) -> ProjectRuntimeContextDto:
         try:
             config = await self.projects.get_project_configuration_view(project_id)
             return ProjectRuntimeContextDto.from_record(config.to_runtime_record())

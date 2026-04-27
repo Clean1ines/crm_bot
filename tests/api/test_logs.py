@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from uuid import uuid4
 
 from src.interfaces.http.app import app
 
@@ -47,7 +46,7 @@ class TestFrontendLogs:
             "message": "Warning message",
             "timestamp": "2025-01-01T00:00:00Z",
             "user_id": "123",
-            "context": {"page": "dashboard"}
+            "context": {"page": "dashboard"},
         }
         with patch("src.interfaces.http.logs.logger") as mock_logger:
             response = client.post("/api/logs/frontend", json=payload)
@@ -61,10 +60,7 @@ class TestFrontendLogs:
         assert call_args[0][0] == "Warning message"
         extra = call_args[1].get("extra", {})
         # timestamp должен быть исключён
-        assert extra == {
-            "user_id": "123",
-            "context": {"page": "dashboard"}
-        }
+        assert extra == {"user_id": "123", "context": {"page": "dashboard"}}
 
     def test_frontend_logs_unknown_level_fallback_to_info(self, client):
         """Неизвестный уровень — fallback на info"""

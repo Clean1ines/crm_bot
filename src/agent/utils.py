@@ -1,7 +1,6 @@
 """Shared utilities for the agent pipeline."""
 
 
-
 def coerce_int(value: object, default: int = 0) -> int:
     """
     Convert a value to int with a safe fallback.

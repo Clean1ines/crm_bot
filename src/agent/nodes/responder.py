@@ -5,7 +5,6 @@ Delivers the final response through the transport adapter and reports the
 delivery outcome back into graph state.
 """
 
-
 from src.agent.state import AgentState
 from src.domain.runtime.delivery import ResponseDeliveryContext, ResponseDeliveryResult
 from src.infrastructure.logging.logger import get_logger, log_node_execution
@@ -17,12 +16,8 @@ MISSING_CHAT_ID_TEXT = (
     "Failed to deliver the response because the chat identifier is missing. "
     "Please contact support."
 )
-SEND_FAILED_TEXT = (
-    "The response could not be delivered right now. Please try again later or contact a manager."
-)
-SEND_EXCEPTION_TEXT = (
-    "A technical error occurred while delivering the response. We are already looking into it."
-)
+SEND_FAILED_TEXT = "The response could not be delivered right now. Please try again later or contact a manager."
+SEND_EXCEPTION_TEXT = "A technical error occurred while delivering the response. We are already looking into it."
 
 
 def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None):
@@ -55,10 +50,15 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
             result = await tool_registry.execute(
                 "telegram.send_message",
                 {"chat_id": context.chat_id, "text": response_text},
-                context={"project_id": context.project_id, "thread_id": context.thread_id},
+                context={
+                    "project_id": context.project_id,
+                    "thread_id": context.thread_id,
+                },
             )
             if result.get("ok"):
-                logger.info("Message sent successfully", extra={"chat_id": context.chat_id})
+                logger.info(
+                    "Message sent successfully", extra={"chat_id": context.chat_id}
+                )
                 if context.thread_id and thread_message_repo:
                     try:
                         await thread_message_repo.add_message(
@@ -66,7 +66,10 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
                             role="assistant",
                             content=response_text,
                         )
-                        logger.debug("Assistant message saved", extra={"thread_id": context.thread_id})
+                        logger.debug(
+                            "Assistant message saved",
+                            extra={"thread_id": context.thread_id},
+                        )
                     except Exception as exc:
                         logger.exception(
                             "Failed to save assistant message",
@@ -84,7 +87,10 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
                     response_text=None,
                 ).to_state_patch()
 
-            logger.error("Telegram send failed", extra={"chat_id": context.chat_id, "result": result})
+            logger.error(
+                "Telegram send failed",
+                extra={"chat_id": context.chat_id, "result": result},
+            )
             return ResponseDeliveryResult(
                 message_sent=False,
                 requires_human=True,

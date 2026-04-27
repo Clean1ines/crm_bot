@@ -1,4 +1,3 @@
-
 from src.domain.project_plane.manager_assignments import ManagerActor
 from src.domain.project_plane.thread_status import ThreadStatus
 from src.utils.uuid_utils import ensure_uuid
@@ -19,9 +18,12 @@ class ThreadLifecycleRepository:
         source: str = "telegram",
         full_name: str = None,
     ) -> str:
-        logger.info(f"Getting or creating client for project {project_id}, chat {chat_id}")
+        logger.info(
+            f"Getting or creating client for project {project_id}, chat {chat_id}"
+        )
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 INSERT INTO clients (project_id, chat_id, username, source, user_id, full_name)
                 VALUES (
                     $1,
@@ -37,7 +39,13 @@ class ThreadLifecycleRepository:
                     full_name = COALESCE(EXCLUDED.full_name, clients.full_name),
                     user_id = COALESCE(clients.user_id, EXCLUDED.user_id)
                 RETURNING id
-            """, ensure_uuid(project_id), chat_id, username, source, full_name)
+            """,
+                ensure_uuid(project_id),
+                chat_id,
+                username,
+                source,
+                full_name,
+            )
             client_id = str(row["id"])
             logger.info(f"Client {client_id} ensured")
             return client_id
@@ -45,12 +53,15 @@ class ThreadLifecycleRepository:
     async def get_active_thread(self, client_id: str) -> str | None:
         logger.debug(f"Looking for thread for client {client_id}")
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 SELECT id FROM threads
                 WHERE client_id = $1
                 ORDER BY updated_at DESC
                 LIMIT 1
-            """, ensure_uuid(client_id))
+            """,
+                ensure_uuid(client_id),
+            )
 
         if row:
             thread_id = str(row["id"])
@@ -63,11 +74,15 @@ class ThreadLifecycleRepository:
     async def create_thread(self, client_id: str) -> str:
         logger.info(f"Creating new thread for client {client_id}")
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("""
+            row = await conn.fetchrow(
+                """
                 INSERT INTO threads (client_id, status)
                 VALUES ($1, $2)
                 RETURNING id
-            """, ensure_uuid(client_id), ThreadStatus.ACTIVE.value)
+            """,
+                ensure_uuid(client_id),
+                ThreadStatus.ACTIVE.value,
+            )
 
         thread_id = str(row["id"])
         logger.info(f"Thread {thread_id} created")
@@ -78,21 +93,29 @@ class ThreadLifecycleRepository:
         logger.info(f"Updating thread {thread_id} status to {status_value}")
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET status = $1, updated_at = NOW()
                 WHERE id = $2
-            """, status_value, ensure_uuid(thread_id))
+            """,
+                status_value,
+                ensure_uuid(thread_id),
+            )
 
     async def update_interaction_mode(self, thread_id: str, mode: str) -> None:
         logger.info(f"Updating interaction mode for thread {thread_id} to {mode}")
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET interaction_mode = $1, updated_at = NOW()
                 WHERE id = $2
-            """, mode, ensure_uuid(thread_id))
+            """,
+                mode,
+                ensure_uuid(thread_id),
+            )
 
     async def claim_for_manager(
         self,
@@ -116,7 +139,8 @@ class ThreadLifecycleRepository:
         )
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET
                     status = $1,
@@ -135,7 +159,8 @@ class ThreadLifecycleRepository:
         logger.info("Releasing manager assignment", extra={"thread_id": thread_id})
 
         async with self.pool.acquire() as conn:
-            await conn.execute("""
+            await conn.execute(
+                """
                 UPDATE threads
                 SET
                     status = $1,
@@ -143,4 +168,7 @@ class ThreadLifecycleRepository:
                     manager_chat_id = NULL,
                     updated_at = NOW()
                 WHERE id = $2
-            """, ThreadStatus.ACTIVE.value, ensure_uuid(thread_id))
+            """,
+                ThreadStatus.ACTIVE.value,
+                ensure_uuid(thread_id),
+            )

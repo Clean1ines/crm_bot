@@ -3,7 +3,9 @@ from uuid import uuid4
 
 import pytest
 
-from src.infrastructure.db.repositories.project.project_channels import ProjectChannelRepository
+from src.infrastructure.db.repositories.project.project_channels import (
+    ProjectChannelRepository,
+)
 
 
 class FakeConnection:

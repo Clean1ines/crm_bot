@@ -10,7 +10,6 @@ No src.tools registry wiring.
 No application composition.
 """
 
-
 import asyncpg
 
 

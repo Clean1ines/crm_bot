@@ -78,7 +78,9 @@ class ProjectIntegrationDto:
             provider=str(record.get("provider") or ""),
             status=str(status) if status is not None else None,
             config_json=_as_dict(record.get("config_json")),
-            credentials_encrypted=str(credentials_encrypted) if credentials_encrypted is not None else None,
+            credentials_encrypted=str(credentials_encrypted)
+            if credentials_encrypted is not None
+            else None,
         )
 
     @classmethod
@@ -187,8 +189,12 @@ class ProjectSummaryDto:
             name=str(record["name"]),
             is_pro_mode=bool(record.get("is_pro_mode")),
             user_id=str(user_id) if user_id is not None else None,
-            client_bot_username=str(client_bot_username) if client_bot_username is not None else None,
-            manager_bot_username=str(manager_bot_username) if manager_bot_username is not None else None,
+            client_bot_username=str(client_bot_username)
+            if client_bot_username is not None
+            else None,
+            manager_bot_username=str(manager_bot_username)
+            if manager_bot_username is not None
+            else None,
         )
 
     @classmethod
@@ -247,9 +253,13 @@ class ProjectConfigurationDto:
             settings=dict(view.settings),
             policies=dict(view.policies),
             limit_profile=dict(view.limit_profile),
-            integrations=[ProjectIntegrationDto.from_view(item) for item in view.integrations],
+            integrations=[
+                ProjectIntegrationDto.from_view(item) for item in view.integrations
+            ],
             channels=[ProjectChannelDto.from_view(item) for item in view.channels],
-            prompt_versions=[ProjectPromptVersionDto.from_view(item) for item in view.prompt_versions],
+            prompt_versions=[
+                ProjectPromptVersionDto.from_view(item) for item in view.prompt_versions
+            ],
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -284,13 +294,17 @@ class ManagerReplyHistoryItemDto:
             thread_id=str(record["thread_id"]),
             project_id=str(record["project_id"]),
             manager_user_id=str(record["manager_user_id"]),
-            manager_chat_id=str(manager_chat_id) if manager_chat_id is not None else None,
+            manager_chat_id=str(manager_chat_id)
+            if manager_chat_id is not None
+            else None,
             text=str(record.get("text") or ""),
             created_at=_serialize_timestamp(created_at),
         )
 
     @classmethod
-    def from_view(cls, view: ManagerReplyHistoryItemView) -> "ManagerReplyHistoryItemDto":
+    def from_view(
+        cls, view: ManagerReplyHistoryItemView
+    ) -> "ManagerReplyHistoryItemDto":
         return cls(
             id=view.id,
             thread_id=view.thread_id,
@@ -321,7 +335,9 @@ class ManagerReplyHistoryDto:
         offset: int,
     ) -> "ManagerReplyHistoryDto":
         return cls(
-            items=[ManagerReplyHistoryItemDto.from_record(record) for record in records],
+            items=[
+                ManagerReplyHistoryItemDto.from_record(record) for record in records
+            ],
             limit=limit,
             offset=offset,
         )

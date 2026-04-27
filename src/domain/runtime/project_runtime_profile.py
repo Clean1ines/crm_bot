@@ -24,7 +24,9 @@ class ProjectRuntimeProfile:
     system_prompt_override: str | None = None
 
     @classmethod
-    def from_configuration(cls, project_configuration: ConfigurationInput | None) -> "ProjectRuntimeProfile":
+    def from_configuration(
+        cls, project_configuration: ConfigurationInput | None
+    ) -> "ProjectRuntimeProfile":
         if not project_configuration:
             return cls()
 
@@ -33,17 +35,27 @@ class ProjectRuntimeProfile:
 
         return cls(
             requests_per_minute=_positive_int(limit_block.get("requests_per_minute")),
-            max_concurrent_threads=_positive_int(limit_block.get("max_concurrent_threads")),
+            max_concurrent_threads=_positive_int(
+                limit_block.get("max_concurrent_threads")
+            ),
             fallback_model=_optional_stripped_text(limit_block.get("fallback_model")),
-            default_language=_optional_stripped_text(settings_block.get("default_language")),
-            default_timezone=_optional_stripped_text(settings_block.get("default_timezone")),
+            default_language=_optional_stripped_text(
+                settings_block.get("default_language")
+            ),
+            default_timezone=_optional_stripped_text(
+                settings_block.get("default_timezone")
+            ),
             tone_of_voice=_optional_stripped_text(settings_block.get("tone_of_voice")),
-            system_prompt_override=_optional_stripped_text(settings_block.get("system_prompt_override")),
+            system_prompt_override=_optional_stripped_text(
+                settings_block.get("system_prompt_override")
+            ),
         )
 
 
 def _limit_block(project_configuration: ConfigurationInput) -> Mapping[str, object]:
-    raw_limits = project_configuration.get("limit_profile") or project_configuration.get("limits")
+    raw_limits = project_configuration.get(
+        "limit_profile"
+    ) or project_configuration.get("limits")
     return _mapping_block(raw_limits)
 
 

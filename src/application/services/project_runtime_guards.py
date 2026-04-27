@@ -4,7 +4,11 @@ Runtime guards driven by explicit project configuration.
 
 import time
 
-from src.application.ports.cache_port import CacheFactoryPort, NullCache, RuntimeCachePort
+from src.application.ports.cache_port import (
+    CacheFactoryPort,
+    NullCache,
+    RuntimeCachePort,
+)
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.state_contracts import ProjectRuntimeConfigurationState
@@ -30,7 +34,9 @@ class ProjectRuntimeGuards:
             return NullCache()
         return await self.cache_factory()
 
-    async def allow_request(self, project_id: str, project_configuration: ProjectConfigurationPayload | None) -> bool:
+    async def allow_request(
+        self, project_id: str, project_configuration: ProjectConfigurationPayload | None
+    ) -> bool:
         profile = ProjectRuntimeProfile.from_configuration(project_configuration)
         if profile.requests_per_minute is None:
             return True

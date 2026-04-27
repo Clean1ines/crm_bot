@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call, ANY
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 import json
 import asyncpg
@@ -77,7 +77,9 @@ class TestQueueRepository:
 
     @pytest.mark.asyncio
     async def test_enqueue_not_null_error(self, queue_repo, mock_pool):
-        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.NotNullViolationError("null"))
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.NotNullViolationError("null")
+        )
         with pytest.raises(asyncpg.exceptions.NotNullViolationError):
             await queue_repo.enqueue(None, payload={"x": 1})
 
@@ -94,7 +96,7 @@ class TestQueueRepository:
             "payload": json.dumps({"a": 1}),
             "attempts": 0,
             "max_attempts": 3,
-            "created_at": "2021-01-01"
+            "created_at": "2021-01-01",
         }
         # First acquire for debug queries
         # Second acquire for main update
@@ -161,7 +163,7 @@ class TestQueueRepository:
             "payload": "invalid_json",  # not valid JSON
             "attempts": 0,
             "max_attempts": 3,
-            "created_at": "2021-01-01"
+            "created_at": "2021-01-01",
         }
         mock_pool.mock_conn.fetchval = AsyncMock(return_value="test_db")
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
@@ -193,7 +195,9 @@ class TestQueueRepository:
                     error = $2
                 WHERE id = $3
             """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, "done", error, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, "done", error, job_id
+        )
 
     @pytest.mark.asyncio
     async def test_complete_job_failed_with_error(self, queue_repo, mock_pool):
@@ -214,7 +218,9 @@ class TestQueueRepository:
                     error = $2
                 WHERE id = $3
             """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, "failed", error, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, "failed", error, job_id
+        )
 
     # ------------------------------------------------------------------
     # release_job
@@ -262,7 +268,9 @@ class TestQueueRepository:
     # fail_job
     # ------------------------------------------------------------------
     @pytest.mark.asyncio
-    async def test_fail_job_increment_attempt_success_pending(self, queue_repo, mock_pool):
+    async def test_fail_job_increment_attempt_success_pending(
+        self, queue_repo, mock_pool
+    ):
         job_id = str(uuid4())
         error = "transient error"
         increment_attempt = True
@@ -284,7 +292,9 @@ class TestQueueRepository:
                         END
                     WHERE id = $2
                 """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, error, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, error, job_id
+        )
         assert result is True
 
     @pytest.mark.asyncio
@@ -310,7 +320,9 @@ class TestQueueRepository:
                         END
                     WHERE id = $2
                 """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, error, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, error, job_id
+        )
         assert result is True
 
     @pytest.mark.asyncio
@@ -332,7 +344,9 @@ class TestQueueRepository:
                         status = 'failed'
                     WHERE id = $2
                 """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, error, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            expected_sql, error, job_id
+        )
         assert result is True
 
     @pytest.mark.asyncio
@@ -350,7 +364,9 @@ class TestQueueRepository:
     @pytest.mark.asyncio
     async def test_increment_attempts_success(self, queue_repo, mock_pool):
         job_id = str(uuid4())
-        mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"attempts": 2, "max_attempts": 3})
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            return_value={"attempts": 2, "max_attempts": 3}
+        )
 
         result = await queue_repo.increment_attempts(job_id)
 
@@ -391,12 +407,13 @@ class TestQueueRepository:
 
         result = await queue_repo.get_stale_locked_jobs(timeout_minutes)
 
-        expected_sql = """
-                SELECT id FROM public.execution_queue
-                WHERE status = 'processing'
-                AND locked_at < NOW() - INTERVAL '%s minutes'
-            """ % timeout_minutes
-        mock_pool.mock_conn.fetch.assert_awaited_once_with(expected_sql)
+        mock_pool.mock_conn.fetch.assert_awaited_once()
+        sql_arg, timeout_arg = mock_pool.mock_conn.fetch.await_args.args
+
+        assert "SELECT id FROM public.execution_queue" in sql_arg
+        assert "WHERE status = 'processing'" in sql_arg
+        assert "locked_at < NOW() - ($1::int * INTERVAL '1 minute')" in sql_arg
+        assert timeout_arg == timeout_minutes
         assert result == [str(jid) for jid in job_ids]
 
     @pytest.mark.asyncio
@@ -410,12 +427,16 @@ class TestQueueRepository:
     # ------------------------------------------------------------------
     @pytest.mark.asyncio
     async def test_connection_error(self, queue_repo, mock_pool):
-        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError("conn closed")
+        mock_pool.acquire.side_effect = asyncpg.exceptions.ConnectionDoesNotExistError(
+            "conn closed"
+        )
         with pytest.raises(asyncpg.exceptions.ConnectionDoesNotExistError):
             await queue_repo.enqueue("test")
 
     @pytest.mark.asyncio
     async def test_undefined_table_error(self, queue_repo, mock_pool):
-        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=asyncpg.exceptions.UndefinedTableError("no table"))
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            side_effect=asyncpg.exceptions.UndefinedTableError("no table")
+        )
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
             await queue_repo.enqueue("test")

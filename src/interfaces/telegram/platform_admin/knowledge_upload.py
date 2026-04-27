@@ -2,7 +2,6 @@
 Platform admin bot handler for uploading knowledge base files.
 """
 
-
 import aiohttp
 
 from src.infrastructure.config.settings import settings
@@ -10,7 +9,11 @@ from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRep
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.llm.embedding_service import embed_text
 from src.infrastructure.logging.logger import get_logger
-from src.interfaces.telegram.platform_admin.handlers import _clear_state, _get_data, _get_project_menu_keyboard
+from src.interfaces.telegram.platform_admin.handlers import (
+    _clear_state,
+    _get_data,
+    _get_project_menu_keyboard,
+)
 
 logger = get_logger(__name__)
 
@@ -36,7 +39,9 @@ async def _get_file_path(file_id: str) -> str:
             return data["result"]["file_path"]
 
 
-async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> tuple[str, object | None]:
+async def handle_knowledge_upload(
+    chat_id: str, message: dict, pool
+) -> tuple[str, object | None]:
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
 
@@ -53,7 +58,10 @@ async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> tuple[st
     file_id = document.get("file_id")
     filename = document.get("file_name", "unknown")
 
-    logger.info("Starting knowledge upload", extra={"project_id": project_id, "filename": filename})
+    logger.info(
+        "Starting knowledge upload",
+        extra={"project_id": project_id, "filename": filename},
+    )
 
     try:
         file_path = await _get_file_path(file_id)
@@ -75,7 +83,10 @@ async def handle_knowledge_upload(chat_id: str, message: dict, pool) -> tuple[st
         repo = KnowledgeRepository(pool)
         await repo.add_knowledge_batch(project_id, chunks, embeddings)
 
-        logger.info("Knowledge base updated", extra={"project_id": project_id, "chunks": len(chunks)})
+        logger.info(
+            "Knowledge base updated",
+            extra={"project_id": project_id, "chunks": len(chunks)},
+        )
         await _clear_state(chat_id)
         return (
             f"Загружено {len(chunks)} чанков.\nБаза знаний обновлена.",

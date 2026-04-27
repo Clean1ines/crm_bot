@@ -62,7 +62,9 @@ async def run_worker_loop(
                 await queue_repo.complete_job(job_id, success=False, error=str(exc))
             except TransientJobError as exc:
                 decision = build_retry_decision(job_record, str(exc))
-                await queue_repo.fail_job(job_id, error=decision.error, increment_attempt=True)
+                await queue_repo.fail_job(
+                    job_id, error=decision.error, increment_attempt=True
+                )
 
                 if decision.should_retry:
                     logger.info(
@@ -83,10 +85,14 @@ async def run_worker_loop(
                 await queue_repo.complete_job(job_id, success=True)
 
         except asyncio.CancelledError:
-            logger.info("Worker loop cancelled", extra={"worker_id": resolved_worker_id})
+            logger.info(
+                "Worker loop cancelled", extra={"worker_id": resolved_worker_id}
+            )
             break
         except Exception:
-            logger.exception("Error in worker loop", extra={"worker_id": resolved_worker_id})
+            logger.exception(
+                "Error in worker loop", extra={"worker_id": resolved_worker_id}
+            )
             await asyncio.sleep(error_sleep_seconds)
 
     logger.info("Worker shutting down", extra={"worker_id": resolved_worker_id})

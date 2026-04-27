@@ -9,7 +9,13 @@ from __future__ import annotations
 import json
 import re
 
-from groq import APIConnectionError, APIError, APITimeoutError, AsyncGroq, RateLimitError
+from groq import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    AsyncGroq,
+    RateLimitError,
+)
 
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger

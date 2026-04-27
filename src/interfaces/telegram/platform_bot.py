@@ -3,7 +3,6 @@ Admin Bot Router.
 Dispatches incoming Telegram updates to appropriate handlers based on update type.
 """
 
-
 import asyncpg
 import httpx
 import json
@@ -17,7 +16,9 @@ from src.interfaces.telegram.platform_admin.handlers import (
     handle_admin_step,
 )
 from src.interfaces.telegram.platform_admin.keyboards import make_main_menu_keyboard
-from src.interfaces.telegram.platform_admin.knowledge_upload import handle_knowledge_upload
+from src.interfaces.telegram.platform_admin.knowledge_upload import (
+    handle_knowledge_upload,
+)
 
 logger = get_logger(__name__)
 
@@ -28,7 +29,9 @@ AdminUpdateResult = dict[str, bool]
 PreparedResponse = tuple[int | None, str | None, TelegramPayload | None]
 
 
-def _keyboard_to_dict(response: AdminResponse, *, source: str) -> tuple[str, TelegramPayload | None]:
+def _keyboard_to_dict(
+    response: AdminResponse, *, source: str
+) -> tuple[str, TelegramPayload | None]:
     response_text, keyboard = response
     if not keyboard:
         return response_text, None
@@ -47,7 +50,9 @@ def _extract_bot_token(update: dict[str, object]) -> str | None:
     return str(bot_token) if bot_token else None
 
 
-async def _answer_callback_query(bot_token: str, callback_id: str, response_text: str | None) -> None:
+async def _answer_callback_query(
+    bot_token: str, callback_id: str, response_text: str | None
+) -> None:
     async with httpx.AsyncClient() as client:
         try:
             await client.post(
@@ -94,7 +99,9 @@ async def _handle_document_message(
     return _main_menu_response("❌ Не ожидал файл. Пожалуйста, используйте меню.")
 
 
-async def _handle_command_message(text: str, pool: asyncpg.Pool) -> tuple[str | None, TelegramPayload | None]:
+async def _handle_command_message(
+    text: str, pool: asyncpg.Pool
+) -> tuple[str | None, TelegramPayload | None]:
     response = await handle_admin_command(text, pool)
     if response is None:
         return None, None
@@ -119,7 +126,9 @@ async def _handle_text_message(
     text: str,
     pool: asyncpg.Pool,
 ) -> tuple[str | None, TelegramPayload | None]:
-    logger.debug("Admin message received", extra={"chat_id": chat_id, "text_preview": text[:50]})
+    logger.debug(
+        "Admin message received", extra={"chat_id": chat_id, "text_preview": text[:50]}
+    )
 
     if text.startswith("/"):
         return await _handle_command_message(text, pool)
@@ -127,13 +136,17 @@ async def _handle_text_message(
     return await _handle_wizard_step_message(chat_id, text, pool)
 
 
-async def _handle_message(message: dict[str, object], pool: asyncpg.Pool) -> PreparedResponse:
+async def _handle_message(
+    message: dict[str, object], pool: asyncpg.Pool
+) -> PreparedResponse:
     chat_id = message["chat"]["id"]
     text = message.get("text")
     document = message.get("document")
 
     if document:
-        response_text, keyboard_dict = await _handle_document_message(chat_id, message, pool)
+        response_text, keyboard_dict = await _handle_document_message(
+            chat_id, message, pool
+        )
         return chat_id, response_text, keyboard_dict
 
     if text:
@@ -177,7 +190,9 @@ async def _send_admin_message(
 
     async with httpx.AsyncClient() as client:
         try:
-            resp = await client.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json=payload)
+            resp = await client.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage", json=payload
+            )
             if resp.status_code != 200:
                 logger.error(
                     "Telegram sendMessage failed with status %s",
@@ -197,7 +212,9 @@ async def _dispatch_admin_update(
     pool: asyncpg.Pool,
 ) -> PreparedResponse:
     if "callback_query" in update:
-        return await _handle_callback_query(update["callback_query"], bot_token=bot_token, pool=pool)
+        return await _handle_callback_query(
+            update["callback_query"], bot_token=bot_token, pool=pool
+        )
 
     if "message" in update:
         return await _handle_message(update["message"], pool)
@@ -205,7 +222,9 @@ async def _dispatch_admin_update(
     return None, None, None
 
 
-async def process_admin_update(update: dict[str, object], pool: asyncpg.Pool) -> AdminUpdateResult:
+async def process_admin_update(
+    update: dict[str, object], pool: asyncpg.Pool
+) -> AdminUpdateResult:
     """
     Main entry point for Admin Bot updates.
     Inspects the update dict and delegates to command, step, callback, or document handlers.
