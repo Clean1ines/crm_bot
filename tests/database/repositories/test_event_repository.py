@@ -102,10 +102,10 @@ class TestEventRepository:
                 """
         mock_pool.fetch.assert_awaited_once_with(expected_sql, stream_id, limit)
         assert len(events) == 2
-        assert events[0]["id"] == 1
-        assert events[0]["type"] == "type1"
-        assert events[0]["payload"] == {"a": 1}
-        assert events[0]["ts"] == "2021-01-01"
+        assert events[0].id == 1
+        assert events[0].type == "type1"
+        assert events[0].payload == {"a": 1}
+        assert events[0].ts == "2021-01-01"
 
     @pytest.mark.asyncio
     async def test_get_stream_with_after_id_success(self, event_repo, mock_pool):
@@ -173,10 +173,10 @@ class TestEventRepository:
             """
         mock_pool.fetch.assert_awaited_once_with(expected_sql, project_id, event_type, limit)
         assert len(events) == 1
-        assert events[0]["id"] == 1
-        assert events[0]["stream_id"] == expected_rows[0]["stream_id"]
-        assert events[0]["payload"] == {"a": 1}
-        assert events[0]["ts"] == "2021-01-01"
+        assert events[0].id == 1
+        assert events[0].stream_id == str(expected_rows[0]["stream_id"])
+        assert events[0].payload == {"a": 1}
+        assert events[0].ts == "2021-01-01"
 
     @pytest.mark.asyncio
     async def test_get_by_type_limit_zero(self, event_repo, mock_pool):
@@ -221,10 +221,10 @@ class TestEventRepository:
             expected_sql, UUID(thread_id), limit, offset
         )
         assert len(events) == 1
-        assert events[0]["id"] == 1
-        assert events[0]["type"] == "type1"
-        assert events[0]["payload"] == {"a": 1}
-        assert events[0]["ts"] == "2021-01-01"
+        assert events[0].id == 1
+        assert events[0].type == "type1"
+        assert events[0].payload == {"a": 1}
+        assert events[0].ts == "2021-01-01"
 
     @pytest.mark.asyncio
     async def test_get_events_for_thread_invalid_uuid(self, event_repo, mock_pool):

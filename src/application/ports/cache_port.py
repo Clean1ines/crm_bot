@@ -1,31 +1,80 @@
-from typing import Protocol, Any
+from typing import Protocol
+
+
+CacheValue = str | bytes | None
 
 
 class CachePort(Protocol):
-    async def get(self, key: str) -> Any: ...
+    async def get(self, key: str) -> CacheValue: ...
+
+    async def expire(self, key: str, seconds: int) -> bool: ...
+
+    async def exists(self, key: str) -> int: ...
+
+    async def sadd(self, key: str, value: str) -> int: ...
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> bool | None: ...
+
+    async def setex(self, key: str, seconds: int, value: str) -> bool | None: ...
+
+    async def srem(self, key: str, value: str) -> int: ...
+
+    async def delete(self, key: str) -> int: ...
+
+
+class RateLimitCachePort(Protocol):
+    async def get(self, key: str) -> CacheValue: ...
+
     async def incr(self, key: str) -> int: ...
-    async def expire(self, key: str, seconds: int) -> Any: ...
-    async def exists(self, key: str) -> Any: ...
-    async def sadd(self, key: str, value: str) -> Any: ...
-    async def set(self, key: str, value: str, ex: int | None = None) -> Any: ...
-    async def setex(self, key: str, seconds: int, value: str) -> Any: ...
+
+    async def expire(self, key: str, seconds: int) -> bool: ...
+
+    async def exists(self, key: str) -> int: ...
+
+    async def sadd(self, key: str, value: str) -> int: ...
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> bool | None: ...
+
+    async def setex(self, key: str, seconds: int, value: str) -> bool | None: ...
+
     async def scard(self, key: str) -> int: ...
-    async def srem(self, key: str, value: str) -> Any: ...
-    async def delete(self, key: str) -> Any: ...
+
+    async def srem(self, key: str, value: str) -> int: ...
+
+    async def delete(self, key: str) -> int: ...
 
 
 class CacheFactoryPort(Protocol):
-    async def __call__(self) -> CachePort: ...
+    def __call__(self) -> CachePort: ...
 
 
 class NullCache:
-    async def get(self, key: str): return None
-    async def incr(self, key: str): return 1
-    async def expire(self, key: str, seconds: int): return None
-    async def exists(self, key: str): return False
-    async def sadd(self, key: str, value: str): return None
-    async def set(self, key: str, value: str, ex: int | None = None): return None
-    async def setex(self, key: str, seconds: int, value: str): return None
-    async def scard(self, key: str): return 0
-    async def srem(self, key: str, value: str): return None
-    async def delete(self, key: str): return None
+    async def get(self, key: str) -> CacheValue:
+        return None
+
+    async def incr(self, key: str) -> int:
+        return 1
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        return False
+
+    async def exists(self, key: str) -> int:
+        return 0
+
+    async def sadd(self, key: str, value: str) -> int:
+        return 0
+
+    async def set(self, key: str, value: str, ex: int | None = None) -> bool:
+        return False
+
+    async def setex(self, key: str, seconds: int, value: str) -> bool:
+        return False
+
+    async def scard(self, key: str) -> int:
+        return 0
+
+    async def srem(self, key: str, value: str) -> int:
+        return 0
+
+    async def delete(self, key: str) -> int:
+        return 0

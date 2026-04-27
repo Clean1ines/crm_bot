@@ -1,5 +1,4 @@
-from typing import Any
-
+from src.application.ports.memory_port import MemoryWriterPort
 from src.application.ports.thread_port import ThreadLifecyclePort
 
 
@@ -7,32 +6,26 @@ class ThreadCommandService:
     def __init__(
         self,
         thread_lifecycle_repo: ThreadLifecyclePort,
-        memory_repo: Any,
+        memory_repo: MemoryWriterPort,
     ) -> None:
         self.thread_lifecycle_repo = thread_lifecycle_repo
         self.memory_repo = memory_repo
 
-    async def update_memory_entry(
+    async def archive_thread(self, thread_id: str) -> dict[str, str]:
+        await self.thread_lifecycle_repo.archive_thread(thread_id)
+        return {"status": "archived"}
+
+    async def save_memory(
         self,
-        *,
         project_id: str,
         client_id: str,
         key: str,
-        value: Any,
-    ) -> dict:
-        if hasattr(self.memory_repo, "set"):
-            await self.memory_repo.set(
-                project_id=project_id,
-                client_id=client_id,
-                key=key,
-                value=value,
-                type_="user_edited",
-            )
-            return {"status": "updated"}
-
-        return await self.memory_repo.update_entry(
+        value: object,
+    ) -> dict[str, str]:
+        await self.memory_repo.update_by_key(
             project_id=project_id,
             client_id=client_id,
             key=key,
             value=value,
         )
+        return {"status": "saved"}

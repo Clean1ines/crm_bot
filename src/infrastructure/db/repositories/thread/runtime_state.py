@@ -1,12 +1,13 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Optional
 
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.thread_views import (
     ThreadAnalyticsView,
     ThreadMessageCounts,
 )
-from src.utils.uuid_utils import ensure_uuid
 from src.infrastructure.logging.logger import get_logger
+from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
@@ -27,7 +28,7 @@ class ThreadRuntimeStateRepository:
 
         logger.debug("Summary updated")
 
-    async def get_state_json(self, thread_id: str) -> Optional[Dict[str, Any]]:
+    async def get_state_json(self, thread_id: str) -> JsonObject | None:
         logger.debug(f"Fetching state_json for thread {thread_id}")
 
         async with self.pool.acquire() as conn:
@@ -39,12 +40,12 @@ class ThreadRuntimeStateRepository:
 
         if row and row["state_json"] is not None:
             logger.debug(f"State_json retrieved for thread {thread_id}")
-            return row["state_json"]
+            return json_object_from_unknown(row["state_json"])
 
         logger.debug(f"No state_json found for thread {thread_id}")
         return None
 
-    async def save_state_json(self, thread_id: str, state: Dict[str, Any]) -> None:
+    async def save_state_json(self, thread_id: str, state: JsonObject) -> None:
         logger.info(f"Saving state_json for thread {thread_id}")
 
         async with self.pool.acquire() as conn:

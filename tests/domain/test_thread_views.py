@@ -164,27 +164,17 @@ def test_thread_message_view_serializes_metadata_copy():
     assert view.metadata == {"source": "test"}
 
 
-def test_thread_runtime_message_view_supports_legacy_dict_access():
+def test_thread_runtime_message_view_exposes_typed_attributes():
     view = ThreadRuntimeMessageView(role="user", content="hello")
 
+    assert view.role == "user"
+    assert view.content == "hello"
     assert view.to_record() == {"role": "user", "content": "hello"}
-    assert view["role"] == "user"
-    assert view["content"] == "hello"
-    assert view.get("role") == "user"
-    assert view.get("missing", "fallback") == "fallback"
-    assert view == {"role": "user", "content": "hello"}
 
-
-def test_thread_runtime_message_view_rejects_unknown_getitem_key():
+def test_thread_runtime_message_view_does_not_expose_mapping_compatibility():
     view = ThreadRuntimeMessageView(role="user", content="hello")
 
-    try:
-        view["missing"]
-    except KeyError as exc:
-        assert exc.args == ("missing",)
-    else:
-        raise AssertionError("Expected KeyError")
-
+    assert not hasattr(view, "__getitem__")
 
 def test_thread_status_summary_view_normalizes_record():
     thread_id = uuid4()

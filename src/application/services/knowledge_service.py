@@ -5,10 +5,27 @@ from src.application.errors import (
     UnauthorizedError,
     ValidationError,
 )
+from src.application.ports.knowledge_port import (
+    JwtDecoderPort,
+    KnowledgeChunkerFactoryPort,
+    KnowledgeDbPoolPort,
+    KnowledgeProjectAccessPort,
+    KnowledgeRepositoryFactoryPort,
+    PlatformUserAdminPort,
+)
+from src.application.ports.logger_port import LoggerPort
+from src.domain.project_plane.json_types import JsonObject
 
 
 class KnowledgeService:
-    def __init__(self, project_repo, user_repo, pool, jwt_secret: str, jwt_module) -> None:
+    def __init__(
+        self,
+        project_repo: KnowledgeProjectAccessPort,
+        user_repo: PlatformUserAdminPort,
+        pool: KnowledgeDbPoolPort,
+        jwt_secret: str,
+        jwt_module: JwtDecoderPort,
+    ) -> None:
         self.project_repo = project_repo
         self.user_repo = user_repo
         self.pool = pool
@@ -36,7 +53,11 @@ class KnowledgeService:
         if await self.user_repo.is_platform_admin(user_id):
             return user_id
 
-        has_access = await self.project_repo.user_has_project_role(project_id, user_id, ["owner", "admin"])
+        has_access = await self.project_repo.user_has_project_role(
+            project_id,
+            user_id,
+            ["owner", "admin"],
+        )
         if has_access is not True:
             project_view = await self.project_repo.get_project_view(project_id)
             if not project_view or str(project_view.user_id) != user_id:
@@ -51,9 +72,9 @@ class KnowledgeService:
         file_content: bytes,
         authorization: str | None,
         *,
-        chunker_factory,
-        knowledge_repo_factory,
-        logger,
+        chunker_factory: KnowledgeChunkerFactoryPort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
     ) -> KnowledgeUploadResultDto:
         uploaded_by = await self.require_access(project_id, authorization)
         normalized_file_name = file_name or "upload"
@@ -69,20 +90,20 @@ class KnowledgeService:
             raw_chunks = await chunker.process_file(file_content, normalized_file_name)
         except ValueError as e:
             logger.error(f"Chunking failed: {e}")
-            raise ValidationError(str(e))
+            raise ValidationError(str(e)) from None
 
-        chunks = [
-            {"content": chunk}
-            if isinstance(chunk, str)
-            else chunk
-            for chunk in raw_chunks
-        ]
+        chunks: list[JsonObject] = []
+        for chunk in raw_chunks:
+            if isinstance(chunk, str):
+                content = chunk.strip()
+                if content:
+                    chunks.append({"content": content})
+                continue
 
-        chunks = [
-            chunk
-            for chunk in chunks
-            if isinstance(chunk, dict) and str(chunk.get("content") or "").strip()
-        ]
+            if isinstance(chunk, dict):
+                content = str(chunk.get("content") or "").strip()
+                if content:
+                    chunks.append(dict(chunk))
 
         if not chunks:
             logger.warning("No text extracted from file")

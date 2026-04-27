@@ -1,9 +1,20 @@
 from src.application.ports.event_port import EventReaderPort
+from src.application.ports.memory_port import MemoryReaderPort
 from src.application.ports.thread_port import (
     ThreadMessagePort,
     ThreadReadPort,
     ThreadRuntimeStatePort,
 )
+
+
+def _event_record(event) -> dict[str, object]:
+    return {
+        "id": event.id,
+        "type": event.type,
+        "payload": event.payload,
+        "ts": event.ts,
+        "stream_id": event.stream_id,
+    }
 
 
 class ThreadQueryService:
@@ -13,7 +24,7 @@ class ThreadQueryService:
         thread_message_repo: ThreadMessagePort,
         thread_runtime_state_repo: ThreadRuntimeStatePort,
         event_repo: EventReaderPort,
-        memory_repo: object,
+        memory_repo: MemoryReaderPort,
     ) -> None:
         self.thread_read_repo = thread_read_repo
         self.thread_message_repo = thread_message_repo
@@ -54,7 +65,7 @@ class ThreadQueryService:
 
     async def get_timeline(self, thread_id: str, limit: int, offset: int) -> dict:
         events = await self.event_repo.get_events_for_thread(thread_id, limit, offset)
-        return {"events": [event.to_record() for event in events]}
+        return {"events": [_event_record(event) for event in events]}
 
     async def get_memory(self, project_id: str, client_id: str | None, *, limit: int = 100) -> dict:
         if not client_id:

@@ -1,17 +1,18 @@
-from typing import Any, Dict
-
 from src.application.dto.webhook_dto import WebhookAckDto
+from src.application.ports.cache_port import CachePort
+from src.application.ports.logger_port import LoggerPort, NullLogger
+from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
+from src.application.ports.telegram_port import TelegramClientPort
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.manager_assignments import ManagerActor, ManagerReplySession
 from src.domain.runtime.dialog_state import default_dialog_state
-from src.application.ports.logger_port import LoggerPort, NullLogger
-from src.application.ports.telegram_port import TelegramClientPort
 
 
 class ManagerBotService:
     def __init__(
         self,
-        orchestrator,
-        redis,
+        orchestrator: ManagerBotOrchestratorPort,
+        redis: CachePort,
         bot_token: str,
         project_id: str,
         *,
@@ -25,7 +26,7 @@ class ManagerBotService:
         self.telegram_client = telegram_client
         self.logger = logger or NullLogger()
 
-    async def _post_telegram(self, method: str, payload: Dict[str, Any]) -> None:
+    async def _post_telegram(self, method: str, payload: JsonObject) -> None:
         if self.telegram_client is not None:
             await self.telegram_client.post_json(self.bot_token, method, payload)
             return
@@ -79,6 +80,7 @@ class ManagerBotService:
         )
         if session.manager_key:
             await self.redis.setex(session.manager_key, 600, thread_id)
+
         await self.orchestrator.threads.claim_for_manager(
             thread_id,
             manager=ManagerActor(
@@ -135,6 +137,7 @@ class ManagerBotService:
         await self.redis.delete(session.thread_key)
         if session.manager_key:
             await self.redis.delete(session.manager_key)
+
         await self.orchestrator.threads.release_manager_assignment(thread_id)
 
         try:

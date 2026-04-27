@@ -6,9 +6,38 @@ from src.application.dto.control_plane_dto import (
     TelegramAdminProjectsDto,
 )
 from src.application.dto.project_dto import ProjectSummaryDto
-from src.domain.control_plane.memberships import is_manager_capable_role
 from src.application.ports.project_port import ProjectControlPort
 from src.application.ports.user_port import UserAuthPort
+from src.domain.control_plane.memberships import is_manager_capable_role
+from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
+
+
+def _project_summary_record(view: ProjectSummaryView) -> dict[str, object]:
+    return {
+        "id": view.id,
+        "user_id": view.user_id,
+        "name": view.name,
+        "is_pro_mode": view.is_pro_mode,
+        "created_at": view.created_at,
+        "updated_at": view.updated_at,
+        "client_bot_username": view.client_bot_username,
+        "manager_bot_username": view.manager_bot_username,
+        "access_role": getattr(view, "access_role", None),
+    }
+
+
+def _project_member_record(view: ProjectMemberView) -> dict[str, object]:
+    return {
+        "id": getattr(view, "id", None),
+        "project_id": getattr(view, "project_id", None),
+        "user_id": view.user_id,
+        "role": view.role,
+        "created_at": getattr(view, "created_at", None),
+        "telegram_id": getattr(view, "telegram_id", None),
+        "username": getattr(view, "username", None),
+        "full_name": getattr(view, "full_name", None),
+        "email": getattr(view, "email", None),
+    }
 
 
 class PlatformBotService:
@@ -40,7 +69,7 @@ class PlatformBotService:
         )
         projects = await self.project_repo.get_projects_for_user_view(user_id)
         return TelegramAdminProjectsDto.create(
-            [ProjectSummaryDto.from_record(project.to_record()) for project in projects]
+            [ProjectSummaryDto.from_record(_project_summary_record(project)) for project in projects]
         )
 
     async def add_manager_by_chat_id(self, project_id: str, manager_chat_id: str) -> str:
@@ -54,7 +83,7 @@ class PlatformBotService:
     async def get_project_team(self, project_id: str) -> ProjectTeamDto:
         members = await self.project_repo.get_project_members_view(project_id)
         manager_capable_members = [
-            ProjectMemberDto.from_record(member.to_record())
+            ProjectMemberDto.from_record(_project_member_record(member))
             for member in members
             if is_manager_capable_role(member.role)
         ]

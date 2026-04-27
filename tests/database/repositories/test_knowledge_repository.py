@@ -86,10 +86,10 @@ class TestKnowledgeRepository:
         assert len(result) == 3
         # Check that the result contains expected fields
         for item in result:
-            assert "id" in item
-            assert "content" in item
-            assert "score" in item
-            assert "method" in item
+            assert item.id
+            assert item.content
+            assert isinstance(item.score, float)
+            assert item.method
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
@@ -113,7 +113,7 @@ class TestKnowledgeRepository:
         # Result limited to limit (2 < limit)
         assert len(result) == len(vector_rows)
         for item in result:
-            assert item["method"] == "vector"
+            assert item.method == "vector"
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
@@ -287,9 +287,9 @@ class TestKnowledgeRepository:
         mock_pool.mock_conn.fetch.assert_awaited_once_with(expected_sql, UUID(project_id), limit, offset)
         assert len(result) == len(rows)
         for i, doc in enumerate(result):
-            assert doc["chunk_count"] == (5 if i == 0 else 10)
-            assert "id" in doc
-            assert "file_name" in doc
+            assert doc.chunk_count == (5 if i == 0 else 10)
+            assert doc.id
+            assert doc.file_name
 
     @pytest.mark.asyncio
     async def test_get_documents_limit_zero(self, knowledge_repo, mock_pool):
@@ -332,8 +332,8 @@ class TestKnowledgeRepository:
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, UUID(doc_id))
         assert result is not None
-        assert result["id"] == doc_id
-        assert result["chunk_count"] == 42
+        assert result.id == doc_id
+        assert result.chunk_count == 42
 
     @pytest.mark.asyncio
     async def test_get_document_not_found(self, knowledge_repo, mock_pool):

@@ -133,12 +133,12 @@ class TestQueueRepository:
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, worker_id)
 
         assert result is not None
-        assert result["id"] == str(job_id)
-        assert result["task_type"] == "test_task"
-        assert result["payload"] == {"a": 1}
-        assert result["attempts"] == 0
-        assert result["max_attempts"] == 3
-        assert result["created_at"] == "2021-01-01"
+        assert result.id == str(job_id)
+        assert result.task_type == "test_task"
+        assert result.payload == {"a": 1}
+        assert result.attempts == 0
+        assert result.max_attempts == 3
+        assert result.created_at == "2021-01-01"
 
     @pytest.mark.asyncio
     async def test_claim_job_no_jobs(self, queue_repo, mock_pool):
@@ -169,7 +169,7 @@ class TestQueueRepository:
         result = await queue_repo.claim_job(worker_id)
 
         assert result is not None
-        assert result["payload"] == {}  # error caught, set to empty dict
+        assert result.payload == {}  # error caught, set to empty dict
 
     # ------------------------------------------------------------------
     # complete_job

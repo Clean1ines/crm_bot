@@ -191,25 +191,9 @@ class ThreadRuntimeMessageView:
             "content": self.content,
         }
 
-    def __getitem__(self, key: str) -> str:
-        if key == "role":
-            return self.role
-        if key == "content":
-            return self.content
-        raise KeyError(key)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key == "role":
-            return self.role
-        if key == "content":
-            return self.content
-        return default
-
     def __eq__(self, other: object) -> bool:
         if isinstance(other, ThreadRuntimeMessageView):
             return self.role == other.role and self.content == other.content
-        if isinstance(other, dict):
-            return self.to_record() == other
         return False
 
 

@@ -1,10 +1,22 @@
-from typing import Protocol, Any, Mapping
+from typing import Protocol
+
+from src.domain.project_plane.json_types import JsonObject
 
 
 class TelegramClientPort(Protocol):
-    async def post_json(self, bot_token: str, method: str, payload: Mapping[str, Any]) -> Mapping[str, Any]: ...
+    async def post_json(
+        self,
+        bot_token: str,
+        method: str,
+        payload: JsonObject,
+    ) -> JsonObject: ...
 
 
 class NullTelegramClient:
-    async def post_json(self, bot_token: str, method: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        return {"ok": True, "result": {}}
+    async def post_json(
+        self,
+        bot_token: str,
+        method: str,
+        payload: JsonObject,
+    ) -> JsonObject:
+        return {"ok": False}

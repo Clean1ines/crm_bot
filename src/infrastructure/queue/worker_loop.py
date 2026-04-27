@@ -39,8 +39,9 @@ async def run_worker_loop(
                 await asyncio.sleep(idle_sleep_seconds)
                 continue
 
-            job_id = str(job.get("id"))
-            task_type = str(job.get("task_type") or "")
+            job_id = job.id
+            task_type = job.task_type
+            job_record = job.to_record()
 
             logger.info(
                 "Processing job",
@@ -48,12 +49,12 @@ async def run_worker_loop(
                     "job_id": job_id,
                     "task_type": task_type,
                     "worker_id": resolved_worker_id,
-                    "attempt": job.get("attempts", 0),
+                    "attempt": job.attempts,
                 },
             )
 
             try:
-                await dispatcher.dispatch(job, worker_id=resolved_worker_id)
+                await dispatcher.dispatch(job_record, worker_id=resolved_worker_id)
             except PermanentJobError as exc:
                 logger.warning(
                     "Job failed permanently",
@@ -61,7 +62,7 @@ async def run_worker_loop(
                 )
                 await queue_repo.complete_job(job_id, success=False, error=str(exc))
             except TransientJobError as exc:
-                decision = build_retry_decision(job, str(exc))
+                decision = build_retry_decision(job_record, str(exc))
                 await queue_repo.fail_job(job_id, error=decision.error, increment_attempt=True)
 
                 if decision.should_retry:

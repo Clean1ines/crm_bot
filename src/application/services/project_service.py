@@ -1,4 +1,4 @@
-from typing import Any
+from src.application.ports.project_port import ProjectControlPort
 
 from src.application.errors import ForbiddenError
 
@@ -6,7 +6,7 @@ from src.application.errors import ForbiddenError
 class ProjectAccessService:
     """Project access guard for project-scoped permissions."""
 
-    def __init__(self, repo: Any) -> None:
+    def __init__(self, repo: ProjectControlPort) -> None:
         self.repo = repo
 
     async def require_project_role(

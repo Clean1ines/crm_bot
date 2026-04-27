@@ -5,11 +5,14 @@ The application layer must not import concrete LangGraph runtime modules.
 Composition roots inject implementations matching these protocols.
 """
 
-from typing import Any, Protocol
+from typing import Protocol
+
+
+AgentGraphState = dict[str, object]
 
 
 class AgentGraphRuntimePort(Protocol):
-    async def ainvoke(self, state: dict[str, Any]) -> dict[str, Any]:
+    async def ainvoke(self, state: AgentGraphState) -> AgentGraphState:
         """Invoke the runtime graph with a typed state payload."""
         ...
 
@@ -18,11 +21,11 @@ class AgentFactoryPort(Protocol):
     def __call__(
         self,
         *,
-        tool_registry: Any = None,
-        queue_repo: Any = None,
-        event_repo: Any = None,
-        project_repo: Any = None,
-        memory_repo: Any = None,
+        tool_registry: object | None = None,
+        queue_repo: object | None = None,
+        event_repo: object | None = None,
+        project_repo: object | None = None,
+        memory_repo: object | None = None,
     ) -> AgentGraphRuntimePort:
         """Create a runtime graph instance."""
         ...

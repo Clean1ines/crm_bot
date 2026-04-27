@@ -1,4 +1,4 @@
-from typing import Protocol, Any
+from typing import Protocol
 
 
 class UserAuthPort(Protocol):
@@ -8,6 +8,10 @@ class UserAuthPort(Protocol):
         first_name: str,
         username: str | None,
     ) -> tuple[str, bool]: ...
+
+
+class UserAdminPort(Protocol):
+    async def is_platform_admin(self, user_id: str) -> bool: ...
 
 
 UserRepositoryPort = UserAuthPort

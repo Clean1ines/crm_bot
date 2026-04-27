@@ -1,5 +1,7 @@
 from typing import Protocol
 
+from src.domain.project_plane.json_types import JsonObject
+
 from src.domain.project_plane.manager_assignments import ManagerActor
 from src.domain.project_plane.thread_status import ThreadStatus
 from src.domain.project_plane.thread_views import (
@@ -61,9 +63,9 @@ class ThreadMessagePort(Protocol):
 class ThreadRuntimeStatePort(Protocol):
     async def update_summary(self, thread_id: str, summary: str) -> None: ...
 
-    async def get_state_json(self, thread_id: str) -> dict[str, object] | None: ...
+    async def get_state_json(self, thread_id: str) -> JsonObject | None: ...
 
-    async def save_state_json(self, thread_id: str, state: dict[str, object]) -> None: ...
+    async def save_state_json(self, thread_id: str, state: JsonObject) -> None: ...
 
     async def update_analytics(
         self,
