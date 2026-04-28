@@ -26,6 +26,11 @@ from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
+
+def _build_platform_bot_service(pool: object) -> PlatformBotService:
+    return PlatformBotService(UserRepository(pool))
+
+
 AdminResponse = tuple[str, InlineKeyboardMarkup | None]
 AdminStateHandler = Callable[[str, str, object], Awaitable[AdminResponse]]
 
@@ -162,7 +167,7 @@ async def _reset_unknown_admin_step(chat_id: str) -> AdminResponse:
 
 
 async def _step_await_project_name(chat_id: str, name: str, pool) -> AdminResponse:
-    service = PlatformBotService(pool)
+    service = _build_platform_bot_service(pool)
     projects = (await service.list_projects_for_telegram_user(int(chat_id))).projects
     if any(
         project.name == name
@@ -224,7 +229,7 @@ async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminR
         return "ChatID должен быть числом. Попробуйте еще раз.", None
 
     try:
-        success_text = await PlatformBotService(pool).add_manager_by_chat_id(
+        success_text = await _build_platform_bot_service(pool).add_manager_by_chat_id(
             project_id, manager_id
         )
     except Exception as exc:
@@ -414,7 +419,7 @@ async def _handle_managers_callback(
     callback_data: str, chat_id: str, pool
 ) -> AdminResponse:
     project_id = _callback_project_id(callback_data)
-    team = await PlatformBotService(pool).get_project_team(project_id)
+    team = await _build_platform_bot_service(pool).get_project_team(project_id)
 
     if team.members or team.legacy_targets:
         text = _format_project_team_lines(team.members, team.legacy_targets)
@@ -666,7 +671,9 @@ async def _show_projects_list(chat_id: str, pool) -> AdminResponse:
     rows = [
         {"id": project.id, "name": project.name}
         for project in (
-            await PlatformBotService(pool).list_projects_for_telegram_user(int(chat_id))
+            await _build_platform_bot_service(pool).list_projects_for_telegram_user(
+                int(chat_id)
+            )
         ).projects
         if str(project.id) != str(settings.ADMIN_PROJECT_ID)
     ]
