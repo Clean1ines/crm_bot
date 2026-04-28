@@ -263,3 +263,35 @@ html[data-theme="dark"] .shadow-sm {
 html[data-theme="dark"] [class*="bg-[var(--surface-secondary)]"] {
   border-color: var(--border-subtle);
 }
+
+/* Auth/landing pages must be scrollable on mobile.
+   The CRM app shell still owns its own fixed-height scroll regions.
+*/
+html.auth-scroll-page,
+body.auth-scroll-page {
+  min-height: 100%;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body.auth-scroll-page #root {
+  min-height: 100%;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+@media (max-width: 768px) {
+  html.auth-scroll-page,
+  body.auth-scroll-page {
+    min-height: 100dvh;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  body.auth-scroll-page #root {
+    min-height: 100dvh;
+  }
+}
+

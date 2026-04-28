@@ -32,6 +32,16 @@ const getAccessTokenFromAuthResponse = (data: unknown): string => {
 };
 
 export const TelegramLoginPage: React.FC = () => {
+  useEffect(() => {
+    document.body.classList.add('auth-scroll-page');
+    document.documentElement.classList.add('auth-scroll-page');
+
+    return () => {
+      document.body.classList.remove('auth-scroll-page');
+      document.documentElement.classList.remove('auth-scroll-page');
+    };
+  }, []);
+
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showAuthPanel, setShowAuthPanel] = useState(false);
