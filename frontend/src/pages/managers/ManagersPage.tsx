@@ -138,7 +138,7 @@ export const ManagersPage: React.FC = () => {
               placeholder="Поиск по участникам..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] py-2 pl-10 pr-4 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-64"
+              className="w-full rounded-lg bg-[var(--surface-card)] py-2 pl-10 pr-4 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-64"
             />
           </div>
           <input
@@ -146,12 +146,12 @@ export const ManagersPage: React.FC = () => {
             placeholder="ID участника"
             value={newMemberUserId}
             onChange={(e) => setNewMemberUserId(e.target.value)}
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-52"
+            className="w-full rounded-lg bg-[var(--surface-card)] px-3 py-2 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-52"
           />
           <select
             value={newMemberRole}
             onChange={(e) => setNewMemberRole(e.target.value as (typeof ROLE_OPTIONS)[number])}
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-auto"
+            className="w-full rounded-lg bg-[var(--surface-card)] px-3 py-2 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-auto"
           >
             {ROLE_OPTIONS.map((role) => (
               <option key={role} value={role}>
@@ -171,10 +171,10 @@ export const ManagersPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-sm">
+      <div className="overflow-hidden rounded-2xl bg-[var(--surface-card)] shadow-sm">
         <div className="hidden overflow-x-auto md:block">
         <table className="w-full border-collapse text-left">
-          <thead className="border-b border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
+          <thead className="shadow-[0_1px_0_var(--divider-soft)] bg-[var(--surface-secondary)]">
             <tr>
               <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">Участник</th>
               <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">User ID</th>
@@ -241,14 +241,14 @@ export const ManagersPage: React.FC = () => {
 
         <div className="grid gap-3 p-3 md:hidden">
           {filteredManagers.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-4 py-10 text-center text-sm text-[var(--text-muted)]">
+            <div className="rounded-2xl bg-[var(--surface-secondary)] px-4 py-10 text-center text-sm text-[var(--text-muted)]">
               Участники проекта пока не найдены.
             </div>
           ) : (
             filteredManagers.map((manager) => (
               <article
                 key={manager.user_id}
-                className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-4"
+                className="rounded-2xl bg-[var(--surface-secondary)] p-4"
               >
                 <div className="flex items-start gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
@@ -265,13 +265,13 @@ export const ManagersPage: React.FC = () => {
                 </div>
 
                 <div className="mt-4 grid gap-2 text-xs">
-                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+                  <div className="rounded-xl bg-[var(--surface-card)] p-3">
                     <div className="text-[var(--text-muted)]">User ID</div>
                     <div className="mt-1 break-all font-mono font-semibold text-[var(--text-primary)]">
                       {manager.user_id}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+                  <div className="rounded-xl bg-[var(--surface-card)] p-3">
                     <div className="text-[var(--text-muted)]">Роль</div>
                     <div className="mt-1 flex items-center gap-2 font-semibold text-[var(--text-primary)]">
                       <CheckCircle2 className="h-4 w-4 text-[var(--accent-success)]" />
@@ -283,7 +283,7 @@ export const ManagersPage: React.FC = () => {
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <button
                     onClick={() => openHistory(manager)}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)]"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)]"
                     title="История ответов"
                   >
                     <History className="h-4 w-4" />
@@ -292,7 +292,7 @@ export const ManagersPage: React.FC = () => {
                   <button
                     onClick={() => removeMemberMutation.mutate(manager.user_id)}
                     disabled={removeMemberMutation.isPending}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-danger-bg)] hover:text-[var(--accent-danger-text)] disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-danger-bg)] hover:text-[var(--accent-danger-text)] disabled:opacity-50"
                     title="Удалить участника"
                   >
                     <Trash2 className="h-4 w-4" />
@@ -311,7 +311,7 @@ export const ManagersPage: React.FC = () => {
             className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm transition-opacity"
             onClick={() => setIsHistoryOpen(false)}
           />
-          <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-card)] p-4 shadow-2xl animate-in slide-in-from-right duration-300 sm:w-[450px] sm:p-8">
+          <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col shadow-[-1px_0_0_var(--divider-soft)] bg-[var(--surface-card)] p-4 shadow-2xl animate-in slide-in-from-right duration-300 sm:w-[450px] sm:p-8">
             <div className="mb-6 flex items-center justify-between sm:mb-8">
               <h2 className="text-2xl font-bold text-[var(--text-primary)]">История ответов</h2>
               <button
@@ -322,7 +322,7 @@ export const ManagersPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="mb-8 flex items-center gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-4">
+            <div className="mb-8 flex items-center gap-4 rounded-xl bg-[var(--surface-secondary)] p-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
                 <User className="h-6 w-6" />
               </div>
@@ -332,7 +332,7 @@ export const ManagersPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex-1 rounded-xl border border-dashed border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-6 text-sm text-[var(--text-muted)]">
+            <div className="flex-1 rounded-xl bg-[var(--surface-secondary)] p-6 text-sm text-[var(--text-muted)]">
               История ответов пока не подключена к API. Фейковые ответы скрыты, чтобы не вводить менеджера в заблуждение.
             </div>
           </div>

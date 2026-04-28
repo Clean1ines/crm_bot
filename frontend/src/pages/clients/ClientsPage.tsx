@@ -59,7 +59,7 @@ export const ClientsPage: React.FC = () => {
               placeholder="Поиск по Telegram username..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 transition-all"
+              className="w-full pl-10 pr-4 py-2 bg-[var(--surface-card)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 transition-all"
             />
           </div>
           <Button variant="secondary" className="flex w-full items-center gap-2 sm:w-auto" disabled>
@@ -70,24 +70,24 @@ export const ClientsPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 lg:gap-6">
-        <div className="bg-[var(--surface-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 lg:p-6 rounded-2xl">
+        <div className="bg-[var(--surface-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl">
           <div className="text-sm text-[var(--text-muted)] mb-1">Всего клиентов</div>
           <div className="text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">{stats.total_clients}</div>
         </div>
-        <div className="bg-[var(--surface-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 lg:p-6 rounded-2xl">
+        <div className="bg-[var(--surface-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl">
           <div className="text-sm text-[var(--text-muted)] mb-1">Новых за 7 дней</div>
           <div className="text-2xl font-bold text-[var(--accent-primary)] sm:text-3xl">+{stats.new_clients_7d}</div>
         </div>
-        <div className="bg-[var(--surface-secondary)] border border-[var(--border-subtle)] p-4 sm:p-5 lg:p-6 rounded-2xl">
+        <div className="bg-[var(--surface-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl">
           <div className="text-sm text-[var(--text-muted)] mb-1">Активных диалогов</div>
           <div className="text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">{stats.active_dialogs}</div>
         </div>
       </div>
 
-      <div className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-2xl overflow-hidden shadow-sm">
+      <div className="bg-[var(--surface-elevated)] rounded-2xl overflow-hidden shadow-sm">
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-left border-collapse">
-            <thead className="bg-[var(--surface-secondary)] border-b border-[var(--border-subtle)]">
+            <thead className="bg-[var(--surface-secondary)] shadow-[0_1px_0_var(--divider-soft)]">
               <tr>
                 <th className="px-6 py-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Клиент</th>
                 <th className="px-6 py-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Дата регистрации</th>
@@ -160,7 +160,7 @@ export const ClientsPage: React.FC = () => {
 
         <div className="grid gap-3 p-3 md:hidden">
           {clients.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-4 py-10 text-center text-sm text-[var(--text-muted)]">
+            <div className="rounded-2xl bg-[var(--surface-secondary)] px-4 py-10 text-center text-sm text-[var(--text-muted)]">
               Клиенты не найдены
             </div>
           ) : (
@@ -174,7 +174,7 @@ export const ClientsPage: React.FC = () => {
               return (
                 <article
                   key={client.id}
-                  className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-4"
+                  className="rounded-2xl bg-[var(--surface-secondary)] p-4"
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--border-subtle)] text-xs font-bold uppercase text-[var(--text-primary)]">
@@ -187,13 +187,13 @@ export const ClientsPage: React.FC = () => {
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+                    <div className="rounded-xl bg-[var(--surface-card)] p-3">
                       <div className="text-[var(--text-muted)]">Регистрация</div>
                       <div className="mt-1 font-semibold text-[var(--text-primary)]">
                         {createdAt ? createdAt.toLocaleDateString() : '—'}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-3">
+                    <div className="rounded-xl bg-[var(--surface-card)] p-3">
                       <div className="text-[var(--text-muted)]">Активность</div>
                       <div className="mt-1 font-semibold text-[var(--text-primary)]">
                         {lastActivityAt ? lastActivityAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}

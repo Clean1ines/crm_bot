@@ -123,7 +123,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
 
   if (status === 'missing-client') {
     return (
-      <div className="rounded-xl border border-dashed border-[var(--border-subtle)] bg-white px-4 py-3 text-sm text-[var(--text-muted)]">
+      <div className="rounded-xl bg-[var(--surface-secondary)] px-4 py-3 text-sm text-[var(--text-muted)] shadow-[var(--shadow-sm)]">
         Google вход станет доступен после настройки `VITE_GOOGLE_CLIENT_ID`.
       </div>
     );
@@ -131,7 +131,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
 
   if (status === 'failed') {
     return (
-      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-xl bg-[var(--accent-danger-bg)] px-4 py-3 text-sm text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)]">
         Не удалось загрузить Google Identity Services.
       </div>
     );

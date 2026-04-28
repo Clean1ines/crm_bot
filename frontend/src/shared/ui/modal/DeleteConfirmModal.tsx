@@ -33,7 +33,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
         <button
           onClick={handleConfirm}
           disabled={isPending}
-          className="px-3 py-1.5 text-xs font-semibold rounded bg-[var(--accent-danger)] text-white hover:bg-[#ff6961] transition-colors disabled:opacity-30"
+          className="px-3 py-1.5 text-xs font-semibold rounded bg-[var(--accent-danger)] text-white hover:bg-[var(--accent-danger-text)] transition-colors disabled:opacity-30"
         >
           {isPending ? 'Deleting...' : 'Delete'}
         </button>

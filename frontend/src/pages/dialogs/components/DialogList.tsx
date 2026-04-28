@@ -87,7 +87,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
   const getMessageBackground = (role: string) => {
     if (role === 'assistant') return 'bg-[var(--surface-secondary)]';
     if (role === 'manager') return 'bg-[var(--accent-muted)]';
-    return 'bg-[var(--surface-card)] border border-[var(--border-subtle)]';
+    return 'bg-[var(--surface-hover)]';
   };
 
   const handleThreadSelect = (threadId: string) => {
@@ -96,8 +96,8 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
   };
 
   return (
-    <div className={`flex h-full min-h-0 flex-col bg-[var(--surface-card)] shadow-sm ${mobile ? '' : 'border-r border-[var(--border-subtle)]'}`}>
-      <div className="border-b border-[var(--border-subtle)] p-4">
+    <div className={`flex h-full min-h-0 flex-col bg-[var(--surface-elevated)] shadow-sm ${mobile ? '' : 'shadow-[1px_0_0_var(--divider-soft)]'}`}>
+      <div className="p-4 shadow-[0_1px_0_var(--divider-soft)]">
         {mobile && (
           <div className="mb-4">
             <h1 className="text-xl font-bold text-[var(--text-primary)]">Диалоги</h1>
@@ -111,7 +111,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
             placeholder="Поиск по имени..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--surface-secondary)] text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
+            className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--control-bg)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20 transition-all"
           />
         </div>
         <div className="flex gap-2 mt-3">
@@ -126,7 +126,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
               className={`px-2 py-1 text-xs rounded-full transition-all ${
                 statusFilter === filter.value
                   ? 'bg-[var(--accent-primary)] text-white shadow-sm'
-                  : 'bg-[var(--surface-secondary)] text-[var(--text-secondary)] hover:bg-white hover:shadow-sm hover:text-[var(--text-primary)]'
+                  : 'bg-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
               }`}
             >
               {filter.label}
@@ -157,10 +157,10 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
             <div
               key={thread.thread_id}
               onClick={() => handleThreadSelect(thread.thread_id)}
-              className={`relative mx-2 mb-1 rounded-lg border border-transparent p-3 cursor-pointer transition-all duration-150 ${
+              className={`relative mx-2 mb-1 rounded-xl p-3 cursor-pointer transition-all duration-150 ${
                 isActive
-                  ? 'border-[var(--border-subtle)] bg-[var(--surface-secondary)] shadow-sm'
-                  : 'hover:border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)] hover:shadow-sm'
+                  ? 'bg-[var(--surface-hover)] shadow-none'
+                  : 'hover:bg-[var(--surface-hover)]'
               }`}
             >
               {isActive && (
