@@ -107,49 +107,56 @@ html, body, #root {
 /* Optional dark theme.
    Light theme above stays the default. Dark mode is enabled only by:
    document.documentElement.dataset.theme = "dark"
+
+   This palette intentionally mirrors the light theme instead of redesigning it.
+   It keeps the same warm CRM identity: beige -> warm graphite, white -> charcoal,
+   brown accent -> bronze/copper.
 */
 html[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg-primary: #05070D;
-  --surface-secondary: #0B0F19;
-  --surface-card: #101625;
+  /* Inverted warm surfaces */
+  --bg-primary: #15120F;
+  --surface-secondary: #1E1A16;
+  --surface-card: #252019;
 
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.24);
-  --shadow-md: 0 10px 30px rgba(0,0,0,0.22);
-  --shadow-card: 0 18px 48px rgba(0,0,0,0.26);
-  --shadow-hover: 0 24px 64px rgba(0,0,0,0.32);
-  --shadow-heavy: 0 32px 90px rgba(0,0,0,0.42);
+  /* Borders and shadows */
+  --border-subtle: rgba(232, 221, 210, 0.12);
+  --border-primary: rgba(232, 221, 210, 0.18);
 
-  --accent-primary: #7C8CFF;
-  --accent-hover: #9AA6FF;
-  --accent-muted: rgba(124,140,255,0.16);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.26);
+  --shadow-md: 0 8px 20px rgba(0,0,0,0.24);
+  --shadow-card: 0 14px 36px rgba(0,0,0,0.28);
+  --shadow-hover: 0 18px 44px rgba(0,0,0,0.34);
+  --shadow-heavy: 0 28px 72px rgba(0,0,0,0.44);
 
-  --text-primary: #E6EDF8;
-  --text-secondary: #AEB9CC;
-  --text-muted: #748096;
+  /* Same family as light accent, lifted for contrast */
+  --accent-primary: #D0A06E;
+  --accent-hover: #E1B987;
+  --accent-muted: rgba(208, 160, 110, 0.18);
 
-  --border-subtle: rgba(148,163,184,0.14);
-  --border-primary: rgba(148,163,184,0.2);
+  /* Warm readable text */
+  --text-primary: #F1E9DD;
+  --text-secondary: #C9B8A3;
+  --text-muted: #9B8C7A;
 
-  --accent-success: #3DDC97;
-  --accent-success-bg: rgba(61,220,151,0.1);
-  --accent-success-border: rgba(61,220,151,0.24);
-  --accent-success-text: #8FF0C6;
+  /* Functional colors: muted, not neon */
+  --accent-success: #9EAD87;
+  --accent-success-bg: rgba(158, 173, 135, 0.13);
+  --accent-success-border: rgba(158, 173, 135, 0.24);
+  --accent-success-text: #C9D8B4;
 
-  --accent-danger: #FF6B7A;
-  --accent-danger-bg: rgba(255,107,122,0.1);
-  --accent-danger-border: rgba(255,107,122,0.28);
-  --accent-danger-text: #FFB3BD;
+  --accent-danger: #D78362;
+  --accent-danger-bg: rgba(215, 131, 98, 0.13);
+  --accent-danger-border: rgba(215, 131, 98, 0.26);
+  --accent-danger-text: #F0B59B;
 
-  --accent-warning: #FFD166;
+  --accent-warning: #D7A354;
+  --accent-warning-bg: rgba(215, 163, 84, 0.14);
 }
 
 html[data-theme="dark"] body {
-  background:
-    radial-gradient(circle at 12% 0%, rgba(124,140,255,0.16), transparent 30rem),
-    radial-gradient(circle at 88% 12%, rgba(56,213,255,0.08), transparent 26rem),
-    linear-gradient(135deg, #05070D 0%, #070A12 48%, #05070D 100%);
+  background: var(--bg-primary);
   color: var(--text-primary);
 }
 
@@ -160,18 +167,18 @@ html[data-theme="dark"] select {
 }
 
 html[data-theme="dark"] ::selection {
-  background: rgba(124,140,255,0.34);
+  background: rgba(208, 160, 110, 0.32);
   color: var(--text-primary);
 }
 
 html[data-theme="dark"] ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--surface-secondary);
 }
 
 html[data-theme="dark"] ::-webkit-scrollbar-thumb {
-  background: rgba(124,140,255,0.28);
+  background: rgba(208, 160, 110, 0.28);
 }
 
 html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(124,140,255,0.52);
+  background: rgba(208, 160, 110, 0.46);
 }
