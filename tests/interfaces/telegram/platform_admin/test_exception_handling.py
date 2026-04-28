@@ -126,3 +126,40 @@ async def test_knowledge_upload_failure_returns_safe_fallback_and_logs_context()
     assert "telegram token internals" not in text
     logger.exception.assert_called_once()
     assert logger.exception.call_args.kwargs["extra"]["policy"] == "safe_user_fallback"
+
+
+async def test_listprojects_callback_builds_service_with_user_repository(monkeypatch):
+    from types import SimpleNamespace
+
+    from src.interfaces.telegram.platform_admin import handlers
+
+    captured: dict[str, object] = {}
+
+    class FakePool:
+        pass
+
+    class FakeUserRepository:
+        def __init__(self, pool: object) -> None:
+            captured["pool"] = pool
+
+    class FakePlatformBotService:
+        def __init__(self, user_repo: object) -> None:
+            captured["user_repo"] = user_repo
+
+        async def list_projects_for_telegram_user(
+            self,
+            telegram_id: int,
+        ) -> object:
+            captured["telegram_id"] = telegram_id
+            return SimpleNamespace(projects=[])
+
+    pool = FakePool()
+
+    monkeypatch.setattr(handlers, "UserRepository", FakeUserRepository)
+    monkeypatch.setattr(handlers, "PlatformBotService", FakePlatformBotService)
+
+    await handlers.handle_admin_callback("listprojects", "123", pool)
+
+    assert captured["pool"] is pool
+    assert isinstance(captured["user_repo"], FakeUserRepository)
+    assert captured["telegram_id"] == 123
