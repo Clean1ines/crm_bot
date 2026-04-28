@@ -57,7 +57,7 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
             required
             maxLength={100}
             autoFocus
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
+            className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div>
@@ -68,7 +68,7 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
             type="text"
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
+            className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div className="flex justify-end gap-2 pt-2">

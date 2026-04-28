@@ -42,7 +42,7 @@ export const TicketsPage: React.FC = () => {
           return (
             <div
               key={ticket.thread_id}
-              className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow"
+              className="rounded-xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] hover:shadow-md transition-shadow"
             >
               <Link
                 to={`/projects/${projectId}/tickets/${ticket.thread_id}`}

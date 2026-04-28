@@ -106,8 +106,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   return (
     <div className={`flex h-full min-h-0 flex-col bg-transparent ${mobile ? '' : 'items-center justify-center'}`}>
       <div className={`flex min-h-0 w-full flex-1 ${mobile ? '' : 'max-w-3xl mx-4 my-4'}`}>
-        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-card transition-all ${mobile ? 'border-x-0 border-t-0 rounded-none' : 'rounded-xl'}`}>
-          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3 sm:p-4">
+        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-[var(--surface-elevated)] shadow-card transition-all ${mobile ? 'rounded-none' : 'rounded-2xl'}`}>
+          <div className="flex items-center justify-between p-3 shadow-[0_1px_0_var(--divider-soft)] sm:p-4">
             <div className="flex min-w-0 items-center gap-2">
               {mobile && (
                 <button
@@ -136,7 +136,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   type="button"
                   onClick={onOpenInspector}
                   disabled={!threadId}
-                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-primary)] disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-lg bg-[var(--surface-hover)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-primary)] disabled:opacity-50"
                 >
                   <Info className="h-4 w-4" />
                   Сводка
@@ -154,13 +154,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             {(Array.isArray(messages) ? messages : []).map((msg, idx) => {
               let bubbleClasses = '';
               if (msg.role === 'user') {
-                bubbleClasses = 'bg-[var(--surface-card)] border border-[var(--border-subtle)] shadow-sm text-[var(--text-primary)]';
+                bubbleClasses = 'bg-[var(--surface-raised)] shadow-sm text-[var(--text-primary)]';
               } else if (msg.role === 'assistant') {
-                bubbleClasses = 'bg-[var(--surface-secondary)] border border-[var(--border-subtle)] text-[var(--text-primary)]';
+                bubbleClasses = 'bg-[var(--surface-secondary)] text-[var(--text-primary)]';
               } else if (msg.role === 'manager') {
-                bubbleClasses = 'bg-[var(--accent-muted)] border border-[var(--border-subtle)] text-[var(--accent-primary)] shadow-sm';
+                bubbleClasses = 'bg-[var(--accent-muted)] text-[var(--accent-primary)] shadow-sm';
               } else {
-                bubbleClasses = 'bg-[var(--surface-secondary)] border border-[var(--border-subtle)] text-[var(--text-primary)]';
+                bubbleClasses = 'bg-[var(--surface-secondary)] text-[var(--text-primary)]';
               }
               return (
                 <div
@@ -190,7 +190,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
 
           {threadId && (
-            <div className="border-t border-[var(--border-subtle)] p-3 sm:p-4">
+            <div className="p-3 shadow-[0_-1px_0_var(--divider-soft)] sm:p-4">
               <div className="flex gap-2">
                 <textarea
                   value={inputText}
@@ -202,7 +202,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     }
                   }}
                   placeholder="Введите ответ..."
-                  className="min-h-[44px] flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
+                  className="min-h-[44px] flex-1 resize-none rounded-lg bg-[var(--control-bg)] p-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20 transition-all"
                   rows={mobile ? 1 : 2}
                   disabled={isSending}
                 />

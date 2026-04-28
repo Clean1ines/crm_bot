@@ -84,7 +84,8 @@ export const AppSidebar: React.FC = () => {
     await deleteProject(deletingProject.id);
   };
 
-  const fallbackProjectId = urlProjectId || selectedProjectId || projects[0]?.id;
+  const firstProjectId = projects[0]?.id;
+  const fallbackProjectId = urlProjectId || selectedProjectId || firstProjectId;
   const activeProjectId = fallbackProjectId || undefined;
   const currentProject = projects.find((project) => project.id === activeProjectId);
 
@@ -92,8 +93,8 @@ export const AppSidebar: React.FC = () => {
     const disabled = !fallbackProjectId;
     const linkClasses = (isActive: boolean) => {
       const base = 'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150';
-      const activeClass = 'bg-white text-[var(--accent-primary)] shadow-sm';
-      const inactiveClass = 'text-[var(--text-secondary)] hover:bg-white hover:text-[var(--text-primary)] hover:shadow-sm';
+      const activeClass = 'bg-[var(--surface-hover)] text-[var(--accent-primary)] shadow-none';
+      const inactiveClass = 'text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]';
       return `${base} ${isActive ? activeClass : inactiveClass}`;
     };
     const disabledClasses = 'flex items-center gap-3 px-3 py-2 rounded-lg text-[var(--text-muted)] opacity-50 cursor-not-allowed';
@@ -122,15 +123,15 @@ export const AppSidebar: React.FC = () => {
   if (isMobile) {
     return (
       <>
-        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-heavy">
-          <div className="flex gap-1 overflow-x-auto px-2 py-2 scrollbar-hide">
+        <nav className="fixed inset-x-0 bottom-0 z-[100] bg-[var(--glass-panel)] shadow-heavy backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
+          <div className="flex items-center gap-1 overflow-x-auto px-2 py-2 scrollbar-hide">
             {navItems.map((item) => {
               const disabled = !fallbackProjectId;
               if (disabled) {
                 return (
                   <div
                     key={item.path}
-                    className="flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-muted)] opacity-50"
+                    className="flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-muted)] opacity-50"
                   >
                     {item.icon}
                     <span className="text-[10px] font-medium">{item.label}</span>
@@ -143,7 +144,7 @@ export const AppSidebar: React.FC = () => {
                   key={item.path}
                   to={`/projects/${fallbackProjectId}/${item.path}`}
                   className={({ isActive }) =>
-                    `flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition-colors ${
+                    `flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition-colors ${
                       isActive
                         ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)]'
                         : 'text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]'
@@ -159,7 +160,7 @@ export const AppSidebar: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/profile')}
-              className="flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
+              className="flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
             >
               <User className="h-4 w-4" />
               <span className="text-[10px] font-medium">Профиль</span>
@@ -205,13 +206,13 @@ export const AppSidebar: React.FC = () => {
       <div className="px-4 pb-4 relative">
         <button
           onClick={() => setIsProjectSelectOpen(!isProjectSelectOpen)}
-          className="w-full flex items-center justify-between bg-white rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] shadow-sm hover:shadow-md transition-all"
+          className="w-full flex items-center justify-between bg-[var(--control-bg)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] shadow-sm hover:bg-[var(--control-bg-hover)] transition-all"
         >
           <span className="truncate">{currentProject?.name || 'Выберите проект'}</span>
           <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
         </button>
         {isProjectSelectOpen && (
-          <div className="absolute left-4 right-4 top-[calc(100%-8px)] z-10 bg-white rounded-lg shadow-md mt-1 max-h-48 overflow-y-auto">
+          <div className="absolute left-4 right-4 top-[calc(100%-8px)] z-10 bg-[var(--surface-raised)] rounded-lg shadow-md mt-1 max-h-48 overflow-y-auto">
             {projects.map((project) => (
               <button
                 key={project.id}
@@ -233,7 +234,7 @@ export const AppSidebar: React.FC = () => {
         <button
           type="button"
           onClick={() => navigate('/profile')}
-          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-white"
+          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[var(--surface-hover)]"
         >
           <div className="w-8 h-8 rounded-full bg-[var(--accent-muted)] flex items-center justify-center text-[var(--accent-primary)] font-medium shadow-sm">
             <User className="w-4 h-4" />
@@ -245,7 +246,7 @@ export const AppSidebar: React.FC = () => {
         </button>
         <button
           onClick={openCreateModal}
-          className="w-full text-sm text-[var(--accent-primary)] hover:bg-white px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 justify-center"
+          className="w-full text-sm text-[var(--accent-primary)] hover:bg-[var(--surface-hover)] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 justify-center"
         >
           <PlusCircle className="w-4 h-4" />
           Новый проект

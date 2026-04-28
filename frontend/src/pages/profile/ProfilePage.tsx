@@ -116,7 +116,7 @@ export const ProfilePage: React.FC = () => {
         </p>
       </div>
 
-      <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-sm">
+      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Подключенные способы входа</h2>
         {methodsQuery.isLoading ? (
           <div className="text-sm text-[var(--text-muted)]">Загрузка...</div>
@@ -125,7 +125,7 @@ export const ProfilePage: React.FC = () => {
             {methodsQuery.data?.methods.map((method) => (
               <div
                 key={`${method.provider}-${method.provider_id}`}
-                className="flex items-center justify-between rounded-lg border border-[var(--border-subtle)] bg-white px-4 py-3"
+                className="flex items-center justify-between rounded-lg bg-[var(--control-bg)] px-4 py-3 shadow-[var(--shadow-sm)]"
               >
                 <div>
                   <div className="font-medium text-[var(--text-primary)]">{method.provider}</div>
@@ -135,7 +135,7 @@ export const ProfilePage: React.FC = () => {
                   type="button"
                   onClick={() => unlinkMethodMutation.mutate(method.provider as 'telegram' | 'email' | 'google')}
                   disabled={unlinkMethodMutation.isPending}
-                  className="rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] disabled:opacity-50"
+                  className="rounded-lg bg-[var(--control-bg)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
                 >
                   Отвязать
                 </button>
@@ -148,12 +148,12 @@ export const ProfilePage: React.FC = () => {
         )}
       </section>
 
-      <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-sm">
+      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Email-вход</h2>
-        <div className="mb-4 rounded-lg border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm text-[var(--text-primary)]">
+        <div className="mb-4 rounded-lg bg-[var(--control-bg)] px-4 py-3 shadow-[var(--shadow-sm)] text-sm text-[var(--text-primary)]">
           Статус email:
           {' '}
-          <span className={emailMethod?.verified ? 'text-emerald-600' : 'text-amber-600'}>
+          <span className={emailMethod?.verified ? 'text-[var(--accent-success-text)]' : 'text-[var(--accent-warning)]'}>
             {emailMethod?.verified ? 'подтвержден' : 'не подтвержден'}
           </span>
         </div>
@@ -164,7 +164,7 @@ export const ProfilePage: React.FC = () => {
               type="email"
               value={emailInputValue}
               onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -173,7 +173,7 @@ export const ProfilePage: React.FC = () => {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
             />
           </label>
         </div>
@@ -187,7 +187,7 @@ export const ProfilePage: React.FC = () => {
         <button
           onClick={() => requestEmailVerificationMutation.mutate()}
           disabled={requestEmailVerificationMutation.isPending || !emailMethod}
-          className="ml-3 mt-5 rounded-lg border border-[var(--border-subtle)] bg-white px-4 py-2 text-sm font-medium text-[var(--text-primary)] disabled:opacity-50"
+          className="ml-3 mt-5 rounded-lg bg-[var(--control-bg)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
           {requestEmailVerificationMutation.isPending ? 'Подготовка...' : 'Получить ссылку подтверждения'}
         </button>
@@ -197,7 +197,7 @@ export const ProfilePage: React.FC = () => {
             <textarea
               readOnly
               value={emailVerificationUrl}
-              className="min-h-20 w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="min-h-20 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
             />
           </label>
         ) : null}
@@ -208,7 +208,7 @@ export const ProfilePage: React.FC = () => {
               type="password"
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -217,20 +217,20 @@ export const ProfilePage: React.FC = () => {
               type="password"
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
             />
           </label>
         </div>
         <button
           onClick={() => changePasswordMutation.mutate()}
           disabled={changePasswordMutation.isPending}
-          className="mt-5 rounded-lg border border-[var(--border-subtle)] bg-white px-4 py-2 text-sm font-medium text-[var(--text-primary)] disabled:opacity-50"
+          className="mt-5 rounded-lg bg-[var(--control-bg)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
           {changePasswordMutation.isPending ? 'Сохранение...' : 'Обновить пароль'}
         </button>
       </section>
 
-      <section className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-6 shadow-sm">
+      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h2 className="mb-2 text-xl font-medium text-[var(--text-primary)]">Google-вход</h2>
         <p className="mb-4 text-sm text-[var(--text-muted)]">
           Google-вход подключается через официальный сервис Google и проверяется безопасно на сервере.

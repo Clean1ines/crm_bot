@@ -75,27 +75,27 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3">
-          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Клиент</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{clientName}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Статус</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.status || '—'}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Настроение</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.lifecycle || '—'}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Сообщений</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.total_messages ?? 0}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Создан</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Обновлён</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}</div>
           </div>
@@ -110,7 +110,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
         <div className="text-sm text-[var(--text-muted)]">Память пока пуста</div>
       )}
       {safeThreadMemory.map((entry) => (
-        <div key={entry.id} className="rounded-lg bg-[var(--surface-card)] p-2 shadow-sm transition-all hover:shadow-md">
+        <div key={entry.id} className="rounded-lg bg-[var(--surface-secondary)] p-2 transition-all hover:shadow-md">
           {editingMemoryKey === entry.key ? (
             <div>
               <textarea
@@ -157,7 +157,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           const repeatCount = typeof payload.repeat_count === 'number' ? payload.repeat_count : undefined;
           const leadStatus = typeof payload.lead_status === 'string' ? payload.lead_status : undefined;
           return (
-            <div key={event.id} className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
+            <div key={event.id} className="rounded-lg bg-[var(--surface-secondary)] p-3">
               <div className="text-xs text-[var(--text-muted)] mb-1">
                 {new Date(event.ts).toLocaleString()}
               </div>
@@ -188,7 +188,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
         return (
           <div
             key={event.id}
-            className={`rounded-lg p-3 shadow-sm ${isEscalation ? 'bg-[var(--accent-muted)]' : 'bg-[var(--surface-card)]'}`}
+            className={`rounded-lg p-3 ${isEscalation ? 'bg-[var(--accent-muted)]' : 'bg-[var(--surface-secondary)]'}`}
           >
             <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mb-1">
               {isEscalation && <AlertCircle className="w-3 h-3 text-[var(--accent-danger)]" />}
@@ -210,7 +210,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
   );
 
   const renderRaw = () => (
-    <pre className="overflow-auto rounded-lg bg-[var(--surface-card)] p-2 text-xs shadow-sm">
+    <pre className="overflow-auto rounded-lg bg-[var(--surface-secondary)] p-2 text-xs">
       {JSON.stringify(threadState, null, 2)}
     </pre>
   );
@@ -433,8 +433,8 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
   const contentKey = `${inspectorActiveTab}-${threadId}`;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--surface-card)] shadow-sm">
-      <div className="border-b border-[var(--border-subtle)] p-3 sm:p-4">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--surface-elevated)] shadow-sm">
+      <div className="p-3 shadow-[0_1px_0_var(--divider-soft)] sm:p-4">
         {mobile && (
           <div className="mb-3 flex items-center gap-2">
             <button
@@ -465,7 +465,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           {showTabMenu && (
             <div
               ref={dropdownRef}
-              className="absolute left-0 z-20 mt-1 w-40 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg"
+              className="absolute left-0 z-20 mt-1 w-40 rounded-md bg-[var(--surface-raised)] shadow-lg"
             >
               {tabs.map((tab) => (
                 <button

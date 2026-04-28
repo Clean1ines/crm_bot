@@ -122,7 +122,7 @@ export const ChannelSettingsPage: React.FC = () => {
   if (projectsError) {
     return (
       <div className="p-8">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
+        <div className="rounded-lg bg-[var(--accent-danger-bg)] p-4 text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)]">
           Не удалось загрузить проекты.
         </div>
       </div>
@@ -140,7 +140,7 @@ export const ChannelSettingsPage: React.FC = () => {
   if (!currentProject) {
     return (
       <div className="p-8">
-        <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 p-4 rounded-lg">
+        <div className="rounded-lg bg-[var(--accent-warning-bg)] p-4 text-[var(--accent-warning)] shadow-[var(--shadow-sm)]">
           Проект не выбран. Выберите проект в боковом меню.
         </div>
       </div>
@@ -159,7 +159,7 @@ export const ChannelSettingsPage: React.FC = () => {
         </p>
       </div>
 
-      <div className="bg-[var(--surface-secondary)] rounded-xl border border-[var(--border-subtle)] p-6 shadow-sm">
+      <div className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h2 className="text-xl font-medium text-[var(--text-primary)] mb-4">Клиентский бот</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
           Бот, который будет общаться с клиентами.
@@ -167,7 +167,7 @@ export const ChannelSettingsPage: React.FC = () => {
 
         {hasClient ? (
           <div className="space-y-4">
-            <div className="p-3 bg-[var(--accent-success-bg)] border border-[var(--accent-success-border)] rounded-lg text-sm text-[var(--accent-success-text)]">
+            <div className="rounded-lg bg-[var(--accent-success-bg)] p-3 text-sm text-[var(--accent-success-text)] shadow-[var(--shadow-sm)]">
               <strong>✓ Бот подключён</strong> – @{currentProject.client_bot_username}
             </div>
             <button
@@ -190,7 +190,7 @@ export const ChannelSettingsPage: React.FC = () => {
                   value={clientToken}
                   onChange={(e) => setClientToken(e.target.value)}
                   placeholder="1234567890:ABCdefGHIJklmNOPqrStuVWXyz"
-                  className="flex-1 px-3 py-2 bg-white border border-[var(--border-subtle)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)] focus:border-transparent"
+                  className="flex-1 px-3 py-2 bg-[var(--control-bg)] rounded-lg text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                 />
                 <button
                   onClick={() => setShowClientToken(!showClientToken)}
@@ -214,7 +214,7 @@ export const ChannelSettingsPage: React.FC = () => {
         )}
       </div>
 
-      <div className="bg-[var(--surface-secondary)] rounded-xl border border-[var(--border-subtle)] p-6 shadow-sm">
+      <div className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h2 className="text-xl font-medium text-[var(--text-primary)] mb-4">Менеджерский бот</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
           Бот, который будет уведомлять менеджеров об эскалациях.
@@ -222,7 +222,7 @@ export const ChannelSettingsPage: React.FC = () => {
 
         {hasManager ? (
           <div className="space-y-4">
-            <div className="p-3 bg-[var(--accent-success-bg)] border border-[var(--accent-success-border)] rounded-lg text-sm text-[var(--accent-success-text)]">
+            <div className="rounded-lg bg-[var(--accent-success-bg)] p-3 text-sm text-[var(--accent-success-text)] shadow-[var(--shadow-sm)]">
               <strong>✓ Бот подключён</strong> – @{currentProject.manager_bot_username}
             </div>
             <button
@@ -245,7 +245,7 @@ export const ChannelSettingsPage: React.FC = () => {
                   value={managerToken}
                   onChange={(e) => setManagerToken(e.target.value)}
                   placeholder="1234567890:ABCdefGHIJklmNOPqrStuVWXyz"
-                  className="flex-1 px-3 py-2 bg-white border border-[var(--border-subtle)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)] focus:border-transparent"
+                  className="flex-1 px-3 py-2 bg-[var(--control-bg)] rounded-lg text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                 />
                 <button
                   onClick={() => setShowManagerToken(!showManagerToken)}

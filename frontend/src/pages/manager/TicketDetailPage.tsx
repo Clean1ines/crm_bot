@@ -75,7 +75,7 @@ export const TicketDetailPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 mb-6 max-h-96 overflow-y-auto shadow-sm">
+      <div className="mb-6 max-h-96 overflow-y-auto rounded-xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
         <h2 className="font-medium text-[var(--text-primary)] mb-3">История диалога</h2>
         {messages.length === 0 && <p className="text-[var(--text-muted)]">Нет сообщений</p>}
         <div className="space-y-3">
@@ -88,7 +88,7 @@ export const TicketDetailPage: React.FC = () => {
                 className={`max-w-[70%] rounded-2xl px-4 py-2 shadow-sm ${
                   msg.role === 'user'
                     ? 'bg-[var(--accent-primary)] text-white'
-                    : 'bg-[var(--surface-secondary)] text-[var(--text-primary)] border border-[var(--border-subtle)]'
+                    : 'bg-[var(--surface-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]'
                 }`}
               >
                 <div className="text-xs opacity-80 mb-1">
@@ -104,11 +104,11 @@ export const TicketDetailPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-[var(--surface-card)] border border-[var(--border-subtle)] rounded-xl p-4 shadow-sm">
+      <div className="rounded-xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
         <textarea
           value={replyText}
           onChange={(e) => setReplyText(e.target.value)}
-          className="w-full border border-[var(--border-subtle)] rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)] focus:border-transparent bg-white text-[var(--text-primary)]"
+          className="w-full rounded-lg bg-[var(--control-bg)] p-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           rows={4}
           placeholder="Введите ответ..."
         />
