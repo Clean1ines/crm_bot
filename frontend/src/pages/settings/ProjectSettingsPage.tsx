@@ -146,7 +146,7 @@ export const ProjectSettingsPage: React.FC = () => {
             <input
               value={brandName}
               onChange={(event) => updateDraft({ brandName: event.target.value })}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -155,7 +155,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={toneOfVoice}
               onChange={(event) => updateDraft({ toneOfVoice: event.target.value })}
               placeholder="friendly, expert, concise"
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -164,7 +164,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={defaultLanguage}
               onChange={(event) => updateDraft({ defaultLanguage: event.target.value })}
               placeholder="ru"
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -173,7 +173,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={defaultTimezone}
               onChange={(event) => updateDraft({ defaultTimezone: event.target.value })}
               placeholder="Europe/Moscow"
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
         </div>
@@ -188,7 +188,7 @@ export const ProjectSettingsPage: React.FC = () => {
               type="number"
               value={requestsPerMinute}
               onChange={(event) => updateDraft({ requestsPerMinute: event.target.value })}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -197,7 +197,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={fallbackModel}
               onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
               placeholder="llama-3.1-8b-instant"
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
         </div>
@@ -218,7 +218,7 @@ export const ProjectSettingsPage: React.FC = () => {
             <input
               value={integrationProvider}
               onChange={(event) => updateDraft({ integrationProvider: event.target.value })}
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -227,7 +227,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={integrationUrl}
               onChange={(event) => updateDraft({ integrationUrl: event.target.value })}
               placeholder="https://example.com/webhook"
-              className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+              className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
         </div>
@@ -251,7 +251,7 @@ export const ProjectSettingsPage: React.FC = () => {
             value={widgetOrigin}
             onChange={(event) => updateDraft({ widgetOrigin: event.target.value })}
             placeholder="https://client-site.example"
-            className="w-full rounded-lg border border-[var(--border-subtle)] bg-white px-3 py-2"
+            className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 py-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
         </label>
         <button

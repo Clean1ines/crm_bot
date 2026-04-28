@@ -98,7 +98,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
   return (
     <div className="flex flex-col h-full items-center justify-center bg-transparent">
       <div className="w-full max-w-3xl mx-4 my-4">
-        <div className="bg-white rounded-xl shadow-card overflow-hidden transition-all">
+        <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-card transition-all">
           <div className="p-4 flex items-center justify-between">
             <div className="font-medium text-[var(--text-primary)]">
               {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
@@ -117,13 +117,13 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
             {(Array.isArray(messages) ? messages : []).map((msg, idx) => {
               let bubbleClasses = '';
               if (msg.role === 'user') {
-                bubbleClasses = 'bg-white shadow-sm text-[var(--text-primary)]';
+                bubbleClasses = 'bg-[var(--surface-card)] border border-[var(--border-subtle)] shadow-sm text-[var(--text-primary)]';
               } else if (msg.role === 'assistant') {
-                bubbleClasses = 'bg-[var(--surface-secondary)] text-[var(--text-primary)]';
+                bubbleClasses = 'bg-[var(--surface-secondary)] border border-[var(--border-subtle)] text-[var(--text-primary)]';
               } else if (msg.role === 'manager') {
-                bubbleClasses = 'bg-[var(--accent-muted)] text-[var(--accent-primary)] shadow-sm';
+                bubbleClasses = 'bg-[var(--accent-muted)] border border-[var(--border-subtle)] text-[var(--accent-primary)] shadow-sm';
               } else {
-                bubbleClasses = 'bg-[var(--surface-secondary)] text-[var(--text-primary)]';
+                bubbleClasses = 'bg-[var(--surface-secondary)] border border-[var(--border-subtle)] text-[var(--text-primary)]';
               }
               return (
                 <div
@@ -131,7 +131,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-lg p-3 cursor-pointer ${bubbleClasses} transition-all hover:shadow-sm`}
+                    className={`max-w-[85%] rounded-lg p-3 cursor-pointer ${bubbleClasses} transition-all hover:shadow-sm sm:max-w-[70%]`}
                     onClick={() => onMessageClick(msg)}
                   >
                     <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
@@ -165,7 +165,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
                     }
                   }}
                   placeholder="Введите ответ..."
-                  className="flex-1 resize-none rounded-lg bg-[var(--surface-secondary)] text-[var(--text-primary)] p-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
+                  className="flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
                   rows={2}
                   disabled={isSending}
                 />
