@@ -90,6 +90,12 @@ class ProjectControlPort(ProjectReadPort, Protocol):
 
     async def get_project_view(self, project_id: str) -> ProjectSummaryView | None: ...
 
+    async def get_project_member_role(
+        self,
+        project_id: str,
+        user_id: str,
+    ) -> str | None: ...
+
     async def user_has_project_role(
         self,
         project_id: str,

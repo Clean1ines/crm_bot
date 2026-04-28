@@ -236,7 +236,7 @@ async def _step_await_add_manager(chat_id: str, manager_id: str, pool) -> AdminR
 
     try:
         success_text = await _build_platform_bot_service(pool).add_manager_by_chat_id(
-            project_id, manager_id
+            project_id, int(chat_id), manager_id
         )
     except Exception as exc:
         logger.exception(

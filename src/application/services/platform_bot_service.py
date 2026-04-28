@@ -11,6 +11,7 @@ from src.application.dto.project_dto import ProjectSummaryDto
 from src.application.ports.project_port import ProjectControlPort
 from src.application.ports.user_port import UserAuthPort
 from src.domain.control_plane.memberships import is_manager_capable_role
+from src.domain.control_plane.roles import PROJECT_ADMIN, PROJECT_MANAGER, PROJECT_OWNER
 
 
 class PlatformBotService:
@@ -53,15 +54,65 @@ class PlatformBotService:
             [ProjectSummaryDto.from_view(project) for project in projects]
         )
 
+    async def _effective_project_role(
+        self, project_id: str, user_id: str
+    ) -> str | None:
+        project = await self.project_repo.get_project_view(project_id)
+        if project is None:
+            raise ValueError("Project not found")
+
+        if project.user_id == user_id:
+            return PROJECT_OWNER
+
+        return await self.project_repo.get_project_member_role(project_id, user_id)
+
     async def add_manager_by_chat_id(
-        self, project_id: str, manager_chat_id: str
+        self,
+        project_id: str,
+        actor_telegram_chat_id: int,
+        manager_chat_id: str,
     ) -> str:
         normalized_manager_id = manager_chat_id.strip()
-        user_id, _ = await self.user_repo.get_or_create_by_telegram(
-            int(normalized_manager_id), first_name="", username=None
+        target_telegram_chat_id = int(normalized_manager_id)
+
+        actor_user_id, _ = await self.user_repo.get_or_create_by_telegram(
+            actor_telegram_chat_id, first_name="", username=None
         )
-        await self.project_repo.add_project_member(project_id, user_id, "manager")
-        return f"Пользователь {normalized_manager_id} добавлен как manager (platform user: {user_id})."
+        target_user_id, _ = await self.user_repo.get_or_create_by_telegram(
+            target_telegram_chat_id, first_name="", username=None
+        )
+
+        actor_role = await self._effective_project_role(project_id, actor_user_id)
+        target_role = await self._effective_project_role(project_id, target_user_id)
+
+        if actor_role == PROJECT_OWNER and target_role == PROJECT_OWNER:
+            return (
+                f"Пользователь {normalized_manager_id} уже владелец проекта; "
+                "роль owner сохранена."
+            )
+
+        if actor_role == PROJECT_ADMIN and target_role in {
+            PROJECT_OWNER,
+            PROJECT_ADMIN,
+        }:
+            return "Недостаточно прав: admin не может понижать owner/admin до manager."
+
+        if actor_role not in {PROJECT_OWNER, PROJECT_ADMIN}:
+            return "Недостаточно прав: только owner/admin могут назначать менеджеров."
+
+        if target_role == PROJECT_MANAGER:
+            return (
+                f"Пользователь {normalized_manager_id} уже manager "
+                f"(platform user: {target_user_id})."
+            )
+
+        await self.project_repo.add_project_member(
+            project_id, target_user_id, PROJECT_MANAGER
+        )
+        return (
+            f"Пользователь {normalized_manager_id} добавлен как manager "
+            f"(platform user: {target_user_id})."
+        )
 
     async def get_project_team(self, project_id: str) -> ProjectTeamDto:
         members = await self.project_repo.get_project_members_view(project_id)
