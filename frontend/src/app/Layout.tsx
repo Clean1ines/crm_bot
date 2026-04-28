@@ -17,10 +17,10 @@ export const Layout: React.FC = () => {
   }, [projectId, setSelectedProjectId, clearSelectedProject]);
 
   return (
-    <div className="flex h-screen bg-[var(--bg-primary)]">
+    <div className="flex h-[100dvh] min-h-0 bg-[var(--bg-primary)]">
       <AppSidebar />
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full overflow-y-auto custom-scrollbar">
+      <main className="min-w-0 flex-1 overflow-hidden pb-[68px] md:pb-0">
+        <div className="h-full min-h-0 overflow-y-auto custom-scrollbar">
           <Outlet />
         </div>
       </main>

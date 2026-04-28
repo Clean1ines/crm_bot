@@ -2,14 +2,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../../app/store';
 import { threadsApi } from '../../../shared/api/modules/threads';
 import type { Message } from '../../../entities/thread/model/types';
-import { Send } from 'lucide-react';
+import { ChevronLeft, Info, Send } from 'lucide-react';
 
 interface ChatWindowProps {
   threadId: string | null;
   projectId: string;
+  mobile?: boolean;
+  onBack?: () => void;
+  onOpenInspector?: () => void;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
+export const ChatWindow: React.FC<ChatWindowProps> = ({
+  threadId,
+  mobile = false,
+  onBack,
+  onOpenInspector,
+}) => {
   const {
     messages,
     setMessages,
@@ -96,19 +104,48 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
 
 
   return (
-    <div className="flex flex-col h-full items-center justify-center bg-transparent">
-      <div className="w-full max-w-3xl mx-4 my-4">
-        <div className="overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-card transition-all">
-          <div className="p-4 flex items-center justify-between">
-            <div className="font-medium text-[var(--text-primary)]">
-              {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
+    <div className={`flex h-full min-h-0 flex-col bg-transparent ${mobile ? '' : 'items-center justify-center'}`}>
+      <div className={`flex min-h-0 w-full flex-1 ${mobile ? '' : 'max-w-3xl mx-4 my-4'}`}>
+        <div className={`flex min-h-0 w-full flex-1 flex-col overflow-hidden border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-card transition-all ${mobile ? 'border-x-0 border-t-0 rounded-none' : 'rounded-xl'}`}>
+          <div className="flex items-center justify-between border-b border-[var(--border-subtle)] p-3 sm:p-4">
+            <div className="flex min-w-0 items-center gap-2">
+              {mobile && (
+                <button
+                  type="button"
+                  onClick={onBack}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
+                  aria-label="Назад к списку диалогов"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+              )}
+              <div className="min-w-0">
+                <div className="truncate font-medium text-[var(--text-primary)]">
+                  {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Выберите диалог'}
+                </div>
+                {mobile && (
+                  <div className="text-xs text-[var(--text-muted)]">
+                    {threadId ? 'Переписка с клиентом' : 'Сначала выберите диалог'}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* WebSocket индикатор удалён */}
+              {mobile && (
+                <button
+                  type="button"
+                  onClick={onOpenInspector}
+                  disabled={!threadId}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-primary)] disabled:opacity-50"
+                >
+                  <Info className="h-4 w-4" />
+                  Сводка
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-6 max-h-[calc(100vh-180px)]">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-4 sm:p-4 sm:space-y-6">
             {isLoadingMessages && <div className="text-center text-[var(--text-muted)]">Загрузка сообщений...</div>}
             {loadError && <div className="text-center text-sm text-red-600">{loadError}</div>}
             {!isLoadingMessages && !loadError && threadId && (!Array.isArray(messages) || messages.length === 0) && (
@@ -153,7 +190,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
           </div>
 
           {threadId && (
-            <div className="p-4">
+            <div className="border-t border-[var(--border-subtle)] p-3 sm:p-4">
               <div className="flex gap-2">
                 <textarea
                   value={inputText}
@@ -165,17 +202,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ threadId }) => {
                     }
                   }}
                   placeholder="Введите ответ..."
-                  className="flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
-                  rows={2}
+                  className="min-h-[44px] flex-1 resize-none rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-primary)] transition-all"
+                  rows={mobile ? 1 : 2}
                   disabled={isSending}
                 />
                 <button
                   onClick={handleSend}
                   disabled={!inputText.trim() || isSending}
-                  className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg disabled:opacity-50 hover:bg-[var(--accent-hover)] transition-all hover:shadow-sm flex items-center gap-2"
+                  className="flex items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-white transition-all hover:bg-[var(--accent-hover)] hover:shadow-sm disabled:opacity-50 sm:px-4"
                 >
                   <Send className="w-4 h-4" />
-                  Отправить
+                  <span className="hidden sm:inline">Отправить</span>
                 </button>
               </div>
             </div>
