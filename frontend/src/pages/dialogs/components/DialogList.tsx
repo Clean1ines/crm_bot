@@ -85,11 +85,11 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
   const getMessageBackground = (role: string) => {
     if (role === 'assistant') return 'bg-[var(--surface-secondary)]';
     if (role === 'manager') return 'bg-[var(--accent-muted)]';
-    return 'bg-white';
+    return 'bg-[var(--surface-card)] border border-[var(--border-subtle)]';
   };
 
   return (
-    <div className="flex flex-col h-full bg-white shadow-sm">
+    <div className="flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-sm">
       <div className="p-4">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
@@ -124,7 +124,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
 
       <div className="flex-1 overflow-y-auto">
         {loadError && (
-          <div className="m-3 rounded-lg bg-red-50 p-3 text-sm text-red-600">
+          <div className="m-3 rounded-lg bg-[var(--accent-danger-bg)] p-3 text-sm text-[var(--accent-danger-text)]">
             {loadError}
           </div>
         )}
@@ -144,10 +144,10 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
             <div
               key={thread.thread_id}
               onClick={() => setSelectedThreadId(thread.thread_id)}
-              className={`relative p-3 mx-2 mb-1 rounded-lg cursor-pointer transition-all duration-150 ${
+              className={`relative mx-2 mb-1 rounded-lg border border-transparent p-3 cursor-pointer transition-all duration-150 ${
                 isActive
-                  ? 'bg-[var(--surface-secondary)] shadow-sm'
-                  : 'hover:bg-[var(--surface-secondary)] hover:shadow-sm'
+                  ? 'border-[var(--border-subtle)] bg-[var(--surface-secondary)] shadow-sm'
+                  : 'hover:border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)] hover:shadow-sm'
               }`}
             >
               {isActive && (
@@ -167,7 +167,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
                     </span>
                   </div>
                   <div className="text-sm text-[var(--text-secondary)] truncate">
-                    <span className={`inline-block px-1 rounded ${bubbleBg}`}>
+                    <span className={`inline-block max-w-full rounded px-1 ${bubbleBg}`}>
                       {lastMsg?.content || 'Нет сообщений'}
                     </span>
                   </div>
