@@ -2,11 +2,11 @@ import React from 'react';
 
 export const HeroSection: React.FC = () => {
   return (
-    <div className="space-y-6">
-      <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-[#1E1E1E] leading-tight">
+    <div className="space-y-4">
+      <h1 className="text-3xl font-semibold leading-tight tracking-tight text-[var(--text-primary)] sm:text-4xl lg:text-5xl">
         Ассистент, который отвечает клиентам за тебя
       </h1>
-      <p className="text-lg text-[#6B6B6B]">
+      <p className="max-w-xl text-base leading-relaxed text-[var(--text-muted)] sm:text-lg">
         Загрузи свои материалы — и он начнёт общаться как твой менеджер.
       </p>
     </div>

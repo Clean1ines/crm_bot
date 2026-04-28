@@ -47,7 +47,7 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <p className="text-xs text-[var(--accent-danger)]">{error}</p>}
         <div>
-          <label className="block text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
+          <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
             Project Name *
           </label>
           <input
@@ -57,25 +57,25 @@ export const EditProjectModal: React.FC<EditProjectModalProps> = ({
             required
             maxLength={100}
             autoFocus
-            className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div>
-          <label className="block text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">
+          <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
             Description
           </label>
           <input
             type="text"
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
-            className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-sm text-[var(--text-primary)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] outline-none transition-colors focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <button
             type="submit"
             disabled={isPending}
-            className="rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           >
             {isPending ? 'Saving...' : 'Save'}
           </button>

@@ -136,7 +136,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   type="button"
                   onClick={onOpenInspector}
                   disabled={!threadId}
-                  className="inline-flex items-center gap-1 rounded-lg bg-[var(--surface-hover)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-primary)] disabled:opacity-50"
+                  className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-[var(--surface-hover)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-primary)] disabled:opacity-50"
                 >
                   <Info className="h-4 w-4" />
                   Сводка
@@ -147,7 +147,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
           <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-4 sm:p-4 sm:space-y-6">
             {isLoadingMessages && <div className="text-center text-[var(--text-muted)]">Загрузка сообщений...</div>}
-            {loadError && <div className="text-center text-sm text-red-600">{loadError}</div>}
+            {loadError && <div className="text-center text-sm text-[var(--accent-danger-text)]">{loadError}</div>}
             {!isLoadingMessages && !loadError && threadId && (!Array.isArray(messages) || messages.length === 0) && (
               <div className="text-center text-sm text-[var(--text-muted)]">Сообщений пока нет</div>
             )}
@@ -168,7 +168,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[85%] rounded-lg p-3 cursor-pointer ${bubbleClasses} transition-all hover:shadow-sm sm:max-w-[70%]`}
+                    className={`max-w-[85%] cursor-pointer rounded-xl p-3 ${bubbleClasses} transition-all hover:shadow-sm sm:max-w-[70%]`}
                     onClick={() => onMessageClick(msg)}
                   >
                     <div className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</div>
@@ -202,14 +202,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     }
                   }}
                   placeholder="Введите ответ..."
-                  className="min-h-[44px] flex-1 resize-none rounded-lg bg-[var(--control-bg)] p-2 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20 transition-all"
+                  className="min-h-11 flex-1 resize-none rounded-lg bg-[var(--control-bg)] p-2 text-sm leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20"
                   rows={mobile ? 1 : 2}
                   disabled={isSending}
                 />
                 <button
                   onClick={handleSend}
                   disabled={!inputText.trim() || isSending}
-                  className="flex items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-white transition-all hover:bg-[var(--accent-hover)] hover:shadow-sm disabled:opacity-50 sm:px-4"
+                  className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--accent-hover)] hover:shadow-sm disabled:opacity-50 sm:px-4"
                 >
                   <Send className="w-4 h-4" />
                   <span className="hidden sm:inline">Отправить</span>

@@ -47,7 +47,7 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({ compact = false }) => 
     <button
       type="button"
       onClick={handleClick}
-      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-card)] px-3 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/30"
+      className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-[var(--control-bg)] px-3 text-xs font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
       aria-label={`Тема: ${titleByMode[normalizedMode]}, сейчас отображается ${resolvedTheme === 'dark' ? 'тёмная' : 'светлая'}`}
       title={`Тема: ${titleByMode[normalizedMode]}. Нажмите, чтобы переключить.`}
     >

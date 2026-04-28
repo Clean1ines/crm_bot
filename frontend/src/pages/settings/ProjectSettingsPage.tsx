@@ -118,35 +118,35 @@ export const ProjectSettingsPage: React.FC = () => {
   });
 
   if (isLoading) {
-    return <div className="p-8 text-[var(--text-muted)]">Загрузка настроек...</div>;
+    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">Загрузка настроек...</div>;
   }
 
   if (isError) {
     return (
-      <div className="p-8 text-[var(--text-muted)]">
+      <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
         Не удалось загрузить настройки проекта: {getErrorMessage(error)}
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8 p-8">
+    <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div>
-        <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Настройки проекта</h1>
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Настройки проекта</h1>
         <p className="mt-2 text-sm text-[var(--text-muted)]">
           Персонализация ассистента, операционные лимиты и внешние подключения проекта.
         </p>
       </div>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Персонализация</h2>
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Персонализация</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--text-muted)]">Бренд</span>
             <input
               value={brandName}
               onChange={(event) => updateDraft({ brandName: event.target.value })}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -155,7 +155,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={toneOfVoice}
               onChange={(event) => updateDraft({ toneOfVoice: event.target.value })}
               placeholder="friendly, expert, concise"
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -164,7 +164,7 @@ export const ProjectSettingsPage: React.FC = () => {
               value={defaultLanguage}
               onChange={(event) => updateDraft({ defaultLanguage: event.target.value })}
               placeholder="ru"
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -173,14 +173,14 @@ export const ProjectSettingsPage: React.FC = () => {
               value={defaultTimezone}
               onChange={(event) => updateDraft({ defaultTimezone: event.target.value })}
               placeholder="Europe/Moscow"
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
         </div>
       </section>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Лимиты</h2>
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Лимиты</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--text-muted)]">Запросов в минуту</span>
@@ -188,7 +188,7 @@ export const ProjectSettingsPage: React.FC = () => {
               type="number"
               value={requestsPerMinute}
               onChange={(event) => updateDraft({ requestsPerMinute: event.target.value })}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -197,28 +197,28 @@ export const ProjectSettingsPage: React.FC = () => {
               value={fallbackModel}
               onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
               placeholder="llama-3.1-8b-instant"
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
         </div>
         <button
           onClick={() => saveSettingsMutation.mutate()}
           disabled={saveSettingsMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {saveSettingsMutation.isPending ? 'Сохранение...' : 'Сохранить настройки'}
         </button>
       </section>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Интеграции</h2>
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Интеграции</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
             <span className="text-[var(--text-muted)]">Поставщик</span>
             <input
               value={integrationProvider}
               onChange={(event) => updateDraft({ integrationProvider: event.target.value })}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -227,21 +227,21 @@ export const ProjectSettingsPage: React.FC = () => {
               value={integrationUrl}
               onChange={(event) => updateDraft({ integrationUrl: event.target.value })}
               placeholder="https://example.com/webhook"
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
         </div>
         <button
           onClick={() => saveIntegrationMutation.mutate()}
           disabled={saveIntegrationMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {saveIntegrationMutation.isPending ? 'Сохранение...' : 'Сохранить интеграцию'}
         </button>
       </section>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Каналы проекта</h2>
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Каналы проекта</h2>
         <p className="mb-4 text-sm text-[var(--text-muted)]">
           Каналы определяют, где клиенты и менеджеры взаимодействуют с проектом: Telegram-боты, платформенный бот или веб-виджет.
         </p>
@@ -251,22 +251,22 @@ export const ProjectSettingsPage: React.FC = () => {
             value={widgetOrigin}
             onChange={(event) => updateDraft({ widgetOrigin: event.target.value })}
             placeholder="https://client-site.example"
-            className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+            className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
         </label>
         <button
           onClick={() => saveWidgetChannelMutation.mutate()}
           disabled={saveWidgetChannelMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {saveWidgetChannelMutation.isPending ? 'Сохранение...' : 'Сохранить канал виджета'}
         </button>
         {channels.length ? (
-          <div className="mt-5 overflow-hidden rounded-lg bg-[var(--control-bg)] shadow-[var(--shadow-sm)]">
+          <div className="mt-5 overflow-hidden rounded-xl bg-[var(--control-bg)] shadow-[var(--shadow-sm)]">
             {channels.map((channel, index) => (
               <div
                 key={`${channel.kind}-${channel.provider}-${index}`}
-                className="flex items-center justify-between border-b border-[var(--divider-soft)] px-4 py-3 last:border-b-0"
+                className="flex items-center justify-between gap-3 px-4 py-3 shadow-[0_1px_0_var(--divider-soft)] last:shadow-none"
               >
                 <div>
                   <div className="font-medium text-[var(--text-primary)]">

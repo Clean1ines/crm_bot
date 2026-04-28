@@ -61,21 +61,21 @@ export const TicketDetailPage: React.FC = () => {
     },
   });
 
-  if (!threadId) return <div className="p-6 text-[var(--text-muted)]">Некорректный ID тикета</div>;
-  if (messagesLoading) return <div className="p-6 text-[var(--text-muted)]">Загрузка...</div>;
-  if (messagesError) return <div className="p-6 text-[var(--accent-danger)]">Ошибка: {String(messagesError)}</div>;
+  if (!threadId) return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Некорректный ID тикета</div>;
+  if (messagesLoading) return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Загрузка...</div>;
+  if (messagesError) return <div className="p-4 text-sm text-[var(--accent-danger-text)] sm:p-6">Ошибка: {String(messagesError)}</div>;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Тикет от {clientName}</h1>
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">Тикет от {clientName}</h1>
         <div className="mt-2 flex gap-4 text-sm text-[var(--text-secondary)]">
           <span>Статус: <span className="font-medium">{ticketInfo?.status || 'manual'}</span></span>
           <span>Создан: {ticketInfo ? new Date(ticketInfo.thread_created_at).toLocaleString() : '—'}</span>
         </div>
       </div>
 
-      <div className="mb-6 max-h-96 overflow-y-auto rounded-xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
+      <div className="mb-6 max-h-96 overflow-y-auto rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
         <h2 className="font-medium text-[var(--text-primary)] mb-3">История диалога</h2>
         {messages.length === 0 && <p className="text-[var(--text-muted)]">Нет сообщений</p>}
         <div className="space-y-3">
@@ -104,18 +104,18 @@ export const TicketDetailPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="rounded-xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
+      <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
         <textarea
           value={replyText}
           onChange={(e) => setReplyText(e.target.value)}
-          className="w-full rounded-lg bg-[var(--control-bg)] p-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          className="min-h-28 w-full rounded-lg bg-[var(--control-bg)] p-3 text-sm leading-relaxed text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           rows={4}
           placeholder="Введите ответ..."
         />
         <button
           onClick={() => replyMutation.mutate(replyText)}
           disabled={replyMutation.isPending || !replyText.trim()}
-          className="mt-3 px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:bg-[var(--accent-primary)]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="mt-3 min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {replyMutation.isPending ? 'Отправка...' : 'Отправить ответ'}
         </button>

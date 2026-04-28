@@ -75,29 +75,29 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3">
-          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Клиент</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{clientName}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{clientName}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Статус</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{state?.status || '—'}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.status || '—'}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Настроение</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{state?.lifecycle || '—'}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.lifecycle || '—'}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Сообщений</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{state?.total_messages ?? 0}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.total_messages ?? 0}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Создан</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}</div>
           </div>
-          <div className="rounded-lg bg-[var(--surface-secondary)] p-3">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="text-xs text-[var(--text-muted)] mb-1">Обновлён</div>
-            <div className="text-sm font-medium text-[var(--text-primary)]">{state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}</div>
           </div>
         </div>
       </div>
@@ -110,13 +110,13 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
         <div className="text-sm text-[var(--text-muted)]">Память пока пуста</div>
       )}
       {safeThreadMemory.map((entry) => (
-        <div key={entry.id} className="rounded-lg bg-[var(--surface-secondary)] p-2 transition-all hover:shadow-md">
+        <div key={entry.id} className="rounded-xl bg-[var(--surface-secondary)] p-3 transition-all hover:shadow-md">
           {editingMemoryKey === entry.key ? (
             <div>
               <textarea
                 value={editingMemoryValue}
                 onChange={(e) => setEditingMemoryValue(e.target.value)}
-                className="w-full p-1 bg-[var(--surface-secondary)] rounded text-sm font-mono focus:ring-1 focus:ring-[var(--accent-primary)]"
+                className="w-full rounded-lg bg-[var(--control-bg)] p-2 font-mono text-sm leading-relaxed text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                 rows={3}
               />
               <div className="flex gap-2 mt-2 justify-end">
@@ -157,7 +157,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           const repeatCount = typeof payload.repeat_count === 'number' ? payload.repeat_count : undefined;
           const leadStatus = typeof payload.lead_status === 'string' ? payload.lead_status : undefined;
           return (
-            <div key={event.id} className="rounded-lg bg-[var(--surface-secondary)] p-3">
+            <div key={event.id} className="rounded-xl bg-[var(--surface-secondary)] p-3">
               <div className="text-xs text-[var(--text-muted)] mb-1">
                 {new Date(event.ts).toLocaleString()}
               </div>
@@ -446,7 +446,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
               <ChevronLeft className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-bold text-[var(--text-primary)]">Сводка диалога</h1>
+              <h1 className="truncate text-lg font-semibold leading-tight text-[var(--text-primary)]">Сводка диалога</h1>
               <p className="text-xs text-[var(--text-muted)]">
                 {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Диалог не выбран'}
               </p>
@@ -457,7 +457,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           <button
             ref={moreButtonRef}
             onClick={() => setShowTabMenu(!showTabMenu)}
-            className="px-2 py-1 text-sm rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)] transition-all flex items-center gap-1"
+            className="flex min-h-8 items-center gap-1 rounded-lg px-2.5 py-1 text-sm text-[var(--text-secondary)] transition-all hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
           >
             <span>{tabs.find(t => t.id === inspectorActiveTab)?.label || 'Вкладки'}</span>
             <ChevronDown className="w-3 h-3" />
