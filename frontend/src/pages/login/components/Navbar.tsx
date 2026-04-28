@@ -7,10 +7,10 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onLoginClick }) => {
   return (
-    <nav className="flex justify-between items-center py-4 px-6 md:px-12 border-b border-[#E5E2DA]">
+    <nav className="flex items-center justify-between px-4 py-4 shadow-[0_1px_0_var(--divider-soft)] sm:px-6 lg:px-8">
       <div className="flex items-center gap-2">
-        <div className="w-6 h-6 rounded-full bg-[#B87333]"></div>
-        <span className="font-semibold text-[#1E1E1E] text-lg">Logo</span>
+        <div className="h-6 w-6 rounded-full bg-[var(--accent-primary)] shadow-[var(--shadow-sm)]"></div>
+        <span className="text-lg font-semibold tracking-tight text-[var(--text-primary)]">OMNICA</span>
       </div>
       <div className="flex items-center gap-3">
         <Button variant="secondary" onClick={onLoginClick}>Войти</Button>

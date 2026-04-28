@@ -33,12 +33,12 @@ export const ClientsPage: React.FC = () => {
   };
 
   if (isLoading) {
-    return <div className="p-8 flex justify-center text-[var(--text-muted)]">Загрузка клиентов...</div>;
+    return <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">Загрузка клиентов...</div>;
   }
 
   if (isError) {
     return (
-      <div className="p-8 text-center text-[var(--text-muted)]">
+      <div className="p-4 text-center text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
         Не удалось загрузить клиентов: {getErrorMessage(error)}
       </div>
     );
@@ -48,7 +48,7 @@ export const ClientsPage: React.FC = () => {
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-[var(--text-primary)] mb-2">Клиенты</h1>
+          <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Клиенты</h1>
           <p className="text-[var(--text-muted)]">Все пользователи, которые взаимодействовали с вашим ботом</p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -59,7 +59,7 @@ export const ClientsPage: React.FC = () => {
               placeholder="Поиск по Telegram username..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[var(--surface-card)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 transition-all"
+              className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </div>
           <Button variant="secondary" className="flex w-full items-center gap-2 sm:w-auto" disabled>
@@ -72,15 +72,15 @@ export const ClientsPage: React.FC = () => {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 lg:gap-6">
         <div className="bg-[var(--surface-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl">
           <div className="text-sm text-[var(--text-muted)] mb-1">Всего клиентов</div>
-          <div className="text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">{stats.total_clients}</div>
+          <div className="text-2xl font-semibold leading-none text-[var(--text-primary)]">{stats.total_clients}</div>
         </div>
         <div className="bg-[var(--surface-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl">
           <div className="text-sm text-[var(--text-muted)] mb-1">Новых за 7 дней</div>
-          <div className="text-2xl font-bold text-[var(--accent-primary)] sm:text-3xl">+{stats.new_clients_7d}</div>
+          <div className="text-2xl font-semibold leading-none text-[var(--accent-primary)]">+{stats.new_clients_7d}</div>
         </div>
         <div className="bg-[var(--surface-secondary)] p-4 sm:p-5 lg:p-6 rounded-2xl">
           <div className="text-sm text-[var(--text-muted)] mb-1">Активных диалогов</div>
-          <div className="text-2xl font-bold text-[var(--text-primary)] sm:text-3xl">{stats.active_dialogs}</div>
+          <div className="text-2xl font-semibold leading-none text-[var(--text-primary)]">{stats.active_dialogs}</div>
         </div>
       </div>
 
@@ -89,16 +89,16 @@ export const ClientsPage: React.FC = () => {
           <table className="w-full text-left border-collapse">
             <thead className="bg-[var(--surface-secondary)] shadow-[0_1px_0_var(--divider-soft)]">
               <tr>
-                <th className="px-6 py-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Клиент</th>
-                <th className="px-6 py-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Дата регистрации</th>
-                <th className="px-6 py-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Последняя активность</th>
-                <th className="px-6 py-4 text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider text-right">Действия</th>
+                <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Клиент</th>
+                <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Дата регистрации</th>
+                <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Последняя активность</th>
+                <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--surface-secondary)]">
               {clients.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-10 text-center text-[var(--text-muted)]">
+                  <td colSpan={4} className="px-4 py-10 text-center text-sm text-[var(--text-muted)] lg:px-5">
                     Клиенты не найдены
                   </td>
                 </tr>
@@ -112,24 +112,24 @@ export const ClientsPage: React.FC = () => {
 
                   return (
                     <tr key={client.id} className="hover:bg-[var(--surface-secondary)] transition-colors group">
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 lg:px-5">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-[var(--border-subtle)] flex items-center justify-center text-[var(--text-primary)] font-bold text-xs uppercase">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--accent-primary)]/10 text-xs font-semibold uppercase text-[var(--accent-primary)]">
                             {initials}
                           </div>
                           <div>
-                            <div className="font-semibold text-[var(--text-primary)]">{displayName}</div>
+                            <div className="font-medium text-[var(--text-primary)]">{displayName}</div>
                             <div className="text-xs text-[var(--text-muted)]">{secondaryText}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 lg:px-5">
                         <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
                           <Calendar className="w-3.5 h-3.5" />
                           {createdAt ? createdAt.toLocaleDateString() : '—'}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 lg:px-5">
                         <div className="text-sm text-[var(--text-primary)]">
                           {lastActivityAt ? lastActivityAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
                         </div>
@@ -137,7 +137,7 @@ export const ClientsPage: React.FC = () => {
                           {lastActivityAt ? lastActivityAt.toLocaleDateString() : '—'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-3 text-right lg:px-5">
                         <div className="flex justify-end gap-2">
                           <Button
                             variant="secondary"
@@ -177,7 +177,7 @@ export const ClientsPage: React.FC = () => {
                   className="rounded-2xl bg-[var(--surface-secondary)] p-4"
                 >
                   <div className="flex items-start gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--border-subtle)] text-xs font-bold uppercase text-[var(--text-primary)]">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--accent-primary)]/10 text-xs font-semibold uppercase text-[var(--accent-primary)]">
                       {initials}
                     </div>
                     <div className="min-w-0 flex-1">

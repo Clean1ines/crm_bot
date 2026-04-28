@@ -86,7 +86,7 @@ export const KnowledgePage: React.FC = () => {
   };
 
   if (documentsQuery.isLoading) {
-    return <div className="p-8 flex justify-center text-[var(--text-muted)]">Загрузка базы знаний...</div>;
+    return <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">Загрузка базы знаний...</div>;
   }
 
 
@@ -119,7 +119,7 @@ export const KnowledgePage: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-[var(--text-primary)] mb-2">База знаний</h1>
+          <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">База знаний</h1>
           <p className="text-[var(--text-muted)]">Загрузите документы, чтобы обучить своего ИИ-ассистента</p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -130,7 +130,7 @@ export const KnowledgePage: React.FC = () => {
               placeholder="Поиск документов..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[var(--surface-card)] rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 transition-all lg:w-64"
+              className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
             />
           </div>
         </div>
@@ -141,7 +141,7 @@ export const KnowledgePage: React.FC = () => {
         onClick={triggerUpload}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
-        className={`rounded-2xl shadow-sm p-6 sm:p-8 lg:p-12 flex flex-col items-center justify-center bg-[var(--surface-card)] transition-colors cursor-pointer group ${
+        className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl bg-[var(--surface-card)] p-6 shadow-sm transition-colors group sm:p-8 lg:p-12 ${
           uploadMutation.isPending
             ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 cursor-wait'
             : 'border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)]'
@@ -160,7 +160,7 @@ export const KnowledgePage: React.FC = () => {
 
       {/* Documents Grid */}
       {documents.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--surface-secondary)] p-8 text-center sm:p-12 lg:p-20">
+        <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--surface-secondary)] p-6 text-center sm:p-10 lg:p-16">
           <BookOpen className="mb-4 h-12 w-12 text-[var(--border-subtle)] sm:h-16 sm:w-16" />
           <h3 className="text-lg font-semibold text-[var(--text-primary)] sm:text-xl">База знаний пуста</h3>
           <p className="text-[var(--text-muted)] mt-2">Загрузите первый документ, чтобы начать обучение</p>
@@ -170,7 +170,7 @@ export const KnowledgePage: React.FC = () => {
           {documents.map((doc) => (
             <div
               key={doc.id}
-              className="bg-[var(--surface-elevated)] rounded-2xl p-4 sm:p-6 transition-all hover:shadow-lg hover:shadow-md group"
+              className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
             >
               <div className="flex justify-between items-start mb-4">
                 <div className="w-10 h-10 rounded-xl bg-[var(--surface-secondary)] flex items-center justify-center text-[var(--accent-primary)]">
@@ -196,7 +196,7 @@ export const KnowledgePage: React.FC = () => {
               </div>
 
               <div className="flex items-center justify-between">
-                <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                <span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
                   doc.status === 'processed'
                     ? 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]'
                     : 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]'

@@ -121,7 +121,7 @@ export const ChannelSettingsPage: React.FC = () => {
 
   if (projectsError) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         <div className="rounded-lg bg-[var(--accent-danger-bg)] p-4 text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)]">
           Не удалось загрузить проекты.
         </div>
@@ -131,7 +131,7 @@ export const ChannelSettingsPage: React.FC = () => {
 
   if (!currentProject && safeProjects.length === 0) {
     return (
-      <div className="p-8 text-center">
+      <div className="p-4 text-center sm:p-6 lg:p-8">
         <p>Нет проектов. Создайте первый проект через боковое меню.</p>
       </div>
     );
@@ -139,7 +139,7 @@ export const ChannelSettingsPage: React.FC = () => {
 
   if (!currentProject) {
     return (
-      <div className="p-8">
+      <div className="p-4 sm:p-6 lg:p-8">
         <div className="rounded-lg bg-[var(--accent-warning-bg)] p-4 text-[var(--accent-warning)] shadow-[var(--shadow-sm)]">
           Проект не выбран. Выберите проект в боковом меню.
         </div>
@@ -151,16 +151,16 @@ export const ChannelSettingsPage: React.FC = () => {
   const hasManager = !!currentProject.manager_bot_username;
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Каналы</h1>
+    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Каналы</h1>
         <p className="text-[var(--text-muted)] mt-2">
           Настройте Telegram ботов для работы с клиентами и менеджерами
         </p>
       </div>
 
-      <div className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="text-xl font-medium text-[var(--text-primary)] mb-4">Клиентский бот</h2>
+      <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-3 text-lg font-semibold leading-tight text-[var(--text-primary)]">Клиентский бот</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
           Бот, который будет общаться с клиентами.
         </p>
@@ -173,7 +173,7 @@ export const ChannelSettingsPage: React.FC = () => {
             <button
               onClick={handleRevokeClientToken}
               disabled={isUpdatingBotToken}
-              className="px-4 py-2 bg-[var(--accent-danger)] text-white rounded-lg hover:bg-[var(--accent-danger)]/80 transition-colors disabled:opacity-50"
+              className="min-h-10 rounded-lg bg-[var(--accent-danger)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-50"
             >
               {isUpdatingBotToken ? 'Открепление...' : 'Открепить бота'}
             </button>
@@ -190,11 +190,11 @@ export const ChannelSettingsPage: React.FC = () => {
                   value={clientToken}
                   onChange={(e) => setClientToken(e.target.value)}
                   placeholder="1234567890:ABCdefGHIJklmNOPqrStuVWXyz"
-                  className="flex-1 px-3 py-2 bg-[var(--control-bg)] rounded-lg text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+                  className="min-h-10 flex-1 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                 />
                 <button
                   onClick={() => setShowClientToken(!showClientToken)}
-                  className="px-3 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-lg hover:bg-[var(--border-subtle)] transition-colors"
+                  className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)]"
                 >
                   {showClientToken ? 'Скрыть' : 'Показать'}
                 </button>
@@ -206,7 +206,7 @@ export const ChannelSettingsPage: React.FC = () => {
             <button
               onClick={handleSaveClientToken}
               disabled={isUpdatingBotToken || !clientToken.trim()}
-              className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:bg-[var(--accent-primary)]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isUpdatingBotToken ? 'Подключение...' : 'Подключить бота'}
             </button>
@@ -214,8 +214,8 @@ export const ChannelSettingsPage: React.FC = () => {
         )}
       </div>
 
-      <div className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="text-xl font-medium text-[var(--text-primary)] mb-4">Менеджерский бот</h2>
+      <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-3 text-lg font-semibold leading-tight text-[var(--text-primary)]">Менеджерский бот</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
           Бот, который будет уведомлять менеджеров об эскалациях.
         </p>
@@ -228,7 +228,7 @@ export const ChannelSettingsPage: React.FC = () => {
             <button
               onClick={handleRevokeManagerToken}
               disabled={isUpdatingManagerBotToken}
-              className="px-4 py-2 bg-[var(--accent-danger)] text-white rounded-lg hover:bg-[var(--accent-danger)]/80 transition-colors disabled:opacity-50"
+              className="min-h-10 rounded-lg bg-[var(--accent-danger)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-50"
             >
               {isUpdatingManagerBotToken ? 'Открепление...' : 'Открепить бота'}
             </button>
@@ -245,11 +245,11 @@ export const ChannelSettingsPage: React.FC = () => {
                   value={managerToken}
                   onChange={(e) => setManagerToken(e.target.value)}
                   placeholder="1234567890:ABCdefGHIJklmNOPqrStuVWXyz"
-                  className="flex-1 px-3 py-2 bg-[var(--control-bg)] rounded-lg text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+                  className="min-h-10 flex-1 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                 />
                 <button
                   onClick={() => setShowManagerToken(!showManagerToken)}
-                  className="px-3 py-2 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] rounded-lg hover:bg-[var(--border-subtle)] transition-colors"
+                  className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)]"
                 >
                   {showManagerToken ? 'Скрыть' : 'Показать'}
                 </button>
@@ -261,7 +261,7 @@ export const ChannelSettingsPage: React.FC = () => {
             <button
               onClick={handleSaveManagerToken}
               disabled={isUpdatingManagerBotToken || !managerToken.trim()}
-              className="px-4 py-2 bg-[var(--accent-primary)] text-white rounded-lg hover:bg-[var(--accent-primary)]/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isUpdatingManagerBotToken ? 'Подключение...' : 'Подключить бота'}
             </button>

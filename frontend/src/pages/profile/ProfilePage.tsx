@@ -108,16 +108,16 @@ export const ProfilePage: React.FC = () => {
   });
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-8">
+    <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div>
-        <h1 className="text-3xl font-semibold text-[var(--text-primary)]">Профиль</h1>
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Профиль</h1>
         <p className="mt-2 text-sm text-[var(--text-muted)]">
           Управление способами входа в аккаунт. Telegram, email и Google можно привязать к одному профилю.
         </p>
       </div>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Подключенные способы входа</h2>
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Подключенные способы входа</h2>
         {methodsQuery.isLoading ? (
           <div className="text-sm text-[var(--text-muted)]">Загрузка...</div>
         ) : (
@@ -125,7 +125,7 @@ export const ProfilePage: React.FC = () => {
             {methodsQuery.data?.methods.map((method) => (
               <div
                 key={`${method.provider}-${method.provider_id}`}
-                className="flex items-center justify-between rounded-lg bg-[var(--control-bg)] px-4 py-3 shadow-[var(--shadow-sm)]"
+                className="flex items-center justify-between gap-3 rounded-xl bg-[var(--control-bg)] px-4 py-3 shadow-[var(--shadow-sm)]"
               >
                 <div>
                   <div className="font-medium text-[var(--text-primary)]">{method.provider}</div>
@@ -148,9 +148,9 @@ export const ProfilePage: React.FC = () => {
         )}
       </section>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-4 text-xl font-medium text-[var(--text-primary)]">Email-вход</h2>
-        <div className="mb-4 rounded-lg bg-[var(--control-bg)] px-4 py-3 shadow-[var(--shadow-sm)] text-sm text-[var(--text-primary)]">
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Email-вход</h2>
+        <div className="mb-4 rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
           Статус email:
           {' '}
           <span className={emailMethod?.verified ? 'text-[var(--accent-success-text)]' : 'text-[var(--accent-warning)]'}>
@@ -164,7 +164,7 @@ export const ProfilePage: React.FC = () => {
               type="email"
               value={emailInputValue}
               onChange={(event) => setEmail(event.target.value)}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -173,21 +173,21 @@ export const ProfilePage: React.FC = () => {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </label>
         </div>
         <button
           onClick={() => linkEmailMutation.mutate()}
           disabled={linkEmailMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {linkEmailMutation.isPending ? 'Сохранение...' : 'Привязать email'}
         </button>
         <button
           onClick={() => requestEmailVerificationMutation.mutate()}
           disabled={requestEmailVerificationMutation.isPending || !emailMethod}
-          className="ml-3 mt-5 rounded-lg bg-[var(--control-bg)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
+          className="ml-3 mt-5 rounded-lg bg-[var(--control-bg)] min-h-10 px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
           {requestEmailVerificationMutation.isPending ? 'Подготовка...' : 'Получить ссылку подтверждения'}
         </button>
@@ -197,7 +197,7 @@ export const ProfilePage: React.FC = () => {
             <textarea
               readOnly
               value={emailVerificationUrl}
-              className="min-h-20 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
+              className="min-h-20 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm leading-relaxed shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </label>
         ) : null}
@@ -208,7 +208,7 @@ export const ProfilePage: React.FC = () => {
               type="password"
               value={currentPassword}
               onChange={(event) => setCurrentPassword(event.target.value)}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </label>
           <label className="space-y-1 text-sm">
@@ -217,21 +217,21 @@ export const ProfilePage: React.FC = () => {
               type="password"
               value={newPassword}
               onChange={(event) => setNewPassword(event.target.value)}
-              className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 shadow-[var(--shadow-sm)]"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </label>
         </div>
         <button
           onClick={() => changePasswordMutation.mutate()}
           disabled={changePasswordMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--control-bg)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
+          className="mt-5 rounded-lg bg-[var(--control-bg)] min-h-10 px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
           {changePasswordMutation.isPending ? 'Сохранение...' : 'Обновить пароль'}
         </button>
       </section>
 
-      <section className="rounded-xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
-        <h2 className="mb-2 text-xl font-medium text-[var(--text-primary)]">Google-вход</h2>
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <h2 className="mb-2 text-lg font-semibold leading-tight text-[var(--text-primary)]">Google-вход</h2>
         <p className="mb-4 text-sm text-[var(--text-muted)]">
           Google-вход подключается через официальный сервис Google и проверяется безопасно на сервере.
         </p>

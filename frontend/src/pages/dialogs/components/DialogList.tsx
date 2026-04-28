@@ -100,7 +100,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
       <div className="p-4 shadow-[0_1px_0_var(--divider-soft)]">
         {mobile && (
           <div className="mb-4">
-            <h1 className="text-xl font-bold text-[var(--text-primary)]">Диалоги</h1>
+            <h1 className="text-lg font-semibold leading-tight text-[var(--text-primary)]">Диалоги</h1>
             <p className="mt-1 text-sm text-[var(--text-muted)]">Выберите диалог, чтобы открыть переписку.</p>
           </div>
         )}
@@ -111,7 +111,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
             placeholder="Поиск по имени..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--control-bg)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20 transition-all"
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20"
           />
         </div>
         <div className="flex gap-2 mt-3">
@@ -123,7 +123,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
             <button
               key={filter.label}
               onClick={() => setStatusFilter(filter.value)}
-              className={`px-2 py-1 text-xs rounded-full transition-all ${
+              className={`inline-flex min-h-7 items-center rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
                 statusFilter === filter.value
                   ? 'bg-[var(--accent-primary)] text-white shadow-sm'
                   : 'bg-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
@@ -170,7 +170,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = fals
                 <Circle className={`w-2 h-2 fill-current ${getStatusColor(thread.status || 'active')}`} />
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline">
-                    <span className="font-medium text-[var(--text-primary)] truncate">
+                    <span className="truncate text-sm font-medium text-[var(--text-primary)]">
                       {clientName}
                     </span>
                     <span className="text-xs text-[var(--text-muted)] ml-2 flex-shrink-0">

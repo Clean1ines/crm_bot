@@ -26,16 +26,17 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <input
         type="file"
         accept=".txt,.pdf"
         onChange={e => setFile(e.target.files?.[0] || null)}
+        className="block w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] file:mr-3 file:rounded-md file:border-0 file:bg-[var(--surface-secondary)] file:px-3 file:py-1.5 file:text-sm file:text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
       />
       <button
         onClick={handleUpload}
         disabled={!file || uploading}
-        className="bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50"
+        className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
       >
         {uploading ? 'Загрузка...' : 'Загрузить'}
       </button>

@@ -25,14 +25,14 @@ export const TicketsPage: React.FC = () => {
     enabled: !!projectId,
   });
 
-  if (!projectId) return <div className="p-6 text-[var(--text-muted)]">Выберите проект</div>;
-  if (isLoading) return <div className="p-6 text-[var(--text-muted)]">Загрузка тикетов...</div>;
-  if (error) return <div className="p-6 text-[var(--accent-danger)]">Ошибка: {String(error)}</div>;
-  if (!data || data.length === 0) return <div className="p-6 text-[var(--text-muted)]">Нет открытых тикетов</div>;
+  if (!projectId) return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Выберите проект</div>;
+  if (isLoading) return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Загрузка тикетов...</div>;
+  if (error) return <div className="p-4 text-sm text-[var(--accent-danger-text)] sm:p-6">Ошибка: {String(error)}</div>;
+  if (!data || data.length === 0) return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Нет открытых тикетов</div>;
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-semibold text-[var(--text-primary)] mb-6">Тикеты (ожидают ответа)</h1>
+    <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
+      <h1 className="mb-5 text-2xl font-semibold leading-tight text-[var(--text-primary)]">Тикеты (ожидают ответа)</h1>
       <div className="space-y-3">
         {data.map((ticket: Thread) => {
           const client = ticket.client as unknown as Client;
@@ -42,7 +42,7 @@ export const TicketsPage: React.FC = () => {
           return (
             <div
               key={ticket.thread_id}
-              className="rounded-xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] hover:shadow-md transition-shadow"
+              className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] transition-shadow hover:shadow-md"
             >
               <Link
                 to={`/projects/${projectId}/tickets/${ticket.thread_id}`}

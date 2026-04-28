@@ -55,24 +55,24 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+    <div className="flex h-full flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[70%] rounded-lg p-2 ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
+            <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed shadow-[var(--shadow-sm)] ${msg.role === 'user' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--surface-secondary)] text-[var(--text-primary)]'}`}>
               {msg.content || (msg.role === 'assistant' && isStreaming && '...')}
             </div>
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
-      <div className="border-t p-4 flex gap-2">
+      <div className="flex gap-2 p-4 shadow-[0_-1px_0_var(--divider-soft)]">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          className="flex-1 border rounded px-3 py-2"
+          className="min-h-11 flex-1 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           placeholder="Введите сообщение..."
           disabled={isStreaming}
         />
@@ -80,7 +80,7 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
           <select
             value={model || ''}
             onChange={(e) => onModelChange(e.target.value)}
-            className="border rounded px-2 py-2"
+            className="min-h-11 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           >
             <option value="">Model</option>
             {availableModels.map(m => (
@@ -91,7 +91,7 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
         <button
           onClick={handleSend}
           disabled={isStreaming}
-          className="bg-blue-600 text-white px-4 py-2 rounded"
+          className="min-h-11 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
         >
           Отправить
         </button>

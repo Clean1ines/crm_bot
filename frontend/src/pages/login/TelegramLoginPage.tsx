@@ -161,7 +161,7 @@ export const TelegramLoginPage: React.FC = () => {
     script.onload = () => log('WIDGET_LOADED');
     script.onerror = () => {
       log('WIDGET_LOAD_ERROR');
-      container.innerHTML = '<p class="text-red-600">Ошибка загрузки виджета. Попробуйте позже.</p>';
+      container.innerHTML = '<p class="text-sm text-[var(--accent-danger-text)]">Ошибка загрузки виджета. Попробуйте позже.</p>';
     };
     container.appendChild(script);
   }, [showTelegramWidget, botUsername]);
@@ -259,25 +259,25 @@ export const TelegramLoginPage: React.FC = () => {
     <div className="auth-login-scroll-root min-h-[100svh] overflow-x-hidden overflow-y-auto bg-[var(--bg-primary)]">
       <Navbar onLoginClick={handleLoginClick} />
       <main className="mx-auto min-h-[calc(100svh-80px)] max-w-7xl overflow-visible px-4 pb-[calc(env(safe-area-inset-bottom)+8rem)] pt-6 sm:px-6 md:px-12 md:py-8">
-        <div className="grid h-full grid-cols-1 items-center gap-8 md:grid-cols-2">
+        <div className="grid h-full grid-cols-1 items-center gap-6 md:grid-cols-2 lg:gap-8">
           <HeroSection />
           <div className="relative overflow-visible">
             {!showAuthPanel ? (
               <ChatWidget />
             ) : (
-              <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5 shadow-xl">
+              <div className="rounded-3xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
                   <div className="mb-4 flex rounded-full bg-[var(--surface-secondary)] p-1">
                     <button
                       type="button"
                       onClick={() => setAuthMode('login')}
-                      className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${authMode === 'login' ? 'bg-white text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-muted)]'}`}
+                      className={`min-h-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${authMode === 'login' ? 'bg-[var(--control-bg)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                     >
                       Войти по email
                     </button>
                     <button
                       type="button"
                       onClick={() => setAuthMode('register')}
-                      className={`flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${authMode === 'register' ? 'bg-white text-[var(--text-primary)] shadow-sm' : 'text-[var(--text-muted)]'}`}
+                      className={`min-h-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${authMode === 'register' ? 'bg-[var(--control-bg)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                     >
                       Регистрация
                     </button>
@@ -288,7 +288,7 @@ export const TelegramLoginPage: React.FC = () => {
                         value={fullName}
                         onChange={(event) => setFullName(event.target.value)}
                         placeholder="Имя"
-                        className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
+                        className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                       />
                     ) : null}
                     <input
@@ -296,7 +296,7 @@ export const TelegramLoginPage: React.FC = () => {
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
                       placeholder="email@example.com"
-                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
+                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                       required
                     />
                     <input
@@ -304,14 +304,14 @@ export const TelegramLoginPage: React.FC = () => {
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
                       placeholder="Пароль"
-                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
+                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                       required
                     />
-                    {authError ? <p className="text-sm text-red-600">{authError}</p> : null}
+                    {authError ? <p className="text-sm text-[var(--accent-danger-text)]">{authError}</p> : null}
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="w-full rounded-xl bg-[var(--accent-primary)] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      className="min-h-11 w-full rounded-lg bg-[var(--accent-primary)] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-60"
                     >
                       {authMode === 'register' ? 'Создать аккаунт' : 'Войти'}
                     </button>
@@ -320,38 +320,38 @@ export const TelegramLoginPage: React.FC = () => {
                     type="button"
                     onClick={handlePasswordResetRequest}
                     disabled={isLoading}
-                    className="mt-3 w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm font-medium text-[var(--text-primary)] disabled:opacity-60"
+                    className="mt-3 min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-60"
                   >
                     Сбросить пароль по email
                   </button>
-                  {verificationMessage ? <p className="mt-3 text-sm text-emerald-600">{verificationMessage}</p> : null}
-                  {resetMessage ? <p className="mt-3 text-sm text-emerald-600">{resetMessage}</p> : null}
+                  {verificationMessage ? <p className="mt-3 text-sm text-[var(--accent-success-text)]">{verificationMessage}</p> : null}
+                  {resetMessage ? <p className="mt-3 text-sm text-[var(--accent-success-text)]">{resetMessage}</p> : null}
                   {resetLink ? (
                     <textarea
                       readOnly
                       value={resetLink}
-                      className="mt-3 min-h-20 w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
+                      className="mt-3 min-h-20 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                     />
                   ) : null}
-                  <div className="mt-3 space-y-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-4">
+                  <div className="mt-3 space-y-3 rounded-2xl bg-[var(--surface-secondary)] p-4 shadow-[var(--shadow-sm)]">
                     <input
                       value={resetToken}
                       onChange={(event) => setResetToken(event.target.value)}
                       placeholder="Код сброса пароля"
-                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
+                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                     />
                     <input
                       type="password"
                       value={resetNewPassword}
                       onChange={(event) => setResetNewPassword(event.target.value)}
                       placeholder="Новый пароль"
-                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm"
+                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                     />
                     <button
                       type="button"
                       onClick={handlePasswordResetConfirm}
                       disabled={isLoading}
-                      className="w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm font-medium text-[var(--text-primary)] disabled:opacity-60"
+                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-60"
                     >
                       Подтвердить сброс пароля
                     </button>
@@ -359,7 +359,7 @@ export const TelegramLoginPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleTelegramLoginClick}
-                    className="mt-3 w-full rounded-xl border border-[var(--border-subtle)] bg-white px-4 py-3 text-sm font-medium text-[var(--text-primary)]"
+                    className="mt-3 min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)]"
                   >
                     Войти через Telegram
                   </button>

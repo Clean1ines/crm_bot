@@ -25,7 +25,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 
   return (
     <BaseModal isOpen={isOpen} onClose={onClose} title={`Delete ${itemType}`}>
-      <p className="text-[var(--text-primary)] mb-4">
+      <p className="mb-4 text-sm leading-relaxed text-[var(--text-primary)]">
         Are you sure you want to delete {itemType}{' '}
         <span className="font-semibold text-[var(--accent-primary)]">"{itemName}"</span>? This action cannot be undone.
       </p>
@@ -33,7 +33,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
         <button
           onClick={handleConfirm}
           disabled={isPending}
-          className="px-3 py-1.5 text-xs font-semibold rounded bg-[var(--accent-danger)] text-white hover:bg-[var(--accent-danger-text)] transition-colors disabled:opacity-30"
+          className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-30 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
         >
           {isPending ? 'Deleting...' : 'Delete'}
         </button>

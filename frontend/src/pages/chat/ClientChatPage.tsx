@@ -70,31 +70,31 @@ export const ClientChatPage: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen">
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+    <div className="flex h-screen flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-6">
         {messages.map((msg, idx) => (
           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[70%] rounded-lg p-2 ${msg.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
+            <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm leading-relaxed shadow-[var(--shadow-sm)] ${msg.role === 'user' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--surface-secondary)] text-[var(--text-primary)]'}`}>
               {msg.content || (msg.role === 'assistant' && isStreaming && '...')}
             </div>
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
-      <div className="border-t p-4 flex">
+      <div className="flex gap-2 p-4 shadow-[0_-1px_0_var(--divider-soft)] sm:p-6">
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-          className="flex-1 border rounded-l px-3 py-2"
+          className="min-h-11 flex-1 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           placeholder="Введите сообщение..."
           disabled={isStreaming}
         />
         <button
           onClick={sendMessage}
           disabled={isStreaming}
-          className="bg-blue-600 text-white px-4 py-2 rounded-r"
+          className="min-h-11 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
         >
           Отправить
         </button>

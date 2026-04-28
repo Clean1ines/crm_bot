@@ -68,23 +68,23 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
   });
 
   if (isLoading) {
-    return <div>Загрузка...</div>;
+    return <div className="text-sm text-[var(--text-muted)]">Загрузка...</div>;
   }
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-lg font-medium">Команда проекта</h3>
-        <ul>
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">Команда проекта</h3>
+        <ul className="mt-3 space-y-2">
           {managers.map((manager) => (
-            <li key={manager.user_id} className="flex items-center justify-between py-1">
+            <li key={manager.user_id} className="flex items-center justify-between rounded-lg bg-[var(--surface-secondary)] px-3 py-2 text-sm">
               <span>
                 {manager.full_name || manager.username || manager.email || manager.user_id}
-                <span className="ml-2 text-xs text-gray-500">({manager.role})</span>
+                <span className="ml-2 inline-flex min-h-6 items-center rounded-full bg-[var(--accent-muted)] px-2 text-xs font-medium text-[var(--accent-primary)]">({manager.role})</span>
               </span>
               <button
                 onClick={() => removeMutation.mutate(manager.user_id)}
-                className="text-red-600 hover:underline"
+                className="text-sm font-medium text-[var(--accent-danger-text)] hover:underline"
               >
                 Удалить
               </button>
@@ -98,12 +98,12 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           value={newMemberUserId}
           onChange={(e) => setNewMemberUserId(e.target.value)}
           placeholder={newMemberRole === 'manager' ? 'Telegram chat_id менеджера' : 'user_id участника'}
-          className="rounded border p-1"
+          className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
         />
         <select
           value={newMemberRole}
           onChange={(e) => setNewMemberRole(e.target.value as (typeof ROLE_OPTIONS)[number])}
-          className="rounded border p-1"
+          className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
         >
           {ROLE_OPTIONS.map((role) => (
             <option key={role} value={role}>
