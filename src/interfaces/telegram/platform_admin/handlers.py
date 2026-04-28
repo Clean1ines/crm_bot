@@ -5,10 +5,12 @@ Platform control-plane Telegram command and callback handlers.
 from collections.abc import Awaitable, Callable
 import json
 import uuid
+from typing import cast
 
 import httpx
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+from src.application.ports.project_port import ProjectControlPort
 from src.application.services.platform_bot_service import PlatformBotService
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.project import ProjectRepository
@@ -28,7 +30,11 @@ logger = get_logger(__name__)
 
 
 def _build_platform_bot_service(pool: object) -> PlatformBotService:
-    return PlatformBotService(UserRepository(pool))
+    project_repo = cast(ProjectControlPort, ProjectRepository(pool))
+    return PlatformBotService(
+        user_repo=UserRepository(pool),
+        project_repo=project_repo,
+    )
 
 
 AdminResponse = tuple[str, InlineKeyboardMarkup | None]

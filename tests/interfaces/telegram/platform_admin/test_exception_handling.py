@@ -128,7 +128,7 @@ async def test_knowledge_upload_failure_returns_safe_fallback_and_logs_context()
     assert logger.exception.call_args.kwargs["extra"]["policy"] == "safe_user_fallback"
 
 
-async def test_listprojects_callback_builds_service_with_user_repository(monkeypatch):
+async def test_listprojects_callback_builds_service_with_repositories(monkeypatch):
     from types import SimpleNamespace
 
     from src.interfaces.telegram.platform_admin import handlers
@@ -140,11 +140,21 @@ async def test_listprojects_callback_builds_service_with_user_repository(monkeyp
 
     class FakeUserRepository:
         def __init__(self, pool: object) -> None:
-            captured["pool"] = pool
+            captured["user_pool"] = pool
+
+    class FakeProjectRepository:
+        def __init__(self, pool: object) -> None:
+            captured["project_pool"] = pool
 
     class FakePlatformBotService:
-        def __init__(self, user_repo: object) -> None:
+        def __init__(
+            self,
+            *,
+            user_repo: object,
+            project_repo: object,
+        ) -> None:
             captured["user_repo"] = user_repo
+            captured["project_repo"] = project_repo
 
         async def list_projects_for_telegram_user(
             self,
@@ -156,10 +166,13 @@ async def test_listprojects_callback_builds_service_with_user_repository(monkeyp
     pool = FakePool()
 
     monkeypatch.setattr(handlers, "UserRepository", FakeUserRepository)
+    monkeypatch.setattr(handlers, "ProjectRepository", FakeProjectRepository)
     monkeypatch.setattr(handlers, "PlatformBotService", FakePlatformBotService)
 
     await handlers.handle_admin_callback("listprojects", "123", pool)
 
-    assert captured["pool"] is pool
+    assert captured["user_pool"] is pool
+    assert captured["project_pool"] is pool
     assert isinstance(captured["user_repo"], FakeUserRepository)
+    assert isinstance(captured["project_repo"], FakeProjectRepository)
     assert captured["telegram_id"] == 123
