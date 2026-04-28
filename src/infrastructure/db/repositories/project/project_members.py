@@ -97,7 +97,10 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                 INSERT INTO project_members (project_id, user_id, role)
                 VALUES ($1, $2, 'manager')
                 ON CONFLICT (project_id, user_id)
-                DO UPDATE SET role = EXCLUDED.role
+                DO UPDATE SET role = CASE
+                    WHEN project_members.role = 'owner' THEN project_members.role
+                    ELSE EXCLUDED.role
+                END
             """,
                 project_uuid,
                 user_id,

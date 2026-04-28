@@ -889,3 +889,18 @@ class TestProjectRepository:
 
         with pytest.raises(asyncpg.exceptions.UndefinedTableError):
             await project_repo.get_project_settings(str(uuid4()))
+
+
+async def test_add_manager_by_telegram_identity_preserves_owner_on_conflict(
+    project_repo, mock_pool
+):
+    project_id = str(uuid4())
+    user_id = uuid4()
+    mock_pool.mock_conn.fetchrow = AsyncMock(return_value={"id": user_id})
+    mock_pool.mock_conn.execute = AsyncMock()
+
+    await project_repo.add_manager_by_telegram_identity(project_id, "123")
+
+    sql = mock_pool.mock_conn.execute.await_args.args[0]
+    assert "WHEN project_members.role = 'owner'" in sql
+    assert "THEN project_members.role" in sql
