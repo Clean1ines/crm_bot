@@ -246,7 +246,7 @@ export const TelegramLoginPage: React.FC = () => {
 
   if (isLoading || window.location.search.includes('hash=')) {
     return (
-      <div className="min-h-screen w-screen flex items-center justify-center bg-[var(--bg-primary)]">
+      <div className="min-h-[100svh] w-full flex items-center justify-center bg-[var(--bg-primary)] px-4 py-10">
         <div className="flex flex-col items-center gap-4">
           <div className="spinner"></div>
           <span className="text-[var(--text-secondary)] font-medium">Проверяем вход через Telegram...</span>
@@ -256,16 +256,16 @@ export const TelegramLoginPage: React.FC = () => {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-[var(--bg-primary)]">
+    <div className="auth-login-scroll-root min-h-[100svh] overflow-x-hidden overflow-y-auto bg-[var(--bg-primary)]">
       <Navbar onLoginClick={handleLoginClick} />
-      <main className="mx-auto h-[calc(100vh-80px)] max-w-7xl overflow-hidden px-6 py-8 md:px-12">
+      <main className="mx-auto min-h-[calc(100svh-80px)] max-w-7xl overflow-visible px-4 pb-[calc(env(safe-area-inset-bottom)+8rem)] pt-6 sm:px-6 md:px-12 md:py-8">
         <div className="grid h-full grid-cols-1 items-center gap-8 md:grid-cols-2">
           <HeroSection />
-          <div className="relative max-h-full overflow-hidden">
+          <div className="relative overflow-visible">
             {!showAuthPanel ? (
               <ChatWidget />
             ) : (
-              <div className="max-h-[calc(100vh-120px)] overflow-y-auto rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5 shadow-xl">
+              <div className="rounded-3xl border border-[var(--border-subtle)] bg-[var(--surface-card)] p-5 shadow-xl">
                   <div className="mb-4 flex rounded-full bg-[var(--surface-secondary)] p-1">
                     <button
                       type="button"
