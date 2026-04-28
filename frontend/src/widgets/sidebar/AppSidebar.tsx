@@ -84,8 +84,6 @@ export const AppSidebar: React.FC = () => {
     await deleteProject(deletingProject.id);
   };
 
-  if (!isOpen && isMobile) return null;
-
   const activeProjectId = urlProjectId || undefined;
   const currentProject = projects.find((project) => project.id === activeProjectId);
 
@@ -119,6 +117,78 @@ export const AppSidebar: React.FC = () => {
       </NavLink>
     );
   };
+
+  if (isMobile) {
+    return (
+      <>
+        <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-heavy">
+          <div className="flex gap-1 overflow-x-auto px-2 py-2 scrollbar-hide">
+            {navItems.map((item) => {
+              const disabled = !urlProjectId;
+              if (disabled) {
+                return (
+                  <div
+                    key={item.path}
+                    className="flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-muted)] opacity-50"
+                  >
+                    {item.icon}
+                    <span className="text-[10px] font-medium">{item.label}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <NavLink
+                  key={item.path}
+                  to={`/projects/${urlProjectId}/${item.path}`}
+                  className={({ isActive }) =>
+                    `flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition-colors ${
+                      isActive
+                        ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)]'
+                        : 'text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]'
+                    }`
+                  }
+                >
+                  {item.icon}
+                  <span className="text-[10px] font-medium">{item.label}</span>
+                </NavLink>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
+              className="flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
+            >
+              <User className="h-4 w-4" />
+              <span className="text-[10px] font-medium">Профиль</span>
+            </button>
+          </div>
+        </nav>
+
+        <CreateProjectModal
+          isOpen={isCreateOpen}
+          onClose={closeModals}
+          onCreate={async (name) => {
+            frontendLogger.info('Creating project', { name });
+            await createProject(name);
+          }}
+          isPending={isCreating}
+        />
+        <DeleteConfirmModal
+          isOpen={isDeleteOpen}
+          onClose={closeModals}
+          onConfirm={handleDelete}
+          projectName={deletingProject?.name || ''}
+          itemName={deletingProject?.name || ''}
+          itemType="project"
+          isPending={isDeleting}
+        />
+      </>
+    );
+  }
+
+  if (!isOpen) return null;
 
   return (
     <aside className="w-64 h-full bg-[var(--surface-secondary)] flex flex-col">

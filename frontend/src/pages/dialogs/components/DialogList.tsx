@@ -7,9 +7,11 @@ import { getClientDisplayName } from '../../../shared/lib/clients';
 
 interface DialogListProps {
   projectId: string;
+  mobile?: boolean;
+  onThreadSelect?: (threadId: string) => void;
 }
 
-export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
+export const DialogList: React.FC<DialogListProps> = ({ projectId, mobile = false, onThreadSelect }) => {
   const { selectedThreadId, setSelectedThreadId } = useAppStore();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [loading, setLoading] = useState(false);
@@ -88,9 +90,20 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
     return 'bg-[var(--surface-card)] border border-[var(--border-subtle)]';
   };
 
+  const handleThreadSelect = (threadId: string) => {
+    setSelectedThreadId(threadId);
+    onThreadSelect?.(threadId);
+  };
+
   return (
-    <div className="flex h-full flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-sm">
-      <div className="p-4">
+    <div className={`flex h-full min-h-0 flex-col bg-[var(--surface-card)] shadow-sm ${mobile ? '' : 'border-r border-[var(--border-subtle)]'}`}>
+      <div className="border-b border-[var(--border-subtle)] p-4">
+        {mobile && (
+          <div className="mb-4">
+            <h1 className="text-xl font-bold text-[var(--text-primary)]">Диалоги</h1>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Выберите диалог, чтобы открыть переписку.</p>
+          </div>
+        )}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <input
@@ -143,7 +156,7 @@ export const DialogList: React.FC<DialogListProps> = ({ projectId }) => {
           return (
             <div
               key={thread.thread_id}
-              onClick={() => setSelectedThreadId(thread.thread_id)}
+              onClick={() => handleThreadSelect(thread.thread_id)}
               className={`relative mx-2 mb-1 rounded-lg border border-transparent p-3 cursor-pointer transition-all duration-150 ${
                 isActive
                   ? 'border-[var(--border-subtle)] bg-[var(--surface-secondary)] shadow-sm'

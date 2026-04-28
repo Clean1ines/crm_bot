@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../../app/store';
 import { threadsApi } from '../../../shared/api/modules/threads';
 import type { MemoryEntry, TimelineEvent, ThreadState } from '../../../entities/thread/model/types';
-import { Edit2, Save, X, AlertCircle, ChevronDown } from 'lucide-react';
+import { Edit2, Save, X, AlertCircle, ChevronDown, ChevronLeft } from 'lucide-react';
 import frontendLogger from '../../../shared/lib/logger';
 import { getClientDisplayName } from '../../../shared/lib/clients';
 
@@ -16,9 +16,11 @@ interface Tab {
 interface InspectorProps {
   threadId: string | null;
   projectId: string;
+  mobile?: boolean;
+  onBack?: () => void;
 }
 
-export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => {
+export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobile = false, onBack }) => {
   const {
     threadState,
     threadTimeline,
@@ -73,27 +75,27 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3">
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
             <div className="text-xs text-[var(--text-muted)] mb-1">Клиент</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{clientName}</div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
             <div className="text-xs text-[var(--text-muted)] mb-1">Статус</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.status || '—'}</div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
             <div className="text-xs text-[var(--text-muted)] mb-1">Настроение</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.lifecycle || '—'}</div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
             <div className="text-xs text-[var(--text-muted)] mb-1">Сообщений</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.total_messages ?? 0}</div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
             <div className="text-xs text-[var(--text-muted)] mb-1">Создан</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}</div>
           </div>
-          <div className="bg-white rounded-lg shadow-sm p-3">
+          <div className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
             <div className="text-xs text-[var(--text-muted)] mb-1">Обновлён</div>
             <div className="text-sm font-medium text-[var(--text-primary)]">{state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}</div>
           </div>
@@ -108,7 +110,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
         <div className="text-sm text-[var(--text-muted)]">Память пока пуста</div>
       )}
       {safeThreadMemory.map((entry) => (
-        <div key={entry.id} className="rounded-lg p-2 shadow-sm hover:shadow-md transition-all bg-white">
+        <div key={entry.id} className="rounded-lg bg-[var(--surface-card)] p-2 shadow-sm transition-all hover:shadow-md">
           {editingMemoryKey === entry.key ? (
             <div>
               <textarea
@@ -155,7 +157,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
           const repeatCount = typeof payload.repeat_count === 'number' ? payload.repeat_count : undefined;
           const leadStatus = typeof payload.lead_status === 'string' ? payload.lead_status : undefined;
           return (
-            <div key={event.id} className="bg-white rounded-lg shadow-sm p-3">
+            <div key={event.id} className="rounded-lg bg-[var(--surface-card)] p-3 shadow-sm">
               <div className="text-xs text-[var(--text-muted)] mb-1">
                 {new Date(event.ts).toLocaleString()}
               </div>
@@ -186,7 +188,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
         return (
           <div
             key={event.id}
-            className={`p-3 rounded-lg shadow-sm ${isEscalation ? 'bg-[var(--accent-muted)]' : 'bg-white'}`}
+            className={`rounded-lg p-3 shadow-sm ${isEscalation ? 'bg-[var(--accent-muted)]' : 'bg-[var(--surface-card)]'}`}
           >
             <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mb-1">
               {isEscalation && <AlertCircle className="w-3 h-3 text-[var(--accent-danger)]" />}
@@ -208,7 +210,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   );
 
   const renderRaw = () => (
-    <pre className="text-xs overflow-auto bg-white p-2 rounded-lg shadow-sm">
+    <pre className="overflow-auto rounded-lg bg-[var(--surface-card)] p-2 text-xs shadow-sm">
       {JSON.stringify(threadState, null, 2)}
     </pre>
   );
@@ -431,8 +433,26 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
   const contentKey = `${inspectorActiveTab}-${threadId}`;
 
   return (
-    <div className="flex flex-col h-full bg-white shadow-sm">
-      <div className="p-4">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--surface-card)] shadow-sm">
+      <div className="border-b border-[var(--border-subtle)] p-3 sm:p-4">
+        {mobile && (
+          <div className="mb-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
+              aria-label="Назад к диалогу"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold text-[var(--text-primary)]">Сводка диалога</h1>
+              <p className="text-xs text-[var(--text-muted)]">
+                {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Диалог не выбран'}
+              </p>
+            </div>
+          </div>
+        )}
         <div className="relative">
           <button
             ref={moreButtonRef}
@@ -445,7 +465,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
           {showTabMenu && (
             <div
               ref={dropdownRef}
-              className="absolute left-0 mt-1 w-40 bg-white rounded-md shadow-lg border border-[var(--border-subtle)] z-20"
+              className="absolute left-0 z-20 mt-1 w-40 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-lg"
             >
               {tabs.map((tab) => (
                 <button
@@ -469,7 +489,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId }) => 
           )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4" key={contentKey}>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4" key={contentKey}>
         {isLoadingInspector && <div className="text-center text-[var(--text-muted)]">Загрузка...</div>}
         {!threadId && <div className="text-center text-[var(--text-muted)]">Выберите диалог</div>}
         {threadId && !isLoadingInspector && tabs.find(t => t.id === inspectorActiveTab)?.component()}
