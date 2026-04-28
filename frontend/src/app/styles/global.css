@@ -103,3 +103,75 @@ html, body, #root {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Optional dark theme.
+   Light theme above stays the default. Dark mode is enabled only by:
+   document.documentElement.dataset.theme = "dark"
+*/
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-primary: #05070D;
+  --surface-secondary: #0B0F19;
+  --surface-card: #101625;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.24);
+  --shadow-md: 0 10px 30px rgba(0,0,0,0.22);
+  --shadow-card: 0 18px 48px rgba(0,0,0,0.26);
+  --shadow-hover: 0 24px 64px rgba(0,0,0,0.32);
+  --shadow-heavy: 0 32px 90px rgba(0,0,0,0.42);
+
+  --accent-primary: #7C8CFF;
+  --accent-hover: #9AA6FF;
+  --accent-muted: rgba(124,140,255,0.16);
+
+  --text-primary: #E6EDF8;
+  --text-secondary: #AEB9CC;
+  --text-muted: #748096;
+
+  --border-subtle: rgba(148,163,184,0.14);
+  --border-primary: rgba(148,163,184,0.2);
+
+  --accent-success: #3DDC97;
+  --accent-success-bg: rgba(61,220,151,0.1);
+  --accent-success-border: rgba(61,220,151,0.24);
+  --accent-success-text: #8FF0C6;
+
+  --accent-danger: #FF6B7A;
+  --accent-danger-bg: rgba(255,107,122,0.1);
+  --accent-danger-border: rgba(255,107,122,0.28);
+  --accent-danger-text: #FFB3BD;
+
+  --accent-warning: #FFD166;
+}
+
+html[data-theme="dark"] body {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(124,140,255,0.16), transparent 30rem),
+    radial-gradient(circle at 88% 12%, rgba(56,213,255,0.08), transparent 26rem),
+    linear-gradient(135deg, #05070D 0%, #070A12 48%, #05070D 100%);
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select {
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] ::selection {
+  background: rgba(124,140,255,0.34);
+  color: var(--text-primary);
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(124,140,255,0.28);
+}
+
+html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(124,140,255,0.52);
+}

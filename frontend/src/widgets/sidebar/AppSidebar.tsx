@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import frontendLogger from '@shared/lib/logger';
+import { ThemeToggle } from '@shared/ui/theme';
 
 interface NavItem {
   path: string;
@@ -174,6 +175,10 @@ export const AppSidebar: React.FC = () => {
           <PlusCircle className="w-4 h-4" />
           Новый проект
         </button>
+
+        <div className="pt-2">
+          <ThemeToggle />
+        </div>
       </div>
 
       <CreateProjectModal
