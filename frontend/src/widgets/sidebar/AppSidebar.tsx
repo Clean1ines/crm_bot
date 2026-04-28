@@ -37,7 +37,7 @@ const navItems: NavItem[] = [
 export const AppSidebar: React.FC = () => {
   const navigate = useNavigate();
   const { projectId: urlProjectId } = useParams<{ projectId: string }>();
-  const { setSelectedProjectId } = useProjectStore();
+  const { selectedProjectId, setSelectedProjectId } = useProjectStore();
   const {
     projects,
     isCreateOpen,
@@ -84,11 +84,12 @@ export const AppSidebar: React.FC = () => {
     await deleteProject(deletingProject.id);
   };
 
-  const activeProjectId = urlProjectId || undefined;
+  const fallbackProjectId = urlProjectId || selectedProjectId || projects[0]?.id;
+  const activeProjectId = fallbackProjectId || undefined;
   const currentProject = projects.find((project) => project.id === activeProjectId);
 
   const renderNavItem = (item: NavItem) => {
-    const disabled = !urlProjectId;
+    const disabled = !fallbackProjectId;
     const linkClasses = (isActive: boolean) => {
       const base = 'flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-150';
       const activeClass = 'bg-white text-[var(--accent-primary)] shadow-sm';
@@ -109,7 +110,7 @@ export const AppSidebar: React.FC = () => {
     return (
       <NavLink
         key={item.path}
-        to={`/projects/${urlProjectId}/${item.path}`}
+        to={`/projects/${fallbackProjectId}/${item.path}`}
         className={({ isActive }) => linkClasses(isActive)}
       >
         {item.icon}
@@ -124,7 +125,7 @@ export const AppSidebar: React.FC = () => {
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-subtle)] bg-[var(--surface-card)] shadow-heavy">
           <div className="flex gap-1 overflow-x-auto px-2 py-2 scrollbar-hide">
             {navItems.map((item) => {
-              const disabled = !urlProjectId;
+              const disabled = !fallbackProjectId;
               if (disabled) {
                 return (
                   <div
@@ -140,7 +141,7 @@ export const AppSidebar: React.FC = () => {
               return (
                 <NavLink
                   key={item.path}
-                  to={`/projects/${urlProjectId}/${item.path}`}
+                  to={`/projects/${fallbackProjectId}/${item.path}`}
                   className={({ isActive }) =>
                     `flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-2 py-1.5 transition-colors ${
                       isActive
@@ -163,6 +164,10 @@ export const AppSidebar: React.FC = () => {
               <User className="h-4 w-4" />
               <span className="text-[10px] font-medium">Профиль</span>
             </button>
+
+            <div className="flex min-w-[72px] items-center justify-center px-2 py-1.5">
+              <ThemeToggle compact />
+            </div>
           </div>
         </nav>
 

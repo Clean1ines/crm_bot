@@ -12,44 +12,55 @@ interface ThemeProviderProps {
   children: React.ReactNode;
 }
 
+const nextModeByMode: Record<ThemeMode, ThemeMode> = {
+  auto: 'light',
+  light: 'dark',
+  dark: 'auto',
+  system: 'light',
+};
+
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const [mode, setModeState] = useState<ThemeMode>(() => getStoredThemeMode());
+  const [themeClock, setThemeClock] = useState(0);
 
-  const resolvedTheme = resolveThemeMode(mode);
+  const normalizedMode = mode === 'system' ? 'auto' : mode;
+  const resolvedTheme = resolveThemeMode(normalizedMode);
 
   const setMode = useCallback((nextMode: ThemeMode) => {
-    storeThemeMode(nextMode);
-    applyThemeMode(nextMode);
-    setModeState(nextMode);
+    const normalizedNextMode = nextMode === 'system' ? 'auto' : nextMode;
+    storeThemeMode(normalizedNextMode);
+    applyThemeMode(normalizedNextMode);
+    setModeState(normalizedNextMode);
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setMode(resolveThemeMode(mode) === 'dark' ? 'light' : 'dark');
-  }, [mode, setMode]);
+    setMode(nextModeByMode[normalizedMode]);
+  }, [normalizedMode, setMode]);
 
   useEffect(() => {
-    applyThemeMode(mode);
+    applyThemeMode(normalizedMode);
+  }, [normalizedMode, themeClock]);
 
-    if (mode !== 'system' || typeof window === 'undefined') {
-      return undefined;
-    }
+  useEffect(() => {
+    const refreshThemeClock = () => setThemeClock((value) => value + 1);
 
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = () => {
-      applyThemeMode('system');
-      setModeState('system');
+    const intervalId = window.setInterval(refreshThemeClock, 60_000);
+    window.addEventListener('visibilitychange', refreshThemeClock);
+    window.addEventListener('focus', refreshThemeClock);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('visibilitychange', refreshThemeClock);
+      window.removeEventListener('focus', refreshThemeClock);
     };
-
-    media.addEventListener('change', handleChange);
-    return () => media.removeEventListener('change', handleChange);
-  }, [mode]);
+  }, []);
 
   const value = useMemo<ThemeContextValue>(() => ({
-    mode,
+    mode: normalizedMode,
     resolvedTheme,
     setMode,
     toggleTheme,
-  }), [mode, resolvedTheme, setMode, toggleTheme]);
+  }), [normalizedMode, resolvedTheme, setMode, toggleTheme]);
 
   return (
     <ThemeContext.Provider value={value}>
