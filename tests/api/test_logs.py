@@ -95,3 +95,23 @@ class TestFrontendLogs:
         response = client.get("/api/logs/frontend")
         assert response.status_code == 405
         assert response.json()["detail"] == "Method Not Allowed"
+
+    def test_frontend_logs_sanitizes_large_and_nested_payloads(self, client):
+        payload = {
+            "level": "warn",
+            "message": "x" * 3000,
+            "nested": {
+                "secret": "y" * 700,
+                "items": list(range(30)),
+            },
+        }
+        with patch("src.interfaces.http.logs.logger") as mock_logger:
+            response = client.post("/api/logs/frontend", json=payload)
+
+        assert response.status_code == 200
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args
+        assert len(call_args[0][0]) == 2000
+        extra = call_args[1]["extra"]
+        assert len(extra["nested"]["secret"]) == 500
+        assert len(extra["nested"]["items"]) == 20

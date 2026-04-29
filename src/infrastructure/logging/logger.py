@@ -14,6 +14,8 @@ import structlog
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.application.ports.logger_port import LoggerPort
+
 
 def configure_logging():
     """Configure structlog for JSON output with timestamps and levels."""
@@ -63,9 +65,54 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
             return response
 
 
-def get_logger(module_name: str) -> structlog.stdlib.BoundLogger:
-    """Return a structlog logger bound with the module name."""
-    return structlog.get_logger(module_name)
+class StructlogAdapter(LoggerPort):
+    def __init__(self, logger: structlog.stdlib.BoundLogger) -> None:
+        self._logger = logger
+
+    def debug(
+        self,
+        message: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        return self._logger.debug(message, *args, **kwargs)
+
+    def info(
+        self,
+        message: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        return self._logger.info(message, *args, **kwargs)
+
+    def warning(
+        self,
+        message: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        return self._logger.warning(message, *args, **kwargs)
+
+    def error(
+        self,
+        message: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        return self._logger.error(message, *args, **kwargs)
+
+    def exception(
+        self,
+        message: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        return self._logger.exception(message, *args, **kwargs)
+
+
+def get_logger(module_name: str) -> LoggerPort:
+    """Return a logger adapter that satisfies application logging contracts."""
+    return StructlogAdapter(structlog.get_logger(module_name))
 
 
 StateT = TypeVar("StateT", bound=Mapping[str, object])
