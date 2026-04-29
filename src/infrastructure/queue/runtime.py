@@ -9,6 +9,7 @@ from functools import partial
 from typing import cast
 
 import asyncpg
+import redis.asyncio as redis
 
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.manager_notifications import ManagerNotificationTarget
@@ -19,11 +20,24 @@ from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_dispatcher import JobDispatcher
+from src.infrastructure.queue.handlers.notify_manager import RedisExistsPort
 from src.infrastructure.queue.telegram_sender import TelegramSender
 from src.infrastructure.queue.worker_loop import run_worker_loop
 from src.infrastructure.redis.client import get_redis_client
 
 logger = get_logger(__name__)
+
+
+class _RedisExistsAdapter(RedisExistsPort):
+    def __init__(self, client: redis.Redis) -> None:
+        self._client = client
+
+    async def exists(self, key: str) -> object:
+        return await self._client.exists(key)
+
+
+async def _get_notify_manager_redis() -> RedisExistsPort:
+    return _RedisExistsAdapter(await get_redis_client())
 
 
 class ProjectNotificationAdapter:
@@ -74,7 +88,7 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
         project_repo=ProjectNotificationAdapter(project_repo),
         metrics_repo=metrics_repo,
         telegram_sender=TelegramSender(),
-        redis_getter=get_redis_client,
+        redis_getter=_get_notify_manager_redis,
     )
 
     await run_worker_loop(
@@ -108,7 +122,7 @@ async def main() -> None:
             project_repo=ProjectNotificationAdapter(project_repo),
             metrics_repo=metrics_repo,
             telegram_sender=TelegramSender(),
-            redis_getter=get_redis_client,
+            redis_getter=_get_notify_manager_redis,
         )
 
         await run_worker_loop(

@@ -213,10 +213,29 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
-                FROM knowledge_documents
-                WHERE project_id = $1
-                ORDER BY created_at DESC
+                SELECT
+                    d.id,
+                    d.file_name,
+                    d.file_size,
+                    d.status,
+                    d.error,
+                    d.uploaded_by,
+                    d.created_at,
+                    d.updated_at,
+                    COUNT(kb.id)::int AS chunk_count
+                FROM knowledge_documents AS d
+                LEFT JOIN knowledge_base AS kb ON kb.document_id = d.id
+                WHERE d.project_id = $1
+                GROUP BY
+                    d.id,
+                    d.file_name,
+                    d.file_size,
+                    d.status,
+                    d.error,
+                    d.uploaded_by,
+                    d.created_at,
+                    d.updated_at
+                ORDER BY d.created_at DESC
                 LIMIT $2 OFFSET $3
             """,
                 ensure_uuid(project_id),
@@ -224,30 +243,24 @@ class KnowledgeRepository:
                 offset,
             )
 
-            documents: list[KnowledgeDocumentView] = []
-            for row in rows or []:
-                chunk_count = await conn.fetchval(
-                    "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
-                    row["id"],
-                )
-
-                documents.append(
-                    KnowledgeDocumentView(
-                        id=str(row["id"]),
-                        file_name=str(row["file_name"]),
-                        file_size=int(row["file_size"])
-                        if row["file_size"] is not None
-                        else None,
-                        status=str(row["status"]),
-                        error=str(row["error"]) if row["error"] is not None else None,
-                        uploaded_by=str(row["uploaded_by"])
-                        if row["uploaded_by"] is not None
-                        else None,
-                        created_at=_normalize_timestamp(row["created_at"]),
-                        updated_at=_normalize_timestamp(row["updated_at"]),
-                        chunk_count=int(chunk_count or 0),
-                    )
-                )
+        documents = [
+            KnowledgeDocumentView(
+                id=str(row["id"]),
+                file_name=str(row["file_name"]),
+                file_size=int(row["file_size"])
+                if row["file_size"] is not None
+                else None,
+                status=str(row["status"]),
+                error=str(row["error"]) if row["error"] is not None else None,
+                uploaded_by=str(row["uploaded_by"])
+                if row["uploaded_by"] is not None
+                else None,
+                created_at=_normalize_timestamp(row["created_at"]),
+                updated_at=_normalize_timestamp(row["updated_at"]),
+                chunk_count=int(row["chunk_count"] or 0),
+            )
+            for row in rows or []
+        ]
 
         logger.debug("Retrieved knowledge documents", extra={"count": len(documents)})
         return documents

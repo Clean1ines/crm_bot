@@ -19,7 +19,6 @@ import json
 import re
 from typing import Mapping
 
-from src.infrastructure.llm.query_expander import NoOpQueryExpander
 from src.infrastructure.llm.rag_contract import (
     KnowledgeSearchRepository,
     QueryExpander,
@@ -31,6 +30,11 @@ from src.infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 
 
+class _NoOpQueryExpander:
+    async def expand(self, query: str, *, max_expansions: int) -> list[str]:
+        return []
+
+
 class RAGService:
     def __init__(
         self,
@@ -40,7 +44,7 @@ class RAGService:
         config: RAGPipelineConfig | None = None,
     ) -> None:
         self._repo = knowledge_repo
-        self._query_expander = query_expander or NoOpQueryExpander()
+        self._query_expander = query_expander or _NoOpQueryExpander()
         self._config = (config or RAGPipelineConfig()).normalized()
 
     # -------------------------
