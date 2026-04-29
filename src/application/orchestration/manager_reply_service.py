@@ -2,6 +2,7 @@
 Manager reply orchestration.
 """
 
+from src.domain.display_names import build_display_name
 from src.domain.project_plane.manager_assignments import build_manager_audit_payload
 from src.domain.project_plane.thread_runtime import ThreadRuntimeSnapshot
 from src.domain.project_plane.thread_status import ThreadStatus
@@ -70,11 +71,14 @@ class ManagerReplyService:
             manager_chat_id=manager_chat_id,
             manager_user_id=manager_user_id,
         )
-
-        prefixed_text = await self._prefixed_manager_text(
+        manager_display_name = await self.resolve_manager_display_name(
             project_id=project_id,
             manager_chat_id=manager_chat_id,
             manager_user_id=resolved_manager_user_id,
+        )
+
+        prefixed_text = await self._prefixed_manager_text(
+            manager_display_name=manager_display_name,
             manager_text=manager_text,
         )
 
@@ -93,6 +97,7 @@ class ManagerReplyService:
             manager_text=manager_text,
             manager_user_id=resolved_manager_user_id,
             manager_chat_id=manager_chat_id,
+            manager_display_name=manager_display_name,
         )
 
         self.logger.info(
@@ -166,7 +171,13 @@ class ManagerReplyService:
             return None
 
         chat_data = response.get("result") or {}
-        return chat_data.get("first_name") or chat_data.get("username")
+        return build_display_name(
+            full_name=chat_data.get("title"),
+            first_name=chat_data.get("first_name"),
+            last_name=chat_data.get("last_name"),
+            username=chat_data.get("username"),
+            fallback="Менеджер",
+        )
 
     async def _load_manual_thread_snapshot(
         self, thread_id: str
@@ -236,17 +247,10 @@ class ManagerReplyService:
     async def _prefixed_manager_text(
         self,
         *,
-        project_id: str,
-        manager_chat_id: str | None,
-        manager_user_id: str,
+        manager_display_name: str,
         manager_text: str,
     ) -> str:
-        manager_name = await self.resolve_manager_display_name(
-            project_id=project_id,
-            manager_chat_id=manager_chat_id,
-            manager_user_id=manager_user_id,
-        )
-        return f"[{manager_name}]: {manager_text}"
+        return f"[{manager_display_name}]: {manager_text}"
 
     async def _send_reply_to_client(
         self,
@@ -300,6 +304,7 @@ class ManagerReplyService:
         manager_text: str,
         manager_user_id: str,
         manager_chat_id: str | None,
+        manager_display_name: str,
     ) -> None:
         await self.event_emitter.emit_event(
             stream_id=str(thread_id),
@@ -310,6 +315,7 @@ class ManagerReplyService:
                 **build_manager_audit_payload(
                     manager_user_id=manager_user_id,
                     manager_chat_id=manager_chat_id,
+                    manager_display_name=manager_display_name,
                 ),
             },
         )

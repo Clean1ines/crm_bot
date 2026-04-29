@@ -407,7 +407,7 @@ def _format_project_team_lines(manager_members, legacy_targets) -> str:
     member_telegram_ids = set()
 
     for member in manager_members:
-        label = member.username or member.full_name or member.email or member.user_id
+        label = member.display_name or "Менеджер"
         telegram_id = member.telegram_id
         if telegram_id is not None:
             member_telegram_ids.add(str(telegram_id))

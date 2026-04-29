@@ -46,15 +46,18 @@ export const TicketsPage: React.FC = () => {
             >
               <Link
                 to={`/projects/${projectId}/tickets/${ticket.thread_id}`}
-                className="text-[var(--accent-primary)] font-medium hover:underline"
+                className="font-medium text-[var(--accent-primary)] hover:underline"
               >
-                Тикет #{ticket.thread_id.slice(0, 8)} - {clientName}
+                Заявка от {clientName}
               </Link>
-              <p className="text-sm text-[var(--text-secondary)] mt-1 line-clamp-2">
+              <p className="mt-1 line-clamp-2 text-sm text-[var(--text-secondary)]">
                 {lastMsg?.content || 'Нет сообщений'}
               </p>
-              <p className="text-xs text-[var(--text-muted)] mt-2">
+              <p className="mt-2 text-xs text-[var(--text-muted)]">
                 Создан: {new Date(ticket.thread_created_at).toLocaleString()}
+              </p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                ID диалога: {ticket.thread_id.slice(0, 8)}
               </p>
             </div>
           );

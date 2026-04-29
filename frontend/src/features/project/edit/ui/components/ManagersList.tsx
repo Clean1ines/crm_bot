@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '@/shared/lib/notification/useNotifications';
 import { useProjectManagers } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
+import { getDisplayName } from '@shared/lib/displayNames';
 import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
@@ -79,7 +80,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           {managers.map((manager) => (
             <li key={manager.user_id} className="flex items-center justify-between rounded-lg bg-[var(--surface-secondary)] px-3 py-2 text-sm">
               <span>
-                {manager.full_name || manager.username || manager.email || manager.user_id}
+                {getDisplayName(manager, 'Менеджер')}
                 <span className="ml-2 inline-flex min-h-6 items-center rounded-full bg-[var(--accent-muted)] px-2 text-xs font-medium text-[var(--accent-primary)]">({manager.role})</span>
               </span>
               <button

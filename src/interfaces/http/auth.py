@@ -3,6 +3,7 @@ import hmac
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 
+from src.domain.display_names import join_name_parts
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.db.repositories.user_repository import UserRepository
@@ -133,11 +134,13 @@ async def telegram_auth(
 
     telegram_id = auth_data["id"]
     first_name = auth_data["first_name"]
+    last_name = auth_data.get("last_name")
     username = auth_data.get("username")
+    full_name = join_name_parts(first_name, last_name)
 
     # Create or get user
     user_id, created = await user_repo.get_or_create_by_telegram(
-        telegram_id, first_name, username
+        telegram_id, first_name, username, last_name
     )
     logger.info(
         "User authenticated",
@@ -150,7 +153,7 @@ async def telegram_auth(
             id=user_id,
             telegram_id=telegram_id,
             username=username,
-            full_name=first_name,
+            full_name=full_name,
         ),
     ).to_dict()
 

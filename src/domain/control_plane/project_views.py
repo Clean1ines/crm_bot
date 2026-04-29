@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from src.domain.display_names import build_display_name
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
@@ -89,6 +90,7 @@ class ProjectMemberView:
     telegram_id: int | None = None
     username: str | None = None
     full_name: str | None = None
+    display_name: str | None = None
     email: str | None = None
     project_id: str | None = None
     created_at: datetime | None = None
@@ -101,11 +103,20 @@ class ProjectMemberView:
             telegram_id=_optional_int(record.get("telegram_id")),
             username=_optional_text(record.get("username")),
             full_name=_optional_text(record.get("full_name")),
+            display_name=_optional_text(record.get("display_name")),
             email=_optional_text(record.get("email")),
             project_id=str(record["project_id"])
             if record.get("project_id") is not None
             else None,
             created_at=_optional_datetime(record.get("created_at")),
+        )
+
+    def __post_init__(self) -> None:
+        self.display_name = self.display_name or build_display_name(
+            full_name=self.full_name,
+            username=self.username,
+            email=self.email,
+            fallback="Менеджер",
         )
 
     def to_record(self) -> dict[str, object]:
@@ -115,6 +126,7 @@ class ProjectMemberView:
             "telegram_id": self.telegram_id,
             "username": self.username,
             "full_name": self.full_name,
+            "display_name": self.display_name,
             "email": self.email,
             "project_id": self.project_id,
             "created_at": self.created_at,

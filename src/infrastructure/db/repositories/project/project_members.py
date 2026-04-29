@@ -2,6 +2,7 @@
 Project membership and manager identity operations.
 """
 
+from src.domain.display_names import build_display_name
 from src.domain.control_plane.project_views import (
     ManagerMembershipMutationView,
     ProjectMemberView,
@@ -174,7 +175,12 @@ class ProjectMemberRepository(ProjectRepositoryBase):
 
         if not row:
             return None
-        return row["full_name"] or row["username"] or row["email"]
+        return build_display_name(
+            full_name=row["full_name"],
+            username=row["username"],
+            email=row["email"],
+            fallback="Менеджер",
+        )
 
     async def get_project_members_view(
         self, project_id: ProjectId

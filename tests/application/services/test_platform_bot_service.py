@@ -11,6 +11,7 @@ def service():
     svc = PlatformBotService(MagicMock())
     svc.user_repo = MagicMock()
     svc.project_repo = MagicMock()
+    svc.project_repo.get_user_display_name = AsyncMock(return_value=None)
     return svc
 
 
@@ -82,14 +83,11 @@ async def test_list_projects_for_telegram_user_creates_platform_user_when_missin
 @pytest.mark.asyncio
 async def test_add_manager_by_chat_id_links_existing_platform_user(service):
     service.user_repo.get_or_create_by_telegram = AsyncMock(
-        return_value=("user-2", False)
+        side_effect=[
+            ("owner-user", False),
+            ("user-2", False),
+        ]
     )
-    service.project_repo.add_project_member = AsyncMock()
-
-    service.user_repo.get_or_create_by_telegram.side_effect = [
-        ("owner-user", False),
-        ("user-2", False),
-    ]
     service.project_repo.get_project_view = AsyncMock(
         return_value=ProjectSummaryView.from_record(
             {
@@ -101,10 +99,12 @@ async def test_add_manager_by_chat_id_links_existing_platform_user(service):
         )
     )
     service.project_repo.get_project_member_role = AsyncMock(return_value=None)
+    service.project_repo.get_user_display_name = AsyncMock(return_value="Alice Manager")
+    service.project_repo.add_project_member = AsyncMock()
 
     result = await service.add_manager_by_chat_id("project-1", 123, "456")
 
-    assert "добавлен как manager" in result
+    assert result == "Alice Manager добавлен как manager."
     service.project_repo.add_project_member.assert_awaited_once_with(
         "project-1", "user-2", "manager"
     )
@@ -130,19 +130,31 @@ async def test_get_project_team_filters_project_member_roles(service):
 
     assert result.to_dict() == {
         "members": [
-            {"project_id": "project-1", "user_id": "u1", "role": "owner"},
-            {"project_id": "project-1", "user_id": "u2", "role": "manager"},
+            {
+                "project_id": "project-1",
+                "user_id": "u1",
+                "role": "owner",
+                "display_name": "Менеджер",
+            },
+            {
+                "project_id": "project-1",
+                "user_id": "u2",
+                "role": "manager",
+                "display_name": "Менеджер",
+            },
         ],
         "legacy_targets": [],
     }
 
 
+@pytest.mark.asyncio
 async def test_add_manager_by_chat_id_owner_self_keeps_owner(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock()
-    service.user_repo.get_or_create_by_telegram.side_effect = [
-        ("owner-user", False),
-        ("owner-user", False),
-    ]
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        side_effect=[
+            ("owner-user", False),
+            ("owner-user", False),
+        ]
+    )
     service.project_repo.get_project_view = AsyncMock(
         return_value=ProjectSummaryView.from_record(
             {
@@ -154,20 +166,23 @@ async def test_add_manager_by_chat_id_owner_self_keeps_owner(service):
         )
     )
     service.project_repo.get_project_member_role = AsyncMock()
+    service.project_repo.get_user_display_name = AsyncMock(return_value="Project Owner")
     service.project_repo.add_project_member = AsyncMock()
 
     result = await service.add_manager_by_chat_id("project-1", 123, "123")
 
-    assert "роль owner сохранена" in result
+    assert result == "Project Owner уже владелец проекта; роль owner сохранена."
     service.project_repo.add_project_member.assert_not_awaited()
 
 
+@pytest.mark.asyncio
 async def test_add_manager_by_chat_id_owner_can_downgrade_admin_to_manager(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock()
-    service.user_repo.get_or_create_by_telegram.side_effect = [
-        ("owner-user", False),
-        ("admin-user", False),
-    ]
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        side_effect=[
+            ("owner-user", False),
+            ("admin-user", False),
+        ]
+    )
     service.project_repo.get_project_view = AsyncMock(
         return_value=ProjectSummaryView.from_record(
             {
@@ -179,22 +194,25 @@ async def test_add_manager_by_chat_id_owner_can_downgrade_admin_to_manager(servi
         )
     )
     service.project_repo.get_project_member_role = AsyncMock(return_value="admin")
+    service.project_repo.get_user_display_name = AsyncMock(return_value="Admin User")
     service.project_repo.add_project_member = AsyncMock()
 
     result = await service.add_manager_by_chat_id("project-1", 123, "456")
 
-    assert "добавлен как manager" in result
+    assert result == "Admin User добавлен как manager."
     service.project_repo.add_project_member.assert_awaited_once_with(
         "project-1", "admin-user", "manager"
     )
 
 
+@pytest.mark.asyncio
 async def test_add_manager_by_chat_id_admin_cannot_downgrade_owner(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock()
-    service.user_repo.get_or_create_by_telegram.side_effect = [
-        ("admin-user", False),
-        ("owner-user", False),
-    ]
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        side_effect=[
+            ("admin-user", False),
+            ("owner-user", False),
+        ]
+    )
     service.project_repo.get_project_view = AsyncMock(
         return_value=ProjectSummaryView.from_record(
             {
@@ -214,12 +232,14 @@ async def test_add_manager_by_chat_id_admin_cannot_downgrade_owner(service):
     service.project_repo.add_project_member.assert_not_awaited()
 
 
+@pytest.mark.asyncio
 async def test_add_manager_by_chat_id_admin_cannot_downgrade_admin(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock()
-    service.user_repo.get_or_create_by_telegram.side_effect = [
-        ("actor-admin", False),
-        ("target-admin", False),
-    ]
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        side_effect=[
+            ("actor-admin", False),
+            ("target-admin", False),
+        ]
+    )
     service.project_repo.get_project_view = AsyncMock(
         return_value=ProjectSummaryView.from_record(
             {
@@ -241,12 +261,14 @@ async def test_add_manager_by_chat_id_admin_cannot_downgrade_admin(service):
     service.project_repo.add_project_member.assert_not_awaited()
 
 
+@pytest.mark.asyncio
 async def test_add_manager_by_chat_id_admin_can_add_plain_user_as_manager(service):
-    service.user_repo.get_or_create_by_telegram = AsyncMock()
-    service.user_repo.get_or_create_by_telegram.side_effect = [
-        ("admin-user", False),
-        ("plain-user", False),
-    ]
+    service.user_repo.get_or_create_by_telegram = AsyncMock(
+        side_effect=[
+            ("admin-user", False),
+            ("plain-user", False),
+        ]
+    )
     service.project_repo.get_project_view = AsyncMock(
         return_value=ProjectSummaryView.from_record(
             {
@@ -260,11 +282,12 @@ async def test_add_manager_by_chat_id_admin_can_add_plain_user_as_manager(servic
     service.project_repo.get_project_member_role = AsyncMock(
         side_effect=["admin", None]
     )
+    service.project_repo.get_user_display_name = AsyncMock(return_value="Plain User")
     service.project_repo.add_project_member = AsyncMock()
 
     result = await service.add_manager_by_chat_id("project-1", 456, "789")
 
-    assert "добавлен как manager" in result
+    assert result == "Plain User добавлен как manager."
     service.project_repo.add_project_member.assert_awaited_once_with(
         "project-1", "plain-user", "manager"
     )

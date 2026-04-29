@@ -37,6 +37,7 @@ class ThreadReadRepository:
                     c.project_id,
                     c.full_name,
                     c.username,
+                    c.email,
                     c.chat_id
                 FROM threads t
                 JOIN clients c ON t.client_id = c.id
@@ -85,6 +86,7 @@ class ThreadReadRepository:
                 c.id AS client_id,
                 c.full_name,
                 c.username,
+                c.email,
                 c.chat_id,
                 lm.content AS last_message_content,
                 lm.created_at AS last_message_created_at
@@ -99,7 +101,14 @@ class ThreadReadRepository:
             ) lm ON true
             WHERE c.project_id = $1
               AND ($2::text IS NULL OR t.status = $2)
-              AND ($3::text IS NULL OR (c.full_name ILIKE $3 OR c.username ILIKE $3))
+              AND (
+                  $3::text IS NULL
+                  OR (
+                      c.full_name ILIKE $3
+                      OR c.username ILIKE $3
+                      OR c.email ILIKE $3
+                  )
+              )
               AND ($4::uuid IS NULL OR c.id = $4)
             ORDER BY t.updated_at DESC
             LIMIT $5 OFFSET $6
@@ -133,6 +142,7 @@ class ThreadReadRepository:
                         id=str(row["client_id"]),
                         full_name=row["full_name"],
                         username=row["username"],
+                        email=row["email"],
                         chat_id=row["chat_id"],
                     ),
                     last_message=ThreadLastMessageView(

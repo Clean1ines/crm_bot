@@ -178,6 +178,7 @@ class TestThreadsAPI:
                     "thread_updated_at": "2025-01-02T12:00:00",
                     "client": {
                         "id": str(uuid4()),
+                        "display_name": "John",
                         "full_name": "John",
                         "username": "john",
                         "chat_id": 123,
@@ -201,6 +202,7 @@ class TestThreadsAPI:
         data = response.json()
         assert len(data) == 1
         assert data[0]["thread_id"] is not None
+        assert data[0]["client"]["display_name"] == "John"
         mock_thread_repo.get_dialogs.assert_awaited_once_with(
             project_id,
             limit=20,

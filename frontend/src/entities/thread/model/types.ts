@@ -10,6 +10,7 @@ export type Thread = components['schemas']['ThreadResponse'];
 export interface Client {
   id: string;
   user_id?: string | null;
+  display_name?: string | null;
   full_name?: string | null;
   username?: string | null;
   email?: string | null;

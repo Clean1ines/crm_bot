@@ -344,6 +344,40 @@ class TestProjectRepository:
         assert result == "Alice Manager"
 
     @pytest.mark.asyncio
+    async def test_get_user_display_name_falls_back_to_username(
+        self, project_repo, mock_pool
+    ):
+        user_id = str(uuid4())
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "full_name": None,
+                "username": "alice",
+                "email": "alice@example.com",
+            }
+        )
+
+        result = await project_repo.get_user_display_name(user_id)
+
+        assert result == "@alice"
+
+    @pytest.mark.asyncio
+    async def test_get_user_display_name_falls_back_to_email(
+        self, project_repo, mock_pool
+    ):
+        user_id = str(uuid4())
+        mock_pool.mock_conn.fetchrow = AsyncMock(
+            return_value={
+                "full_name": None,
+                "username": " ",
+                "email": "alice@example.com",
+            }
+        )
+
+        result = await project_repo.get_user_display_name(user_id)
+
+        assert result == "alice@example.com"
+
+    @pytest.mark.asyncio
     async def test_set_pro_mode(self, project_repo, mock_pool):
         project_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock()

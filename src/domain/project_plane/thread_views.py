@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from src.domain.display_names import build_display_name
 from src.domain.project_plane.json_types import JsonObject
 
 
@@ -51,6 +52,8 @@ class ThreadWithProjectView:
     project_id: str | None = None
     full_name: str | None = None
     username: str | None = None
+    email: str | None = None
+    display_name: str | None = None
     chat_id: int | None = None
 
     @classmethod
@@ -79,6 +82,8 @@ class ThreadWithProjectView:
             else None,
             full_name=_view_text(record.get("full_name")),
             username=_view_text(record.get("username")),
+            email=_view_text(record.get("email")),
+            display_name=_view_text(record.get("display_name")),
             chat_id=(
                 _view_int(record.get("chat_id"))
                 if record.get("chat_id") is not None
@@ -99,6 +104,14 @@ class ThreadWithProjectView:
             "project_id": self.project_id,
             "full_name": self.full_name,
             "username": self.username,
+            "email": self.email,
+            "display_name": self.display_name
+            or build_display_name(
+                full_name=self.full_name,
+                username=self.username,
+                email=self.email,
+                fallback="Клиент",
+            ),
             "chat_id": self.chat_id,
         }
 
@@ -160,13 +173,25 @@ class ThreadDialogClientView:
     id: str
     full_name: str | None = None
     username: str | None = None
+    email: str | None = None
+    display_name: str | None = None
     chat_id: int | None = None
+
+    def __post_init__(self) -> None:
+        self.display_name = self.display_name or build_display_name(
+            full_name=self.full_name,
+            username=self.username,
+            email=self.email,
+            fallback="Клиент",
+        )
 
     def to_record(self) -> dict[str, object]:
         return {
             "id": self.id,
             "full_name": self.full_name,
             "username": self.username,
+            "email": self.email,
+            "display_name": self.display_name,
             "chat_id": self.chat_id,
         }
 

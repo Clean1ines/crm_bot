@@ -20,6 +20,7 @@ class ManagerReplyHistoryItemResponse(BaseModel):
     project_id: str
     manager_user_id: str
     text: str
+    manager_display_name: str | None = None
     manager_chat_id: str | None = None
     created_at: str | None = None
 

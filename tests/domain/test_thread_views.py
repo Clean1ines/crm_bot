@@ -56,6 +56,8 @@ def test_thread_with_project_view_normalizes_uuid_fields_and_serializes_record()
         "project_id": str(project_id),
         "full_name": "Client Name",
         "username": "client",
+        "email": None,
+        "display_name": "Client Name",
         "chat_id": 555,
     }
 
@@ -131,6 +133,8 @@ def test_thread_dialog_view_serializes_nested_payloads():
             "id": "client-1",
             "full_name": "Client Name",
             "username": "client",
+            "email": None,
+            "display_name": "Client Name",
             "chat_id": 123,
         },
         "last_message": {

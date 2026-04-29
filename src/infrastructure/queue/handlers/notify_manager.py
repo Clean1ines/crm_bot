@@ -8,6 +8,7 @@ from typing import Awaitable, Callable, Mapping, Protocol
 import asyncpg
 
 from src.application.ports.project_port import ProjectNotificationPort
+from src.domain.display_names import build_display_name
 from src.application.ports.thread_port import ThreadReadPort
 from src.domain.project_plane.manager_notifications import (
     ManagerNotificationTarget,
@@ -81,16 +82,24 @@ async def get_client_display_name(
     """Resolve a readable client name for notification text."""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT username, full_name FROM clients WHERE id = $1 AND project_id = $2",
+            """
+            SELECT username, full_name, email
+            FROM clients
+            WHERE id = $1 AND project_id = $2
+            """,
             ensure_uuid(client_id),
             ensure_uuid(project_id),
         )
 
-    if row and row["full_name"]:
-        return row["full_name"]
-    if row and row["username"]:
-        return row["username"]
-    return "Клиент"
+    if not row:
+        return "Клиент"
+
+    return build_display_name(
+        full_name=row["full_name"],
+        username=row["username"],
+        email=row["email"],
+        fallback="Клиент",
+    )
 
 
 async def _load_thread_context(

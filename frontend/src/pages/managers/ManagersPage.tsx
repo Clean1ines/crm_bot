@@ -6,6 +6,7 @@ import { useParams } from 'react-router-dom';
 
 import { useProjectManagers, type ProjectMember } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
+import { getDisplayName, getSecondaryDisplayText } from '@shared/lib/displayNames';
 import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
@@ -91,10 +92,10 @@ export const ManagersPage: React.FC = () => {
     }
 
     const haystack = [
+      manager.display_name,
       manager.full_name,
       manager.username,
       manager.email,
-      manager.user_id,
       manager.role,
     ]
       .filter(Boolean)
@@ -192,10 +193,10 @@ export const ManagersPage: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-medium text-[var(--text-primary)]">
-                        {manager.full_name || manager.username || manager.email || manager.user_id}
+                        {getDisplayName(manager, 'Менеджер')}
                       </div>
                       <div className="text-xs text-[var(--text-muted)]">
-                        {manager.username ? `@${manager.username}` : manager.email || 'Участник проекта'}
+                        {getSecondaryDisplayText(manager) || 'Участник проекта'}
                       </div>
                     </div>
                   </div>
@@ -256,10 +257,10 @@ export const ManagersPage: React.FC = () => {
                   </div>
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate font-semibold text-[var(--text-primary)]">
-                      {manager.full_name || manager.username || manager.email || manager.user_id}
+                      {getDisplayName(manager, 'Менеджер')}
                     </h2>
                     <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
-                      {manager.username ? `@${manager.username}` : manager.email || 'Участник проекта'}
+                      {getSecondaryDisplayText(manager) || 'Участник проекта'}
                     </p>
                   </div>
                 </div>
@@ -327,8 +328,12 @@ export const ManagersPage: React.FC = () => {
                 <User className="h-6 w-6" />
               </div>
               <div>
-                <div className="font-semibold text-[var(--text-primary)]">{selectedManager?.full_name || selectedManager?.user_id}</div>
-                <div className="text-sm text-[var(--text-muted)]">{selectedManager?.username || selectedManager?.email}</div>
+                <div className="font-semibold text-[var(--text-primary)]">
+                  {getDisplayName(selectedManager, 'Менеджер')}
+                </div>
+                <div className="text-sm text-[var(--text-muted)]">
+                  {getSecondaryDisplayText(selectedManager) || 'Участник проекта'}
+                </div>
               </div>
             </div>
 

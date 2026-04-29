@@ -1,6 +1,7 @@
 from dataclasses import asdict, dataclass
 
 from src.application.dto.project_dto import ProjectSummaryDto
+from src.domain.display_names import build_display_name
 from src.domain.control_plane.project_views import ProjectMemberView
 
 
@@ -36,20 +37,31 @@ class ProjectMemberDto:
     telegram_id: int | None = None
     username: str | None = None
     full_name: str | None = None
+    display_name: str | None = None
     email: str | None = None
     created_at: str | None = None
 
     @classmethod
     def from_record(cls, record: dict[str, object]) -> "ProjectMemberDto":
+        full_name = _optional_str(record.get("full_name"))
+        username = _optional_str(record.get("username"))
+        email = _optional_str(record.get("email"))
+        display_name = _optional_str(record.get("display_name")) or build_display_name(
+            full_name=full_name,
+            username=username,
+            email=email,
+            fallback="Менеджер",
+        )
         return cls(
             id=_optional_str(record.get("id")),
             project_id=str(record["project_id"]),
             user_id=str(record["user_id"]),
             role=str(record["role"]),
             telegram_id=_optional_int(record.get("telegram_id")),
-            username=_optional_str(record.get("username")),
-            full_name=_optional_str(record.get("full_name")),
-            email=_optional_str(record.get("email")),
+            username=username,
+            full_name=full_name,
+            display_name=display_name,
+            email=email,
             created_at=_serialize_timestamp(record.get("created_at")),
         )
 
@@ -63,6 +75,7 @@ class ProjectMemberDto:
             telegram_id=_optional_int(view.telegram_id),
             username=_optional_str(view.username),
             full_name=_optional_str(view.full_name),
+            display_name=_optional_str(view.display_name),
             email=_optional_str(view.email),
             created_at=_serialize_timestamp(view.created_at),
         )
