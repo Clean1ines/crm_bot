@@ -72,8 +72,7 @@ class PlatformBotService:
         actor_telegram_chat_id: int,
         manager_chat_id: str,
     ) -> str:
-        normalized_manager_id = manager_chat_id.strip()
-        target_telegram_chat_id = int(normalized_manager_id)
+        target_telegram_chat_id = int(manager_chat_id.strip())
 
         actor_user_id, _ = await self.user_repo.get_or_create_by_telegram(
             actor_telegram_chat_id, first_name="", username=None
@@ -84,12 +83,10 @@ class PlatformBotService:
 
         actor_role = await self._effective_project_role(project_id, actor_user_id)
         target_role = await self._effective_project_role(project_id, target_user_id)
+        target_label = await self._member_display_name(target_user_id, "Менеджер")
 
         if actor_role == PROJECT_OWNER and target_role == PROJECT_OWNER:
-            return (
-                f"Пользователь {normalized_manager_id} уже владелец проекта; "
-                "роль owner сохранена."
-            )
+            return f"{target_label} уже владелец проекта; роль owner сохранена."
 
         if actor_role == PROJECT_ADMIN and target_role in {
             PROJECT_OWNER,
@@ -101,18 +98,16 @@ class PlatformBotService:
             return "Недостаточно прав: только owner/admin могут назначать менеджеров."
 
         if target_role == PROJECT_MANAGER:
-            return (
-                f"Пользователь {normalized_manager_id} уже manager "
-                f"(platform user: {target_user_id})."
-            )
+            return f"{target_label} уже имеет роль manager."
 
         await self.project_repo.add_project_member(
             project_id, target_user_id, PROJECT_MANAGER
         )
-        return (
-            f"Пользователь {normalized_manager_id} добавлен как manager "
-            f"(platform user: {target_user_id})."
-        )
+        return f"{target_label} добавлен как manager."
+
+    async def _member_display_name(self, user_id: str, fallback: str) -> str:
+        display_name = await self.project_repo.get_user_display_name(user_id)
+        return display_name or fallback
 
     async def get_project_team(self, project_id: str) -> ProjectTeamDto:
         members = await self.project_repo.get_project_members_view(project_id)

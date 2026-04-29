@@ -27,6 +27,7 @@ def test_project_member_dto_normalizes_identity_fields():
         "telegram_id": 12345,
         "username": "manager_user",
         "full_name": "Manager User",
+        "display_name": "Manager User",
         "email": "manager@example.com",
         "created_at": "2026-04-23T12:00:00+00:00",
     }

@@ -107,6 +107,7 @@ def build_manager_audit_payload(
     *,
     manager_user_id: str | None,
     manager_chat_id: str | None,
+    manager_display_name: str | None = None,
 ) -> JsonObject:
     """
     Build canonical event/audit payload for manager-originated actions.
@@ -117,6 +118,8 @@ def build_manager_audit_payload(
     payload: JsonObject = {}
     if manager_user_id:
         payload["manager_user_id"] = manager_user_id
+    if manager_display_name:
+        payload["manager_identity"] = {"display_name": manager_display_name}
     if manager_chat_id:
         payload["manager_transport"] = {
             "kind": "telegram",

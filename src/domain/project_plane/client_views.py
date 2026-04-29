@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from src.domain.display_names import build_display_name
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
@@ -15,6 +16,7 @@ class ClientListItemView:
     user_id: str | None = None
     username: str | None = None
     full_name: str | None = None
+    display_name: str | None = None
     email: str | None = None
     company: str | None = None
     phone: str | None = None
@@ -26,6 +28,14 @@ class ClientListItemView:
     threads_count: int = 0
     latest_thread_id: str | None = None
 
+    def __post_init__(self) -> None:
+        self.display_name = self.display_name or build_display_name(
+            full_name=self.full_name,
+            username=self.username,
+            email=self.email,
+            fallback="Клиент",
+        )
+
     def to_record(self) -> dict[str, object]:
         metadata_dict = _ensure_metadata_dict(self.metadata)
         return {
@@ -33,6 +43,7 @@ class ClientListItemView:
             "user_id": self.user_id,
             "username": self.username,
             "full_name": self.full_name,
+            "display_name": self.display_name,
             "email": self.email,
             "company": self.company,
             "phone": self.phone,
@@ -70,6 +81,7 @@ class ClientDetailView:
     user_id: str | None = None
     username: str | None = None
     full_name: str | None = None
+    display_name: str | None = None
     email: str | None = None
     company: str | None = None
     phone: str | None = None
@@ -78,6 +90,14 @@ class ClientDetailView:
     source: str | None = None
     created_at: str | None = None
 
+    def __post_init__(self) -> None:
+        self.display_name = self.display_name or build_display_name(
+            full_name=self.full_name,
+            username=self.username,
+            email=self.email,
+            fallback="Клиент",
+        )
+
     def to_record(self) -> dict[str, object]:
         metadata_dict = _ensure_metadata_dict(self.metadata)
         return {
@@ -85,6 +105,7 @@ class ClientDetailView:
             "user_id": self.user_id,
             "username": self.username,
             "full_name": self.full_name,
+            "display_name": self.display_name,
             "email": self.email,
             "company": self.company,
             "phone": self.phone,

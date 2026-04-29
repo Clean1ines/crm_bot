@@ -43,6 +43,7 @@ class TestUserRepository:
         mock_pool.mock_conn.fetchrow = AsyncMock(
             return_value={"user_id": existing_user_id}
         )
+        mock_pool.mock_conn.execute = AsyncMock()
 
         result = await user_repo.get_or_create_by_telegram(
             telegram_id, first_name, username
@@ -55,6 +56,18 @@ class TestUserRepository:
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(
             expected_sql, str(telegram_id)
+        )
+        mock_pool.mock_conn.execute.assert_awaited_once_with(
+            """
+        UPDATE users
+        SET
+            username = COALESCE(NULLIF(users.username, ''), NULLIF($2, '')),
+            full_name = COALESCE(NULLIF(users.full_name, ''), NULLIF($3, ''))
+        WHERE id = $1
+        """,
+            str(existing_user_id),
+            "johndoe",
+            "John",
         )
         assert result == (str(existing_user_id), False)
 
@@ -99,8 +112,20 @@ class TestUserRepository:
                     VALUES ($1, 'telegram', $2)
                     ON CONFLICT (provider, provider_id) DO NOTHING
                 """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(
+        mock_pool.mock_conn.execute.assert_any_await(
             expected_identity_insert, str(existing_user_id), str(telegram_id)
+        )
+        mock_pool.mock_conn.execute.assert_any_await(
+            """
+        UPDATE users
+        SET
+            username = COALESCE(NULLIF(users.username, ''), NULLIF($2, '')),
+            full_name = COALESCE(NULLIF(users.full_name, ''), NULLIF($3, ''))
+        WHERE id = $1
+        """,
+            str(existing_user_id),
+            "johndoe",
+            "John",
         )
         assert result == (str(existing_user_id), False)
 
@@ -163,6 +188,33 @@ class TestUserRepository:
             """
         mock_pool.mock_conn.fetchval.assert_awaited_once_with(
             expected_insert_user_sql, telegram_id, None, first_name
+        )
+        assert result == (str(new_user_id), True)
+
+    @pytest.mark.asyncio
+    async def test_get_or_create_by_telegram_joins_first_and_last_name(
+        self, user_repo, mock_pool
+    ):
+        telegram_id = 12345
+        new_user_id = uuid4()
+
+        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=[None, None])
+        mock_pool.mock_conn.fetchval = AsyncMock(return_value=new_user_id)
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        result = await user_repo.get_or_create_by_telegram(
+            telegram_id, "John", username="johndoe", last_name="Doe"
+        )
+
+        mock_pool.mock_conn.fetchval.assert_awaited_once_with(
+            """
+                INSERT INTO users (id, telegram_id, username, full_name)
+                VALUES (gen_random_uuid(), $1, $2, $3)
+                RETURNING id
+            """,
+            telegram_id,
+            "johndoe",
+            "John Doe",
         )
         assert result == (str(new_user_id), True)
 

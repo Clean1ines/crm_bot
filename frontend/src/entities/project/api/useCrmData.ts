@@ -6,6 +6,7 @@ import { clientsApi } from '@shared/api/modules/clients';
 export interface ProjectClient {
   id: string;
   user_id?: string | null;
+  display_name?: string | null;
   username?: string | null;
   full_name?: string | null;
   email?: string | null;
@@ -34,6 +35,7 @@ export interface ProjectClientsResponse {
 export interface ProjectMember {
   user_id: string;
   role: string;
+  display_name?: string | null;
   full_name?: string | null;
   username?: string | null;
   email?: string | null;
@@ -121,6 +123,7 @@ export const useProjectMembers = (
         return {
           user_id: String(member.user_id ?? member.id ?? ''),
           role: String(member.role ?? ''),
+          display_name: typeof member.display_name === 'string' ? member.display_name : null,
           full_name: typeof member.full_name === 'string' ? member.full_name : null,
           username: typeof member.username === 'string' ? member.username : null,
           email: typeof member.email === 'string' ? member.email : null,

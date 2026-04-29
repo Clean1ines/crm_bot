@@ -299,6 +299,7 @@ class ManagerReplyHistoryItemDto:
     project_id: str
     manager_user_id: str
     text: str
+    manager_display_name: str | None = None
     manager_chat_id: str | None = None
     created_at: str | None = None
 
@@ -312,6 +313,9 @@ class ManagerReplyHistoryItemDto:
             thread_id=str(record["thread_id"]),
             project_id=str(record["project_id"]),
             manager_user_id=str(record["manager_user_id"]),
+            manager_display_name=str(record["manager_display_name"])
+            if record.get("manager_display_name") is not None
+            else None,
             manager_chat_id=str(manager_chat_id)
             if manager_chat_id is not None
             else None,
@@ -328,6 +332,7 @@ class ManagerReplyHistoryItemDto:
             thread_id=view.thread_id,
             project_id=view.project_id,
             manager_user_id=view.manager_user_id,
+            manager_display_name=view.manager_display_name,
             manager_chat_id=view.manager_chat_id,
             text=view.text,
             created_at=_serialize_timestamp(view.created_at),

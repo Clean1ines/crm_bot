@@ -13,6 +13,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from src.domain.display_names import join_name_parts, normalize_display_text
 from src.domain.identity.auth_providers import (
     AUTH_PROVIDER_EMAIL,
     AUTH_PROVIDER_TELEGRAM,
@@ -38,6 +39,31 @@ _UPDATABLE_USER_FIELDS = (
     "is_platform_admin",
     "user_metadata",
 )
+
+
+def _telegram_full_name(first_name: str, last_name: str | None) -> str | None:
+    return join_name_parts(first_name, last_name)
+
+
+async def _fill_missing_telegram_profile_fields(
+    conn: asyncpg.Connection,
+    *,
+    user_id: str,
+    username: str | None,
+    full_name: str | None,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE users
+        SET
+            username = COALESCE(NULLIF(users.username, ''), NULLIF($2, '')),
+            full_name = COALESCE(NULLIF(users.full_name, ''), NULLIF($3, ''))
+        WHERE id = $1
+        """,
+        user_id,
+        normalize_display_text(username),
+        normalize_display_text(full_name),
+    )
 
 
 def _safe_metadata_dict(value) -> dict:
@@ -122,7 +148,11 @@ class UserRepository:
         logger.debug("UserRepository initialized")
 
     async def get_or_create_by_telegram(
-        self, telegram_id: int, first_name: str, username: str | None = None
+        self,
+        telegram_id: int,
+        first_name: str,
+        username: str | None = None,
+        last_name: str | None = None,
     ) -> tuple[str, bool]:
         """
         Get or create a user by Telegram ID.
@@ -143,6 +173,8 @@ class UserRepository:
             "Getting or creating user by telegram", extra={"telegram_id": telegram_id}
         )
 
+        full_name = _telegram_full_name(first_name, last_name)
+
         async with self.pool.acquire() as conn:
             # Try to find existing identity
             row = await conn.fetchrow(
@@ -156,6 +188,12 @@ class UserRepository:
 
             if row:
                 user_id = str(row["user_id"])
+                await _fill_missing_telegram_profile_fields(
+                    conn,
+                    user_id=user_id,
+                    username=username,
+                    full_name=full_name,
+                )
                 logger.debug(
                     "Existing user found via identity", extra={"user_id": user_id}
                 )
@@ -181,6 +219,12 @@ class UserRepository:
                     user_id,
                     str(telegram_id),
                 )
+                await _fill_missing_telegram_profile_fields(
+                    conn,
+                    user_id=user_id,
+                    username=username,
+                    full_name=full_name,
+                )
                 logger.info(
                     "Migrated legacy user to auth_identities",
                     extra={"user_id": user_id},
@@ -188,8 +232,6 @@ class UserRepository:
                 return user_id, False
 
             # Create new user
-            full_name = first_name
-            # Optionally append last_name if available, but we don't have it here
             user_id = await conn.fetchval(
                 """
                 INSERT INTO users (id, telegram_id, username, full_name)

@@ -16,6 +16,7 @@ class UserAuthPort(Protocol):
         telegram_chat_id: int,
         first_name: str,
         username: str | None,
+        last_name: str | None = None,
     ) -> tuple[str, bool]: ...
 
 

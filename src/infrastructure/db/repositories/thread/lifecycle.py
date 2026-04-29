@@ -18,15 +18,15 @@ class ThreadLifecycleRepository:
         source: str = "telegram",
         full_name: str | None = None,
     ) -> str:
-        username_value = username or ""
-        full_name_value = full_name or ""
+        username_value = username.strip() if username and username.strip() else None
+        full_name_value = full_name.strip() if full_name and full_name.strip() else None
         logger.info(
             f"Getting or creating client for project {project_id}, chat {chat_id}"
         )
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO clients (project_id, chat_id, username_value, source, user_id, full_name_value)
+                INSERT INTO clients (project_id, chat_id, username, source, user_id, full_name)
                 VALUES (
                     $1,
                     $2,
@@ -37,8 +37,8 @@ class ThreadLifecycleRepository:
                 )
                 ON CONFLICT (project_id, chat_id) DO UPDATE
                 SET
-                    username_value = EXCLUDED.username_value,
-                    full_name_value = COALESCE(EXCLUDED.full_name_value, clients.full_name_value),
+                    username = COALESCE(NULLIF(EXCLUDED.username, ''), clients.username),
+                    full_name = COALESCE(NULLIF(EXCLUDED.full_name, ''), clients.full_name),
                     user_id = COALESCE(clients.user_id, EXCLUDED.user_id)
                 RETURNING id
             """,

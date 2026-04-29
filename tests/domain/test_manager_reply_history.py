@@ -17,6 +17,9 @@ def test_manager_reply_history_item_view_reads_canonical_payload():
             "payload": {
                 "manager_user_id": "manager-1",
                 "text": "Здравствуйте",
+                "manager_identity": {
+                    "display_name": "Alice Manager",
+                },
                 "manager_transport": {
                     "kind": "telegram",
                     "chat_id": "777",
@@ -31,11 +34,12 @@ def test_manager_reply_history_item_view_reads_canonical_payload():
     assert view.project_id == project_id
     assert view.manager_user_id == "manager-1"
     assert view.manager_chat_id == "777"
+    assert view.manager_display_name == "Alice Manager"
     assert view.text == "Здравствуйте"
     assert view.created_at == created_at
 
 
-def test_manager_reply_history_item_view_uses_empty_text_for_missing_payload():
+def test_manager_reply_history_item_view_uses_safe_fallbacks_for_missing_payload():
     view = ManagerReplyHistoryItemView.from_record(
         {
             "id": 1,
@@ -47,5 +51,6 @@ def test_manager_reply_history_item_view_uses_empty_text_for_missing_payload():
     )
 
     assert view.manager_user_id == ""
+    assert view.manager_display_name == "Менеджер"
     assert view.manager_chat_id is None
     assert view.text == ""

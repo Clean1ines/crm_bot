@@ -118,6 +118,7 @@ class TestClientsAPI:
         assert "clients" in data
         assert len(data["clients"]) == 1
         client_data = data["clients"][0]
+        assert client_data["display_name"] == "Client One"
         assert client_data["username"] == "client1"
         assert client_data["full_name"] == "Client One"
         mock_client_repo.list_for_project_view.assert_awaited_once_with(
@@ -206,6 +207,7 @@ class TestClientsAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == client_id
+        assert data["display_name"] == "Client One"
         assert data["username"] == "client1"
         assert "memory" in data
         assert "threads" in data

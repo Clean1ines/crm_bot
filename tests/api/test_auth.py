@@ -81,7 +81,7 @@ class TestAuthAPI:
         assert response.status_code == 200
         assert response.json()["user_id"] == user_id
         mock_user_repo.get_or_create_by_telegram.assert_awaited_once_with(
-            12345, "John", "johndoe"
+            12345, "John", "johndoe", None
         )
 
     def test_telegram_auth_existing_user(self, client, mock_user_repo):
@@ -104,6 +104,33 @@ class TestAuthAPI:
 
         assert response.status_code == 200
         assert response.json()["user_id"] == user_id
+
+    def test_telegram_auth_with_last_name_passes_full_profile(
+        self, client, mock_user_repo
+    ):
+        user_id = str(uuid4())
+        mock_user_repo.get_or_create_by_telegram = AsyncMock(
+            return_value=(user_id, False)
+        )
+
+        with patch("src.interfaces.http.auth.verify", return_value=True):
+            response = client.post(
+                "/api/auth/telegram",
+                json={
+                    "id": 12345,
+                    "first_name": "John",
+                    "last_name": "Doe",
+                    "username": "johndoe",
+                    "auth_date": 1234567890,
+                    "hash": "dummy",
+                },
+            )
+
+        assert response.status_code == 200
+        assert response.json()["full_name"] == "John Doe"
+        mock_user_repo.get_or_create_by_telegram.assert_awaited_once_with(
+            12345, "John", "johndoe", "Doe"
+        )
 
     def test_telegram_auth_invalid_signature(self, client):
         with patch("src.interfaces.http.auth.verify", return_value=False):
