@@ -144,72 +144,14 @@ def create_persist_node(
 
         if memory_repo and context.client_id:
             try:
-                dialog_state = context.normalized_dialog_state()
-                await memory_repo.set(
-                    project_id=context.project_id,
-                    client_id=context.client_id,
-                    key="dialog_state",
-                    value=dialog_state,
-                    type_="dialog_state",
-                )
-
-                lifecycle_stage = dialog_state.get("lifecycle") or dialog_state.get(
-                    "lead_status"
-                )
-                if lifecycle_stage:
+                for candidate in context.memory_write_candidates():
                     await memory_repo.set(
                         project_id=context.project_id,
                         client_id=context.client_id,
-                        key="stage",
-                        value={"stage": lifecycle_stage},
-                        type_="lifecycle",
+                        key=candidate.key,
+                        value=candidate.value,
+                        type_=candidate.type,
                     )
-
-                if context.user_input:
-                    if "не хочу звонок" in context.user_input:
-                        await memory_repo.set(
-                            project_id=context.project_id,
-                            client_id=context.client_id,
-                            key="calls",
-                            value=False,
-                            type_="rejection",
-                        )
-
-                    if any(
-                        phrase in context.user_input
-                        for phrase in ["дорого", "слишком дорого"]
-                    ):
-                        await memory_repo.set(
-                            project_id=context.project_id,
-                            client_id=context.client_id,
-                            key="price_sensitivity",
-                            value="high",
-                            type_="behavior",
-                        )
-
-                    if any(
-                        phrase in context.user_input
-                        for phrase in ["у меня салон", "мой бизнес", "я из"]
-                    ):
-                        await memory_repo.set(
-                            project_id=context.project_id,
-                            client_id=context.client_id,
-                            key="business_type",
-                            value="salon",
-                            type_="context",
-                        )
-
-                    if any(
-                        kw in context.user_input
-                        for kw in ["не работает", "бесит", "ошибка", "жалоба"]
-                    ):
-                        await memory_repo.set(
-                            project_id=context.project_id,
-                            client_id=context.client_id,
-                            key="last_issue",
-                            value=context.user_input[:200],
-                            type_="issues",
-                        )
             except Exception as exc:
                 logger.exception(
                     "Failed to store user memory",

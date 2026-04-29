@@ -3,7 +3,9 @@ Configuration management for the application.
 Uses Pydantic Settings to load and validate environment variables.
 """
 
-from pydantic_settings import BaseSettings
+from typing import TYPE_CHECKING
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
 
@@ -154,10 +156,11 @@ class Settings(BaseSettings):
             )
         return v
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
 
 # Global instance for easy import
-settings = Settings()
+if TYPE_CHECKING:
+    settings: Settings
+else:
+    settings = Settings()

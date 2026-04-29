@@ -5,6 +5,8 @@ Load-state node for the LangGraph pipeline.
 from collections.abc import Mapping
 
 from src.agent.state import AgentState
+from src.domain.runtime.dialog_state import dialog_state_from_memory
+from src.domain.runtime.load_state import LoadStateResult
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
@@ -30,6 +32,19 @@ def _read_value(view: object, key: str, default: object = None) -> object:
             return record.get(key, default)
 
     return getattr(view, key, default)
+
+
+def _memory_record(view: object) -> dict[str, object] | None:
+    if isinstance(view, Mapping):
+        return {str(key): value for key, value in view.items()}
+
+    to_record = getattr(view, "to_record", None)
+    if callable(to_record):
+        record = to_record()
+        if isinstance(record, Mapping):
+            return {str(key): value for key, value in record.items()}
+
+    return None
 
 
 def create_load_state_node(
@@ -86,16 +101,33 @@ def create_load_state_node(
         if memory_repo and project_id and client_id:
             try:
                 if hasattr(memory_repo, "get_for_user_view"):
-                    patch["user_memory"] = await memory_repo.get_for_user_view(
-                        project_id, client_id
+                    raw_memory = await memory_repo.get_for_user_view(
+                        project_id,
+                        client_id,
+                        limit=20,
                     )
                 elif hasattr(memory_repo, "get_for_client"):
-                    patch["user_memory"] = await memory_repo.get_for_client(
+                    raw_memory = await memory_repo.get_for_client(
                         project_id, client_id, limit=20
                     )
                 elif hasattr(memory_repo, "list_for_client"):
-                    patch["user_memory"] = await memory_repo.list_for_client(
+                    raw_memory = await memory_repo.list_for_client(
                         project_id, client_id, limit=20
+                    )
+                else:
+                    raw_memory = []
+
+                memory_records = [
+                    record
+                    for item in raw_memory
+                    if (record := _memory_record(item)) is not None
+                ]
+                memory_index = LoadStateResult.build_memory_index(memory_records)
+                patch["user_memory"] = memory_index
+                if "dialog_state" not in patch and memory_index:
+                    patch["dialog_state"] = dialog_state_from_memory(
+                        memory_index,
+                        lifecycle=str(patch.get("lifecycle") or "cold"),
                     )
             except Exception as exc:
                 logger.exception(

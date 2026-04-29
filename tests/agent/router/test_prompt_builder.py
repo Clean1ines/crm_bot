@@ -80,3 +80,41 @@ def test_build_intent_prompt_uses_clean_fallback_text():
     assert "User message: Need help" in prompt
     assert "- Summary: none" in prompt
     assert "- User memory: none" in prompt
+
+
+def test_build_response_prompt_formats_memory_compactly():
+    prompt = build_response_prompt(
+        decision="LLM_GENERATE",
+        user_input="слишком дорого",
+        user_memory={
+            "preferences": [
+                {
+                    "key": "contact_preference",
+                    "value": {"preferred_channel": "chat", "avoid_calls": True},
+                }
+            ],
+            "behavior": [{"key": "price_sensitivity", "value": "high"}],
+            "dialog_state": [
+                {
+                    "key": "dialog_state",
+                    "value": {
+                        "lifecycle": "warm",
+                        "lead_status": "warm",
+                        "last_topic": "pricing",
+                        "repeat_count": 2,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert (
+        '- preferences: contact_preference={"preferred_channel":"chat","avoid_calls":true}'
+        in prompt
+    )
+    assert "- behavior: price_sensitivity=high" in prompt
+    assert (
+        "- dialog_state: lifecycle=warm; lead_status=warm; last_topic=pricing; repeat_count=2"
+        in prompt
+    )
+    assert "--- PREFERENCES ---" not in prompt

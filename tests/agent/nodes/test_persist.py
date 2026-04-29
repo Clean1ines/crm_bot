@@ -132,3 +132,67 @@ async def test_persist_degrades_when_assistant_message_save_fails():
     assert result == {}
     thread_runtime_state_repo.save_state_json.assert_awaited_once()
     thread_runtime_state_repo.update_analytics.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_persist_writes_deterministic_memory_candidates():
+    thread_message_repo = MagicMock()
+    thread_message_repo.add_message = AsyncMock()
+
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.save_state_json = AsyncMock()
+    thread_runtime_state_repo.update_analytics = AsyncMock()
+
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(return_value=None)
+
+    memory_repo = MagicMock()
+    memory_repo.set = AsyncMock()
+
+    node = create_persist_node(
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
+        memory_repo=memory_repo,
+    )
+
+    result = await node(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "Слишком дорого, только в чат, интеграция не работает",
+            "intent": "pricing",
+            "topic": "integration",
+            "emotion": "negative",
+            "lifecycle": "warm",
+            "cta": "none",
+        }
+    )
+
+    assert result == {}
+    writes = [
+        {
+            "key": call.kwargs["key"],
+            "value": call.kwargs["value"],
+            "type_": call.kwargs["type_"],
+        }
+        for call in memory_repo.set.await_args_list
+    ]
+
+    assert {
+        "key": "contact_preference",
+        "value": {"preferred_channel": "chat", "avoid_calls": True},
+        "type_": "preferences",
+    } in writes
+    assert {"key": "price_sensitivity", "value": "high", "type_": "behavior"} in writes
+    assert {
+        "key": "pricing_objection",
+        "value": "too_expensive",
+        "type_": "rejections",
+    } in writes
+    assert {
+        "key": "active_issue",
+        "value": {"kind": "integration", "emotion": "negative"},
+        "type_": "issues",
+    } in writes

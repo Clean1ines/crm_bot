@@ -12,6 +12,7 @@ Extract:
 Important:
 - If the user explicitly asks for a human, a manager, an operator, or says they want to talk to a person, use intent=handoff_request and cta=call_manager.
 - If the user is clearly angry or abusive, set emotion=angry and prefer topic=angry.
+- Use recent messages to interpret short follow-ups like "да", "нет", "дорого", or "не работает" instead of classifying them from keywords alone.
 
 User message: {user_input}
 
