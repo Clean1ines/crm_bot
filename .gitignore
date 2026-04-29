@@ -26,7 +26,7 @@ tree_output.txt
 
 
 db_schema.txt
-dev_scripts/*
+dev_scripts/
 reports/
 
 kb_demo_ai_seller_faq.json
