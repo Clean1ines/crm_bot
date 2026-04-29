@@ -26,6 +26,28 @@ class WebhookDispatcher:
             return update["callback_query"].get("from", {}).get("id")
         return None
 
+    @staticmethod
+    def _safe_update_metadata(update: dict) -> dict[str, object]:
+        top_level_keys = sorted(str(key) for key in update.keys())
+        metadata: dict[str, object] = {
+            "top_level_keys": top_level_keys,
+            "update_id": update.get("update_id"),
+            "has_message": "message" in update,
+            "has_callback_query": "callback_query" in update,
+        }
+
+        message = update.get("message")
+        if isinstance(message, dict):
+            metadata["message_keys"] = sorted(str(key) for key in message.keys())
+
+        callback_query = update.get("callback_query")
+        if isinstance(callback_query, dict):
+            metadata["callback_query_keys"] = sorted(
+                str(key) for key in callback_query.keys()
+            )
+
+        return metadata
+
     async def verify_project_secret(
         self, project_id: str, secret_token: str | None, project_tokens
     ) -> None:
@@ -115,7 +137,10 @@ class WebhookDispatcher:
         if not chat_id:
             logger.warning(
                 "No chat_id in update",
-                extra={"update": update, "project_id": project_id},
+                extra={
+                    "project_id": project_id,
+                    "update_metadata": self._safe_update_metadata(update),
+                },
             )
             return WebhookAckDto()
 

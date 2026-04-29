@@ -11,12 +11,12 @@ No application composition.
 """
 
 import asyncpg
-from structlog.stdlib import BoundLogger
 
+from src.application.ports.logger_port import LoggerPort
 from src.infrastructure.config.settings import Settings
 
 
-async def init_db(*, settings: Settings, logger: BoundLogger) -> asyncpg.Pool:
+async def init_db(*, settings: Settings, logger: LoggerPort) -> asyncpg.Pool:
     if not settings.DATABASE_URL:
         raise RuntimeError("DATABASE_URL not configured")
 
@@ -42,7 +42,7 @@ async def init_db(*, settings: Settings, logger: BoundLogger) -> asyncpg.Pool:
     return db_pool
 
 
-async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: BoundLogger) -> None:
+async def shutdown_db(db_pool: asyncpg.Pool | None, *, logger: LoggerPort) -> None:
     if db_pool is None:
         return
 
@@ -66,7 +66,7 @@ async def bootstrap_platform_owner(
     db_pool: asyncpg.Pool,
     *,
     settings: Settings,
-    logger: BoundLogger,
+    logger: LoggerPort,
 ) -> str | None:
     telegram_id = platform_owner_telegram_id(settings=settings)
     if telegram_id is None:
