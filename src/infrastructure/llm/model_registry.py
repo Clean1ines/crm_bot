@@ -3,14 +3,23 @@ Model registry for managing available LLM models and their capabilities.
 Loads model definitions from a YAML configuration file.
 """
 
-import yaml
-from pathlib import Path
 from collections.abc import Mapping
+from importlib import import_module
+from pathlib import Path
+from typing import Protocol
 
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
 
 logger = get_logger(__name__)
+
+
+class YamlLoader(Protocol):
+    def safe_load(self, stream: object) -> object: ...
+
+
+def _yaml_loader() -> YamlLoader:
+    return import_module("yaml")
 
 
 def _as_text(value: object) -> str | None:
@@ -55,7 +64,7 @@ class ModelRegistry:
     Data is loaded from a YAML file specified in settings.MODEL_CONFIG_PATH.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._models: dict[str, dict[str, object]] = {}
         self._load_models()
 
@@ -70,11 +79,27 @@ class ModelRegistry:
             return
 
         try:
+            yaml_loader = _yaml_loader()
             with open(config_path, "r") as f:
-                data = yaml.safe_load(f)
-            models_list = data.get("models", [])
+                data = yaml_loader.safe_load(f)
+            if not isinstance(data, Mapping):
+                logger.warning(
+                    "Model config root must be a mapping",
+                    extra={"path": str(config_path)},
+                )
+                self._load_defaults()
+                return
+
+            models_value = data.get("models", [])
+            models_list = models_value if isinstance(models_value, list) else []
             for model in models_list:
-                model_id = model.get("id")
+                if not isinstance(model, dict):
+                    logger.warning(
+                        "Skipping model entry with invalid shape",
+                        extra={"model": model},
+                    )
+                    continue
+                model_id = _as_text(model.get("id"))
                 if model_id:
                     self._models[model_id] = model
                 else:

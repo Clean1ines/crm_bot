@@ -316,6 +316,7 @@ class TestKnowledgeRepository:
                 "uploaded_by": "admin",
                 "created_at": "2021-01-01",
                 "updated_at": "2021-01-01",
+                "chunk_count": 5,
             },
             {
                 "id": uuid4(),
@@ -326,20 +327,37 @@ class TestKnowledgeRepository:
                 "uploaded_by": "admin",
                 "created_at": "2021-01-02",
                 "updated_at": "2021-01-02",
+                "chunk_count": 10,
             },
         ]
-        # Mock fetch for documents
         mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
-        # Mock fetchval for chunk counts (one per document)
-        mock_pool.mock_conn.fetchval = AsyncMock(side_effect=[5, 10])
 
         result = await knowledge_repo.get_documents(project_id, limit, offset)
 
         expected_sql = """
-                SELECT id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
-                FROM knowledge_documents
-                WHERE project_id = $1
-                ORDER BY created_at DESC
+                SELECT
+                    d.id,
+                    d.file_name,
+                    d.file_size,
+                    d.status,
+                    d.error,
+                    d.uploaded_by,
+                    d.created_at,
+                    d.updated_at,
+                    COUNT(kb.id)::int AS chunk_count
+                FROM knowledge_documents AS d
+                LEFT JOIN knowledge_base AS kb ON kb.document_id = d.id
+                WHERE d.project_id = $1
+                GROUP BY
+                    d.id,
+                    d.file_name,
+                    d.file_size,
+                    d.status,
+                    d.error,
+                    d.uploaded_by,
+                    d.created_at,
+                    d.updated_at
+                ORDER BY d.created_at DESC
                 LIMIT $2 OFFSET $3
             """
         mock_pool.mock_conn.fetch.assert_awaited_once_with(
