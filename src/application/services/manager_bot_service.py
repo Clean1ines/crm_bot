@@ -10,6 +10,8 @@ from src.domain.project_plane.manager_assignments import (
 )
 from src.domain.runtime.dialog_state import default_dialog_state
 
+MANAGER_REPLY_FAILED_TEXT = "❌ Не удалось отправить ответ. Попробуйте ещё раз позже."
+
 
 class ManagerBotService:
     def __init__(
@@ -19,7 +21,7 @@ class ManagerBotService:
         bot_token: str,
         project_id: str,
         *,
-        telegram_client: TelegramClientPort | None = None,
+        telegram_client: TelegramClientPort,
         logger: LoggerPort | None = None,
     ) -> None:
         self.orchestrator = orchestrator
@@ -30,16 +32,7 @@ class ManagerBotService:
         self.logger = logger or NullLogger()
 
     async def _post_telegram(self, method: str, payload: JsonObject) -> None:
-        if self.telegram_client is not None:
-            await self.telegram_client.post_json(self.bot_token, method, payload)
-            return
-
-        httpx_mod = __import__("httpx")
-        async with httpx_mod.AsyncClient() as client:
-            await client.post(
-                f"https://api.telegram.org/bot{self.bot_token}/{method}",
-                json=payload,
-            )
+        await self.telegram_client.post_json(self.bot_token, method, payload)
 
     async def _deny_unauthorized_manager(self, chat_id: str) -> WebhookAckDto:
         await self._post_telegram(
@@ -280,10 +273,17 @@ class ManagerBotService:
                 },
             )
         except Exception as exc:
-            self.logger.exception("Error sending manager reply")
+            self.logger.exception(
+                "Error sending manager reply",
+                extra={
+                    "project_id": self.project_id,
+                    "manager_chat_id": manager_chat_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
             await self._post_telegram(
                 "sendMessage",
-                {"chat_id": manager_chat_id, "text": f"❌ Ошибка: {str(exc)}"},
+                {"chat_id": manager_chat_id, "text": MANAGER_REPLY_FAILED_TEXT},
             )
 
         return WebhookAckDto()
