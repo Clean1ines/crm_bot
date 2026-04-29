@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from urllib.parse import urlparse
 
 import httpx
@@ -16,6 +16,10 @@ from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import JsonMap, Tool, ToolExecutionError
 
 logger = get_logger(__name__)
+
+QueryParamValue = str | int | float | bool | None
+QueryParam = QueryParamValue | Sequence[QueryParamValue]
+QueryParams = dict[str, QueryParam]
 
 
 class HTTPTool(Tool):
@@ -123,7 +127,22 @@ class HTTPTool(Tool):
 
         try:
             async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
-                response = await client.request(**request.to_httpx_kwargs())
+                request_json = (
+                    dict(request.body) if isinstance(request.body, Mapping) else None
+                )
+                request_content = (
+                    None
+                    if request.body is None or isinstance(request.body, Mapping)
+                    else str(request.body)
+                )
+                response = await client.request(
+                    request.method,
+                    request.url,
+                    headers=request.headers,
+                    params=request.params,
+                    json=request_json,
+                    content=request_content,
+                )
 
             elapsed_ms = _elapsed_ms(start_time)
             response_body = _response_body(response, parse_json=request.parse_json)
@@ -219,7 +238,7 @@ class HTTPRequest:
         method: str,
         url: str,
         headers: dict[str, str],
-        params: dict[str, object] | None,
+        params: QueryParams | None,
         body: object,
         timeout_seconds: int,
         parse_json: bool,
@@ -231,24 +250,6 @@ class HTTPRequest:
         self.body = body
         self.timeout_seconds = timeout_seconds
         self.parse_json = parse_json
-
-    def to_httpx_kwargs(self) -> JsonMap:
-        kwargs: JsonMap = {
-            "method": self.method,
-            "url": self.url,
-            "headers": self.headers,
-        }
-
-        if self.params:
-            kwargs["params"] = self.params
-
-        if self.body is not None:
-            if isinstance(self.body, Mapping):
-                kwargs["json"] = dict(self.body)
-            else:
-                kwargs["content"] = str(self.body)
-
-        return kwargs
 
 
 def _coerce_int(value: object, default: int = 30) -> int:
@@ -282,7 +283,7 @@ def _request_from_args(args: JsonMap) -> HTTPRequest:
         method=str(args.get("method") or "GET").upper(),
         url=url,
         headers=_string_mapping(args.get("headers")),
-        params=_object_mapping_or_none(args.get("params")),
+        params=_query_params_or_none(args.get("params")),
         body=args.get("body"),
         timeout_seconds=_timeout_seconds(args.get("timeout_seconds")),
         parse_json=bool(args.get("parse_json", True)),
@@ -296,12 +297,28 @@ def _string_mapping(value: object) -> dict[str, str]:
     return {str(key): str(item) for key, item in value.items() if item is not None}
 
 
-def _object_mapping_or_none(value: object) -> dict[str, object] | None:
+def _query_params_or_none(value: object) -> QueryParams | None:
     if not isinstance(value, Mapping):
         return None
 
-    result = {str(key): item for key, item in value.items()}
+    result: QueryParams = {}
+    for key, item in value.items():
+        result[str(key)] = _normalize_query_param(item)
     return result or None
+
+
+def _normalize_query_param(value: object) -> QueryParam:
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        normalized_items: list[QueryParamValue] = []
+        for item in value:
+            if isinstance(item, str | int | float | bool) or item is None:
+                normalized_items.append(item)
+            else:
+                normalized_items.append(str(item))
+        return normalized_items
+    return str(value)
 
 
 def _timeout_seconds(value: object) -> int:

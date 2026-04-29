@@ -30,6 +30,15 @@ from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
+_UPDATABLE_USER_FIELDS = (
+    "full_name",
+    "email",
+    "username",
+    "telegram_id",
+    "is_platform_admin",
+    "user_metadata",
+)
+
 
 def _safe_metadata_dict(value) -> dict:
     """
@@ -674,17 +683,39 @@ class UserRepository:
         if not data:
             return True
 
-        sets = []
-        params: list[object] = [user_id]
-        for idx, (key, value) in enumerate(data.items(), start=2):
-            sets.append(f"{key} = ${idx}")
-            params.append(value)
+        invalid_fields = sorted(set(data) - set(_UPDATABLE_USER_FIELDS))
+        if invalid_fields:
+            raise ValueError(
+                f"Unsupported user update fields: {', '.join(invalid_fields)}"
+            )
 
-        query = f"""
+        query = """
             UPDATE users
-            SET {", ".join(sets)}, updated_at = NOW()
+            SET
+                full_name = CASE WHEN $2 THEN $3 ELSE full_name END,
+                email = CASE WHEN $4 THEN $5 ELSE email END,
+                username = CASE WHEN $6 THEN $7 ELSE username END,
+                telegram_id = CASE WHEN $8 THEN $9 ELSE telegram_id END,
+                is_platform_admin = CASE WHEN $10 THEN $11 ELSE is_platform_admin END,
+                user_metadata = CASE WHEN $12 THEN $13 ELSE user_metadata END,
+                updated_at = NOW()
             WHERE id = $1
         """
+        params: list[object] = [
+            user_id,
+            "full_name" in data,
+            data.get("full_name"),
+            "email" in data,
+            data.get("email"),
+            "username" in data,
+            data.get("username"),
+            "telegram_id" in data,
+            data.get("telegram_id"),
+            "is_platform_admin" in data,
+            data.get("is_platform_admin"),
+            "user_metadata" in data,
+            data.get("user_metadata"),
+        ]
 
         async with self.pool.acquire() as conn:
             result = await conn.execute(query, *params)

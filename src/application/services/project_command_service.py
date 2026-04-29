@@ -87,7 +87,7 @@ class ProjectCommandService:
             kind=CHANNEL_CLIENT,
             provider="telegram",
             status="active",
-            config_json={"token_configured": True},
+            config_json={"token_configured": True},  # nosec B105 - config flag, not a secret
         )
         return ProjectMutationResultDto.create(status="ok")
 
@@ -105,7 +105,7 @@ class ProjectCommandService:
             kind=CHANNEL_MANAGER,
             provider="telegram",
             status="active",
-            config_json={"token_configured": True},
+            config_json={"token_configured": True},  # nosec B105 - config flag, not a secret
         )
         return ProjectMutationResultDto.create(status="ok")
 
@@ -120,7 +120,7 @@ class ProjectCommandService:
             kind=CHANNEL_CLIENT,
             provider="telegram",
             status="disabled",
-            config_json={"token_configured": False},
+            config_json={"token_configured": False},  # nosec B105 - config flag, not a secret
         )
         return ProjectMutationResultDto.create(status="ok", type=CHANNEL_CLIENT)
 
@@ -135,7 +135,7 @@ class ProjectCommandService:
             kind=CHANNEL_MANAGER,
             provider="telegram",
             status="disabled",
-            config_json={"token_configured": False},
+            config_json={"token_configured": False},  # nosec B105 - config flag, not a secret
         )
         return ProjectMutationResultDto.create(status="ok", type=CHANNEL_MANAGER)
 
@@ -180,7 +180,7 @@ class ProjectCommandService:
                 kind=CHANNEL_CLIENT,
                 provider="telegram",
                 status="active",
-                config_json={"token_configured": True},
+                config_json={"token_configured": True},  # nosec B105 - config flag, not a secret
             )
         elif bot_type == CHANNEL_MANAGER:
             token = self._normalize_bot_token(token)
@@ -190,7 +190,7 @@ class ProjectCommandService:
                 kind=CHANNEL_MANAGER,
                 provider="telegram",
                 status="active",
-                config_json={"token_configured": True},
+                config_json={"token_configured": True},  # nosec B105 - config flag, not a secret
             )
         else:
             raise ValidationError("Invalid bot type")

@@ -13,8 +13,8 @@ ALLOWED_AUTH_PROVIDERS = {
 AUTH_DELIVERY_MANUAL_LINK = "manual_link"
 
 AUTH_STATUS_VERIFICATION_REQUESTED = "verification_requested"
-AUTH_STATUS_PASSWORD_RESET_REQUESTED = "password_reset_requested"
-AUTH_STATUS_PASSWORD_RESET_COMPLETED = "password_reset_completed"
+AUTH_STATUS_PASSWORD_RESET_REQUESTED = "password_reset_requested"  # nosec B105 - auth status label
+AUTH_STATUS_PASSWORD_RESET_COMPLETED = "password_reset_completed"  # nosec B105 - auth status label
 
 EMAIL_VERIFICATION_QUERY_KEY = "verify_email_token"
-PASSWORD_RESET_QUERY_KEY = "reset_password_token"
+PASSWORD_RESET_QUERY_KEY = "reset_password_token"  # nosec B105 - query parameter name

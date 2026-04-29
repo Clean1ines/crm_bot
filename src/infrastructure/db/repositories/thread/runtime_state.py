@@ -77,38 +77,23 @@ class ThreadRuntimeStateRepository:
         decision: str | None = None,
     ) -> None:
         thread_uuid = ensure_uuid(thread_id)
-
-        updates: list[str] = []
-        params: list[str | UUID] = []
-
-        if intent is not None:
-            updates.append("intent = $%d" % (len(params) + 1))
-            params.append(intent)
-
-        if lifecycle is not None:
-            updates.append("lifecycle = $%d" % (len(params) + 1))
-            params.append(lifecycle)
-
-        if cta is not None:
-            updates.append("cta = $%d" % (len(params) + 1))
-            params.append(cta)
-
-        if decision is not None:
-            updates.append("decision = $%d" % (len(params) + 1))
-            params.append(decision)
-
-        if not updates:
-            logger.debug(
-                "No analytics fields to update", extra={"thread_id": thread_id}
-            )
-            return
-
-        query = f"""
+        query = """
             UPDATE threads
-            SET {", ".join(updates)}, updated_at = NOW()
-            WHERE id = ${len(params) + 1}
+            SET
+                intent = COALESCE($1, intent),
+                lifecycle = COALESCE($2, lifecycle),
+                cta = COALESCE($3, cta),
+                decision = COALESCE($4, decision),
+                updated_at = NOW()
+            WHERE id = $5
         """
-        params.append(thread_uuid)
+        params: list[str | UUID | None] = [
+            intent,
+            lifecycle,
+            cta,
+            decision,
+            thread_uuid,
+        ]
 
         async with self.pool.acquire() as conn:
             await conn.execute(query, *params)
