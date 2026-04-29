@@ -52,51 +52,28 @@ class MetricsRepository:
             resolution_time: Resolution time in seconds (sets the field).
         """
         thread_uuid = ensure_uuid(thread_id)
-        # Build SET clause dynamically
-        updates: list[str] = []
-        params: list[object] = [thread_uuid]
-        param_idx = 2
-
-        if total_messages is not None:
-            updates.append(
-                f"total_messages = COALESCE(total_messages, 0) + ${param_idx}"
-            )
-            params.append(total_messages)
-            param_idx += 1
-        if ai_messages is not None:
-            updates.append(f"ai_messages = COALESCE(ai_messages, 0) + ${param_idx}")
-            params.append(ai_messages)
-            param_idx += 1
-        if manager_messages is not None:
-            updates.append(
-                f"manager_messages = COALESCE(manager_messages, 0) + ${param_idx}"
-            )
-            params.append(manager_messages)
-            param_idx += 1
-        if escalated is not None:
-            updates.append(f"escalated = ${param_idx}")
-            params.append(escalated)
-            param_idx += 1
-        if resolution_time is not None:
-            updates.append(f"resolution_time = ${param_idx} * interval '1 second'")
-            params.append(resolution_time)
-            param_idx += 1
-
-        # Always update updated_at
-        updates.append("updated_at = NOW()")
-
-        if not updates:
-            logger.debug(
-                "No updates to apply for thread_metrics", extra={"thread_id": thread_id}
-            )
-            return
-
-        query = f"""
+        query = """
             INSERT INTO thread_metrics (thread_id, total_messages, ai_messages, manager_messages, escalated, resolution_time, updated_at)
             VALUES ($1, 0, 0, 0, false, NULL, NOW())
             ON CONFLICT (thread_id) DO UPDATE SET
-            {", ".join(updates)}
+            total_messages = COALESCE(thread_metrics.total_messages, 0) + COALESCE($2, 0),
+            ai_messages = COALESCE(thread_metrics.ai_messages, 0) + COALESCE($3, 0),
+            manager_messages = COALESCE(thread_metrics.manager_messages, 0) + COALESCE($4, 0),
+            escalated = COALESCE($5, thread_metrics.escalated),
+            resolution_time = CASE
+                WHEN $6 IS NULL THEN thread_metrics.resolution_time
+                ELSE $6 * interval '1 second'
+            END,
+            updated_at = NOW()
         """
+        params = [
+            thread_uuid,
+            total_messages,
+            ai_messages,
+            manager_messages,
+            escalated,
+            resolution_time,
+        ]
 
         async with self.pool.acquire() as conn:
             await conn.execute(query, *params)

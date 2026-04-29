@@ -65,33 +65,8 @@ def _row_mapping(row: object) -> Mapping[str, object]:
     return {str(key): value for key, value in mapped.items()}
 
 
-def _search_filter(
-    search: str | None, param_idx: int
-) -> tuple[list[str], list[object], int]:
-    if not search:
-        return [], [], param_idx
-
-    clause = f"""(
-        c.full_name ILIKE ${param_idx}
-        OR c.username ILIKE ${param_idx}
-        OR c.email ILIKE ${param_idx}
-        OR c.company ILIKE ${param_idx}
-        OR c.phone ILIKE ${param_idx}
-    )"""
-    return [clause], [f"%{search}%"], param_idx + 1
-
-
-def _list_where_clause(search: str | None) -> tuple[str, list[object], int]:
-    where_parts = ["c.project_id = $1"]
-    search_parts, search_params, param_idx = _search_filter(search, 2)
-    where_parts.extend(search_parts)
-    return " AND ".join(where_parts), search_params, param_idx
-
-
-def _client_list_query(
-    where_clause: str, *, limit_param: int, offset_param: int
-) -> str:
-    return f"""
+def _client_list_query() -> str:
+    return """
         SELECT
             c.id,
             c.user_id,
@@ -115,11 +90,19 @@ def _client_list_query(
             ) AS latest_thread_id
         FROM clients c
         LEFT JOIN threads t ON t.client_id = c.id
-        WHERE {where_clause}
+        WHERE c.project_id = $1
+          AND (
+              $2::text IS NULL
+              OR c.full_name ILIKE $2
+              OR c.username ILIKE $2
+              OR c.email ILIKE $2
+              OR c.company ILIKE $2
+              OR c.phone ILIKE $2
+          )
         GROUP BY c.id, c.user_id, c.username, c.full_name, c.email,
                  c.company, c.phone, c.metadata, c.chat_id, c.source, c.created_at
         ORDER BY COALESCE(MAX(t.updated_at), c.created_at) DESC
-        LIMIT ${limit_param} OFFSET ${offset_param}
+        LIMIT $3 OFFSET $4
     """
 
 
@@ -203,14 +186,9 @@ class ClientRepository:
         search: str | None = None,
     ) -> ClientListView:
         project_uuid = UUID(project_id)
-        where_clause, search_params, param_idx = _list_where_clause(search)
-
-        query = _client_list_query(
-            where_clause,
-            limit_param=param_idx,
-            offset_param=param_idx + 1,
-        )
-        params: list[object] = [project_uuid, *search_params, limit, offset]
+        search_term = f"%{search}%" if search else None
+        query = _client_list_query()
+        params: list[object] = [project_uuid, search_term, limit, offset]
 
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(query, *params)

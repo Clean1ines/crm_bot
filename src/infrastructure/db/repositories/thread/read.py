@@ -66,30 +66,16 @@ class ThreadReadRepository:
             extra={"project_id": project_id, "limit": limit, "offset": offset},
         )
 
-        where_parts = ["c.project_id = $1"]
-        params: list[UUID | str | int] = [ensure_uuid(project_id)]
-        param_idx = 2
+        params: list[UUID | str | int | None] = [
+            ensure_uuid(project_id),
+            status_filter,
+            f"%{search}%" if search else None,
+            ensure_uuid(client_id) if client_id else None,
+            limit,
+            offset,
+        ]
 
-        if status_filter:
-            where_parts.append(f"t.status = ${param_idx}")
-            params.append(status_filter)
-            param_idx += 1
-
-        if search:
-            where_parts.append(
-                f"(c.full_name ILIKE ${param_idx} OR c.username ILIKE ${param_idx})"
-            )
-            params.append(f"%{search}%")
-            param_idx += 1
-
-        if client_id:
-            where_parts.append(f"c.id = ${param_idx}")
-            params.append(ensure_uuid(client_id))
-            param_idx += 1
-
-        where_clause = " AND ".join(where_parts)
-
-        query = f"""
+        query = """
             SELECT
                 t.id AS thread_id,
                 t.status,
@@ -111,11 +97,13 @@ class ThreadReadRepository:
                 ORDER BY m.created_at DESC
                 LIMIT 1
             ) lm ON true
-            WHERE {where_clause}
+            WHERE c.project_id = $1
+              AND ($2::text IS NULL OR t.status = $2)
+              AND ($3::text IS NULL OR (c.full_name ILIKE $3 OR c.username ILIKE $3))
+              AND ($4::uuid IS NULL OR c.id = $4)
             ORDER BY t.updated_at DESC
-            LIMIT ${param_idx} OFFSET ${param_idx + 1}
+            LIMIT $5 OFFSET $6
         """
-        params.extend([limit, offset])
 
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(query, *params)

@@ -55,7 +55,15 @@ class TestMetricsRepository:
             INSERT INTO thread_metrics (thread_id, total_messages, ai_messages, manager_messages, escalated, resolution_time, updated_at)
             VALUES ($1, 0, 0, 0, false, NULL, NOW())
             ON CONFLICT (thread_id) DO UPDATE SET
-            total_messages = COALESCE(total_messages, 0) + $2, ai_messages = COALESCE(ai_messages, 0) + $3, manager_messages = COALESCE(manager_messages, 0) + $4, escalated = $5, resolution_time = $6 * interval '1 second', updated_at = NOW()
+            total_messages = COALESCE(thread_metrics.total_messages, 0) + COALESCE($2, 0),
+            ai_messages = COALESCE(thread_metrics.ai_messages, 0) + COALESCE($3, 0),
+            manager_messages = COALESCE(thread_metrics.manager_messages, 0) + COALESCE($4, 0),
+            escalated = COALESCE($5, thread_metrics.escalated),
+            resolution_time = CASE
+                WHEN $6 IS NULL THEN thread_metrics.resolution_time
+                ELSE $6 * interval '1 second'
+            END,
+            updated_at = NOW()
         """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
             expected_sql,
@@ -82,10 +90,18 @@ class TestMetricsRepository:
             INSERT INTO thread_metrics (thread_id, total_messages, ai_messages, manager_messages, escalated, resolution_time, updated_at)
             VALUES ($1, 0, 0, 0, false, NULL, NOW())
             ON CONFLICT (thread_id) DO UPDATE SET
-            total_messages = COALESCE(total_messages, 0) + $2, escalated = $3, updated_at = NOW()
+            total_messages = COALESCE(thread_metrics.total_messages, 0) + COALESCE($2, 0),
+            ai_messages = COALESCE(thread_metrics.ai_messages, 0) + COALESCE($3, 0),
+            manager_messages = COALESCE(thread_metrics.manager_messages, 0) + COALESCE($4, 0),
+            escalated = COALESCE($5, thread_metrics.escalated),
+            resolution_time = CASE
+                WHEN $6 IS NULL THEN thread_metrics.resolution_time
+                ELSE $6 * interval '1 second'
+            END,
+            updated_at = NOW()
         """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, UUID(thread_id), total_messages, escalated
+            expected_sql, UUID(thread_id), total_messages, None, None, escalated, None
         )
 
     @pytest.mark.asyncio
@@ -99,10 +115,18 @@ class TestMetricsRepository:
             INSERT INTO thread_metrics (thread_id, total_messages, ai_messages, manager_messages, escalated, resolution_time, updated_at)
             VALUES ($1, 0, 0, 0, false, NULL, NOW())
             ON CONFLICT (thread_id) DO UPDATE SET
+            total_messages = COALESCE(thread_metrics.total_messages, 0) + COALESCE($2, 0),
+            ai_messages = COALESCE(thread_metrics.ai_messages, 0) + COALESCE($3, 0),
+            manager_messages = COALESCE(thread_metrics.manager_messages, 0) + COALESCE($4, 0),
+            escalated = COALESCE($5, thread_metrics.escalated),
+            resolution_time = CASE
+                WHEN $6 IS NULL THEN thread_metrics.resolution_time
+                ELSE $6 * interval '1 second'
+            END,
             updated_at = NOW()
         """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, UUID(thread_id)
+            expected_sql, UUID(thread_id), None, None, None, None, None
         )
 
     @pytest.mark.asyncio

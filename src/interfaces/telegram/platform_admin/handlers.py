@@ -45,8 +45,8 @@ DATA_PREFIX = "admin_data:"
 
 STATE_IDLE = "idle"
 STATE_AWAIT_PROJECT_NAME = "await_project_name"
-STATE_AWAIT_CLIENT_TOKEN = "await_client_token"
-STATE_AWAIT_MANAGER_TOKEN = "await_manager_token"
+STATE_AWAIT_CLIENT_TOKEN = "await_client_token"  # nosec B105 - dialog state name
+STATE_AWAIT_MANAGER_TOKEN = "await_manager_token"  # nosec B105 - dialog state name
 STATE_AWAIT_ADD_MANAGER = "await_add_manager"
 STATE_DELETE_AWAIT_CONFIRM = "delete:await_confirm"
 STATE_AWAIT_DETACH_CHOICE = "await_detach_choice"
@@ -310,7 +310,7 @@ async def _step_detach_choice(chat_id: str, choice: str, pool) -> AdminResponse:
             kind="client",
             provider="telegram",
             status="disabled",
-            config_json={"token_configured": False},
+            config_json={"token_configured": False},  # nosec B105 - config flag, not a secret
         )
         await _clear_state(chat_id)
         return "Клиентский бот откреплен.", await _get_project_menu_keyboard(
@@ -323,7 +323,7 @@ async def _step_detach_choice(chat_id: str, choice: str, pool) -> AdminResponse:
             kind="manager",
             provider="telegram",
             status="disabled",
-            config_json={"token_configured": False},
+            config_json={"token_configured": False},  # nosec B105 - config flag, not a secret
         )
         await _clear_state(chat_id)
         return "Менеджерский бот откреплен.", await _get_project_menu_keyboard(
@@ -474,7 +474,7 @@ async def _detach_project_bot(project_id: str, pool, *, kind: str) -> AdminRespo
         kind=kind,
         provider="telegram",
         status="disabled",
-        config_json={"token_configured": False},
+        config_json={"token_configured": False},  # nosec B105 - config flag, not a secret
     )
     return message, await _get_project_menu_keyboard(project_id, pool)
 
@@ -606,7 +606,7 @@ async def _set_project_token(project_id: str, token: str, pool) -> None:
         kind="client",
         provider="telegram",
         status="active",
-        config_json={"webhook_url": webhook_url, "token_configured": True},
+        config_json={"webhook_url": webhook_url, "token_configured": True},  # nosec B105 - config flag, not a secret
     )
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -641,7 +641,7 @@ async def _set_manager_token(
         kind="manager",
         provider="telegram",
         status="active",
-        config_json={"webhook_url": webhook_url, "token_configured": True},
+        config_json={"webhook_url": webhook_url, "token_configured": True},  # nosec B105 - config flag, not a secret
     )
     async with httpx.AsyncClient() as client:
         resp = await client.post(

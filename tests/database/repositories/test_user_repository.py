@@ -331,11 +331,31 @@ class TestUserRepository:
 
         expected_sql = """
             UPDATE users
-            SET full_name = $2, email = $3, updated_at = NOW()
+            SET
+                full_name = CASE WHEN $2 THEN $3 ELSE full_name END,
+                email = CASE WHEN $4 THEN $5 ELSE email END,
+                username = CASE WHEN $6 THEN $7 ELSE username END,
+                telegram_id = CASE WHEN $8 THEN $9 ELSE telegram_id END,
+                is_platform_admin = CASE WHEN $10 THEN $11 ELSE is_platform_admin END,
+                user_metadata = CASE WHEN $12 THEN $13 ELSE user_metadata END,
+                updated_at = NOW()
             WHERE id = $1
         """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, user_id, "Jane Doe", "jane@example.com"
+            expected_sql,
+            user_id,
+            True,
+            "Jane Doe",
+            True,
+            "jane@example.com",
+            False,
+            None,
+            False,
+            None,
+            False,
+            None,
+            False,
+            None,
         )
         assert result is True
 
@@ -355,23 +375,40 @@ class TestUserRepository:
 
         expected_sql = """
             UPDATE users
-            SET full_name = $2, updated_at = NOW()
+            SET
+                full_name = CASE WHEN $2 THEN $3 ELSE full_name END,
+                email = CASE WHEN $4 THEN $5 ELSE email END,
+                username = CASE WHEN $6 THEN $7 ELSE username END,
+                telegram_id = CASE WHEN $8 THEN $9 ELSE telegram_id END,
+                is_platform_admin = CASE WHEN $10 THEN $11 ELSE is_platform_admin END,
+                user_metadata = CASE WHEN $12 THEN $13 ELSE user_metadata END,
+                updated_at = NOW()
             WHERE id = $1
         """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, user_id, "New Name"
+            expected_sql,
+            user_id,
+            True,
+            "New Name",
+            False,
+            None,
+            False,
+            None,
+            False,
+            None,
+            False,
+            None,
+            False,
+            None,
         )
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_update_user_undefined_column_error(self, user_repo, mock_pool):
+    async def test_update_user_rejects_unsupported_field(self, user_repo, mock_pool):
         user_id = str(uuid4())
         data = {"nonexistent_column": "value"}
-        mock_pool.mock_conn.execute = AsyncMock(
-            side_effect=asyncpg.exceptions.UndefinedColumnError("column not found")
-        )
 
-        with pytest.raises(asyncpg.exceptions.UndefinedColumnError):
+        with pytest.raises(ValueError, match="Unsupported user update fields"):
             await user_repo.update_user(user_id, data)
 
     # ------------------------------------------------------------------

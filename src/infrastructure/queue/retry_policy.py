@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from secrets import SystemRandom
 from typing import Mapping
-import random
 
 MAX_RETRIES = 3
 
@@ -29,6 +29,7 @@ def _coerce_int(value: object, default: int) -> int:
 
 INITIAL_BACKOFF_SECONDS = 1
 MAX_BACKOFF_SECONDS = 60
+_SECURE_RANDOM = SystemRandom()
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ def calculate_backoff(attempt: int) -> float:
     """Calculate exponential backoff with small jitter."""
     safe_attempt = max(int(attempt or 0), 0)
     delay = min(INITIAL_BACKOFF_SECONDS * (2**safe_attempt), MAX_BACKOFF_SECONDS)
-    jitter = random.uniform(0, delay * 0.1)
+    jitter = _SECURE_RANDOM.uniform(0, delay * 0.1)
     return delay + jitter
 
 
