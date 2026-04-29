@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, cast
 
@@ -60,7 +61,7 @@ class LoadStateResult:
         return result
 
     @staticmethod
-    def build_memory_index(memories: list[MemoryRecord]) -> UserMemoryByType:
+    def build_memory_index(memories: Sequence[MemoryRecord]) -> UserMemoryByType:
         memory_by_type: UserMemoryByType = {}
         for memory in memories:
             memory_type = str(memory["type"])

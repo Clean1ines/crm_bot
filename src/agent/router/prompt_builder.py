@@ -123,19 +123,74 @@ def _format_memory(memory_by_type: dict[str, list[dict[str, object]]]) -> str:
     if not memory_by_type:
         return ""
 
+    ordered_types = (
+        "preferences",
+        "rejections",
+        "behavior",
+        "issues",
+        "context",
+        "agreements",
+        "profile",
+        "dialog_state",
+    )
+    type_order = {memory_type: index for index, memory_type in enumerate(ordered_types)}
     lines: list[str] = []
-    for memory_type, items in memory_by_type.items():
-        lines.append(f"--- {memory_type.upper()} ---")
-        for item in items:
-            key = item.get("key", "?")
-            value = item.get("value")
-            value_text = (
-                json.dumps(value, ensure_ascii=False)
-                if isinstance(value, dict)
-                else str(value)
-            )
-            lines.append(f"  {key}: {truncate_text(value_text, 200)}")
+    for memory_type, items in sorted(
+        memory_by_type.items(),
+        key=lambda item: (type_order.get(item[0], len(type_order)), item[0]),
+    ):
+        formatted_items = _format_memory_items(memory_type, items[:3])
+        if formatted_items:
+            lines.append(f"- {memory_type}: {'; '.join(formatted_items)}")
     return "\n".join(lines)
+
+
+def _format_memory_items(
+    memory_type: str,
+    items: list[dict[str, object]],
+) -> list[str]:
+    if memory_type == "dialog_state":
+        return _format_dialog_state_memory(items)
+
+    formatted: list[str] = []
+    for item in items:
+        key = str(item.get("key") or "?")
+        value_text = _memory_value_text(item.get("value"))
+        if value_text:
+            formatted.append(f"{key}={value_text}")
+    return formatted
+
+
+def _format_dialog_state_memory(items: list[dict[str, object]]) -> list[str]:
+    for item in items:
+        value = item.get("value")
+        if not isinstance(value, dict):
+            continue
+
+        fields = (
+            ("lifecycle", value.get("lifecycle")),
+            ("lead_status", value.get("lead_status")),
+            ("last_topic", value.get("last_topic")),
+            ("last_intent", value.get("last_intent")),
+            ("repeat_count", value.get("repeat_count")),
+        )
+        formatted = [
+            f"{key}={truncate_text(str(field_value), 80)}"
+            for key, field_value in fields
+            if field_value not in {None, ""}
+        ]
+        if formatted:
+            return formatted
+    return []
+
+
+def _memory_value_text(value: object) -> str:
+    if isinstance(value, dict):
+        return truncate_text(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":")),
+            160,
+        )
+    return truncate_text(str(value), 160)
 
 
 def _format_features(features: dict[str, float] | None) -> str:

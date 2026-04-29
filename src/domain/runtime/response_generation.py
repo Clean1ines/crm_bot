@@ -29,25 +29,6 @@ class ResponseGenerationContext:
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "ResponseGenerationContext":
-        raw_dialog_state = state.get("dialog_state")
-        dialog_state = (
-            cast(DialogState, raw_dialog_state)
-            if isinstance(raw_dialog_state, Mapping)
-            else None
-        )
-        raw_features = state.get("features")
-        features = (
-            cast(RuntimeFeatures | Mapping[str, object], raw_features)
-            if isinstance(raw_features, Mapping)
-            else None
-        )
-        raw_project_configuration = state.get("project_configuration")
-        project_configuration = (
-            cast(ProjectRuntimeConfigurationState, raw_project_configuration)
-            if isinstance(raw_project_configuration, Mapping)
-            else None
-        )
-
         return cls(
             decision=str(state.get("decision") or "LLM_GENERATE"),
             user_input=str(state.get("user_input") or ""),
@@ -55,9 +36,11 @@ class ResponseGenerationContext:
             history=list(state.get("history") or []),
             knowledge_chunks=list(state.get("knowledge_chunks") or []),
             user_memory=state.get("user_memory"),
-            dialog_state=dialog_state,
-            features=features,
-            project_configuration=project_configuration,
+            dialog_state=_dialog_state_or_none(state.get("dialog_state")),
+            features=_mapping_or_none(state.get("features")),
+            project_configuration=_project_configuration_or_none(
+                state.get("project_configuration")
+            ),
             intent=str(state.get("intent") or ""),
             lifecycle=str(state.get("lifecycle") or ""),
             cta=str(state.get("cta") or ""),
@@ -83,3 +66,24 @@ class ResponseGenerationResult:
 
     def to_state_patch(self) -> RuntimeStatePatch:
         return {"response_text": self.response_text, "metadata": self.metadata}
+
+
+def _dialog_state_or_none(value: object) -> DialogState | None:
+    if not isinstance(value, Mapping):
+        return None
+    return cast(DialogState, value)
+
+
+def _mapping_or_none(value: object) -> Mapping[str, object] | None:
+    if not isinstance(value, Mapping):
+        return None
+    return value
+
+
+def _project_configuration_or_none(
+    value: object,
+) -> ProjectRuntimeConfigurationState | None:
+    mapping = _mapping_or_none(value)
+    if mapping is None:
+        return None
+    return cast(ProjectRuntimeConfigurationState, mapping)

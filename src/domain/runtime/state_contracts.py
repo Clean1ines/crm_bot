@@ -16,6 +16,11 @@ class RuntimeMemory(TypedDict, total=False):
     system: list[RuntimeMemoryEntry]
     profile: list[RuntimeMemoryEntry]
     preferences: list[RuntimeMemoryEntry]
+    rejections: list[RuntimeMemoryEntry]
+    behavior: list[RuntimeMemoryEntry]
+    issues: list[RuntimeMemoryEntry]
+    context: list[RuntimeMemoryEntry]
+    agreements: list[RuntimeMemoryEntry]
 
 
 class KnowledgeChunkPayload(TypedDict):

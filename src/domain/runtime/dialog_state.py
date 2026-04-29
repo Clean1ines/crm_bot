@@ -1,6 +1,6 @@
 from typing import Mapping, NotRequired, TypedDict, cast
 
-from src.domain.runtime.state_contracts import RuntimeMemory
+from src.domain.runtime.state_contracts import RuntimeMemory, RuntimeMemoryEntry
 from src.domain.runtime.value_parsing import coerce_int
 
 
@@ -70,7 +70,7 @@ def merge_dialog_state(
 
 
 def dialog_state_from_memory(
-    user_memory: RuntimeMemory | None,
+    user_memory: RuntimeMemory | Mapping[str, list[RuntimeMemoryEntry]] | None,
     *,
     lifecycle: str = "cold",
 ) -> DialogState:

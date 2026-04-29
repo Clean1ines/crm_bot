@@ -2,7 +2,6 @@
 Thin LangGraph adapter for the pure domain policy engine.
 """
 
-from collections.abc import Awaitable, Callable
 from typing import Protocol, cast
 from uuid import UUID
 
@@ -19,9 +18,6 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 
 logger = get_logger(__name__)
-
-
-PolicyEngineNode = Callable[[AgentState], Awaitable[dict[str, object]]]
 
 
 class PolicyEventAppender(Protocol):
@@ -43,7 +39,7 @@ def _event_id_for_append(value: str) -> UUID | str:
 
 def create_policy_engine_node(
     event_repo: EventRepository | None = None,
-) -> PolicyEngineNode:
+):
     async def _policy_engine_node_impl(state: AgentState) -> dict[str, object]:
         context = PolicyDecisionContext.from_state(cast(RuntimeStateInput, state))
         normalized_intent = normalize_intent(context.intent)

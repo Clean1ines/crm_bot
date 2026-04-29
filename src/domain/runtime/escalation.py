@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Mapping, cast
+from typing import Mapping
 
 from src.domain.runtime.state_contracts import (
     ClientProfileState,
@@ -21,7 +21,7 @@ class EscalationContext:
         client_id = None
         client_profile = state.get("client_profile")
         if isinstance(client_profile, Mapping):
-            profile = cast(ClientProfileState, client_profile)
+            profile: ClientProfileState = client_profile
             client_id = profile.get("id")
         return cls(
             thread_id=state.get("thread_id"),

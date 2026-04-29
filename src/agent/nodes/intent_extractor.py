@@ -119,7 +119,9 @@ def create_intent_extractor_node(
         try:
             response = await llm.ainvoke([("human", prompt)])
             payload = json.loads(_unwrap_json_block(str(response.content or "")))
-            result = IntentExtractionResult.from_llm_payload(payload)
+            result = IntentExtractionResult.from_llm_payload(
+                payload
+            ).normalized_for_context(context)
             logger.debug(
                 "Intent extracted",
                 extra={

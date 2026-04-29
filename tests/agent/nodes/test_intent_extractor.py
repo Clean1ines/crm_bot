@@ -46,3 +46,39 @@ async def test_intent_extractor_parses_json_block_into_state_patch():
     assert result["intent"] == "support"
     assert result["features"] == {"crm": 0.8}
     assert result["is_repeat_like"] is True
+
+
+@pytest.mark.asyncio
+async def test_intent_extractor_normalizes_short_affirmative_reply_using_context():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"intent":"other","cta":"none","features":{},"topic":"other","cta_hint":null,"emotion":"neutral","is_repeat_like":false}"""
+        )
+    )
+    node = create_intent_extractor_node(llm=llm)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "user_input": "да",
+                "topic": "pricing",
+                "cta": "call_manager",
+                "history": [
+                    {
+                        "role": "assistant",
+                        "content": "Если удобно, могу подключить менеджера.",
+                    }
+                ],
+            }
+        )
+
+    assert result["intent"] == "sales"
+    assert result["topic"] == "pricing"
+    assert result["cta"] == "call_manager"

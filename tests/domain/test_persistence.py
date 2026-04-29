@@ -50,3 +50,58 @@ def test_persistence_context_builds_normalized_dialog_state():
         "repeat_count": 1,
         "lifecycle": "warm",
     }
+
+
+def test_persistence_context_builds_conservative_memory_candidates():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "Слишком дорого, только в чат, и интеграция не работает",
+            "intent": "pricing",
+            "topic": "integration",
+            "emotion": "negative",
+            "lifecycle": "warm",
+            "cta": "none",
+        }
+    )
+
+    candidates = {
+        (item.type, item.key): item.value for item in context.memory_write_candidates()
+    }
+
+    assert ("dialog_state", "dialog_state") in candidates
+    assert ("lifecycle", "stage") in candidates
+    assert candidates[("preferences", "contact_preference")] == {
+        "preferred_channel": "chat",
+        "avoid_calls": True,
+    }
+    assert candidates[("behavior", "price_sensitivity")] == "high"
+    assert candidates[("rejections", "pricing_objection")] == "too_expensive"
+    assert candidates[("issues", "active_issue")] == {
+        "kind": "integration",
+        "emotion": "negative",
+    }
+
+
+def test_persistence_context_does_not_store_raw_issue_text():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "Ошибка в счете, вот номер карты 4111111111111111",
+            "intent": "support",
+            "topic": "support",
+            "emotion": "negative",
+        }
+    )
+
+    issue_candidate = next(
+        item
+        for item in context.memory_write_candidates()
+        if item.type == "issues" and item.key == "active_issue"
+    )
+
+    assert issue_candidate.value == {"kind": "support", "emotion": "negative"}
