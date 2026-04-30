@@ -1,6 +1,10 @@
 from collections.abc import Mapping, Sequence
 
-from src.application.dto.knowledge_dto import KnowledgeUploadResultDto
+from src.application.dto.knowledge_dto import (
+    KnowledgePreviewRequestDto,
+    KnowledgePreviewResponseDto,
+    KnowledgeUploadResultDto,
+)
 from src.application.errors import (
     ForbiddenError,
     NotFoundError,
@@ -120,6 +124,36 @@ class KnowledgeService:
         return KnowledgeUploadResultDto.create(
             message=f"Uploaded {len(chunks)} chunks", chunks=len(chunks)
         )
+
+    async def preview_query(
+        self,
+        project_id: str,
+        request: KnowledgePreviewRequestDto,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> KnowledgePreviewResponseDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        query = request.normalized_question()
+        if not query:
+            return KnowledgePreviewResponseDto.empty(query=query)
+
+        repo = knowledge_repo_factory(self.pool)
+        results = await repo.search(
+            project_id=project_id,
+            query=query,
+            limit=request.normalized_limit(),
+            hybrid_fallback=True,
+        )
+
+        logger.info(
+            "Knowledge preview search completed",
+            extra={"project_id": project_id, "result_count": len(results)},
+        )
+        return KnowledgePreviewResponseDto.from_results(query=query, results=results)
 
     async def _ensure_project_exists(self, project_id: str, logger: LoggerPort) -> None:
         if await self.project_repo.project_exists(project_id):

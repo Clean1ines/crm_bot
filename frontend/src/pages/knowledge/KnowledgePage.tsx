@@ -1,5 +1,22 @@
 import React, { useState } from 'react';
-import { BookOpen, Upload, FileText, Trash2, Search, ExternalLink } from 'lucide-react';
+import {
+  BookOpen,
+  Upload,
+  FileText,
+  Trash2,
+  Search,
+  ExternalLink,
+  TestTube2,
+} from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { useParams } from 'react-router-dom';
+
+import {
+  knowledgeApi,
+  type KnowledgePreviewResponse,
+  type KnowledgePreviewResult,
+} from '@shared/api/modules/knowledge';
 
 interface Document {
   id: string;
@@ -15,20 +32,46 @@ const formatSize = (bytes: number) => {
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { knowledgeApi } from '@shared/api/modules/knowledge';
-import toast from 'react-hot-toast';
-import { useParams } from 'react-router-dom';
+const confidenceLabel = (score: number): string => {
+  if (score >= 0.75) return 'Высокая уверенность';
+  if (score >= 0.45) return 'Средняя уверенность';
+  return 'Низкая уверенность';
+};
+
+const scoreLabel = (score: number): string => score.toFixed(3);
+
+const PreviewResultCard: React.FC<{
+  title: string;
+  result: KnowledgePreviewResult;
+  compact?: boolean;
+}> = ({ title, result, compact = false }) => (
+  <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+    <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
+      <span className="inline-flex w-fit items-center rounded-full bg-[var(--accent-muted)] px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]">
+        {confidenceLabel(result.score)} · {scoreLabel(result.score)}
+      </span>
+    </div>
+    <p className={`text-sm leading-relaxed text-[var(--text-primary)] ${compact ? 'line-clamp-3' : ''}`}>
+      {result.answer || result.content}
+    </p>
+    <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
+      <span>Метод: {result.method}</span>
+      {result.source && <span>Источник: {result.source}</span>}
+      {result.document_status && <span>Статус: {result.document_status}</span>}
+    </div>
+  </div>
+);
 
 export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
+  const [previewQuestion, setPreviewQuestion] = useState('');
 
-  // For now we don't have a list endpoint, but let's keep the UI
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
     queryFn: async () => {
@@ -48,7 +91,6 @@ export const KnowledgePage: React.FC = () => {
   });
 
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
-
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const uploadMutation = useMutation({
@@ -71,7 +113,21 @@ export const KnowledgePage: React.FC = () => {
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : 'Ошибка при загрузке документа';
       toast.error(message);
-    }
+    },
+  });
+
+  const previewMutation = useMutation<KnowledgePreviewResponse, unknown, string>({
+    mutationFn: async (question: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      const { data } = await knowledgeApi.preview(projectId, question, 5);
+      return data;
+    },
+    onError: (err: unknown) => {
+      const detail = err && typeof err === 'object' && 'detail' in err
+        ? String((err as { detail?: unknown }).detail)
+        : null;
+      toast.error(detail || 'Не удалось проверить базу знаний');
+    },
   });
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -85,10 +141,15 @@ export const KnowledgePage: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  if (documentsQuery.isLoading) {
-    return <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">Загрузка базы знаний...</div>;
-  }
-
+  const handlePreviewSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const question = previewQuestion.trim();
+    if (!question) {
+      toast.error('Введите вопрос клиента');
+      return;
+    }
+    previewMutation.mutate(question);
+  };
 
   const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
     event.preventDefault();
@@ -105,6 +166,19 @@ export const KnowledgePage: React.FC = () => {
     }
   };
 
+  if (documentsQuery.isLoading) {
+    return (
+      <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
+        Загрузка базы знаний...
+      </div>
+    );
+  }
+
+  const filteredDocuments = documents.filter((doc) => (
+    doc.file_name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+  ));
+
+  const previewResult = previewMutation.data;
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500">
@@ -113,18 +187,21 @@ export const KnowledgePage: React.FC = () => {
         ref={fileInputRef}
         onChange={handleFileSelect}
         className="hidden"
-        accept=".pdf,.docx,.txt"
+        accept=".pdf,.json,.md,.txt"
       />
 
-      {/* Header */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">База знаний</h1>
-          <p className="text-[var(--text-muted)]">Загрузите документы, чтобы обучить своего ИИ-ассистента</p>
+          <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">
+            База знаний
+          </h1>
+          <p className="text-[var(--text-muted)]">
+            Загрузите документы, чтобы обучить своего ИИ-ассистента
+          </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               type="text"
               placeholder="Поиск документов..."
@@ -136,7 +213,6 @@ export const KnowledgePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Upload Zone */}
       <div
         onClick={triggerUpload}
         onDragOver={handleDragOver}
@@ -147,51 +223,118 @@ export const KnowledgePage: React.FC = () => {
             : 'border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)]'
         }`}
       >
-        <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mb-4 transition-transform ${
+        <div className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full transition-transform sm:h-16 sm:w-16 ${
           uploadMutation.isPending ? 'bg-[var(--accent-primary)]/20 animate-pulse' : 'bg-[var(--accent-primary)]/10 group-hover:scale-110'
         }`}>
-          <Upload className="w-7 h-7 sm:w-8 sm:h-8 text-[var(--accent-primary)]" />
+          <Upload className="h-7 w-7 text-[var(--accent-primary)] sm:h-8 sm:w-8" />
         </div>
         <h3 className="text-center text-base font-semibold text-[var(--text-primary)] sm:text-lg">
           {uploadMutation.isPending ? 'Загрузка...' : 'Нажмите или перетащите файл'}
         </h3>
-        <p className="mt-1 text-center text-sm text-[var(--text-muted)]">PDF, DOCX или TXT (до 10MB)</p>
+        <p className="mt-1 text-center text-sm text-[var(--text-muted)]">
+          PDF, JSON, Markdown или TXT
+        </p>
       </div>
 
-      {/* Documents Grid */}
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
+        <div className="mb-4 flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+            <TestTube2 className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              Тест базы знаний
+            </h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              Введите вопрос клиента и проверьте, какой ответ найдётся без генерации LLM.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handlePreviewSubmit} className="flex flex-col gap-3 lg:flex-row">
+          <textarea
+            value={previewQuestion}
+            onChange={(event) => setPreviewQuestion(event.target.value)}
+            placeholder="Например: как оформить возврат заказа?"
+            rows={3}
+            className="min-h-24 flex-1 resize-y rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          />
+          <button
+            type="submit"
+            disabled={previewMutation.isPending}
+            className="min-h-11 rounded-xl bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-wait disabled:opacity-60 lg:self-start"
+          >
+            {previewMutation.isPending ? 'Проверяем...' : 'Проверить'}
+          </button>
+        </form>
+
+        {previewResult && (
+          <div className="mt-5 space-y-4">
+            {previewResult.is_empty || !previewResult.best_result ? (
+              <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
+                Ничего не найдено. Попробуйте другой вопрос или загрузите документы в базу знаний.
+              </div>
+            ) : (
+              <>
+                <PreviewResultCard title="Лучший найденный ответ" result={previewResult.best_result} />
+                {previewResult.top_results.length > 1 && (
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                      Топ совпадений
+                    </h3>
+                    {previewResult.top_results.slice(1).map((result) => (
+                      <PreviewResultCard
+                        key={result.id}
+                        title="Дополнительное совпадение"
+                        result={result}
+                        compact
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </section>
+
       {documents.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--surface-secondary)] p-6 text-center sm:p-10 lg:p-16">
           <BookOpen className="mb-4 h-12 w-12 text-[var(--border-subtle)] sm:h-16 sm:w-16" />
-          <h3 className="text-lg font-semibold text-[var(--text-primary)] sm:text-xl">База знаний пуста</h3>
-          <p className="text-[var(--text-muted)] mt-2">Загрузите первый документ, чтобы начать обучение</p>
+          <h3 className="text-lg font-semibold text-[var(--text-primary)] sm:text-xl">
+            База знаний пуста
+          </h3>
+          <p className="mt-2 text-[var(--text-muted)]">
+            Загрузите первый документ, чтобы начать обучение
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
-          {documents.map((doc) => (
+          {filteredDocuments.map((doc) => (
             <div
               key={doc.id}
               className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
             >
-              <div className="flex justify-between items-start mb-4">
-                <div className="w-10 h-10 rounded-xl bg-[var(--surface-secondary)] flex items-center justify-center text-[var(--accent-primary)]">
-                  <FileText className="w-5 h-5" />
+              <div className="mb-4 flex items-start justify-between">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
+                  <FileText className="h-5 w-5" />
                 </div>
                 <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                  <button className="p-2 hover:bg-[var(--surface-secondary)] rounded-lg transition-colors text-[var(--text-muted)]">
-                    <Trash2 className="w-4 h-4" />
+                  <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
+                    <Trash2 className="h-4 w-4" />
                   </button>
-                  <button className="p-2 hover:bg-[var(--surface-secondary)] rounded-lg transition-colors text-[var(--text-muted)]">
-                    <ExternalLink className="w-4 h-4" />
+                  <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
+                    <ExternalLink className="h-4 w-4" />
                   </button>
                 </div>
               </div>
 
-              <h4 className="font-semibold text-[var(--text-primary)] mb-1 truncate" title={doc.file_name}>
+              <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
                 {doc.file_name}
               </h4>
               <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span>{formatSize(doc.file_size)}</span>
-                <span className="w-1 h-1 rounded-full bg-[var(--border-subtle)]" />
+                <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
                 <span>{doc.chunk_count} фрагментов</span>
               </div>
 

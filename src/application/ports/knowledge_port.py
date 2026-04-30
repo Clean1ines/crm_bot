@@ -5,6 +5,7 @@ from typing import Protocol
 
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 
 
 class KnowledgeDbPoolPort(Protocol):
@@ -62,6 +63,14 @@ class KnowledgeRepositoryPort(Protocol):
         status: str,
         error: str | None = None,
     ) -> None: ...
+
+    async def search(
+        self,
+        project_id: str,
+        query: str,
+        limit: int = 10,
+        hybrid_fallback: bool = True,
+    ) -> list[KnowledgeSearchResultView]: ...
 
 
 class KnowledgeRepositoryFactoryPort(Protocol):

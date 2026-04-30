@@ -6,6 +6,7 @@ from typing import cast
 
 import jwt
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 
 from src.domain.project_plane.json_types import JsonObject
 from src.application.ports.knowledge_port import (
@@ -24,11 +25,17 @@ from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRep
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
+from src.application.dto.knowledge_dto import KnowledgePreviewRequestDto
 from src.application.services.knowledge_service import KnowledgeService
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
+
+
+class KnowledgePreviewRequestModel(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    limit: int = Field(default=5, ge=1, le=10)
 
 
 class PyJwtDecoder:
@@ -78,6 +85,32 @@ async def list_knowledge_documents(
     repo = KnowledgeRepository(pool)
     documents = await repo.get_documents(project_id, limit=limit, offset=offset)
     return {"documents": documents, "items": documents}
+
+
+@router.post("/preview")
+async def preview_knowledge(
+    project_id: str,
+    request: KnowledgePreviewRequestModel,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """
+    Returns the best knowledge-base matches for a customer question without
+    calling LLM generation.
+    """
+    service = KnowledgeService(
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+    )
+    result = await service.preview_query(
+        project_id,
+        KnowledgePreviewRequestDto(question=request.question, limit=request.limit),
+        authorization,
+        knowledge_repo_factory=make_knowledge_repo,
+        logger=logger,
+    )
+    return result.to_dict()
 
 
 @router.post("")

@@ -6,6 +6,8 @@ Clean Architecture contract:
 - Repository read methods do not return dict/Mapping compatibility objects.
 """
 
+from typing import Protocol
+
 import asyncpg
 
 from src.domain.project_plane.knowledge_views import (
@@ -19,6 +21,19 @@ from src.utils.uuid_utils import ensure_uuid
 
 
 logger = get_logger(__name__)
+
+
+class _RowLookup(Protocol):
+    def __getitem__(self, key: str) -> object: ...
+
+
+def _optional_row_text(row: _RowLookup, key: str) -> str | None:
+    try:
+        value = row[key]
+    except KeyError:
+        return None
+
+    return str(value) if value is not None else None
 
 
 def _normalize_timestamp(value: object) -> str | None:
@@ -59,10 +74,17 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             vector_results = await conn.fetch(
                 """
-                SELECT id, content, (1 - (embedding <=> $1)) AS score
-                FROM knowledge_base
-                WHERE project_id = $2
-                ORDER BY embedding <=> $1
+                SELECT
+                    kb.id,
+                    kb.content,
+                    kb.document_id,
+                    d.file_name AS source,
+                    d.status AS document_status,
+                    (1 - (kb.embedding <=> $1)) AS score
+                FROM knowledge_base AS kb
+                LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
+                WHERE kb.project_id = $2
+                ORDER BY kb.embedding <=> $1
                 LIMIT $3
                 """,
                 query_embedding_str,
@@ -76,6 +98,9 @@ class KnowledgeRepository:
                 content=str(row["content"]),
                 score=float(row["score"]),
                 method="vector",
+                document_id=_optional_row_text(row, "document_id"),
+                source=_optional_row_text(row, "source"),
+                document_status=_optional_row_text(row, "document_status"),
             )
             for row in vector_results
         ]
@@ -86,11 +111,17 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             fts_results = await conn.fetch(
                 """
-                SELECT id, content,
-                       ts_rank_cd(tsv, plainto_tsquery('russian', $1)) AS score
-                FROM knowledge_base
-                WHERE project_id = $2
-                  AND tsv @@ plainto_tsquery('russian', $1)
+                SELECT
+                    kb.id,
+                    kb.content,
+                    kb.document_id,
+                    d.file_name AS source,
+                    d.status AS document_status,
+                    ts_rank_cd(kb.tsv, plainto_tsquery('russian', $1)) AS score
+                FROM knowledge_base AS kb
+                LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
+                WHERE kb.project_id = $2
+                  AND kb.tsv @@ plainto_tsquery('russian', $1)
                 ORDER BY score DESC
                 LIMIT $3
                 """,
@@ -107,6 +138,9 @@ class KnowledgeRepository:
             row_id = str(row["id"])
             row_content = str(row["content"])
             row_score = float(row["score"])
+            row_document_id = _optional_row_text(row, "document_id")
+            row_source = _optional_row_text(row, "source")
+            row_document_status = _optional_row_text(row, "document_status")
 
             if row_id in merged:
                 current = merged[row_id]
@@ -115,6 +149,9 @@ class KnowledgeRepository:
                     content=current.content,
                     score=current.score * 0.7 + row_score * 0.3,
                     method="hybrid",
+                    document_id=current.document_id,
+                    source=current.source,
+                    document_status=current.document_status,
                 )
             else:
                 merged[row_id] = KnowledgeSearchResultView(
@@ -122,6 +159,9 @@ class KnowledgeRepository:
                     content=row_content,
                     score=row_score * 0.8,
                     method="fts",
+                    document_id=row_document_id,
+                    source=row_source,
+                    document_status=row_document_status,
                 )
 
         results = [
@@ -130,6 +170,9 @@ class KnowledgeRepository:
                 content=item.content,
                 score=item.score + self._keyword_overlap(query, item.content) * 0.15,
                 method=item.method,
+                document_id=item.document_id,
+                source=item.source,
+                document_status=item.document_status,
             )
             for item in merged.values()
         ]
