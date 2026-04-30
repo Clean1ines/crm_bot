@@ -7,6 +7,11 @@ from uuid import UUID
 
 from src.agent.state import AgentState
 from src.domain.runtime.policy.decision_engine import get_decision
+from src.domain.runtime.policy.handoff_confirmation import (
+    build_handoff_confirmation_text,
+    is_handoff_confirmation_pending,
+    with_handoff_confirmation_pending,
+)
 from src.domain.runtime.policy.intent_topic import normalize_intent, resolve_topic
 from src.domain.runtime.dialog_state import merge_dialog_state
 from src.domain.runtime.policy.repeat_detection import build_dialog_state_update
@@ -18,6 +23,38 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 
 logger = get_logger(__name__)
+
+
+def _handoff_confirmation_result(
+    context: PolicyDecisionContext,
+    *,
+    normalized_intent: str,
+    topic: str,
+    cta: str,
+) -> PolicyDecisionResult:
+    next_dialog_state = merge_dialog_state(
+        build_dialog_state_update(
+            context.dialog_state,
+            intent=normalized_intent,
+            topic=topic,
+            cta=cta,
+            lifecycle=context.lifecycle,
+            decision="RESPOND",
+            features=context.features,
+        ),
+        lifecycle=context.lifecycle,
+    )
+    next_dialog_state = with_handoff_confirmation_pending(next_dialog_state)
+    return PolicyDecisionResult(
+        lifecycle=context.lifecycle,
+        decision="RESPOND",
+        cta=cta,
+        topic=topic,
+        lead_status=str(next_dialog_state.get("lead_status") or context.lifecycle),
+        dialog_state=next_dialog_state,
+        response_text=build_handoff_confirmation_text(context.user_input),
+        requires_human=False,
+    )
 
 
 class PolicyEventAppender(Protocol):
@@ -71,6 +108,15 @@ def create_policy_engine_node(
             lead_status=str(next_dialog_state.get("lead_status") or ""),
             dialog_state=next_dialog_state,
         )
+        if decision == "ESCALATE_TO_HUMAN" and not is_handoff_confirmation_pending(
+            context.dialog_state
+        ):
+            result = _handoff_confirmation_result(
+                context,
+                normalized_intent=normalized_intent,
+                topic=topic,
+                cta=cta,
+            )
 
         if event_repo and context.thread_id and context.project_id:
             try:

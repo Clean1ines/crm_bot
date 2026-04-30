@@ -2,6 +2,7 @@
 Manager reply orchestration.
 """
 
+from src.application.errors import InternalServiceError
 from src.domain.display_names import build_display_name
 from src.domain.project_plane.json_types import json_object_from_unknown
 from src.domain.project_plane.manager_assignments import (
@@ -56,6 +57,13 @@ class ManagerReplyService:
         manager: ManagerActor,
     ) -> None:
         await self.threads.claim_for_manager(thread_id, manager=manager)
+        try:
+            await self._emit_manager_claimed_event(thread_id=thread_id, manager=manager)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to emit manager claim event",
+                extra={"thread_id": thread_id, "error": str(exc)},
+            )
 
     async def close_thread_for_manager(
         self,
@@ -154,6 +162,32 @@ class ManagerReplyService:
                 "manually_closed": manually_closed,
                 "reason": close_reason or "manager_closed",
             },
+        )
+
+    async def _emit_manager_claimed_event(
+        self,
+        *,
+        thread_id: str,
+        manager: ManagerActor,
+    ) -> None:
+        thread = await self.thread_read.get_thread_with_project_view(thread_id)
+        if not thread or not thread.project_id:
+            return
+
+        manager_display_name = await self.resolve_manager_display_name(
+            project_id=thread.project_id,
+            manager_chat_id=manager.telegram_chat_id,
+            manager_user_id=manager.user_id,
+        )
+        await self.event_emitter.emit_event(
+            stream_id=thread_id,
+            project_id=thread.project_id,
+            event_type="manager_claimed",
+            payload=build_manager_audit_payload(
+                manager_user_id=manager.user_id,
+                manager_chat_id=manager.telegram_chat_id,
+                manager_display_name=manager_display_name,
+            ),
         )
 
     async def resolve_manager_display_name(
@@ -393,7 +427,11 @@ class ManagerReplyService:
                 "text": text,
             },
         )
-        self._ensure_telegram_response_ok(thread_id, response)
+        self._ensure_telegram_response_ok(
+            thread_id,
+            response,
+            payload={"chat_id": client_chat_id, "text_length": len(text)},
+        )
 
     async def _require_bot_token(self, project_id: str) -> str:
         bot_token = await self.projects.get_bot_token(project_id)
@@ -407,16 +445,27 @@ class ManagerReplyService:
         return chat_id
 
     def _ensure_telegram_response_ok(
-        self, thread_id: str, response: dict[str, object]
+        self,
+        thread_id: str,
+        response: dict[str, object],
+        *,
+        payload: dict[str, object],
     ) -> None:
         if response.get("ok") is not False:
             return
 
         self.logger.error(
             "Failed to send manager reply",
-            extra={"thread_id": thread_id, "response": response},
+            extra={
+                "thread_id": thread_id,
+                "telegram_ok": response.get("ok"),
+                "telegram_error_code": response.get("error_code"),
+                "telegram_description": response.get("description"),
+                "telegram_response": response,
+                "payload": payload,
+            },
         )
-        raise RuntimeError("Telegram API error")
+        raise InternalServiceError("Failed to deliver manager reply to client")
 
     async def _emit_manager_reply_event(
         self,

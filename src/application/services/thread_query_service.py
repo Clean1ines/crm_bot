@@ -1,5 +1,14 @@
 from src.application.ports.event_port import EventReaderPort
+from src.application.dto.thread_dto import (
+    ThreadInspectorStateDto,
+    ThreadTimelineItemDto,
+)
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.thread_views import (
+    ThreadAnalyticsView,
+    ThreadMessageCounts,
+    ThreadWithProjectView,
+)
 from src.application.errors import NotFoundError, ValidationError
 from src.application.ports.memory_port import MemoryReaderPort
 from src.application.ports.project_port import ProjectAccessPort
@@ -12,13 +21,7 @@ from src.domain.control_plane.roles import PROJECT_READ_ROLES, PROJECT_WRITE_ROL
 
 
 def _event_record(event) -> JsonObject:
-    return {
-        "id": event.id,
-        "type": event.type,
-        "payload": event.payload,
-        "ts": event.ts,
-        "stream_id": event.stream_id,
-    }
+    return ThreadTimelineItemDto.from_event(event).to_record()
 
 
 class ThreadQueryService:
@@ -158,7 +161,7 @@ class ThreadQueryService:
         self, project_id: str, client_id: str | None, *, limit: int = 100
     ) -> dict:
         if not client_id:
-            return {"items": []}
+            return {"items": [], "memory": []}
 
         items = await self.memory_repo.get_for_user_view(
             project_id,
@@ -166,11 +169,52 @@ class ThreadQueryService:
             limit=limit,
         )
 
-        return {"items": items}
+        return {"items": items, "memory": items}
 
     async def get_state(self, thread_id: str) -> dict:
-        state = await self.thread_runtime_state_repo.get_state_json(thread_id) or {}
-        return {"state": state}
+        persisted_state = await self.thread_runtime_state_repo.get_state_json(thread_id)
+        thread_view_raw = await self.thread_read_repo.get_thread_with_project_view(
+            thread_id
+        )
+        analytics_view_raw = await self.thread_runtime_state_repo.get_analytics_view(
+            thread_id
+        )
+        message_counts_raw = (
+            await self.thread_runtime_state_repo.get_message_counts_view(thread_id)
+        )
+        thread_view = _thread_view(thread_view_raw)
+        analytics_view = _analytics_view(analytics_view_raw)
+        message_counts = _message_counts(message_counts_raw)
+        return ThreadInspectorStateDto.create(
+            persisted_state=persisted_state,
+            thread_view=thread_view,
+            analytics_view=analytics_view,
+            message_counts=message_counts,
+        ).to_record()
 
     async def get_context(self, thread_id: str) -> dict:
         return await self.get_state(thread_id)
+
+
+def _thread_view(value: object) -> ThreadWithProjectView | None:
+    if isinstance(value, ThreadWithProjectView):
+        return value
+    if isinstance(value, dict):
+        return ThreadWithProjectView.from_record(value)
+    return None
+
+
+def _analytics_view(value: object) -> ThreadAnalyticsView | None:
+    if isinstance(value, ThreadAnalyticsView):
+        return value
+    if isinstance(value, dict):
+        return ThreadAnalyticsView.from_record(value)
+    return None
+
+
+def _message_counts(value: object) -> ThreadMessageCounts:
+    if isinstance(value, ThreadMessageCounts):
+        return value
+    if isinstance(value, dict):
+        return ThreadMessageCounts.from_record(value)
+    return ThreadMessageCounts()

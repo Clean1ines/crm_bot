@@ -621,7 +621,7 @@ class UserRepository:
             await conn.execute(
                 "UPDATE users SET email = $1, user_metadata = $2, updated_at = NOW() WHERE id = $3",
                 normalized_email,
-                metadata,
+                json.dumps(metadata, ensure_ascii=False),
                 user_id,
             )
         await self.set_password(user_id, password)

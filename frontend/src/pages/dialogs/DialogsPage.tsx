@@ -26,7 +26,6 @@ export const DialogsPage: React.FC = () => {
     }
   }, [projectId, navigate]);
 
-  // Reset thread selection when project changes
   useEffect(() => {
     if (projectId) {
       setSelectedThreadId(null);
@@ -73,18 +72,17 @@ export const DialogsPage: React.FC = () => {
     );
   }
 
-  // Force remount of each child component when projectId changes by using key
   return (
-    <div className="flex h-full min-h-0 bg-[var(--bg-primary)]">
-      <div className="min-w-[240px] max-w-[320px] flex-1">
+    <div className="grid h-full min-h-0 grid-cols-[minmax(240px,320px)_minmax(0,1fr)_minmax(240px,320px)] bg-[var(--bg-primary)]">
+      <div className="min-w-0 overflow-hidden">
         <DialogList key={`dialoglist-${projectId}`} projectId={projectId} />
       </div>
 
-      <div className="min-w-[400px] flex-[2]">
+      <div className="min-w-0 overflow-hidden">
         <ChatWindow key={`chatwindow-${projectId}`} threadId={selectedThreadId} projectId={projectId} />
       </div>
 
-      <div className="min-w-[240px] max-w-[320px] flex-1">
+      <div className="min-w-0 overflow-hidden">
         <Inspector key={`inspector-${projectId}`} threadId={selectedThreadId} projectId={projectId} />
       </div>
     </div>

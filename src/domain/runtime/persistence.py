@@ -157,6 +157,9 @@ class PersistenceContext:
             "repeat_count": coerce_int(existing.get("repeat_count"), 0),
             "lead_status": self._lead_status(existing),
             "lifecycle": self._lifecycle(existing),
+            "handoff_confirmation_pending": bool(
+                existing.get("handoff_confirmation_pending")
+            ),
         }
         return _ensure_repeat_count(dialog_state)
 

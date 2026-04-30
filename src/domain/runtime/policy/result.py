@@ -18,6 +18,7 @@ from src.domain.runtime.state_contracts import (
 class PolicyDecisionContext:
     lifecycle: str = "cold"
     intent: str | None = None
+    user_input: str = ""
     features: RuntimeFeatures | None = None
     dialog_state: DialogState = field(default_factory=default_dialog_state)
     thread_id: str | None = None
@@ -44,6 +45,7 @@ class PolicyDecisionContext:
         return cls(
             lifecycle=str(state.get("lifecycle") or "cold"),
             intent=state.get("intent"),
+            user_input=str(state.get("user_input") or ""),
             features=features,
             dialog_state=dialog_state,
             thread_id=state.get("thread_id"),
@@ -60,6 +62,8 @@ class PolicyDecisionResult:
     topic: str
     lead_status: str
     dialog_state: DialogState
+    response_text: str | None = None
+    requires_human: bool = False
 
     def to_state_patch(self, *, previous_lifecycle: str) -> RuntimeStatePatch:
         result: RuntimeStatePatch = {
@@ -71,6 +75,10 @@ class PolicyDecisionResult:
         }
         if self.lifecycle != previous_lifecycle:
             result["lifecycle"] = self.lifecycle
+        if self.response_text is not None:
+            result["response_text"] = self.response_text
+        if self.requires_human:
+            result["requires_human"] = True
         return result
 
     def to_event_payload(self, *, confidence: float | None) -> RuntimeStatePatch:

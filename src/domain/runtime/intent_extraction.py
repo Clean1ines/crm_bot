@@ -14,6 +14,23 @@ NEGATIVE_REPLIES = frozenset({"нет", "неа", "не", "no", "nope"})
 PRICE_OBJECTION_MARKERS = ("дорого", "слишком дорого", "expensive", "too expensive")
 ISSUE_MARKERS = ("не работает", "ошибка", "сломалось", "error", "issue", "problem")
 ACTION_CTAS = frozenset({"call_manager", "book_consultation"})
+KNOWN_INTENTS = frozenset(
+    {"pricing", "support", "sales", "feedback", "handoff_request", "other", "unknown"}
+)
+KNOWN_TOPICS = frozenset(
+    {
+        "pricing",
+        "product",
+        "integration",
+        "support",
+        "feedback",
+        "other",
+        "handoff",
+        "angry",
+    }
+)
+KNOWN_CTAS = frozenset({"call_manager", "book_consultation", "none"})
+KNOWN_EMOTIONS = frozenset({"neutral", "positive", "negative"})
 
 
 @dataclass(slots=True)
@@ -40,12 +57,16 @@ class IntentExtractionPayload:
 
         cta_hint = payload.get("cta_hint")
         return cls(
-            intent=str(payload.get("intent") or "unknown"),
-            cta=str(payload.get("cta") or "none"),
+            intent=_normalized_enum_value(
+                payload.get("intent"), KNOWN_INTENTS, "unknown"
+            ),
+            cta=_normalized_enum_value(payload.get("cta"), KNOWN_CTAS, "none"),
             features=features,
-            topic=str(payload.get("topic") or "other"),
+            topic=_normalized_enum_value(payload.get("topic"), KNOWN_TOPICS, "other"),
             cta_hint=str(cta_hint) if cta_hint is not None else None,
-            emotion=str(payload.get("emotion") or "neutral"),
+            emotion=_normalized_enum_value(
+                payload.get("emotion"), KNOWN_EMOTIONS, "neutral"
+            ),
             is_repeat_like=bool(payload.get("is_repeat_like", False)),
         )
 
@@ -160,6 +181,17 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
+def _normalized_enum_value(
+    value: object,
+    allowed: frozenset[str],
+    default: str,
+) -> str:
+    text = _optional_text(value)
+    if text is None:
+        return default
+    return text if text in allowed else default
+
+
 def _dialog_state_or_none(value: object) -> DialogState | None:
     if not isinstance(value, Mapping):
         return None
@@ -170,6 +202,9 @@ def _dialog_state_or_none(value: object) -> DialogState | None:
         repeat_count=int(value.get("repeat_count") or 0),
         lead_status=str(value.get("lead_status") or "cold"),
         lifecycle=str(value.get("lifecycle") or "cold"),
+        handoff_confirmation_pending=bool(
+            value.get("handoff_confirmation_pending", False)
+        ),
     )
 
 

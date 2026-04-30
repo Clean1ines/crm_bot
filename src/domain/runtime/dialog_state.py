@@ -1,6 +1,7 @@
 from typing import Mapping, NotRequired, TypedDict, cast
 
 from src.domain.runtime.state_contracts import RuntimeMemory, RuntimeMemoryEntry
+from src.domain.runtime.value_parsing import coerce_bool
 from src.domain.runtime.value_parsing import coerce_int
 
 
@@ -11,6 +12,7 @@ class DialogState(TypedDict):
     repeat_count: int
     lead_status: str
     lifecycle: str
+    handoff_confirmation_pending: bool
 
 
 class PartialDialogState(TypedDict, total=False):
@@ -20,6 +22,7 @@ class PartialDialogState(TypedDict, total=False):
     repeat_count: NotRequired[int]
     lead_status: NotRequired[str]
     lifecycle: NotRequired[str]
+    handoff_confirmation_pending: NotRequired[bool]
 
 
 def default_dialog_state(*, lifecycle: str = "cold") -> DialogState:
@@ -30,6 +33,7 @@ def default_dialog_state(*, lifecycle: str = "cold") -> DialogState:
         "repeat_count": 0,
         "lead_status": lifecycle,
         "lifecycle": lifecycle,
+        "handoff_confirmation_pending": False,
     }
 
 
@@ -56,6 +60,9 @@ def dialog_state_from_mapping(
     patch["repeat_count"] = coerce_int(value.get("repeat_count"), 0)
     patch["lead_status"] = _optional_text(value.get("lead_status")) or lifecycle
     patch["lifecycle"] = _optional_text(value.get("lifecycle")) or lifecycle
+    patch["handoff_confirmation_pending"] = coerce_bool(
+        value.get("handoff_confirmation_pending"), False
+    )
 
     result.update(patch)
     return result

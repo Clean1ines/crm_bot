@@ -904,7 +904,7 @@ class TestThreadsAPI:
 
         response = client.get(f"/api/threads/{thread_id}/memory")
         assert response.status_code == 200
-        assert response.json() == {"items": []}
+        assert response.json() == {"items": [], "memory": []}
 
         self._restore_auth()
 
@@ -1152,7 +1152,26 @@ class TestThreadsAPI:
 
         response = client.get(f"/api/threads/{thread_id}/state")
         assert response.status_code == 200
-        assert response.json() == {"state": {"key": "value"}}
+        assert response.json() == {
+            "state": {
+                "key": "value",
+                "client": {
+                    "id": None,
+                    "full_name": None,
+                    "username": None,
+                    "email": None,
+                    "display_name": "Клиент",
+                    "chat_id": None,
+                },
+                "status": None,
+                "created_at": None,
+                "updated_at": None,
+                "conversation_summary": None,
+                "total_messages": 0,
+                "ai_messages": 0,
+                "manager_messages": 0,
+            }
+        }
 
         mock_thread_repo.get_state_json.assert_awaited_once_with(thread_id)
 

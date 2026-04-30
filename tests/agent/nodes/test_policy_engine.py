@@ -103,3 +103,39 @@ async def test_policy_engine_keeps_sales_cta_without_marking_handoff():
     assert result["cta"] == "call_manager"
     assert result["topic"] == "product"
     assert result["lead_status"] == "warm"
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_requests_handoff_confirmation_before_escalation():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "lifecycle": "warm",
+                "intent": "handoff_request",
+                "user_input": "Хочу поговорить с менеджером по интеграции CRM",
+                "dialog_state": {
+                    "last_intent": "sales",
+                    "last_cta": "call_manager",
+                    "last_topic": "product",
+                    "repeat_count": 1,
+                    "lead_status": "warm",
+                    "lifecycle": "warm",
+                    "handoff_confirmation_pending": False,
+                },
+            }
+        )
+
+    assert result["decision"] == "RESPOND"
+    assert "requires_human" not in result
+    assert result["dialog_state"]["handoff_confirmation_pending"] is True
+    assert "менеджер" in str(result["response_text"]).lower()
