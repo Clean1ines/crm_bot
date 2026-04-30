@@ -13,6 +13,15 @@ from src.domain.project_plane.manager_assignments import (
 )
 
 MANAGER_REPLY_FAILED_TEXT = "❌ Не удалось отправить ответ. Попробуйте ещё раз позже."
+MANAGER_CLAIM_FAILED_TEXT = (
+    "❌ Не удалось взять тикет в работу. Возможно, он уже закрыт или недоступен."
+)
+MANAGER_REPLY_SESSION_EXPIRED_TEXT = "❌ Активный тикет больше недоступен. Пожалуйста, возьмите тикет заново из нового уведомления."
+MANAGER_UNAUTHORIZED_TEXT = (
+    "⛔ Доступ запрещён. Вы не являетесь менеджером этого проекта."
+)
+MANAGER_NO_ACTIVE_REPLY_TEXT = "Нет активного ожидания ответа. Пожалуйста, нажмите кнопку ✍️ Ответить под уведомлением."
+MANAGER_CLAIM_CALLBACK_FAILED_TEXT = "Тикет недоступен или уже изменился."
 
 
 class ManagerBotService:
@@ -41,10 +50,19 @@ class ManagerBotService:
             "sendMessage",
             {
                 "chat_id": chat_id,
-                "text": "⛔ Доступ запрещён. Вы не являетесь менеджером этого проекта.",
+                "text": MANAGER_UNAUTHORIZED_TEXT,
             },
         )
         return WebhookAckDto()
+
+    async def _clear_manager_session(self, session: ManagerReplySession) -> None:
+        await self.redis.delete(session.thread_key)
+        if session.manager_key:
+            await self.redis.delete(session.manager_key)
+
+    @staticmethod
+    def _should_clear_reply_session(exc: Exception) -> bool:
+        return isinstance(exc, (PermissionError, ValueError))
 
     async def claim_thread(
         self,
@@ -77,6 +95,41 @@ class ManagerBotService:
             manager_chat_id=manager_chat_id,
         )
 
+        try:
+            await self.orchestrator.claim_thread_for_manager(
+                thread_id,
+                manager=ManagerActor(
+                    user_id=manager_user_id,
+                    telegram_chat_id=manager_chat_id,
+                ),
+            )
+        except Exception as exc:
+            self.logger.exception(
+                "Error claiming manager thread",
+                extra={
+                    "project_id": self.project_id,
+                    "thread_id": thread_id,
+                    "manager_chat_id": manager_chat_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            await self._post_telegram(
+                "answerCallbackQuery",
+                {
+                    "callback_query_id": callback_id,
+                    "text": MANAGER_CLAIM_CALLBACK_FAILED_TEXT,
+                    "show_alert": True,
+                },
+            )
+            await self._post_telegram(
+                "sendMessage",
+                {
+                    "chat_id": manager_chat_id,
+                    "text": MANAGER_CLAIM_FAILED_TEXT,
+                },
+            )
+            return WebhookAckDto()
+
         await self.redis.setex(
             session.thread_key,
             MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
@@ -88,14 +141,6 @@ class ManagerBotService:
                 MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
                 thread_id,
             )
-
-        await self.orchestrator.claim_thread_for_manager(
-            thread_id,
-            manager=ManagerActor(
-                user_id=manager_user_id,
-                telegram_chat_id=manager_chat_id,
-            ),
-        )
 
         await self._post_telegram(
             "answerCallbackQuery",
@@ -109,7 +154,10 @@ class ManagerBotService:
             "sendMessage",
             {
                 "chat_id": manager_chat_id,
-                "text": f"Тикет {thread_id} взят в работу. Чтобы вернуть диалог AI, нажмите «Закрыть тикет».",
+                "text": (
+                    f"Тикет {thread_id} взят в работу. "
+                    "Чтобы вернуть диалог AI, нажмите «Закрыть тикет»."
+                ),
                 "reply_markup": {
                     "inline_keyboard": [
                         [
@@ -154,10 +202,7 @@ class ManagerBotService:
             manager_user_id=manager_user_id,
             manager_chat_id=manager_chat_id,
         )
-
-        await self.redis.delete(session.thread_key)
-        if session.manager_key:
-            await self.redis.delete(session.manager_key)
+        await self._clear_manager_session(session)
 
         await self.orchestrator.close_thread_for_manager(thread_id)
 
@@ -207,7 +252,7 @@ class ManagerBotService:
                 "sendMessage",
                 {
                     "chat_id": manager_chat_id,
-                    "text": "Нет активного ожидания ответа. Пожалуйста, нажмите кнопку ✏️ Ответить под уведомлением.",
+                    "text": MANAGER_NO_ACTIVE_REPLY_TEXT,
                 },
             )
             return WebhookAckDto()
@@ -238,9 +283,11 @@ class ManagerBotService:
                 "sendMessage",
                 {
                     "chat_id": manager_chat_id,
-                    "text": "✅ Ответ успешно отправлен клиенту."
-                    if success
-                    else "❌ Не удалось отправить ответ.",
+                    "text": (
+                        "✅ Ответ успешно отправлен клиенту."
+                        if success
+                        else "❌ Не удалось отправить ответ."
+                    ),
                 },
             )
         except Exception as exc:
@@ -249,9 +296,26 @@ class ManagerBotService:
                 extra={
                     "project_id": self.project_id,
                     "manager_chat_id": manager_chat_id,
+                    "thread_id": thread_id,
                     "error_type": type(exc).__name__,
                 },
             )
+            if self._should_clear_reply_session(exc):
+                expired_session = ManagerReplySession.for_telegram_manager(
+                    thread_id=str(thread_id),
+                    manager_user_id=manager_user_id,
+                    manager_chat_id=manager_chat_id,
+                )
+                await self._clear_manager_session(expired_session)
+                await self._post_telegram(
+                    "sendMessage",
+                    {
+                        "chat_id": manager_chat_id,
+                        "text": MANAGER_REPLY_SESSION_EXPIRED_TEXT,
+                    },
+                )
+                return WebhookAckDto()
+
             await self._post_telegram(
                 "sendMessage",
                 {"chat_id": manager_chat_id, "text": MANAGER_REPLY_FAILED_TEXT},

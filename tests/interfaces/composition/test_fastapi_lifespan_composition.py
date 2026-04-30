@@ -2,6 +2,7 @@ import sys
 import types
 
 from src.infrastructure.db.repositories.project import ProjectRepository
+from src.infrastructure.telegram.http_client import HttpTelegramClient
 from src.interfaces.composition import fastapi_lifespan
 
 
@@ -30,3 +31,4 @@ def test_build_orchestrator_wires_project_repository_facade(monkeypatch):
 
     assert isinstance(project_repo, ProjectRepository)
     assert hasattr(project_repo, "get_project_configuration_view")
+    assert isinstance(captured["telegram_client"], HttpTelegramClient)

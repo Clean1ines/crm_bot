@@ -57,6 +57,11 @@ class ManagerReplyService:
         manager: ManagerActor,
     ) -> None:
         await self.threads.claim_for_manager(thread_id, manager=manager)
+        claimed_thread = await self._load_manual_thread_snapshot(thread_id)
+        if claimed_thread.manager_user_id != manager.user_id:
+            raise ValueError(
+                f"Thread {thread_id} claim was not persisted for manager {manager.user_id}"
+            )
         try:
             await self._emit_manager_claimed_event(thread_id=thread_id, manager=manager)
         except Exception as exc:

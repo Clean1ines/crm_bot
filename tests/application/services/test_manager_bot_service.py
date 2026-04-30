@@ -115,6 +115,56 @@ async def test_reply_from_manager_persists_active_session_after_first_reply():
 
 
 @pytest.mark.asyncio
+async def test_claim_thread_does_not_persist_session_when_claim_fails():
+    orchestrator = AsyncMock()
+    orchestrator.resolve_manager_user_id_by_telegram = AsyncMock(return_value="user-1")
+    orchestrator.claim_thread_for_manager = AsyncMock(side_effect=ValueError("missing"))
+    redis = AsyncMock()
+    telegram_client = AsyncMock()
+    service = ManagerBotService(
+        orchestrator,
+        redis,
+        "bot-token",
+        "project-1",
+        telegram_client=telegram_client,
+    )
+
+    result = await service.claim_thread(
+        callback_id="callback-1",
+        thread_id="thread-1",
+        manager_chat_id="12345",
+    )
+
+    assert result.to_dict() == {"ok": True}
+    redis.setex.assert_not_called()
+    assert telegram_client.post_json.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reply_from_manager_clears_stale_session_when_thread_is_invalid():
+    orchestrator = AsyncMock()
+    orchestrator.resolve_manager_user_id_by_telegram = AsyncMock(return_value="user-1")
+    orchestrator.manager_reply = AsyncMock(side_effect=ValueError("Thread not found"))
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value="thread-1")
+    telegram_client = AsyncMock()
+    service = ManagerBotService(
+        orchestrator,
+        redis,
+        "bot-token",
+        "project-1",
+        telegram_client=telegram_client,
+    )
+
+    result = await service.reply_from_manager(manager_chat_id="12345", text="hello")
+
+    assert result.to_dict() == {"ok": True}
+    redis.delete.assert_any_await("awaiting_reply_thread:thread-1")
+    redis.delete.assert_any_await("awaiting_reply:12345")
+    redis.set.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_close_thread_uses_orchestrator_boundary_method():
     orchestrator = AsyncMock()
     orchestrator.resolve_manager_user_id_by_telegram = AsyncMock(return_value="user-1")
