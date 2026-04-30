@@ -121,6 +121,8 @@ class ConversationOrchestrator:
         self.graph_executor = GraphExecutor(logger=self.logger)
         self.client_messages = ClientMessageService(
             threads=thread_lifecycle_repo,
+            thread_messages=thread_message_repo,
+            thread_read=thread_read_repo,
             queue_repo=queue_repo,
             runtime_guards=self.runtime_guards,
             runtime_loader=self.runtime_loader,
@@ -134,6 +136,8 @@ class ConversationOrchestrator:
         self.manager_replies = ManagerReplyService(
             projects=project_repo,
             threads=thread_lifecycle_repo,
+            thread_messages=thread_message_repo,
+            thread_read=thread_read_repo,
             telegram_client=self.telegram_client,
             event_emitter=self.event_emitter,
             logger=self.logger,

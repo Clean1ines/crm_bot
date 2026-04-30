@@ -17,12 +17,16 @@ class ManagerReplyService:
         *,
         projects,
         threads,
+        thread_messages=None,
+        thread_read=None,
         telegram_client,
         event_emitter,
         logger,
     ) -> None:
         self.projects = projects
         self.threads = threads
+        self.thread_messages = thread_messages or threads
+        self.thread_read = thread_read or threads
         self.telegram_client = telegram_client
         self.event_emitter = event_emitter
         self.logger = logger
@@ -82,7 +86,9 @@ class ManagerReplyService:
             manager_text=manager_text,
         )
 
-        await self.threads.append_manager_reply_message(thread_id, prefixed_text)
+        await self.thread_messages.append_manager_reply_message(
+            thread_id, prefixed_text
+        )
         await self._send_reply_to_client(
             project_id=project_id,
             thread_id=thread_id,
@@ -190,7 +196,7 @@ class ManagerReplyService:
         return thread_snapshot
 
     async def _load_thread_snapshot(self, thread_id: str) -> ThreadRuntimeSnapshot:
-        thread_view = await self.threads.get_thread_with_project_view(thread_id)
+        thread_view = await self.thread_read.get_thread_with_project_view(thread_id)
         thread_snapshot = ThreadRuntimeSnapshot.from_record(
             thread_view.to_record() if thread_view else None
         )

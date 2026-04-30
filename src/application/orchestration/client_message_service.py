@@ -34,6 +34,8 @@ class ClientMessageService:
         self,
         *,
         threads,
+        thread_messages=None,
+        thread_read=None,
         queue_repo,
         runtime_guards,
         runtime_loader,
@@ -45,6 +47,8 @@ class ClientMessageService:
         logger,
     ) -> None:
         self.threads = threads
+        self.thread_messages = thread_messages or threads
+        self.thread_read = thread_read or threads
         self.queue_repo = queue_repo
         self.runtime_guards = runtime_guards
         self.runtime_loader = runtime_loader
@@ -269,7 +273,7 @@ class ClientMessageService:
         if not manager_session or not manager_session.manager_chat_id:
             return manager_session
 
-        thread_view = await self.threads.get_thread_with_project_view(thread_id_str)
+        thread_view = await self.thread_read.get_thread_with_project_view(thread_id_str)
         thread_snapshot = ThreadRuntimeSnapshot.from_record(
             thread_view.to_record() if thread_view else None
         )
@@ -315,7 +319,7 @@ class ClientMessageService:
         thread_id,
         thread_id_str: str,
     ) -> None:
-        await self.threads.add_message(thread_id, role="user", content=text)
+        await self.thread_messages.add_message(thread_id, role="user", content=text)
         await self.event_emitter.emit_event(
             stream_id=thread_id_str,
             project_id=project_id,
@@ -419,7 +423,7 @@ class ClientMessageService:
         question: str,
     ):
         recent_messages = self.graph_executor.trim_recent_history(
-            await self.threads.get_messages_for_langgraph(thread_id)
+            await self.thread_messages.get_messages_for_langgraph(thread_id)
         )
         return self.graph_executor.create_graph_execution_request(
             project_id=project_id,
