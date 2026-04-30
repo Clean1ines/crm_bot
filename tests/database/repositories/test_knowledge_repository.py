@@ -65,10 +65,17 @@ class TestKnowledgeRepository:
 
         # First fetch (vector)
         vector_sql = """
-                SELECT id, content, (1 - (embedding <=> $1)) AS score
-                FROM knowledge_base
-                WHERE project_id = $2
-                ORDER BY embedding <=> $1
+                SELECT
+                    kb.id,
+                    kb.content,
+                    kb.document_id,
+                    d.file_name AS source,
+                    d.status AS document_status,
+                    (1 - (kb.embedding <=> $1)) AS score
+                FROM knowledge_base AS kb
+                LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
+                WHERE kb.project_id = $2
+                ORDER BY kb.embedding <=> $1
                 LIMIT $3
                 """
         mock_pool.mock_conn.fetch.assert_any_call(
@@ -77,11 +84,17 @@ class TestKnowledgeRepository:
 
         # Second fetch (FTS)
         fts_sql = """
-                SELECT id, content,
-                       ts_rank_cd(tsv, plainto_tsquery('russian', $1)) AS score
-                FROM knowledge_base
-                WHERE project_id = $2
-                  AND tsv @@ plainto_tsquery('russian', $1)
+                SELECT
+                    kb.id,
+                    kb.content,
+                    kb.document_id,
+                    d.file_name AS source,
+                    d.status AS document_status,
+                    ts_rank_cd(kb.tsv, plainto_tsquery('russian', $1)) AS score
+                FROM knowledge_base AS kb
+                LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
+                WHERE kb.project_id = $2
+                  AND kb.tsv @@ plainto_tsquery('russian', $1)
                 ORDER BY score DESC
                 LIMIT $3
                 """

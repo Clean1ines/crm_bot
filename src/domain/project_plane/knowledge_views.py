@@ -8,6 +8,9 @@ class KnowledgeSearchResultView:
     content: str
     score: float
     method: str
+    document_id: str | None = None
+    source: str | None = None
+    document_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
