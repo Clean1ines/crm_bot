@@ -57,7 +57,7 @@ class ThreadMessageRepository:
                     VALUES ($1, $2, $3)
                 """,
                     ensure_uuid(thread_id),
-                    "assistant",
+                    "manager",
                     content,
                 )
 

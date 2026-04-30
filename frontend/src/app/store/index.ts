@@ -1,9 +1,17 @@
 import { create } from 'zustand';
-import type { Message, ThreadState, MemoryEntry, TimelineEvent } from '../../entities/thread/model/types';
+import type {
+  Client,
+  Message,
+  ThreadState,
+  MemoryEntry,
+  TimelineEvent,
+} from '../../entities/thread/model/types';
 
 interface AppState {
   selectedThreadId: string | null;
+  selectedThreadClient: Client | null;
   setSelectedThreadId: (id: string | null) => void;
+  setSelectedThreadClient: (client: Client | null) => void;
 
   // Messages for current thread
   messages: Message[];
@@ -35,7 +43,9 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   selectedThreadId: null,
+  selectedThreadClient: null,
   setSelectedThreadId: (id) => set({ selectedThreadId: id }),
+  setSelectedThreadClient: (client) => set({ selectedThreadClient: client }),
 
   messages: [],
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),

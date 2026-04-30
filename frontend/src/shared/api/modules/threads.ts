@@ -1,5 +1,6 @@
 import { client } from '../core/openapi';
 import type { components } from '../generated/schema';
+import type { ThreadStatusFilter } from '../../../entities/thread/model/status';
 
 type ReplyRequest = components['schemas']['ReplyRequest'];
 type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
@@ -8,7 +9,7 @@ export type ThreadListParams = {
   project_id: string;
   limit?: number;
   offset?: number;
-  status_filter?: string | null;
+  status_filter?: ThreadStatusFilter;
   search?: string | null;
 };
 
