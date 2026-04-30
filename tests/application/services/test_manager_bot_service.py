@@ -32,9 +32,8 @@ async def test_claim_thread_starts_reply_session():
     )
 
     assert result.to_dict() == {"ok": True}
-    redis.setex.assert_any_await(
+    redis.set.assert_any_await(
         "awaiting_reply_thread:thread-1",
-        MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
         json.dumps(
             {
                 "manager_chat_id": "12345",
@@ -44,9 +43,7 @@ async def test_claim_thread_starts_reply_session():
             }
         ),
     )
-    redis.setex.assert_any_await(
-        "awaiting_reply:12345", MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS, "thread-1"
-    )
+    redis.set.assert_any_await("awaiting_reply:12345", "thread-1")
     orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with(
         "project-1", "12345"
     )
@@ -100,8 +97,9 @@ async def test_reply_from_manager_persists_active_session_after_first_reply():
 
     await service.reply_from_manager(manager_chat_id="12345", text="hello")
 
-    redis.set.assert_any_await(
+    redis.setex.assert_any_await(
         "awaiting_reply_thread:thread-1",
+        MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
         json.dumps(
             {
                 "manager_chat_id": "12345",
@@ -111,7 +109,11 @@ async def test_reply_from_manager_persists_active_session_after_first_reply():
             }
         ),
     )
-    redis.set.assert_any_await("awaiting_reply:12345", "thread-1")
+    redis.setex.assert_any_await(
+        "awaiting_reply:12345",
+        MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+        "thread-1",
+    )
 
 
 @pytest.mark.asyncio
@@ -136,7 +138,7 @@ async def test_claim_thread_does_not_persist_session_when_claim_fails():
     )
 
     assert result.to_dict() == {"ok": True}
-    redis.setex.assert_not_called()
+    redis.set.assert_not_called()
     assert telegram_client.post_json.await_count == 2
 
 
@@ -161,7 +163,7 @@ async def test_reply_from_manager_clears_stale_session_when_thread_is_invalid():
     assert result.to_dict() == {"ok": True}
     redis.delete.assert_any_await("awaiting_reply_thread:thread-1")
     redis.delete.assert_any_await("awaiting_reply:12345")
-    redis.set.assert_not_called()
+    redis.setex.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -217,7 +219,7 @@ async def test_claim_thread_denies_unknown_manager_without_mutating_state():
     )
 
     assert result.to_dict() == {"ok": True}
-    redis.setex.assert_not_called()
+    redis.set.assert_not_called()
     orchestrator.claim_thread_for_manager.assert_not_called()
     telegram_client.post_json.assert_awaited_once()
 

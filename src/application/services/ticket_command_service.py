@@ -30,14 +30,13 @@ class TicketCommandService:
             thread_id=thread_id,
             manager_user_id=manager_user_id,
         )
-        await self.cache.setex(
-            session.thread_key,
-            MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
-            session.to_redis_value(),
-        )
         await self.orchestrator.claim_thread_for_manager(
             thread_id,
             manager=ManagerActor(user_id=manager_user_id),
+        )
+        await self.cache.set(
+            session.thread_key,
+            session.to_redis_value(),
         )
         return {"status": "claimed"}
 
@@ -64,4 +63,8 @@ class TicketCommandService:
             manager_user_id=manager_user_id,
             has_manager_reply=True,
         )
-        await self.cache.set(session.thread_key, session.to_redis_value())
+        await self.cache.setex(
+            session.thread_key,
+            MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+            session.to_redis_value(),
+        )
