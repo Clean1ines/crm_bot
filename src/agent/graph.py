@@ -172,6 +172,7 @@ def create_agent(
         AgentGraphNode.POLICY_ENGINE.value,
         route_from_policy,
         {
+            _decision_value(AgentGraphDecision.RESPOND): AgentGraphNode.RESPONDER.value,
             _decision_value(
                 AgentGraphDecision.LLM_GENERATE
             ): AgentGraphNode.KB_SEARCH.value,

@@ -182,6 +182,11 @@ AGENT_GRAPH_TRANSITIONS: tuple[AgentGraphTransition, ...] = (
     ),
     AgentGraphTransition(
         AgentGraphNode.POLICY_ENGINE,
+        AgentGraphNode.RESPONDER,
+        AgentGraphDecision.RESPOND,
+    ),
+    AgentGraphTransition(
+        AgentGraphNode.POLICY_ENGINE,
         AgentGraphNode.ESCALATE,
         AgentGraphDecision.ESCALATE_TO_HUMAN,
     ),

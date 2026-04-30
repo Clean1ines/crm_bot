@@ -11,8 +11,10 @@ def test_default_dialog_state_uses_requested_lifecycle():
 
     assert cold_state["lead_status"] == "cold"
     assert cold_state["lifecycle"] == "cold"
+    assert cold_state["handoff_confirmation_pending"] is False
     assert active_client_state["lead_status"] == "active_client"
     assert active_client_state["lifecycle"] == "active_client"
+    assert active_client_state["handoff_confirmation_pending"] is False
 
 
 def test_merge_dialog_state_preserves_defaults_and_overrides_fields():
@@ -28,6 +30,7 @@ def test_merge_dialog_state_preserves_defaults_and_overrides_fields():
         "repeat_count": 2,
         "lead_status": "warm",
         "lifecycle": "warm",
+        "handoff_confirmation_pending": False,
     }
 
 
@@ -51,4 +54,5 @@ def test_dialog_state_from_memory_reads_and_normalizes_snapshot():
         "repeat_count": 3,
         "lead_status": "interested",
         "lifecycle": "interested",
+        "handoff_confirmation_pending": False,
     }

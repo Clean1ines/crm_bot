@@ -7,6 +7,7 @@ export type ThreadStatusFilter =
   | 'manager'
   | null;
 export type TicketStatusFilter = 'waiting_manager' | 'manual' | 'closed';
+export type TicketVisibleStatusFilter = TicketStatusFilter | null;
 
 export const AUTO_THREAD_FILTER: Exclude<ThreadStatusFilter, null> = 'active';
 export const MANAGER_THREAD_FILTER: Exclude<ThreadStatusFilter, null> = 'manager';
@@ -25,11 +26,12 @@ export const THREAD_STATUS_FILTER_OPTIONS: ReadonlyArray<{
 
 export const TICKET_STATUS_FILTER_OPTIONS: ReadonlyArray<{
   label: string;
-  value: TicketStatusFilter;
+  value: TicketVisibleStatusFilter;
 }> = [
   { label: 'Активные', value: TICKET_NEW_FILTER },
   { label: 'В работе', value: TICKET_IN_WORK_FILTER },
   { label: 'Закрытые', value: TICKET_CLOSED_FILTER },
+  { label: 'Все', value: null },
 ];
 
 export const isManagerThreadStatus = (status?: string | null): boolean => {

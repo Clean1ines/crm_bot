@@ -43,6 +43,11 @@ export interface TimelineEvent {
   type: string;
   payload: Record<string, unknown>;
   ts: string;
+  presentation?: {
+    label?: string;
+    summary?: string;
+    accent?: string;
+  };
 }
 
 export interface MemoryEntry {
@@ -60,5 +65,9 @@ export interface ThreadState {
   created_at?: string | null;
   updated_at?: string | null;
   interaction_mode?: string | null;
+  conversation_summary?: string | null;
+  total_messages?: number;
+  ai_messages?: number;
+  manager_messages?: number;
   [key: string]: unknown;
 }

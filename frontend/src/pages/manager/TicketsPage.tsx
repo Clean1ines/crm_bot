@@ -1,29 +1,28 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
 import {
   TICKET_NEW_FILTER,
   TICKET_STATUS_FILTER_OPTIONS,
-  type TicketStatusFilter,
+  type TicketVisibleStatusFilter,
 } from '../../entities/thread/model/status';
-import type { Thread, Client, LastMessage } from '../../entities/thread/model/types';
+import type { Client, LastMessage, Thread } from '../../entities/thread/model/types';
 import { threadsApi } from '../../shared/api/modules/threads';
 import { getClientDisplayName } from '../../shared/lib/clients';
 
 export const TicketsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const [statusFilter, setStatusFilter] =
-    useState<TicketStatusFilter>(TICKET_NEW_FILTER);
+    useState<TicketVisibleStatusFilter>(TICKET_NEW_FILTER);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['tickets', statusFilter, projectId],
+    queryKey: ['tickets', projectId],
     queryFn: async () => {
       if (!projectId) return [];
 
       const { data, error } = await threadsApi.list({
         project_id: projectId,
-        status_filter: statusFilter,
         limit: 100,
       });
 
@@ -33,11 +32,42 @@ export const TicketsPage: React.FC = () => {
     enabled: !!projectId,
   });
 
+  const tickets = useMemo(() => data ?? [], [data]);
+  const ticketsByStatus = useMemo(
+    () => ({
+      waiting_manager: tickets.filter(
+        (ticket: Thread) => ticket.status === 'waiting_manager',
+      ),
+      manual: tickets.filter((ticket: Thread) => ticket.status === 'manual'),
+      closed: tickets.filter((ticket: Thread) => ticket.status === 'closed'),
+    }),
+    [tickets],
+  );
+
+  const defaultStatusFilter: TicketVisibleStatusFilter =
+    ticketsByStatus.waiting_manager.length > 0
+      ? 'waiting_manager'
+      : ticketsByStatus.manual.length > 0
+        ? 'manual'
+        : ticketsByStatus.closed.length > 0
+          ? 'closed'
+          : null;
+  const activeStatusFilter =
+    statusFilter === TICKET_NEW_FILTER ? defaultStatusFilter : statusFilter;
+
   if (!projectId) {
-    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Выберите проект</div>;
+    return (
+      <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">
+        Выберите проект
+      </div>
+    );
   }
   if (isLoading) {
-    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Загрузка тикетов...</div>;
+    return (
+      <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">
+        Загрузка тикетов...
+      </div>
+    );
   }
   if (error) {
     return (
@@ -47,13 +77,18 @@ export const TicketsPage: React.FC = () => {
     );
   }
 
-  const tickets = data ?? [];
+  const filteredTickets =
+    activeStatusFilter === null
+      ? tickets
+      : tickets.filter((ticket: Thread) => ticket.status === activeStatusFilter);
   const emptyLabel =
-    statusFilter === 'waiting_manager'
+    activeStatusFilter === 'waiting_manager'
       ? 'Нет активных тикетов'
-      : statusFilter === 'manual'
+      : activeStatusFilter === 'manual'
         ? 'Нет тикетов в работе'
-        : 'Нет закрытых тикетов';
+        : activeStatusFilter === 'closed'
+          ? 'Нет закрытых тикетов'
+          : 'Тикетов пока нет';
 
   return (
     <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
@@ -69,11 +104,11 @@ export const TicketsPage: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           {TICKET_STATUS_FILTER_OPTIONS.map((option) => (
             <button
-              key={option.value}
+              key={option.label}
               type="button"
               onClick={() => setStatusFilter(option.value)}
               className={`inline-flex min-h-9 items-center rounded-full px-3 py-1.5 text-sm font-medium transition-all ${
-                statusFilter === option.value
+                activeStatusFilter === option.value
                   ? 'bg-[var(--accent-primary)] text-white shadow-sm'
                   : 'bg-[var(--surface-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
@@ -84,13 +119,13 @@ export const TicketsPage: React.FC = () => {
         </div>
       </div>
 
-      {tickets.length === 0 ? (
+      {filteredTickets.length === 0 ? (
         <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
           {emptyLabel}
         </div>
       ) : (
         <div className="space-y-3">
-          {tickets.map((ticket: Thread) => {
+          {filteredTickets.map((ticket: Thread) => {
             const client = ticket.client as unknown as Client;
             const lastMsg = ticket.last_message as unknown as LastMessage | null;
             const clientName = getClientDisplayName(client, 'Клиент');

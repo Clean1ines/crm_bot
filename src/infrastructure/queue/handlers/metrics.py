@@ -30,6 +30,14 @@ async def handle_update_metrics(
         )
         raise PermanentJobError("update_metrics job missing thread_id")
 
+    thread_info = await thread_read_repo.get_thread_with_project_view(str(thread_id))
+    if not thread_info:
+        logger.warning(
+            "Skipping metrics update for missing thread",
+            extra={"thread_id": thread_id, "job_id": job.get("id")},
+        )
+        return
+
     await metrics_repo.update_thread_metrics(
         thread_id=str(thread_id),
         total_messages=payload.get("total_messages"),
@@ -40,16 +48,6 @@ async def handle_update_metrics(
     )
 
     if payload.get("close_ticket"):
-        thread_info = await thread_read_repo.get_thread_with_project_view(
-            str(thread_id)
-        )
-        if not thread_info:
-            logger.warning(
-                "Thread not found for project daily update",
-                extra={"thread_id": thread_id},
-            )
-            return
-
         project_id = getattr(thread_info, "project_id", None)
         if not project_id and isinstance(thread_info, Mapping):
             project_id = thread_info.get("project_id")

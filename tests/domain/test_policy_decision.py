@@ -40,6 +40,7 @@ def test_policy_decision_result_serializes_state_patch_and_event_payload():
             "last_intent": "handoff_request",
             "repeat_count": 3,
             "lead_status": "handoff_to_manager",
+            "handoff_confirmation_pending": False,
         },
     )
 
@@ -52,6 +53,7 @@ def test_policy_decision_result_serializes_state_patch_and_event_payload():
             "last_intent": "handoff_request",
             "repeat_count": 3,
             "lead_status": "handoff_to_manager",
+            "handoff_confirmation_pending": False,
         },
         "lifecycle": "handoff_to_manager",
     }

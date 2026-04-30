@@ -56,6 +56,7 @@ def test_agent_graph_contract_declares_transitions():
         transition.decision: transition.target
         for transition in transition_map[AgentGraphNode.POLICY_ENGINE]
     }
+    assert policy_targets[AgentGraphDecision.RESPOND] == AgentGraphNode.RESPONDER
     assert policy_targets[AgentGraphDecision.LLM_GENERATE] == AgentGraphNode.KB_SEARCH
     assert policy_targets[AgentGraphDecision.CALL_TOOL] == AgentGraphNode.TOOL_EXECUTOR
     assert (

@@ -138,7 +138,7 @@ class ThreadRuntimeStateRepository:
                 SELECT
                     COUNT(*) AS total,
                     COUNT(CASE WHEN role = 'assistant' THEN 1 END) AS ai,
-                    COUNT(CASE WHEN role = 'user' THEN 1 END) AS manager
+                    COUNT(CASE WHEN role = 'manager' THEN 1 END) AS manager
                 FROM messages
                 WHERE thread_id = $1
             """,

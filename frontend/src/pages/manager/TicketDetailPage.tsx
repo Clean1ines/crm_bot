@@ -7,6 +7,20 @@ import { threadsApi } from '../../shared/api/modules/threads';
 import { getClientDisplayName } from '../../shared/lib/clients';
 import { getMessagePresentation } from '../../shared/lib/threadMessages';
 
+const getMutationErrorMessage = (error: unknown): string => {
+  if (error && typeof error === 'object') {
+    const detail = 'detail' in error ? error.detail : undefined;
+    if (typeof detail === 'string' && detail.trim()) {
+      return detail;
+    }
+    const message = 'message' in error ? error.message : undefined;
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+  }
+  return 'Ответ не удалось доставить клиенту.';
+};
+
 export const TicketDetailPage: React.FC = () => {
   const { projectId, threadId } = useParams<{ projectId: string; threadId: string }>();
   const queryClient = useQueryClient();
@@ -224,6 +238,11 @@ export const TicketDetailPage: React.FC = () => {
         >
           {replyMutation.isPending ? 'Отправка...' : 'Отправить ответ'}
         </button>
+        {replyMutation.isError && (
+          <div className="mt-3 rounded-lg bg-[var(--accent-danger-bg)] p-3 text-sm text-[var(--accent-danger-text)]">
+            {getMutationErrorMessage(replyMutation.error)}
+          </div>
+        )}
       </div>
     </div>
   );

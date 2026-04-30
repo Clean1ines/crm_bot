@@ -20,6 +20,16 @@ interface InspectorProps {
   onBack?: () => void;
 }
 
+const readMemoryItems = (data: object): MemoryEntry[] | null => {
+  if ('memory' in data && Array.isArray(data.memory)) {
+    return data.memory as MemoryEntry[];
+  }
+  if ('items' in data && Array.isArray(data.items)) {
+    return data.items as MemoryEntry[];
+  }
+  return null;
+};
+
 export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobile = false, onBack }) => {
   const {
     threadState,
@@ -49,7 +59,6 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
   const safeThreadMemory = Array.isArray(threadMemory) ? threadMemory : [];
   const safeThreadTimeline = Array.isArray(threadTimeline) ? threadTimeline : [];
 
-  // Component lifecycle logging
   useEffect(() => {
     frontendLogger.debug('Inspector mounted', { threadId, projectId });
     return () => {
@@ -57,7 +66,6 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     };
   }, [threadId, projectId]);
 
-  // Log active tab changes
   useEffect(() => {
     frontendLogger.debug('Inspector active tab changed', { inspectorActiveTab, threadId });
   }, [inspectorActiveTab, threadId]);
@@ -70,34 +78,45 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
       created_at?: string;
       updated_at?: string;
       interaction_mode?: string;
+      conversation_summary?: string | null;
     };
     const clientName = getClientDisplayName(state?.client, 'Клиент');
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3">
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="text-xs text-[var(--text-muted)] mb-1">Клиент</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Клиент</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{clientName}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="text-xs text-[var(--text-muted)] mb-1">Статус</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Статус</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.status || '—'}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="text-xs text-[var(--text-muted)] mb-1">Настроение</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Стадия</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.lifecycle || '—'}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="text-xs text-[var(--text-muted)] mb-1">Сообщений</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Сообщений</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.total_messages ?? 0}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="text-xs text-[var(--text-muted)] mb-1">Создан</div>
-            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Создан</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">
+              {state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}
+            </div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="text-xs text-[var(--text-muted)] mb-1">Обновлён</div>
-            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Обновлён</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">
+              {state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}
+            </div>
+          </div>
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Summary</div>
+            <div className="whitespace-pre-wrap break-words text-sm leading-snug text-[var(--text-primary)]">
+              {state?.conversation_summary || '—'}
+            </div>
           </div>
         </div>
       </div>
@@ -119,21 +138,21 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
                 className="w-full rounded-lg bg-[var(--control-bg)] p-2 font-mono text-sm leading-relaxed text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                 rows={3}
               />
-              <div className="flex gap-2 mt-2 justify-end">
-                <button onClick={saveEditMemory} className="text-[var(--accent-success)] text-sm flex items-center gap-1"><Save className="w-3 h-3" /> Сохранить</button>
-                <button onClick={cancelEditMemory} className="text-[var(--accent-danger)] text-sm flex items-center gap-1"><X className="w-3 h-3" /> Отмена</button>
+              <div className="mt-2 flex justify-end gap-2">
+                <button onClick={saveEditMemory} className="flex items-center gap-1 text-sm text-[var(--accent-success)]"><Save className="h-3 w-3" /> Сохранить</button>
+                <button onClick={cancelEditMemory} className="flex items-center gap-1 text-sm text-[var(--accent-danger)]"><X className="h-3 w-3" /> Отмена</button>
               </div>
             </div>
           ) : (
             <div>
               <div className="flex justify-between">
                 <span className="font-mono text-sm text-[var(--text-primary)]">{entry.key}</span>
-                <button onClick={() => startEditMemory(entry)} className="text-[var(--text-muted)] hover:text-[var(--accent-primary)] text-xs flex items-center gap-1"><Edit2 className="w-3 h-3" /> Редактировать</button>
+                <button onClick={() => startEditMemory(entry)} className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-primary)]"><Edit2 className="h-3 w-3" /> Редактировать</button>
               </div>
-              <div className="text-sm text-[var(--text-secondary)] break-all mt-1 font-mono">
+              <div className="mt-1 break-all font-mono text-sm text-[var(--text-secondary)]">
                 {typeof entry.value === 'object' ? JSON.stringify(entry.value, null, 2) : String(entry.value)}
               </div>
-              <div className="text-xs text-[var(--text-muted)] mt-1">тип: {entry.type}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">тип: {entry.type}</div>
             </div>
           )}
         </div>
@@ -158,18 +177,18 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           const leadStatus = typeof payload.lead_status === 'string' ? payload.lead_status : undefined;
           return (
             <div key={event.id} className="rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="text-xs text-[var(--text-muted)] mb-1">
+              <div className="mb-1 text-xs text-[var(--text-muted)]">
                 {new Date(event.ts).toLocaleString()}
               </div>
-              <div className="text-sm font-mono">Решение: {decision}</div>
-              <div className="text-xs text-[var(--text-secondary)] mt-1">
+              <div className="font-mono text-sm">Решение: {decision}</div>
+              <div className="mt-1 text-xs text-[var(--text-secondary)]">
                 Намерение: {intent}, ЖЦ: {lifecycle}, CTA: {cta}
               </div>
               {repeatCount !== undefined && (
-                <div className="text-xs text-[var(--text-muted)] mt-1">Повторов: {repeatCount}</div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">Повторов: {repeatCount}</div>
               )}
               {leadStatus !== undefined && (
-                <div className="text-xs text-[var(--text-muted)] mt-1">Статус лида: {leadStatus}</div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">Статус лида: {leadStatus}</div>
               )}
             </div>
           );
@@ -185,24 +204,26 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
       )}
       {safeThreadTimeline.map((event) => {
         const isEscalation = event.type === 'ticket_created';
+        const label = event.presentation?.label || event.type;
+        const summary = event.presentation?.summary || JSON.stringify(event.payload ?? {});
         return (
           <div
             key={event.id}
             className={`rounded-lg p-3 ${isEscalation ? 'bg-[var(--accent-muted)]' : 'bg-[var(--surface-secondary)]'}`}
           >
-            <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mb-1">
-              {isEscalation && <AlertCircle className="w-3 h-3 text-[var(--accent-danger)]" />}
+            <div className="mb-1 flex items-center gap-2 text-xs text-[var(--text-muted)]">
+              {isEscalation && <AlertCircle className="h-3 w-3 text-[var(--accent-danger)]" />}
               <span>{new Date(event.ts).toLocaleString()}</span>
             </div>
-            <div className="text-sm font-mono">{event.type}</div>
-            <div className="text-xs text-[var(--text-secondary)] break-all mt-1">
-              {JSON.stringify(event.payload ?? {}).slice(0, 100)}
+            <div className="text-sm font-medium">{label}</div>
+            <div className="mt-1 whitespace-pre-wrap break-words text-xs text-[var(--text-secondary)]">
+              {summary}
             </div>
           </div>
         );
       })}
       {hasMoreTimeline && (
-        <button onClick={loadMoreTimeline} className="text-[var(--accent-primary)] text-sm">
+        <button onClick={loadMoreTimeline} className="text-sm text-[var(--accent-primary)]">
           Загрузить ещё
         </button>
       )}
@@ -223,7 +244,6 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     { id: 'raw', label: 'Raw', component: renderRaw },
   ];
 
-  // Data loading effect with request cancellation
   useEffect(() => {
     frontendLogger.debug('Inspector data loading effect triggered', { threadId });
     isMountedRef.current = true;
@@ -267,9 +287,12 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           frontendLogger.debug('Memory request outdated, ignoring', { requestId: currentRequestId });
           return;
         }
-        if (!error && data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
-          setThreadMemory(data.memory as MemoryEntry[]);
-          frontendLogger.debug('Memory loaded successfully', { threadId, count: data.memory.length });
+        if (!error && data && typeof data === 'object') {
+          const memoryItems = readMemoryItems(data);
+          if (memoryItems) {
+            setThreadMemory(memoryItems);
+            frontendLogger.debug('Memory loaded successfully', { threadId, count: memoryItems.length });
+          }
         } else if (error) {
           frontendLogger.warn('Memory load error', { error });
         }
@@ -307,8 +330,6 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
       } finally {
         if (isRequestValid(currentRequestId)) {
           setLoadingInspector(false);
-        } else {
-          frontendLogger.debug('Timeline loading finished but request invalid, not resetting loading state');
         }
       }
     };
@@ -371,8 +392,11 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
       } else {
         const { data } = await threadsApi.getMemory(threadId);
         if (!isRequestValid(currentRequestId)) return;
-        if (data && typeof data === 'object' && 'memory' in data && Array.isArray(data.memory)) {
-          setThreadMemory(data.memory as MemoryEntry[]);
+        if (data && typeof data === 'object') {
+          const memoryItems = readMemoryItems(data);
+          if (memoryItems) {
+            setThreadMemory(memoryItems);
+          }
           frontendLogger.debug('Memory updated and reloaded', { threadId, key });
         }
       }
@@ -410,26 +434,21 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     setEditingMemoryValue('');
   };
 
-  // Click outside to close dropdown – but ignore clicks inside the dropdown itself
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      // If the click is on the toggle button, let the button handle toggling.
       if (moreButtonRef.current && moreButtonRef.current.contains(target)) {
         return;
       }
-      // If the click is inside the dropdown container, don't close.
       if (dropdownRef.current && dropdownRef.current.contains(target)) {
         return;
       }
-      // Otherwise close the menu.
       setShowTabMenu(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Force content re-render when tab changes by using a key
   const contentKey = `${inspectorActiveTab}-${threadId}`;
 
   return (
@@ -460,7 +479,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
             className="flex min-h-8 items-center gap-1 rounded-lg px-2.5 py-1 text-sm text-[var(--text-secondary)] transition-all hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
           >
             <span>{tabs.find(t => t.id === inspectorActiveTab)?.label || 'Вкладки'}</span>
-            <ChevronDown className="w-3 h-3" />
+            <ChevronDown className="h-3 w-3" />
           </button>
           {showTabMenu && (
             <div
@@ -472,11 +491,10 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
                   key={tab.id}
                   onClick={() => {
                     frontendLogger.debug('Inspector tab clicked from dropdown', { tabId: tab.id });
-                    frontendLogger.debug('Tab selected from dropdown', { tab: tab.id });
                     setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw');
                     setShowTabMenu(false);
                   }}
-                  className={`block w-full text-left px-3 py-2 text-sm ${
+                  className={`block w-full px-3 py-2 text-left text-sm ${
                     inspectorActiveTab === tab.id
                       ? 'bg-[var(--accent-muted)] text-[var(--accent-primary)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]'

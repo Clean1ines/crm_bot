@@ -99,7 +99,7 @@ def create_escalate_node(
                 {
                     "thread_id": context.thread_id,
                     "project_id": context.project_id,
-                    "message": context.user_input[:200],
+                    "message": context.user_input,
                 },
             )
             await queue_repo.enqueue("notify_manager", notification_payload)

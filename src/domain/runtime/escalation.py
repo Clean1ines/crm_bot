@@ -33,7 +33,7 @@ class EscalationContext:
     def ticket_payload(self) -> Mapping[str, object]:
         return {
             "title": "Escalation: user requested human help",
-            "description": f"User message: {self.user_input[:500]}",
+            "description": f"User message: {self.user_input}",
             "priority": "normal",
         }
 
@@ -41,7 +41,7 @@ class EscalationContext:
         return {
             "thread_id": self.thread_id,
             "project_id": self.project_id,
-            "message": self.user_input[:200],
+            "message": self.user_input,
         }
 
 
