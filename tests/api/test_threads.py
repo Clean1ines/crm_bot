@@ -178,9 +178,10 @@ class TestThreadsAPI:
                     "thread_updated_at": "2025-01-02T12:00:00",
                     "client": {
                         "id": str(uuid4()),
-                        "display_name": "John",
-                        "full_name": "John",
+                        "display_name": "John Client",
+                        "full_name": "John Client",
                         "username": "john",
+                        "email": None,
                         "chat_id": 123,
                     },
                     "last_message": {
@@ -202,7 +203,9 @@ class TestThreadsAPI:
         data = response.json()
         assert len(data) == 1
         assert data[0]["thread_id"] is not None
-        assert data[0]["client"]["display_name"] == "John"
+        assert data[0]["client"]["display_name"] == "John Client"
+        assert data[0]["client"]["full_name"] == "John Client"
+        assert data[0]["client"]["username"] == "john"
         mock_thread_repo.get_dialogs.assert_awaited_once_with(
             project_id,
             limit=20,
@@ -325,6 +328,13 @@ class TestThreadsAPI:
                     "created_at": "2025-01-01T12:01:00",
                     "metadata": {},
                 },
+                {
+                    "id": str(uuid4()),
+                    "role": "manager",
+                    "content": "[Alice Manager]: I will take this case",
+                    "created_at": "2025-01-01T12:02:00",
+                    "metadata": {},
+                },
             ]
         )
 
@@ -340,7 +350,12 @@ class TestThreadsAPI:
         assert response.status_code == 200
         data = response.json()
         assert "messages" in data
-        assert len(data["messages"]) == 2
+        assert len(data["messages"]) == 3
+        assert [message["role"] for message in data["messages"]] == [
+            "user",
+            "assistant",
+            "manager",
+        ]
         mock_thread_repo.get_thread_with_project_view.assert_awaited_once_with(
             thread_id
         )

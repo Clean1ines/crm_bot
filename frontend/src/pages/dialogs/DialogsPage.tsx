@@ -12,7 +12,12 @@ export const DialogsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 768px)');
-  const { selectedThreadId, setSelectedThreadId, clearMessages } = useAppStore();
+  const {
+    selectedThreadId,
+    setSelectedThreadId,
+    setSelectedThreadClient,
+    clearMessages,
+  } = useAppStore();
   const [mobileView, setMobileView] = useState<MobileDialogsView>('list');
 
   useEffect(() => {
@@ -25,9 +30,10 @@ export const DialogsPage: React.FC = () => {
   useEffect(() => {
     if (projectId) {
       setSelectedThreadId(null);
+      setSelectedThreadClient(null);
       clearMessages();
     }
-  }, [projectId, setSelectedThreadId, clearMessages]);
+  }, [projectId, setSelectedThreadId, setSelectedThreadClient, clearMessages]);
 
   if (!projectId) return null;
 

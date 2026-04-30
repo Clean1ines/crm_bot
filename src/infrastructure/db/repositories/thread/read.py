@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from src.domain.project_plane.thread_status import ThreadStatus
 from src.domain.project_plane.thread_views import (
     ThreadDialogClientView,
     ThreadDialogView,
@@ -11,6 +12,18 @@ from src.utils.uuid_utils import ensure_uuid
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
+
+ThreadDialogQueryParam = UUID | str | int | None | list[str]
+
+
+def _status_filter_values(status_filter: str | None) -> list[str] | None:
+    if status_filter is None:
+        return None
+    if status_filter == ThreadStatus.MANUAL.value:
+        return [ThreadStatus.MANUAL.value, ThreadStatus.WAITING_MANAGER.value]
+    if status_filter == ThreadStatus.ACTIVE.value:
+        return [ThreadStatus.ACTIVE.value]
+    return [status_filter]
 
 
 class ThreadReadRepository:
@@ -67,9 +80,9 @@ class ThreadReadRepository:
             extra={"project_id": project_id, "limit": limit, "offset": offset},
         )
 
-        params: list[UUID | str | int | None] = [
+        params: list[ThreadDialogQueryParam] = [
             ensure_uuid(project_id),
-            status_filter,
+            _status_filter_values(status_filter),
             f"%{search}%" if search else None,
             ensure_uuid(client_id) if client_id else None,
             limit,
@@ -100,7 +113,7 @@ class ThreadReadRepository:
                 LIMIT 1
             ) lm ON true
             WHERE c.project_id = $1
-              AND ($2::text IS NULL OR t.status = $2)
+              AND ($2::text[] IS NULL OR t.status = ANY($2))
               AND (
                   $3::text IS NULL
                   OR (

@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import { MANAGER_THREAD_FILTER } from '../../entities/thread/model/status';
 import type { Thread, Client, LastMessage } from '../../entities/thread/model/types';
 import { getClientDisplayName } from '../../shared/lib/clients';
 import { threadsApi } from '../../shared/api/modules/threads';
@@ -9,13 +10,13 @@ export const TicketsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['tickets', 'manual', projectId],
+    queryKey: ['tickets', MANAGER_THREAD_FILTER, projectId],
     queryFn: async () => {
       if (!projectId) return [];
 
       const { data, error } = await threadsApi.list({
         project_id: projectId,
-        status_filter: 'manual',
+        status_filter: MANAGER_THREAD_FILTER,
         limit: 100,
       });
 
