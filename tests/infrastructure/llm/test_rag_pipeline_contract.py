@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 import pytest
 
+from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.infrastructure.llm.rag_contract import RAGPipelineConfig
 from src.infrastructure.llm.rag_service import RAGService
 
@@ -176,6 +177,43 @@ async def test_rag_pipeline_returns_empty_for_empty_query_or_missing_project():
         await service.search_with_expansion(project_id="project-1", query="   ") == []
     )
     assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_rag_pipeline_accepts_typed_knowledge_views_from_repository():
+    repo = FakeKnowledgeRepository(
+        {
+            "pricing": [
+                KnowledgeSearchResultView(
+                    id="chunk-1",
+                    content="Pricing and packages overview",
+                    score=0.82,
+                    method="hybrid",
+                    document_id="doc-1",
+                    source="pricing.md",
+                    document_status="ready",
+                )
+            ]
+        }
+    )
+    service = RAGService(repo)
+
+    result = await service.search_with_expansion(
+        project_id="project-1",
+        query="pricing",
+    )
+
+    assert result == [
+        {
+            "id": "chunk-1",
+            "content": "Pricing and packages overview",
+            "score": pytest.approx(1.02),
+            "method": "hybrid",
+            "source": "pricing.md",
+            "title": None,
+            "chunk_index": None,
+        }
+    ]
 
 
 def test_safe_json_extract_rejects_non_integer_indexes():

@@ -191,6 +191,24 @@ class KnowledgeService:
         )
         return KnowledgePreviewResponseDto.from_results(query=query, results=results)
 
+    async def clear_project_knowledge(
+        self,
+        project_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> None:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        await repo.clear_project_knowledge(project_id)
+        logger.info(
+            "Knowledge base cleared",
+            extra={"project_id": project_id},
+        )
+
     async def _ensure_project_exists(self, project_id: str, logger: LoggerPort) -> None:
         if await self.project_repo.project_exists(project_id):
             return

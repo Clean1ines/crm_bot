@@ -5,8 +5,10 @@ Stores facts, preferences, and issues per user for cross-conversation recall.
 """
 
 import uuid
+import json
 import asyncpg
 
+from src.domain.project_plane.json_types import json_value_from_unknown
 from src.domain.project_plane.memory_views import MemoryEntryView
 from src.infrastructure.logging.logger import get_logger
 
@@ -113,6 +115,10 @@ class MemoryRepository:
         """
         project_uuid = _ensure_uuid(project_id)
         client_uuid = _ensure_uuid(client_id)
+        serialized_value = json.dumps(
+            json_value_from_unknown(value),
+            ensure_ascii=False,
+        )
 
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -127,7 +133,7 @@ class MemoryRepository:
                 project_uuid,
                 client_uuid,
                 key,
-                value,
+                serialized_value,
                 type_,
             )
 

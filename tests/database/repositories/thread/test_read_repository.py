@@ -24,7 +24,7 @@ def read_repo(mock_pool):
 
 
 @pytest.mark.asyncio
-async def test_get_dialogs_expands_manager_filter_to_handoff_statuses(
+async def test_get_dialogs_uses_ticket_history_query_for_manager_filter(
     read_repo, mock_pool
 ):
     project_id = str(uuid4())
@@ -32,12 +32,17 @@ async def test_get_dialogs_expands_manager_filter_to_handoff_statuses(
 
     await read_repo.get_dialogs(project_id=project_id, status_filter="manager")
 
-    query, stored_project_id, statuses, search, client_id, limit, offset = (
+    query, stored_project_id, search, client_id, limit, offset = (
         mock_pool.mock_conn.fetch.await_args.args
     )
-    assert "t.status = ANY($2)" in query
+    assert "t.status IN ('manual', 'waiting_manager', 'closed')" in query
+    assert "m.role = 'manager'" in query
+    assert (
+        "event_type IN ('ticket_created', 'manager_replied', 'ticket_closed')" in query
+    )
+    assert "INTERVAL '30 minutes'" in query
+    assert "GREATEST(" in query
     assert str(stored_project_id) == project_id
-    assert statuses == ["manual", "waiting_manager"]
     assert search is None
     assert client_id is None
     assert limit == 20

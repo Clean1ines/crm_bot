@@ -130,6 +130,9 @@ class FakeKnowledgeRepo:
             )
         ]
 
+    async def clear_project_knowledge(self, project_id: str) -> None:
+        self.calls.append((project_id, "clear", 0, False))
+
 
 @pytest.mark.asyncio
 async def test_preview_query_uses_existing_search_without_generation() -> None:

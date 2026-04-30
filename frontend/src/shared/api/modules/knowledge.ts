@@ -24,6 +24,11 @@ export const knowledgeApi = {
       method: 'GET',
     }),
 
+  clear: (projectId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge`, {
+      method: 'DELETE',
+    }),
+
   preview: (projectId: string, question: string, limit = 5) =>
     authedJsonRequest<KnowledgePreviewResponse, { question: string; limit: number }>(
       `/api/projects/${projectId}/knowledge/preview`,

@@ -509,3 +509,30 @@ class TestKnowledgeUpload:
 
         assert response.status_code == 403
         assert response.json()["detail"] == "Insufficient permissions"
+
+    def test_clear_knowledge_success(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
+                mock_repo = AsyncMock()
+                MockRepo.return_value = mock_repo
+                mock_repo.clear_project_knowledge = AsyncMock()
+
+                response = client.delete(
+                    f"/api/projects/{project_id}/knowledge",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "cleared"}
+        mock_repo.clear_project_knowledge.assert_awaited_once_with(project_id)
+
+    def test_clear_knowledge_requires_auth(self, client):
+        response = client.delete(f"/api/projects/{uuid4()}/knowledge")
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Authorization header required"

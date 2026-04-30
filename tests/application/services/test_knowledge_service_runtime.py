@@ -39,6 +39,7 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
     repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
+    repo.clear_project_knowledge = AsyncMock()
 
     chunker_factory = Mock(return_value=chunker)
     knowledge_repo_factory = Mock(return_value=repo)
@@ -104,6 +105,7 @@ async def test_upload_marks_document_error_when_batch_processing_fails():
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
     repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
+    repo.clear_project_knowledge = AsyncMock()
 
     service = KnowledgeService(project_repo, user_repo, pool, "secret", FakeJwt)
 
@@ -121,3 +123,33 @@ async def test_upload_marks_document_error_when_batch_processing_fails():
     repo.update_document_status.assert_awaited_once_with(
         "doc-err", "error", "embed failed"
     )
+
+
+@pytest.mark.asyncio
+async def test_clear_project_knowledge_uses_pool_repo():
+    project_repo = Mock()
+    project_repo.user_has_project_role = AsyncMock(return_value=True)
+    project_repo.project_exists = AsyncMock(return_value=True)
+
+    user_repo = Mock()
+    user_repo.is_platform_admin = AsyncMock(return_value=False)
+
+    pool = object()
+
+    repo = Mock()
+    repo.clear_project_knowledge = AsyncMock()
+
+    knowledge_repo_factory = Mock(return_value=repo)
+    logger = Mock()
+
+    service = KnowledgeService(project_repo, user_repo, pool, "secret", FakeJwt)
+
+    await service.clear_project_knowledge(
+        "project-1",
+        "Bearer valid-token",
+        knowledge_repo_factory=knowledge_repo_factory,
+        logger=logger,
+    )
+
+    knowledge_repo_factory.assert_called_once_with(pool)
+    repo.clear_project_knowledge.assert_awaited_once_with("project-1")
