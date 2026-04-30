@@ -34,6 +34,9 @@ class ProjectTokenRepository(ProjectRepositoryBase):
                 ensure_uuid(project_id),
             )
 
+    async def clear_bot_token(self, project_id: ProjectId) -> None:
+        await self.set_bot_token(project_id, None)
+
     async def get_manager_bot_token(self, project_id: ProjectId) -> str | None:
         logger.info("Fetching manager bot token", extra={"project_id": str(project_id)})
         async with self.pool.acquire() as conn:
@@ -63,6 +66,9 @@ class ProjectTokenRepository(ProjectRepositoryBase):
                 username,
                 ensure_uuid(project_id),
             )
+
+    async def clear_manager_token(self, project_id: ProjectId) -> None:
+        await self.set_manager_bot_token(project_id, None)
 
     async def get_webhook_secret(self, project_id: ProjectId) -> str | None:
         async with self.pool.acquire() as conn:

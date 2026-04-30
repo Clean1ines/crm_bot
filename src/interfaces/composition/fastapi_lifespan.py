@@ -31,7 +31,7 @@ from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRep
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.project import (
     ProjectMemberRepository,
-    ProjectQueryRepository,
+    ProjectRepository,
     ProjectTokenRepository,
 )
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
@@ -133,7 +133,7 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
 
     return ConversationOrchestrator(
         db_conn=db_pool,
-        project_repo=ProjectQueryRepository(db_pool),
+        project_repo=ProjectRepository(db_pool),
         thread_lifecycle_repo=thread_lifecycle_repo,
         thread_message_repo=thread_message_repo,
         thread_runtime_state_repo=thread_runtime_state_repo,
