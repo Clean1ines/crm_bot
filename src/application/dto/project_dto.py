@@ -195,12 +195,14 @@ class ProjectSummaryDto:
     user_id: str | None
     client_bot_username: str | None = None
     manager_bot_username: str | None = None
+    access_role: str | None = None
 
     @classmethod
     def from_record(cls, record: Mapping[str, object]) -> "ProjectSummaryDto":
         user_id = record.get("user_id")
         client_bot_username = record.get("client_bot_username")
         manager_bot_username = record.get("manager_bot_username")
+        access_role = record.get("access_role")
 
         return cls(
             id=str(record["id"]),
@@ -213,6 +215,7 @@ class ProjectSummaryDto:
             manager_bot_username=str(manager_bot_username)
             if manager_bot_username is not None
             else None,
+            access_role=str(access_role) if access_role is not None else None,
         )
 
     @classmethod
@@ -224,6 +227,7 @@ class ProjectSummaryDto:
             user_id=view.user_id,
             client_bot_username=view.client_bot_username,
             manager_bot_username=view.manager_bot_username,
+            access_role=view.access_role,
         )
 
     def to_dict(self) -> dict[str, object]:

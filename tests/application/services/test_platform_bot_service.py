@@ -60,6 +60,7 @@ async def test_list_projects_for_telegram_user_uses_typed_membership_lookup(serv
             "user_id": "user-1",
             "client_bot_username": None,
             "manager_bot_username": None,
+            "access_role": None,
         }
     ]
     service.project_repo.get_projects_for_user_view.assert_awaited_once_with("user-1")

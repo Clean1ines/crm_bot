@@ -6,6 +6,7 @@ from src.application.services.thread_query_service import ThreadQueryService
 from fastapi.testclient import TestClient
 from uuid import uuid4
 
+from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.memory_views import MemoryEntryView
 from src.domain.project_plane.thread_views import ThreadWithProjectView
 from src.interfaces.http.app import app
@@ -587,6 +588,60 @@ class TestThreadsAPI:
         )
         assert response.status_code == 400
         assert response.json()["detail"] == "Thread is not in manual mode"
+
+        self._restore_auth()
+
+    def test_reply_manager_role_allowed_for_manual_ticket(
+        self, client, mock_ticket_commands
+    ):
+        user_id = str(uuid4())
+        owner_user_id = str(uuid4())
+        thread_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+
+        mock_thread_repo = AsyncMock()
+        mock_thread_repo.get_thread_with_project_view = AsyncMock(
+            return_value=ThreadWithProjectView(
+                thread_id=thread_id,
+                project_id=project_id,
+                status="manual",
+            )
+        )
+
+        mock_project_repo = AsyncMock()
+        mock_project_repo.get_project_view = AsyncMock(
+            return_value=ProjectSummaryView(
+                id=project_id,
+                name="Test",
+                is_pro_mode=False,
+                user_id=owner_user_id,
+            )
+        )
+        mock_project_repo.user_has_project_role = AsyncMock(
+            side_effect=lambda _, __, roles: "manager" in roles
+        )
+
+        mock_orchestrator = AsyncMock()
+        mock_orchestrator.manager_reply = AsyncMock(return_value=True)
+
+        app.dependency_overrides[get_thread_query_service] = lambda: (
+            make_thread_query_service(mock_thread_repo, project_repo=mock_project_repo)
+        )
+        app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
+        app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
+
+        response = client.post(
+            f"/api/threads/{thread_id}/reply", json={"message": "manager reply"}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"status": "sent"}
+        mock_orchestrator.manager_reply.assert_awaited_once_with(
+            thread_id,
+            "manager reply",
+            manager_chat_id=None,
+            manager_user_id=user_id,
+        )
 
         self._restore_auth()
 

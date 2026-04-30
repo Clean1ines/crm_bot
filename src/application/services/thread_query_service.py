@@ -17,7 +17,7 @@ from src.application.ports.thread_port import (
     ThreadReadPort,
     ThreadRuntimeStatePort,
 )
-from src.domain.control_plane.roles import PROJECT_READ_ROLES, PROJECT_WRITE_ROLES
+from src.domain.control_plane.roles import PROJECT_MANAGER_ROLES, PROJECT_READ_ROLES
 
 
 def _event_record(event) -> JsonObject:
@@ -128,7 +128,7 @@ class ThreadQueryService:
         self, thread_id: str, current_user_id: str
     ):
         thread = await self.require_thread_access(
-            thread_id, current_user_id, PROJECT_WRITE_ROLES
+            thread_id, current_user_id, PROJECT_MANAGER_ROLES
         )
         if thread.status != "manual":
             raise ValidationError("Thread is not in manual mode")

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects } from '@entities/project';
+import { getProjectHomePath, isProjectAdminRole } from '@entities/project/model/access';
 import { CreateProjectModal } from '@features/project/create';
 import { DeleteConfirmModal } from '@shared/ui';
 import { useMediaQuery } from '@/shared/lib/hooks/useMediaQuery';
@@ -22,16 +23,17 @@ interface NavItem {
   path: string;
   label: string;
   icon: React.ReactNode;
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
   { path: 'dialogs', label: 'Диалоги', icon: <MessageSquare className="w-4 h-4" /> },
   { path: 'tickets', label: 'Тикеты', icon: <UserCog className="w-4 h-4" /> },
   { path: 'clients', label: 'Клиенты', icon: <Users className="w-4 h-4" /> },
-  { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" /> },
-  { path: 'managers', label: 'Менеджеры', icon: <User className="w-4 h-4" /> },
-  { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" /> },
-  { path: 'settings', label: 'Настройки', icon: <Settings className="w-4 h-4" /> },
+  { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" />, adminOnly: true },
+  { path: 'managers', label: 'Менеджеры', icon: <User className="w-4 h-4" />, adminOnly: true },
+  { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" />, adminOnly: true },
+  { path: 'settings', label: 'Настройки', icon: <Settings className="w-4 h-4" />, adminOnly: true },
 ];
 
 export const AppSidebar: React.FC = () => {
@@ -67,10 +69,20 @@ export const AppSidebar: React.FC = () => {
     frontendLogger.debug('AppSidebar state updated', { urlProjectId, projectsCount: projects.length });
   }, [urlProjectId, projects.length]);
 
+  const currentProject = projects.find((project) => project.id === (urlProjectId || selectedProjectId))
+    ?? projects[0]
+    ?? null;
+  const fallbackProjectId = currentProject?.id;
+  const canManageProject = isProjectAdminRole(currentProject?.access_role);
+  const visibleNavItems = navItems.filter((item) => !item.adminOnly || canManageProject);
+  const canCreateProject = projects.length === 0
+    || projects.some((project) => isProjectAdminRole(project.access_role));
+
   const handleProjectSelect = (projectId: string) => {
+    const project = projects.find((item) => item.id === projectId);
     frontendLogger.info('Project selected', { projectId, previousUrl: urlProjectId });
     setSelectedProjectId(projectId);
-    navigate(`/projects/${projectId}/dialogs`);
+    navigate(getProjectHomePath(projectId, project?.access_role));
     setIsProjectSelectOpen(false);
   };
 
@@ -83,11 +95,6 @@ export const AppSidebar: React.FC = () => {
     });
     await deleteProject(deletingProject.id);
   };
-
-  const firstProjectId = projects[0]?.id;
-  const fallbackProjectId = urlProjectId || selectedProjectId || firstProjectId;
-  const activeProjectId = fallbackProjectId || undefined;
-  const currentProject = projects.find((project) => project.id === activeProjectId);
 
   const renderNavItem = (item: NavItem) => {
     const disabled = !fallbackProjectId;
@@ -125,7 +132,7 @@ export const AppSidebar: React.FC = () => {
       <>
         <nav className="fixed inset-x-0 bottom-0 z-[100] bg-[var(--glass-panel)] shadow-heavy backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
           <div className="flex items-center gap-1 overflow-x-auto px-2 py-2 scrollbar-hide">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const disabled = !fallbackProjectId;
               if (disabled) {
                 return (
@@ -227,7 +234,7 @@ export const AppSidebar: React.FC = () => {
       </div>
 
       <nav className="flex-1 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map(renderNavItem)}
+        {visibleNavItems.map(renderNavItem)}
       </nav>
 
       <div className="p-4 space-y-2">
@@ -244,13 +251,15 @@ export const AppSidebar: React.FC = () => {
             <div className="text-xs text-[var(--text-muted)]">Профиль и вход</div>
           </div>
         </button>
-        <button
-          onClick={openCreateModal}
-          className="w-full text-sm text-[var(--accent-primary)] hover:bg-[var(--surface-hover)] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 justify-center"
-        >
-          <PlusCircle className="w-4 h-4" />
-          Новый проект
-        </button>
+        {canCreateProject && (
+          <button
+            onClick={openCreateModal}
+            className="w-full text-sm text-[var(--accent-primary)] hover:bg-[var(--surface-hover)] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 justify-center"
+          >
+            <PlusCircle className="w-4 h-4" />
+            Новый проект
+          </button>
+        )}
 
         <div className="pt-2">
           <ThemeToggle />

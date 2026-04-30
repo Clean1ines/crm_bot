@@ -16,6 +16,7 @@ def test_project_summary_dto_normalizes_repository_record():
             "user_id": "user-1",
             "client_bot_username": "client_bot",
             "manager_bot_username": None,
+            "access_role": "manager",
         }
     )
 
@@ -26,6 +27,7 @@ def test_project_summary_dto_normalizes_repository_record():
         "user_id": "user-1",
         "client_bot_username": "client_bot",
         "manager_bot_username": None,
+        "access_role": "manager",
     }
 
 

@@ -5,4 +5,5 @@ export interface Project {
   user_id: string | null;
   client_bot_username?: string | null;
   manager_bot_username?: string | null;
+  access_role?: string | null;
 }
