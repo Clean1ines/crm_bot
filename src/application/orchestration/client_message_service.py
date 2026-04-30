@@ -5,8 +5,13 @@ Client message orchestration.
 import asyncio
 import re
 import uuid
+from datetime import UTC, datetime
 
 from src.application.ports.cache_port import NullCache
+from src.application.ports.event_port import EventReaderPort
+from src.application.services.ticket_command_service import (
+    MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+)
 from src.domain.project_plane.manager_assignments import ManagerReplySession
 from src.domain.project_plane.thread_runtime import ThreadRuntimeSnapshot
 from src.domain.project_plane.thread_status import ThreadStatus
@@ -37,6 +42,7 @@ class ClientMessageService:
         thread_messages=None,
         thread_read=None,
         manager_replies=None,
+        event_reader: EventReaderPort | None = None,
         queue_repo,
         runtime_guards,
         runtime_loader,
@@ -51,6 +57,7 @@ class ClientMessageService:
         self.thread_messages = thread_messages or threads
         self.thread_read = thread_read or threads
         self.manager_replies = manager_replies
+        self.event_reader = event_reader
         self.queue_repo = queue_repo
         self.runtime_guards = runtime_guards
         self.runtime_loader = runtime_loader
@@ -158,21 +165,76 @@ class ClientMessageService:
         if thread_snapshot.status != ThreadStatus.MANUAL.value:
             return False
 
+        return await self._manual_thread_should_rollover(thread_id, thread_snapshot)
+
+    async def _manual_thread_should_rollover(
+        self,
+        thread_id: str,
+        thread_snapshot: ThreadRuntimeSnapshot,
+    ) -> bool:
         redis = await self.cache()
+        raw_session = await self._load_manager_session_value(redis, thread_id)
+        session = ManagerReplySession.from_redis_value(
+            thread_id=thread_id,
+            raw_value=raw_session,
+        )
+        if session is not None:
+            return False
+
+        if thread_snapshot.manager_user_id or thread_snapshot.manager_chat_id:
+            return await self._is_manual_ticket_stale_without_session(thread_id)
+
+        return True
+
+    async def _load_manager_session_value(self, redis, thread_id: str):
         try:
-            raw_session = await redis.get(f"awaiting_reply_thread:{thread_id}")
+            return await redis.get(f"awaiting_reply_thread:{thread_id}")
         except Exception as exc:
             self.logger.warning(
                 "Manager session lookup failed while selecting thread",
                 extra={"thread_id": thread_id, "error": str(exc)},
             )
+            return None
+
+    async def _is_manual_ticket_stale_without_session(self, thread_id: str) -> bool:
+        last_manager_reply_at = await self._last_manager_reply_at(thread_id)
+        if last_manager_reply_at is None:
             return False
 
-        session = ManagerReplySession.from_redis_value(
-            thread_id=thread_id,
-            raw_value=raw_session,
-        )
-        return session is None
+        return self._reply_timeout_expired(last_manager_reply_at)
+
+    async def _last_manager_reply_at(self, thread_id: str) -> datetime | None:
+        if self.event_reader is None:
+            return None
+
+        events = await self.event_reader.get_events_for_thread(thread_id, 30, 0)
+        for event in events:
+            if event.type != "manager_replied":
+                continue
+            timestamp = self._event_timestamp(event.ts)
+            if timestamp is not None:
+                return timestamp
+        return None
+
+    @staticmethod
+    def _event_timestamp(value: datetime | str | None) -> datetime | None:
+        if isinstance(value, datetime):
+            return value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+        if isinstance(value, str):
+            try:
+                normalized = value.replace("Z", "+00:00")
+                parsed = datetime.fromisoformat(normalized)
+            except ValueError:
+                return None
+            return (
+                parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+            )
+        return None
+
+    @staticmethod
+    def _reply_timeout_expired(last_manager_reply_at: datetime) -> bool:
+        elapsed = datetime.now(UTC) - last_manager_reply_at
+        return elapsed.total_seconds() >= MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS
 
     async def _auto_close_stale_manager_ticket(
         self, *, project_id: str, thread_id: str
@@ -323,6 +385,11 @@ class ClientMessageService:
             manager_session=manager_session,
         )
         if manager_session is None:
+            manager_session = self._manual_ticket_fallback_session(
+                thread_id=thread_id_str,
+                thread_snapshot=thread_snapshot,
+            )
+        if manager_session is None:
             return None
 
         await self._record_user_message(
@@ -348,6 +415,30 @@ class ClientMessageService:
         else:
             return None
         return self.graph_executor.outcome(MANAGER_HANDOFF_TEXT).text
+
+    def _manual_ticket_fallback_session(
+        self,
+        *,
+        thread_id: str,
+        thread_snapshot: ThreadRuntimeSnapshot | None,
+    ) -> ManagerReplySession | None:
+        if not thread_snapshot or thread_snapshot.status != ThreadStatus.MANUAL.value:
+            return None
+
+        if not thread_snapshot.manager_user_id:
+            return None
+
+        if thread_snapshot.manager_chat_id:
+            return ManagerReplySession.for_telegram_manager(
+                thread_id=thread_id,
+                manager_user_id=thread_snapshot.manager_user_id,
+                manager_chat_id=thread_snapshot.manager_chat_id,
+            )
+
+        return ManagerReplySession.for_platform_manager(
+            thread_id=thread_id,
+            manager_user_id=thread_snapshot.manager_user_id,
+        )
 
     async def _clear_stale_manager_session(
         self,

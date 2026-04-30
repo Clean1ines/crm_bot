@@ -130,17 +130,12 @@ class ManagerBotService:
             )
             return WebhookAckDto()
 
-        await self.redis.setex(
+        await self.redis.set(
             session.thread_key,
-            MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
             session.to_redis_value(),
         )
         if session.manager_key:
-            await self.redis.setex(
-                session.manager_key,
-                MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
-                thread_id,
-            )
+            await self.redis.set(session.manager_key, thread_id)
 
         await self._post_telegram(
             "answerCallbackQuery",
@@ -273,12 +268,17 @@ class ManagerBotService:
                 manager_chat_id=manager_chat_id,
                 has_manager_reply=True,
             )
-            await self.redis.set(
+            await self.redis.setex(
                 active_session.thread_key,
+                MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
                 active_session.to_redis_value(),
             )
             if active_session.manager_key:
-                await self.redis.set(active_session.manager_key, thread_id)
+                await self.redis.setex(
+                    active_session.manager_key,
+                    MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+                    thread_id,
+                )
             await self._post_telegram(
                 "sendMessage",
                 {

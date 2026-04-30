@@ -19,9 +19,12 @@ async def test_claim_ticket_starts_platform_manager_session() -> None:
     result = await service.claim_ticket(thread_id="thread-1", manager_user_id="user-1")
 
     assert result == {"status": "claimed"}
-    cache.setex.assert_awaited_once_with(
+    orchestrator.claim_thread_for_manager.assert_awaited_once_with(
+        "thread-1",
+        manager=ManagerActor(user_id="user-1"),
+    )
+    cache.set.assert_awaited_once_with(
         "awaiting_reply_thread:thread-1",
-        MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
         json.dumps(
             {
                 "manager_chat_id": None,
@@ -30,10 +33,6 @@ async def test_claim_ticket_starts_platform_manager_session() -> None:
                 "claimed_at_unix": None,
             }
         ),
-    )
-    orchestrator.claim_thread_for_manager.assert_awaited_once_with(
-        "thread-1",
-        manager=ManagerActor(user_id="user-1"),
     )
 
 
@@ -52,15 +51,16 @@ async def test_close_ticket_clears_platform_manager_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mark_ticket_replied_persists_non_expiring_web_session() -> None:
+async def test_mark_ticket_replied_refreshes_web_session_timeout() -> None:
     orchestrator = AsyncMock()
     cache = AsyncMock()
     service = TicketCommandService(orchestrator, cache)
 
     await service.mark_ticket_replied(thread_id="thread-1", manager_user_id="user-1")
 
-    cache.set.assert_awaited_once_with(
+    cache.setex.assert_awaited_once_with(
         "awaiting_reply_thread:thread-1",
+        MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
         json.dumps(
             {
                 "manager_chat_id": None,

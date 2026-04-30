@@ -135,6 +135,7 @@ class ConversationOrchestrator:
             thread_messages=thread_message_repo,
             thread_read=thread_read_repo,
             manager_replies=self.manager_replies,
+            event_reader=event_repo,
             queue_repo=queue_repo,
             runtime_guards=self.runtime_guards,
             runtime_loader=self.runtime_loader,
