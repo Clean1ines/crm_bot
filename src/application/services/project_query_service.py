@@ -11,7 +11,7 @@ from src.application.ports.event_port import EventReaderPort
 from src.application.ports.project_port import ProjectAccessPort, ProjectReadPort
 from src.domain.control_plane.project_configuration import ProjectConfigurationView
 from src.domain.control_plane.project_views import ProjectMemberView, ProjectSummaryView
-from src.domain.control_plane.roles import PROJECT_READ_ROLES
+from src.domain.control_plane.roles import PROJECT_ADMIN_ROLES, PROJECT_READ_ROLES
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
@@ -73,7 +73,7 @@ class ProjectQueryService:
 
     async def get_managers(self, project_id: str, current_user_id: str) -> list[int]:
         await self.access_service.require_project_role(
-            project_id, current_user_id, PROJECT_READ_ROLES
+            project_id, current_user_id, PROJECT_ADMIN_ROLES
         )
         return self._serialize_manager_targets(
             await self.repo.get_manager_notification_targets(project_id)
@@ -83,7 +83,7 @@ class ProjectQueryService:
         self, project_id: str, current_user_id: str
     ) -> list[ProjectMemberDto]:
         await self.access_service.require_project_role(
-            project_id, current_user_id, PROJECT_READ_ROLES
+            project_id, current_user_id, PROJECT_ADMIN_ROLES
         )
         members = await self._load_project_members_view(project_id)
         return [ProjectMemberDto.from_view(member) for member in members]
@@ -92,7 +92,7 @@ class ProjectQueryService:
         self, project_id: str, current_user_id: str
     ) -> JsonObject:
         await self.access_service.require_project_role(
-            project_id, current_user_id, PROJECT_READ_ROLES
+            project_id, current_user_id, PROJECT_ADMIN_ROLES
         )
         configuration = await self._load_project_configuration_view(project_id)
         return json_object_from_unknown(
@@ -103,7 +103,7 @@ class ProjectQueryService:
         self, project_id: str, current_user_id: str
     ) -> list[JsonObject]:
         await self.access_service.require_project_role(
-            project_id, current_user_id, PROJECT_READ_ROLES
+            project_id, current_user_id, PROJECT_ADMIN_ROLES
         )
         configuration = await self._load_project_configuration_view(project_id)
         return [
@@ -117,7 +117,7 @@ class ProjectQueryService:
         self, project_id: str, current_user_id: str
     ) -> list[JsonObject]:
         await self.access_service.require_project_role(
-            project_id, current_user_id, PROJECT_READ_ROLES
+            project_id, current_user_id, PROJECT_ADMIN_ROLES
         )
         configuration = await self._load_project_configuration_view(project_id)
         return [
@@ -134,7 +134,7 @@ class ProjectQueryService:
         offset: int,
     ) -> JsonObject:
         await self.access_service.require_project_role(
-            project_id, current_user_id, PROJECT_READ_ROLES
+            project_id, current_user_id, PROJECT_ADMIN_ROLES
         )
 
         items = await self.event_reader.get_manager_reply_history(

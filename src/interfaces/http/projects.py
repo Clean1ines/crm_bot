@@ -49,6 +49,7 @@ class ProjectResponse(BaseModel):
     user_id: str | None
     client_bot_username: str | None = None
     manager_bot_username: str | None = None
+    access_role: str | None = None
 
 
 class BotTokenRequest(BaseModel):

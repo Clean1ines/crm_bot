@@ -120,6 +120,8 @@ class TestProjectsAPI:
             assert len(data) == 2
             assert data[0]["name"] == "Proj1"
             assert data[1]["client_bot_username"] == "bot1"
+            assert data[0]["access_role"] == "owner"
+            assert data[1]["access_role"] == "manager"
 
             mock_repo.get_projects_for_user_view.assert_awaited_once_with(user_id)
 
@@ -751,6 +753,30 @@ class TestProjectsAPI:
         finally:
             self._restore_auth()
 
+    def test_get_managers_forbidden_for_manager_role(self, client):
+        user_id = str(uuid4())
+        owner_user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.get_project_view = AsyncMock(
+                return_value=_project_view(project_id, owner_user_id)
+            )
+            mock_repo.user_has_project_role = AsyncMock(
+                side_effect=lambda _, __, roles: "manager" in roles
+            )
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.get(f"/api/projects/{project_id}/managers")
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Access denied"
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
     # ------------------------------------------------------------------
     # POST /api/projects/{project_id}/managers
     # ------------------------------------------------------------------
@@ -1096,6 +1122,30 @@ class TestProjectsAPI:
         finally:
             self._restore_auth()
 
+    def test_list_project_members_forbidden_for_manager_role(self, client):
+        user_id = str(uuid4())
+        owner_user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.get_project_view = AsyncMock(
+                return_value=_project_view(project_id, owner_user_id)
+            )
+            mock_repo.user_has_project_role = AsyncMock(
+                side_effect=lambda _, __, roles: "manager" in roles
+            )
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.get(f"/api/projects/{project_id}/members")
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Access denied"
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
     def test_upsert_project_member_success(self, client):
         user_id = str(uuid4())
         member_user_id = str(uuid4())
@@ -1216,6 +1266,30 @@ class TestProjectsAPI:
             mock_repo.get_project_configuration_view.assert_awaited_once_with(
                 project_id
             )
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
+    def test_get_project_configuration_forbidden_for_manager_role(self, client):
+        user_id = str(uuid4())
+        owner_user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.get_project_view = AsyncMock(
+                return_value=_project_view(project_id, owner_user_id)
+            )
+            mock_repo.user_has_project_role = AsyncMock(
+                side_effect=lambda _, __, roles: "manager" in roles
+            )
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.get(f"/api/projects/{project_id}/configuration")
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Access denied"
 
             app.dependency_overrides.pop(get_project_repo, None)
         finally:
@@ -1366,6 +1440,30 @@ class TestProjectsAPI:
         finally:
             self._restore_auth()
 
+    def test_list_project_integrations_forbidden_for_manager_role(self, client):
+        user_id = str(uuid4())
+        owner_user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.get_project_view = AsyncMock(
+                return_value=_project_view(project_id, owner_user_id)
+            )
+            mock_repo.user_has_project_role = AsyncMock(
+                side_effect=lambda _, __, roles: "manager" in roles
+            )
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.get(f"/api/projects/{project_id}/integrations")
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Access denied"
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
     def test_upsert_project_integration_success(self, client):
         user_id = str(uuid4())
         project_id = str(uuid4())
@@ -1466,6 +1564,30 @@ class TestProjectsAPI:
             assert response.json() == [
                 {"kind": "widget", "provider": "web", "status": "active"}
             ]
+
+            app.dependency_overrides.pop(get_project_repo, None)
+        finally:
+            self._restore_auth()
+
+    def test_list_project_channels_forbidden_for_manager_role(self, client):
+        user_id = str(uuid4())
+        owner_user_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+        try:
+            mock_repo = AsyncMock(spec=ProjectRepository)
+            mock_repo.get_project_view = AsyncMock(
+                return_value=_project_view(project_id, owner_user_id)
+            )
+            mock_repo.user_has_project_role = AsyncMock(
+                side_effect=lambda _, __, roles: "manager" in roles
+            )
+
+            app.dependency_overrides[get_project_repo] = lambda: mock_repo
+
+            response = client.get(f"/api/projects/{project_id}/channels")
+            assert response.status_code == 403
+            assert response.json()["detail"] == "Access denied"
 
             app.dependency_overrides.pop(get_project_repo, None)
         finally:
