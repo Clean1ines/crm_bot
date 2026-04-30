@@ -19,6 +19,7 @@ import json
 import re
 from typing import Mapping
 
+from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.infrastructure.llm.rag_contract import (
     KnowledgeSearchRepository,
     QueryExpander,
@@ -28,6 +29,8 @@ from src.infrastructure.llm.rag_contract import (
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
+
+RAGSearchRow = Mapping[str, object] | KnowledgeSearchResultView
 
 
 class _NoOpQueryExpander:
@@ -116,11 +119,11 @@ class RAGService:
     # Dedup and rerank
     # -------------------------
 
-    def _deduplicate(self, rows: list[Mapping[str, object]]) -> list[RAGCandidate]:
+    def _deduplicate(self, rows: list[RAGSearchRow]) -> list[RAGCandidate]:
         by_id: dict[str, RAGCandidate] = {}
 
         for row in rows:
-            candidate = RAGCandidate.from_mapping(row)
+            candidate = _candidate_from_row(row)
             if not candidate.id or not candidate.content:
                 continue
 
@@ -166,7 +169,7 @@ class RAGService:
     async def _rerank(
         self,
         query: str,
-        candidates: list[RAGCandidate] | list[Mapping[str, object]],
+        candidates: list[RAGCandidate] | list[RAGSearchRow],
         top_k: int,
     ) -> list[dict[str, object]]:
         """Deterministic rerank.
@@ -182,7 +185,7 @@ class RAGService:
         query_terms = set(normalized_query.split())
 
         normalized_candidates = [
-            item if isinstance(item, RAGCandidate) else RAGCandidate.from_mapping(item)
+            item if isinstance(item, RAGCandidate) else _candidate_from_row(item)
             for item in candidates
         ]
 
@@ -234,7 +237,7 @@ class RAGService:
         expansions = await self._expand_query(normalized_query)
         variants = self._unique_queries(normalized_query, expansions)
 
-        raw_candidates: list[Mapping[str, object]] = []
+        raw_candidates: list[RAGSearchRow] = []
 
         for variant in variants:
             results = await self._repo.search(
@@ -254,3 +257,9 @@ class RAGService:
             candidates[: runtime_config.max_candidates],
             runtime_config.final_limit,
         )
+
+
+def _candidate_from_row(row: RAGSearchRow) -> RAGCandidate:
+    if isinstance(row, KnowledgeSearchResultView):
+        return RAGCandidate.from_knowledge_view(row)
+    return RAGCandidate.from_mapping(row)

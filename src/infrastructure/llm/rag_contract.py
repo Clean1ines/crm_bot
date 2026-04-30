@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Protocol, SupportsFloat, SupportsInt
 
+from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+
 
 RAG_CANDIDATE_KNOWN_KEYS = frozenset(
     {
@@ -74,6 +76,20 @@ class RAGCandidate:
             title=_to_optional_text(payload.get("title")),
             chunk_index=_to_optional_int(payload.get("chunk_index")),
             metadata=_metadata_without_known_keys(payload),
+        )
+
+    @classmethod
+    def from_knowledge_view(cls, payload: KnowledgeSearchResultView) -> "RAGCandidate":
+        return cls(
+            id=payload.id,
+            content=payload.content,
+            score=payload.score,
+            method=payload.method,
+            source=payload.source,
+            metadata={
+                "document_id": payload.document_id,
+                "document_status": payload.document_status,
+            },
         )
 
     def to_tool_payload(self) -> dict[str, object]:
@@ -156,4 +172,4 @@ class KnowledgeSearchRepository(Protocol):
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
-    ) -> list[Mapping[str, object]]: ...
+    ) -> list[Mapping[str, object] | KnowledgeSearchResultView]: ...

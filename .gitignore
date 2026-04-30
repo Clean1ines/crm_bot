@@ -24,7 +24,7 @@ tree_output.txt
 
 *.log
 
-
+ai_manager_knowledge_base.md
 db_schema.txt
 dev_scripts/
 reports/

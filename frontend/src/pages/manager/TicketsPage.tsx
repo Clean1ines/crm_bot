@@ -33,27 +33,24 @@ export const TicketsPage: React.FC = () => {
   });
 
   const tickets = useMemo(() => data ?? [], [data]);
-  const ticketsByStatus = useMemo(
-    () => ({
-      waiting_manager: tickets.filter(
-        (ticket: Thread) => ticket.status === 'waiting_manager',
-      ),
-      manual: tickets.filter((ticket: Thread) => ticket.status === 'manual'),
-      closed: tickets.filter((ticket: Thread) => ticket.status === 'closed'),
-    }),
+  const ticketThreads = useMemo(
+    () => tickets.filter((ticket: Thread) => (
+      ticket.status === 'waiting_manager'
+      || ticket.status === 'manual'
+      || ticket.status === 'closed'
+    )),
     [tickets],
   );
-
-  const defaultStatusFilter: TicketVisibleStatusFilter =
-    ticketsByStatus.waiting_manager.length > 0
-      ? 'waiting_manager'
-      : ticketsByStatus.manual.length > 0
-        ? 'manual'
-        : ticketsByStatus.closed.length > 0
-          ? 'closed'
-          : null;
-  const activeStatusFilter =
-    statusFilter === TICKET_NEW_FILTER ? defaultStatusFilter : statusFilter;
+  const ticketsByStatus = useMemo(
+    () => ({
+      waiting_manager: ticketThreads.filter(
+        (ticket: Thread) => ticket.status === 'waiting_manager',
+      ),
+      manual: ticketThreads.filter((ticket: Thread) => ticket.status === 'manual'),
+      closed: ticketThreads.filter((ticket: Thread) => ticket.status === 'closed'),
+    }),
+    [ticketThreads],
+  );
 
   if (!projectId) {
     return (
@@ -78,15 +75,13 @@ export const TicketsPage: React.FC = () => {
   }
 
   const filteredTickets =
-    activeStatusFilter === null
-      ? tickets
-      : tickets.filter((ticket: Thread) => ticket.status === activeStatusFilter);
+    statusFilter === null ? ticketThreads : ticketsByStatus[statusFilter];
   const emptyLabel =
-    activeStatusFilter === 'waiting_manager'
+    statusFilter === 'waiting_manager'
       ? 'Нет активных тикетов'
-      : activeStatusFilter === 'manual'
+      : statusFilter === 'manual'
         ? 'Нет тикетов в работе'
-        : activeStatusFilter === 'closed'
+        : statusFilter === 'closed'
           ? 'Нет закрытых тикетов'
           : 'Тикетов пока нет';
 
@@ -108,7 +103,7 @@ export const TicketsPage: React.FC = () => {
               type="button"
               onClick={() => setStatusFilter(option.value)}
               className={`inline-flex min-h-9 items-center rounded-full px-3 py-1.5 text-sm font-medium transition-all ${
-                activeStatusFilter === option.value
+                statusFilter === option.value
                   ? 'bg-[var(--accent-primary)] text-white shadow-sm'
                   : 'bg-[var(--surface-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}

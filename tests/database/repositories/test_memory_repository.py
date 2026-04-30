@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
+import json
 import asyncpg
 
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
@@ -150,7 +151,12 @@ class TestMemoryRepository:
                     updated_at = NOW()
             """
         mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, UUID(project_id), UUID(client_id), key, value, type_
+            expected_sql,
+            UUID(project_id),
+            UUID(client_id),
+            key,
+            json.dumps(value, ensure_ascii=False),
+            type_,
         )
         assert mock_pool.acquire.call_count == 1
 
@@ -341,7 +347,7 @@ class TestMemoryRepository:
             UUID(project_id),
             UUID(client_id),
             "stage",
-            {"stage": lifecycle},
+            json.dumps({"stage": lifecycle}, ensure_ascii=False),
             "lifecycle",
         )
         assert mock_pool.acquire.call_count == 1
@@ -393,7 +399,7 @@ class TestMemoryRepository:
             UUID(project_id),
             UUID(client_id),
             key,
-            value,
+            json.dumps(value, ensure_ascii=False),
             "original_type",
         )
 
@@ -430,7 +436,7 @@ class TestMemoryRepository:
             UUID(project_id),
             UUID(client_id),
             key,
-            value,
+            json.dumps(value, ensure_ascii=False),
             "user_edited",
         )
 

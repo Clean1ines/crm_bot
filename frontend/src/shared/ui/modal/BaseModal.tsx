@@ -5,6 +5,7 @@ interface BaseModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  cancelLabel?: string;
 }
 
 /**
@@ -16,6 +17,7 @@ export const BaseModal: React.FC<BaseModalProps> = ({
   onClose,
   title,
   children,
+  cancelLabel = 'Cancel',
 }) => {
   if (!isOpen) return null;
 
@@ -29,7 +31,7 @@ export const BaseModal: React.FC<BaseModalProps> = ({
             onClick={onClose}
             className="min-h-9 rounded-lg bg-[var(--control-bg)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           >
-            Cancel
+            {cancelLabel}
           </button>
         </div>
       </div>

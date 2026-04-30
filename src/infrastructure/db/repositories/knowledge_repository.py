@@ -485,3 +485,19 @@ class KnowledgeRepository:
             )
 
         logger.info("Document deleted", extra={"document_id": document_id})
+
+    async def clear_project_knowledge(self, project_id: str) -> None:
+        logger.info("Clearing knowledge base", extra={"project_id": project_id})
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM knowledge_base WHERE project_id = $1",
+                    ensure_uuid(project_id),
+                )
+                await conn.execute(
+                    "DELETE FROM knowledge_documents WHERE project_id = $1",
+                    ensure_uuid(project_id),
+                )
+
+        logger.info("Knowledge base cleared", extra={"project_id": project_id})

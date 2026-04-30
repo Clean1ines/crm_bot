@@ -19,8 +19,6 @@ ThreadDialogQueryParam = UUID | str | int | None | list[str]
 def _status_filter_values(status_filter: str | None) -> list[str] | None:
     if status_filter is None:
         return None
-    if status_filter == "manager":
-        return [ThreadStatus.MANUAL.value, ThreadStatus.WAITING_MANAGER.value]
     if status_filter == ThreadStatus.ACTIVE.value:
         return [ThreadStatus.ACTIVE.value]
     if status_filter == ThreadStatus.MANUAL.value:
@@ -86,52 +84,25 @@ class ThreadReadRepository:
             extra={"project_id": project_id, "limit": limit, "offset": offset},
         )
 
-        params: list[ThreadDialogQueryParam] = [
-            ensure_uuid(project_id),
-            _status_filter_values(status_filter),
-            f"%{search}%" if search else None,
-            ensure_uuid(client_id) if client_id else None,
-            limit,
-            offset,
-        ]
-
-        query = """
-            SELECT
-                t.id AS thread_id,
-                t.status,
-                t.interaction_mode,
-                t.created_at AS thread_created_at,
-                t.updated_at AS thread_updated_at,
-                c.id AS client_id,
-                c.full_name,
-                c.username,
-                c.email,
-                c.chat_id,
-                lm.content AS last_message_content,
-                lm.created_at AS last_message_created_at
-            FROM threads t
-            JOIN clients c ON t.client_id = c.id
-            LEFT JOIN LATERAL (
-                SELECT content, created_at
-                FROM messages m
-                WHERE m.thread_id = t.id
-                ORDER BY m.created_at DESC
-                LIMIT 1
-            ) lm ON true
-            WHERE c.project_id = $1
-              AND ($2::text[] IS NULL OR t.status = ANY($2))
-              AND (
-                  $3::text IS NULL
-                  OR (
-                      c.full_name ILIKE $3
-                      OR c.username ILIKE $3
-                      OR c.email ILIKE $3
-                  )
-              )
-              AND ($4::uuid IS NULL OR c.id = $4)
-            ORDER BY t.updated_at DESC
-            LIMIT $5 OFFSET $6
-        """
+        if status_filter == "manager":
+            params = self._manager_dialog_params(
+                project_id=project_id,
+                search=search,
+                client_id=client_id,
+                limit=limit,
+                offset=offset,
+            )
+            query = self._manager_dialogs_query()
+        else:
+            params = self._default_dialog_params(
+                project_id=project_id,
+                status_filter=status_filter,
+                search=search,
+                client_id=client_id,
+                limit=limit,
+                offset=offset,
+            )
+            query = self._default_dialogs_query()
 
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
@@ -176,6 +147,150 @@ class ThreadReadRepository:
 
         logger.debug(f"Retrieved {len(dialogs)} dialogs")
         return dialogs
+
+    def _default_dialog_params(
+        self,
+        *,
+        project_id: str,
+        status_filter: str | None,
+        search: str | None,
+        client_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[ThreadDialogQueryParam]:
+        return [
+            ensure_uuid(project_id),
+            _status_filter_values(status_filter),
+            f"%{search}%" if search else None,
+            ensure_uuid(client_id) if client_id else None,
+            limit,
+            offset,
+        ]
+
+    def _manager_dialog_params(
+        self,
+        *,
+        project_id: str,
+        search: str | None,
+        client_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> list[ThreadDialogQueryParam]:
+        return [
+            ensure_uuid(project_id),
+            f"%{search}%" if search else None,
+            ensure_uuid(client_id) if client_id else None,
+            limit,
+            offset,
+        ]
+
+    def _default_dialogs_query(self) -> str:
+        return """
+            SELECT
+                t.id AS thread_id,
+                t.status,
+                t.interaction_mode,
+                t.created_at AS thread_created_at,
+                t.updated_at AS thread_updated_at,
+                c.id AS client_id,
+                c.full_name,
+                c.username,
+                c.email,
+                c.chat_id,
+                lm.content AS last_message_content,
+                lm.created_at AS last_message_created_at
+            FROM threads t
+            JOIN clients c ON t.client_id = c.id
+            LEFT JOIN LATERAL (
+                SELECT content, created_at
+                FROM messages m
+                WHERE m.thread_id = t.id
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE c.project_id = $1
+              AND ($2::text[] IS NULL OR t.status = ANY($2))
+              AND (
+                  $3::text IS NULL
+                  OR (
+                      c.full_name ILIKE $3
+                      OR c.username ILIKE $3
+                      OR c.email ILIKE $3
+                  )
+              )
+              AND ($4::uuid IS NULL OR c.id = $4)
+            ORDER BY t.updated_at DESC
+            LIMIT $5 OFFSET $6
+        """
+
+    def _manager_dialogs_query(self) -> str:
+        return """
+            SELECT
+                t.id AS thread_id,
+                t.status,
+                t.interaction_mode,
+                t.created_at AS thread_created_at,
+                t.updated_at AS thread_updated_at,
+                c.id AS client_id,
+                c.full_name,
+                c.username,
+                c.email,
+                c.chat_id,
+                lm.content AS last_message_content,
+                lm.created_at AS last_message_created_at
+            FROM threads t
+            JOIN clients c ON t.client_id = c.id
+            LEFT JOIN LATERAL (
+                SELECT MAX(m.created_at) AS last_manager_message_at
+                FROM messages m
+                WHERE m.thread_id = t.id
+                  AND m.role = 'manager'
+            ) manager_reply ON true
+            LEFT JOIN LATERAL (
+                SELECT MAX(e.created_at) AS last_ticket_event_at
+                FROM threads related
+                JOIN events e ON e.stream_id = related.id
+                WHERE related.client_id = t.client_id
+                  AND e.event_type IN ('ticket_created', 'manager_replied', 'ticket_closed')
+            ) manager_history ON true
+            LEFT JOIN LATERAL (
+                SELECT content, created_at
+                FROM messages m
+                WHERE m.thread_id = t.id
+                ORDER BY m.created_at DESC
+                LIMIT 1
+            ) lm ON true
+            WHERE c.project_id = $1
+              AND (
+                  manager_reply.last_manager_message_at IS NOT NULL
+                  OR
+                  t.status IN ('manual', 'waiting_manager', 'closed')
+                  OR EXISTS (
+                      SELECT 1
+                      FROM threads related
+                      JOIN events e ON e.stream_id = related.id
+                      WHERE related.client_id = t.client_id
+                        AND e.event_type IN ('ticket_created', 'manager_replied', 'ticket_closed')
+                        AND t.updated_at BETWEEN e.created_at - INTERVAL '30 minutes' AND e.created_at
+                  )
+              )
+              AND (
+                  $2::text IS NULL
+                  OR (
+                      c.full_name ILIKE $2
+                      OR c.username ILIKE $2
+                      OR c.email ILIKE $2
+                  )
+              )
+              AND ($3::uuid IS NULL OR c.id = $3)
+            ORDER BY GREATEST(
+                COALESCE(manager_reply.last_manager_message_at, TO_TIMESTAMP(0)),
+                COALESCE(manager_history.last_ticket_event_at, TO_TIMESTAMP(0)),
+                t.updated_at
+            ) DESC,
+            t.updated_at DESC
+            LIMIT $4 OFFSET $5
+        """
 
     async def find_by_status(self, status: str) -> list[ThreadStatusSummaryView]:
         async with self.pool.acquire() as conn:

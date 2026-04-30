@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import frontendLogger from '@shared/lib/logger';
 import { ThemeToggle } from '@shared/ui/theme';
+import logoSrc from '@shared/assets/logo.png';
 
 interface NavItem {
   path: string;
@@ -206,7 +207,13 @@ export const AppSidebar: React.FC = () => {
   return (
     <aside className="w-64 h-full bg-[var(--surface-secondary)] flex flex-col">
       <div className="p-5 flex items-center gap-2">
-        <div className="w-6 h-6 rounded-full bg-[var(--accent-primary)] shadow-sm" />
+        <span className="w-6 h-6 overflow-hidden rounded-full shadow-sm shrink-0">
+          <img
+            src={logoSrc}
+            alt="Omnica logo"
+            className="h-full w-full object-cover"
+          />
+        </span>
         <span className="font-semibold text-[var(--text-primary)] text-lg tracking-tight">OMNICA</span>
       </div>
 

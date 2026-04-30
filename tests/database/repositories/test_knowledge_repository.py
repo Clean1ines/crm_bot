@@ -551,3 +551,24 @@ class TestKnowledgeRepository:
         mock_pool.mock_conn.execute.assert_any_call(
             "DELETE FROM knowledge_documents WHERE id = $1", UUID(doc_id)
         )
+
+    @pytest.mark.asyncio
+    async def test_clear_project_knowledge_success(self, knowledge_repo, mock_pool):
+        project_id = str(uuid4())
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        mock_transaction = AsyncMock()
+        mock_transaction.__aenter__.return_value = mock_pool.mock_conn
+        mock_transaction.__aexit__.return_value = None
+        mock_pool.mock_conn.transaction = MagicMock(return_value=mock_transaction)
+
+        await knowledge_repo.clear_project_knowledge(project_id)
+
+        calls = [
+            call("DELETE FROM knowledge_base WHERE project_id = $1", UUID(project_id)),
+            call(
+                "DELETE FROM knowledge_documents WHERE project_id = $1",
+                UUID(project_id),
+            ),
+        ]
+        mock_pool.mock_conn.execute.assert_has_calls(calls, any_order=False)

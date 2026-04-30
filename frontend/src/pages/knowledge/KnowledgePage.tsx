@@ -17,6 +17,7 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
 } from '@shared/api/modules/knowledge';
+import { BaseModal } from '@shared/ui';
 
 interface Document {
   id: string;
@@ -71,6 +72,7 @@ export const KnowledgePage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [previewQuestion, setPreviewQuestion] = useState('');
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -127,6 +129,24 @@ export const KnowledgePage: React.FC = () => {
         ? String((err as { detail?: unknown }).detail)
         : null;
       toast.error(detail || 'Не удалось проверить базу знаний');
+    },
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.clear(projectId);
+    },
+    onSuccess: async () => {
+      setIsClearModalOpen(false);
+      setPreviewQuestion('');
+      previewMutation.reset();
+      toast.success('База знаний очищена');
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Не удалось очистить базу знаний';
+      toast.error(message);
     },
   });
 
@@ -210,6 +230,13 @@ export const KnowledgePage: React.FC = () => {
               className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
             />
           </div>
+          <button
+            type="button"
+            onClick={() => setIsClearModalOpen(true)}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--accent-danger-bg)] px-4 py-2 text-sm font-medium text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--accent-danger-bg)]/80"
+          >
+            Очистить базу знаний
+          </button>
         </div>
       </div>
 
@@ -354,6 +381,31 @@ export const KnowledgePage: React.FC = () => {
           ))}
         </div>
       )}
+
+      <BaseModal
+        isOpen={isClearModalOpen}
+        onClose={() => {
+          if (!clearMutation.isPending) {
+            setIsClearModalOpen(false);
+          }
+        }}
+        title="Очистить базу знаний"
+        cancelLabel="Отмена"
+      >
+        <p className="text-sm leading-relaxed text-[var(--text-primary)]">
+          Все документы и связанные фрагменты будут удалены без возможности восстановления.
+        </p>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => clearMutation.mutate()}
+            disabled={clearMutation.isPending}
+            className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
+          >
+            {clearMutation.isPending ? 'Очищаем...' : 'Очистить'}
+          </button>
+        </div>
+      </BaseModal>
     </div>
   );
 };

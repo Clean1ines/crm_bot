@@ -174,3 +174,24 @@ async def upload_knowledge(
         preprocessor_factory=make_knowledge_preprocessor,
     )
     return result.to_dict()
+
+
+@router.delete("")
+async def clear_knowledge(
+    project_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Deletes all knowledge documents and chunks for a project."""
+    service = KnowledgeService(
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+    )
+    await service.clear_project_knowledge(
+        project_id,
+        authorization,
+        knowledge_repo_factory=make_knowledge_repo,
+        logger=logger,
+    )
+    return {"status": "cleared"}
