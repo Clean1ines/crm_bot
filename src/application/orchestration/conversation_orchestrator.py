@@ -138,6 +138,8 @@ class ConversationOrchestrator:
             threads=thread_lifecycle_repo,
             thread_messages=thread_message_repo,
             thread_read=thread_read_repo,
+            thread_runtime_state=thread_runtime_state_repo,
+            memory_repo=memory_repo,
             telegram_client=self.telegram_client,
             event_emitter=self.event_emitter,
             logger=self.logger,
@@ -231,6 +233,15 @@ class ConversationOrchestrator:
             manager_chat_id=manager_chat_id,
             manager_user_id=manager_user_id,
         )
+
+    async def claim_thread_for_manager(self, thread_id: str, *, manager) -> None:
+        await self.manager_replies.claim_thread_for_manager(
+            thread_id,
+            manager=manager,
+        )
+
+    async def close_thread_for_manager(self, thread_id: str) -> None:
+        await self.manager_replies.close_thread_for_manager(thread_id)
 
     async def manager_reply(
         self,

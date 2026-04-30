@@ -3,9 +3,14 @@ Manager reply orchestration.
 """
 
 from src.domain.display_names import build_display_name
-from src.domain.project_plane.manager_assignments import build_manager_audit_payload
+from src.domain.project_plane.json_types import json_object_from_unknown
+from src.domain.project_plane.manager_assignments import (
+    ManagerActor,
+    build_manager_audit_payload,
+)
 from src.domain.project_plane.thread_runtime import ThreadRuntimeSnapshot
 from src.domain.project_plane.thread_status import ThreadStatus
+from src.domain.runtime.dialog_state import default_dialog_state
 
 
 MANAGER_FALLBACK_NAME = "Manager"
@@ -19,6 +24,8 @@ class ManagerReplyService:
         threads,
         thread_messages=None,
         thread_read=None,
+        thread_runtime_state=None,
+        memory_repo=None,
         telegram_client,
         event_emitter,
         logger,
@@ -27,6 +34,8 @@ class ManagerReplyService:
         self.threads = threads
         self.thread_messages = thread_messages or threads
         self.thread_read = thread_read or threads
+        self.thread_runtime_state = thread_runtime_state
+        self.memory_repo = memory_repo
         self.telegram_client = telegram_client
         self.event_emitter = event_emitter
         self.logger = logger
@@ -38,6 +47,74 @@ class ManagerReplyService:
     ) -> str | None:
         return await self.projects.resolve_manager_user_id_by_telegram(
             project_id, manager_chat_id
+        )
+
+    async def claim_thread_for_manager(
+        self,
+        thread_id: str,
+        *,
+        manager: ManagerActor,
+    ) -> None:
+        await self.threads.claim_for_manager(thread_id, manager=manager)
+
+    async def close_thread_for_manager(self, thread_id: str) -> None:
+        await self.threads.release_manager_assignment(thread_id)
+
+        try:
+            await self._reset_thread_analytics(thread_id)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to reset thread analytics", extra={"error": str(exc)}
+            )
+
+        try:
+            await self._reset_user_memory_after_ticket_closure(thread_id)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to reset user memory after ticket closure",
+                extra={"error": str(exc)},
+            )
+
+    async def _reset_thread_analytics(self, thread_id: str) -> None:
+        if self.thread_runtime_state is None:
+            return
+
+        await self.thread_runtime_state.update_analytics(
+            thread_id=thread_id,
+            lifecycle="active_client",
+            decision=None,
+            intent=None,
+            cta=None,
+        )
+        self.logger.info(
+            "Thread analytics reset after ticket closure",
+            extra={"thread_id": thread_id},
+        )
+
+    async def _reset_user_memory_after_ticket_closure(self, thread_id: str) -> None:
+        if self.memory_repo is None:
+            return
+
+        thread = await self.thread_read.get_thread_with_project_view(thread_id)
+        if not thread:
+            return
+
+        client_id = thread.client_id
+        project_id = thread.project_id
+        if not client_id or not project_id:
+            return
+
+        await self.memory_repo.set_lifecycle(project_id, client_id, "active_client")
+        await self.memory_repo.set(
+            project_id,
+            client_id,
+            "dialog_state",
+            json_object_from_unknown(default_dialog_state(lifecycle="active_client")),
+            "dialog_state",
+        )
+        self.logger.info(
+            "User memory reset after ticket closure",
+            extra={"client_id": client_id},
         )
 
     async def resolve_manager_display_name(

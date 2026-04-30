@@ -55,3 +55,31 @@ async def test_manager_reply_delegates_to_manager_reply_service():
 
     assert result is True
     orchestrator.manager_replies.manager_reply.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_claim_thread_for_manager_delegates_to_manager_reply_service():
+    from src.domain.project_plane.manager_assignments import ManagerActor
+
+    orchestrator = make_orchestrator()
+    orchestrator.manager_replies.claim_thread_for_manager = AsyncMock()
+
+    manager = ManagerActor(user_id="user-1", telegram_chat_id="12345")
+    await orchestrator.claim_thread_for_manager("thread-1", manager=manager)
+
+    orchestrator.manager_replies.claim_thread_for_manager.assert_awaited_once_with(
+        "thread-1",
+        manager=manager,
+    )
+
+
+@pytest.mark.asyncio
+async def test_close_thread_for_manager_delegates_to_manager_reply_service():
+    orchestrator = make_orchestrator()
+    orchestrator.manager_replies.close_thread_for_manager = AsyncMock()
+
+    await orchestrator.close_thread_for_manager("thread-1")
+
+    orchestrator.manager_replies.close_thread_for_manager.assert_awaited_once_with(
+        "thread-1"
+    )
