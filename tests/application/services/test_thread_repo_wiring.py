@@ -41,11 +41,16 @@ def test_manager_reply_service_uses_split_thread_repositories():
     messages = MagicMock(name="thread_message_repo")
     read = MagicMock(name="thread_read_repo")
 
+    runtime_state = MagicMock(name="thread_runtime_state_repo")
+    memory = MagicMock(name="memory_repo")
+
     service = ManagerReplyService(
         projects=MagicMock(),
         threads=lifecycle,
         thread_messages=messages,
         thread_read=read,
+        thread_runtime_state=runtime_state,
+        memory_repo=memory,
         telegram_client=MagicMock(),
         event_emitter=MagicMock(),
         logger=MagicMock(),
@@ -54,6 +59,8 @@ def test_manager_reply_service_uses_split_thread_repositories():
     assert service.threads is lifecycle
     assert service.thread_messages is messages
     assert service.thread_read is read
+    assert service.thread_runtime_state is runtime_state
+    assert service.memory_repo is memory
 
 
 def test_conversation_orchestrator_wires_client_and_manager_services_to_split_thread_repos():
@@ -84,3 +91,5 @@ def test_conversation_orchestrator_wires_client_and_manager_services_to_split_th
     assert orchestrator.manager_replies.threads is lifecycle
     assert orchestrator.manager_replies.thread_messages is messages
     assert orchestrator.manager_replies.thread_read is read
+    assert orchestrator.manager_replies.thread_runtime_state is runtime_state
+    assert orchestrator.manager_replies.memory_repo is orchestrator.memory_repo

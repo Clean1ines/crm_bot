@@ -3,12 +3,11 @@ from src.application.ports.cache_port import CachePort
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
 from src.application.ports.telegram_port import TelegramClientPort
-from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.manager_assignments import (
     ManagerActor,
     ManagerReplySession,
 )
-from src.domain.runtime.dialog_state import default_dialog_state
 
 MANAGER_REPLY_FAILED_TEXT = "❌ Не удалось отправить ответ. Попробуйте ещё раз позже."
 
@@ -83,7 +82,7 @@ class ManagerBotService:
         if session.manager_key:
             await self.redis.setex(session.manager_key, 600, thread_id)
 
-        await self.orchestrator.threads.claim_for_manager(
+        await self.orchestrator.claim_thread_for_manager(
             thread_id,
             manager=ManagerActor(
                 user_id=manager_user_id,
@@ -153,54 +152,7 @@ class ManagerBotService:
         if session.manager_key:
             await self.redis.delete(session.manager_key)
 
-        await self.orchestrator.threads.release_manager_assignment(thread_id)
-
-        try:
-            await self.orchestrator.threads.update_analytics(
-                thread_id=thread_id,
-                lifecycle="active_client",
-                decision=None,
-                intent=None,
-                cta=None,
-            )
-            self.logger.info(
-                "Thread analytics reset after ticket closure",
-                extra={"thread_id": thread_id},
-            )
-        except Exception as exc:
-            self.logger.warning(
-                "Failed to reset thread analytics", extra={"error": str(exc)}
-            )
-
-        try:
-            thread = await self.orchestrator.threads.get_thread_with_project_view(
-                thread_id
-            )
-            if thread and self.orchestrator.memory_repo:
-                client_id = thread.client_id
-                project_id = thread.project_id
-                if client_id and project_id:
-                    await self.orchestrator.memory_repo.set_lifecycle(
-                        project_id, client_id, "active_client"
-                    )
-                    await self.orchestrator.memory_repo.set(
-                        project_id,
-                        client_id,
-                        "dialog_state",
-                        json_object_from_unknown(
-                            default_dialog_state(lifecycle="active_client")
-                        ),
-                        "dialog_state",
-                    )
-                    self.logger.info(
-                        "User memory reset after ticket closure",
-                        extra={"client_id": client_id},
-                    )
-        except Exception as exc:
-            self.logger.warning(
-                "Failed to reset user memory after ticket closure",
-                extra={"error": str(exc)},
-            )
+        await self.orchestrator.close_thread_for_manager(thread_id)
 
         await self._post_telegram(
             "answerCallbackQuery",
