@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 
-import { MANAGER_THREAD_FILTER } from '../../entities/thread/model/status';
 import type { Client, Message, ThreadState } from '../../entities/thread/model/types';
 import { threadsApi } from '../../shared/api/modules/threads';
 import { getClientDisplayName } from '../../shared/lib/clients';
@@ -45,9 +44,8 @@ export const TicketDetailPage: React.FC = () => {
 
       const { data, error } = await threadsApi.list({
         project_id: projectId,
-        status_filter: MANAGER_THREAD_FILTER,
+        limit: 100,
       });
-
       if (error) throw error;
 
       const tickets = Array.isArray(data) ? data : [];
@@ -75,20 +73,62 @@ export const TicketDetailPage: React.FC = () => {
   const ticketClient =
     (ticketInfo?.client as Client | undefined) ?? ticketState?.client ?? null;
   const clientName = getClientDisplayName(ticketClient, 'Клиент');
+  const ticketStatus = ticketInfo?.status || ticketState?.status || 'waiting_manager';
+  const isClosed = ticketStatus === 'closed';
+
+  const claimMutation = useMutation({
+    mutationFn: async () => {
+      if (!threadId) throw new Error('No thread ID');
+      const { error } = await threadsApi.claim(threadId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ticket_info', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+
+  const closeMutation = useMutation({
+    mutationFn: async () => {
+      if (!threadId) throw new Error('No thread ID');
+      const { error } = await threadsApi.close(threadId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ticket_info', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+
+  useEffect(() => {
+    if (!threadId || !ticketInfo) {
+      return;
+    }
+    if (ticketInfo.status === 'waiting_manager' && !claimMutation.isPending) {
+      claimMutation.mutate();
+    }
+  }, [claimMutation, threadId, ticketInfo]);
 
   const replyMutation = useMutation({
-    mutationFn: (message: string) => {
+    mutationFn: async (message: string) => {
       if (!threadId) throw new Error('No thread ID');
-      return threadsApi.reply(threadId, message);
+      const { error } = await threadsApi.reply(threadId, message);
+      if (error) throw error;
     },
     onSuccess: () => {
       setReplyText('');
-      queryClient.invalidateQueries({ queryKey: ['ticket_messages', threadId] });
-      queryClient.invalidateQueries({ queryKey: ['tickets', MANAGER_THREAD_FILTER] });
-      queryClient.invalidateQueries({ queryKey: ['ticket_info', threadId] });
-      queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_messages', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_info', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });
+
+  const ticketCreatedAt = ticketInfo?.thread_created_at
+    ? new Date(ticketInfo.thread_created_at).toLocaleString()
+    : '—';
 
   if (!threadId) {
     return (
@@ -110,22 +150,26 @@ export const TicketDetailPage: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-          Тикет от {clientName}
-        </h1>
-        <div className="mt-2 flex gap-4 text-sm text-[var(--text-secondary)]">
-          <span>
-            Статус:{' '}
-            <span className="font-medium">
-              {ticketInfo?.status || ticketState?.status || MANAGER_THREAD_FILTER}
+      <div className="mb-6 flex flex-col gap-4 rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
+            Тикет от {clientName}
+          </h1>
+          <div className="mt-2 flex flex-wrap gap-4 text-sm text-[var(--text-secondary)]">
+            <span>
+              Статус: <span className="font-medium">{ticketStatus}</span>
             </span>
-          </span>
-          <span>
-            Создан:{' '}
-            {ticketInfo ? new Date(ticketInfo.thread_created_at).toLocaleString() : '—'}
-          </span>
+            <span>Создан: {ticketCreatedAt}</span>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={() => closeMutation.mutate()}
+          disabled={closeMutation.isPending || isClosed}
+          className="min-h-10 rounded-lg border border-[var(--divider-soft)] bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {closeMutation.isPending ? 'Закрытие...' : 'Закрыть тикет'}
+        </button>
       </div>
 
       <div className="mb-6 max-h-96 overflow-y-auto rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
@@ -170,10 +214,12 @@ export const TicketDetailPage: React.FC = () => {
           className="min-h-28 w-full rounded-lg bg-[var(--control-bg)] p-3 text-sm leading-relaxed text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           rows={4}
           placeholder="Введите ответ..."
+          disabled={isClosed}
         />
         <button
+          type="button"
           onClick={() => replyMutation.mutate(replyText)}
-          disabled={replyMutation.isPending || !replyText.trim()}
+          disabled={isClosed || replyMutation.isPending || !replyText.trim()}
           className="mt-3 min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {replyMutation.isPending ? 'Отправка...' : 'Отправить ответ'}

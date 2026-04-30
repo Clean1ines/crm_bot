@@ -19,10 +19,16 @@ ThreadDialogQueryParam = UUID | str | int | None | list[str]
 def _status_filter_values(status_filter: str | None) -> list[str] | None:
     if status_filter is None:
         return None
-    if status_filter == ThreadStatus.MANUAL.value:
+    if status_filter == "manager":
         return [ThreadStatus.MANUAL.value, ThreadStatus.WAITING_MANAGER.value]
     if status_filter == ThreadStatus.ACTIVE.value:
         return [ThreadStatus.ACTIVE.value]
+    if status_filter == ThreadStatus.MANUAL.value:
+        return [ThreadStatus.MANUAL.value]
+    if status_filter == ThreadStatus.WAITING_MANAGER.value:
+        return [ThreadStatus.WAITING_MANAGER.value]
+    if status_filter == ThreadStatus.CLOSED.value:
+        return [ThreadStatus.CLOSED.value]
     return [status_filter]
 
 

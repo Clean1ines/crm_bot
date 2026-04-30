@@ -33,6 +33,16 @@ export const threadsApi = {
       body: { message } as ReplyRequest,
     }),
 
+  claim: (threadId: string) =>
+    client.POST('/api/threads/{thread_id}/claim', {
+      params: { path: { thread_id: threadId } },
+    }),
+
+  close: (threadId: string) =>
+    client.POST('/api/threads/{thread_id}/close', {
+      params: { path: { thread_id: threadId } },
+    }),
+
   getTimeline: (threadId: string, limit?: number, offset?: number) =>
     client.GET('/api/threads/{thread_id}/timeline', {
       params: {

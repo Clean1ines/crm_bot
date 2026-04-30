@@ -78,11 +78,8 @@ def _initial_lead_status(dialog_state: DialogStateMap, lifecycle: str) -> str:
 
 
 def _is_handoff_required(*, lifecycle: str, decision: str, cta: str) -> bool:
-    return (
-        lifecycle in ESCALATION_LIFECYCLES
-        or decision == "ESCALATE_TO_HUMAN"
-        or cta == "call_manager"
-    )
+    del cta
+    return lifecycle in ESCALATION_LIFECYCLES or decision == "ESCALATE_TO_HUMAN"
 
 
 def _advance_consultation_status(lead_status: str) -> str:

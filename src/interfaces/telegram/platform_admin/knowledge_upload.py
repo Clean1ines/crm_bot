@@ -56,12 +56,12 @@ def _missing_project_response() -> UploadResult:
 
 
 def _missing_document_response() -> UploadResult:
-    return "Пожалуйста, отправьте файл (.pdf или .txt).", None
+    return "Пожалуйста, отправьте файл (.pdf, .txt, .md или .json).", None
 
 
 def _invalid_document_response() -> UploadResult:
     return (
-        "Пожалуйста, отправьте файл (.pdf или .txt).",
+        "Пожалуйста, отправьте файл (.pdf, .txt, .md или .json).",
         None,
     )
 

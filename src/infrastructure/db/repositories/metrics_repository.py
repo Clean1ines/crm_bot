@@ -61,8 +61,8 @@ class MetricsRepository:
             manager_messages = COALESCE(thread_metrics.manager_messages, 0) + COALESCE($4, 0),
             escalated = COALESCE($5, thread_metrics.escalated),
             resolution_time = CASE
-                WHEN $6 IS NULL THEN thread_metrics.resolution_time
-                ELSE $6 * interval '1 second'
+                WHEN $6::double precision IS NULL THEN thread_metrics.resolution_time
+                ELSE $6::double precision * interval '1 second'
             END,
             updated_at = NOW()
         """

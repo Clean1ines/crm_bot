@@ -5,6 +5,9 @@ import pytest
 
 from src.domain.project_plane.manager_assignments import ManagerActor
 from src.application.services.manager_bot_service import ManagerBotService
+from src.application.services.ticket_command_service import (
+    MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+)
 
 
 @pytest.mark.asyncio
@@ -31,10 +34,19 @@ async def test_claim_thread_starts_reply_session():
     assert result.to_dict() == {"ok": True}
     redis.setex.assert_any_await(
         "awaiting_reply_thread:thread-1",
-        600,
-        json.dumps({"manager_chat_id": "12345", "manager_user_id": "user-1"}),
+        MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+        json.dumps(
+            {
+                "manager_chat_id": "12345",
+                "manager_user_id": "user-1",
+                "has_manager_reply": False,
+                "claimed_at_unix": None,
+            }
+        ),
     )
-    redis.setex.assert_any_await("awaiting_reply:12345", 600, "thread-1")
+    redis.setex.assert_any_await(
+        "awaiting_reply:12345", MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS, "thread-1"
+    )
     orchestrator.resolve_manager_user_id_by_telegram.assert_awaited_once_with(
         "project-1", "12345"
     )
@@ -68,6 +80,38 @@ async def test_reply_from_manager_without_active_session_sends_hint():
     )
     orchestrator.manager_reply.assert_not_called()
     telegram_client.post_json.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reply_from_manager_persists_active_session_after_first_reply():
+    orchestrator = AsyncMock()
+    orchestrator.resolve_manager_user_id_by_telegram = AsyncMock(return_value="user-1")
+    orchestrator.manager_reply = AsyncMock(return_value=True)
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value="thread-1")
+    telegram_client = AsyncMock()
+    service = ManagerBotService(
+        orchestrator,
+        redis,
+        "bot-token",
+        "project-1",
+        telegram_client=telegram_client,
+    )
+
+    await service.reply_from_manager(manager_chat_id="12345", text="hello")
+
+    redis.set.assert_any_await(
+        "awaiting_reply_thread:thread-1",
+        json.dumps(
+            {
+                "manager_chat_id": "12345",
+                "manager_user_id": "user-1",
+                "has_manager_reply": True,
+                "claimed_at_unix": None,
+            }
+        ),
+    )
+    redis.set.assert_any_await("awaiting_reply:12345", "thread-1")
 
 
 @pytest.mark.asyncio

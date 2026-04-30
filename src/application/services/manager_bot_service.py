@@ -3,6 +3,9 @@ from src.application.ports.cache_port import CachePort
 from src.application.ports.logger_port import LoggerPort, NullLogger
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
 from src.application.ports.telegram_port import TelegramClientPort
+from src.application.services.ticket_command_service import (
+    MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+)
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.manager_assignments import (
     ManagerActor,
@@ -76,11 +79,15 @@ class ManagerBotService:
 
         await self.redis.setex(
             session.thread_key,
-            600,
+            MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
             session.to_redis_value(),
         )
         if session.manager_key:
-            await self.redis.setex(session.manager_key, 600, thread_id)
+            await self.redis.setex(
+                session.manager_key,
+                MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS,
+                thread_id,
+            )
 
         await self.orchestrator.claim_thread_for_manager(
             thread_id,
@@ -215,6 +222,18 @@ class ManagerBotService:
                 manager_chat_id,
                 manager_user_id=manager_user_id,
             )
+            active_session = ManagerReplySession.for_telegram_manager(
+                thread_id=thread_id,
+                manager_user_id=manager_user_id,
+                manager_chat_id=manager_chat_id,
+                has_manager_reply=True,
+            )
+            await self.redis.set(
+                active_session.thread_key,
+                active_session.to_redis_value(),
+            )
+            if active_session.manager_key:
+                await self.redis.set(active_session.manager_key, thread_id)
             await self._post_telegram(
                 "sendMessage",
                 {

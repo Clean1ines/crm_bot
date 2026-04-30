@@ -31,6 +31,8 @@ class ManagerReplySession:
     thread_id: str
     manager_user_id: str
     manager_chat_id: str | None = None
+    has_manager_reply: bool = False
+    claimed_at_unix: int | None = None
 
     @property
     def thread_key(self) -> str:
@@ -46,6 +48,8 @@ class ManagerReplySession:
         payload: JsonObject = {
             "manager_chat_id": self.manager_chat_id,
             "manager_user_id": self.manager_user_id,
+            "has_manager_reply": self.has_manager_reply,
+            "claimed_at_unix": self.claimed_at_unix,
         }
         return json.dumps(payload)
 
@@ -56,11 +60,32 @@ class ManagerReplySession:
         thread_id: str,
         manager_user_id: str,
         manager_chat_id: str,
+        has_manager_reply: bool = False,
+        claimed_at_unix: int | None = None,
     ) -> "ManagerReplySession":
         return cls(
             thread_id=thread_id,
             manager_user_id=manager_user_id,
             manager_chat_id=manager_chat_id,
+            has_manager_reply=has_manager_reply,
+            claimed_at_unix=claimed_at_unix,
+        )
+
+    @classmethod
+    def for_platform_manager(
+        cls,
+        *,
+        thread_id: str,
+        manager_user_id: str,
+        has_manager_reply: bool = False,
+        claimed_at_unix: int | None = None,
+    ) -> "ManagerReplySession":
+        return cls(
+            thread_id=thread_id,
+            manager_user_id=manager_user_id,
+            manager_chat_id=None,
+            has_manager_reply=has_manager_reply,
+            claimed_at_unix=claimed_at_unix,
         )
 
     @classmethod
@@ -94,6 +119,12 @@ class ManagerReplySession:
                 thread_id=thread_id,
                 manager_user_id=str(manager_user_id) if manager_user_id else "",
                 manager_chat_id=str(manager_chat_id) if manager_chat_id else None,
+                has_manager_reply=bool(parsed.get("has_manager_reply")),
+                claimed_at_unix=(
+                    int(parsed["claimed_at_unix"])
+                    if isinstance(parsed.get("claimed_at_unix"), int)
+                    else None
+                ),
             )
 
         return cls(

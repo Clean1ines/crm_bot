@@ -57,8 +57,14 @@ class ManagerReplyService:
     ) -> None:
         await self.threads.claim_for_manager(thread_id, manager=manager)
 
-    async def close_thread_for_manager(self, thread_id: str) -> None:
-        await self.threads.release_manager_assignment(thread_id)
+    async def close_thread_for_manager(
+        self,
+        thread_id: str,
+        *,
+        manually_closed: bool = True,
+        close_reason: str | None = None,
+    ) -> None:
+        await self.threads.close_manager_ticket(thread_id)
 
         try:
             await self._reset_thread_analytics(thread_id)
@@ -72,6 +78,18 @@ class ManagerReplyService:
         except Exception as exc:
             self.logger.warning(
                 "Failed to reset user memory after ticket closure",
+                extra={"error": str(exc)},
+            )
+
+        try:
+            await self._emit_ticket_closed_event(
+                thread_id=thread_id,
+                manually_closed=manually_closed,
+                close_reason=close_reason,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to emit ticket closure event",
                 extra={"error": str(exc)},
             )
 
@@ -115,6 +133,27 @@ class ManagerReplyService:
         self.logger.info(
             "User memory reset after ticket closure",
             extra={"client_id": client_id},
+        )
+
+    async def _emit_ticket_closed_event(
+        self,
+        *,
+        thread_id: str,
+        manually_closed: bool,
+        close_reason: str | None,
+    ) -> None:
+        thread = await self.thread_read.get_thread_with_project_view(thread_id)
+        if not thread or not thread.project_id:
+            return
+
+        await self.event_emitter.emit_event(
+            stream_id=thread_id,
+            project_id=thread.project_id,
+            event_type="ticket_closed",
+            payload={
+                "manually_closed": manually_closed,
+                "reason": close_reason or "manager_closed",
+            },
         )
 
     async def resolve_manager_display_name(
