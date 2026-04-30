@@ -1,6 +1,6 @@
 import io
+import json
 import re
-
 
 from src.infrastructure.logging.logger import get_logger
 
@@ -34,6 +34,20 @@ class ChunkerService:
             raise ValueError(f"Failed to extract text from PDF: {e}")
 
         return self._clean_text(text)
+
+    def extract_text_from_json(self, file_bytes: bytes) -> str:
+        try:
+            payload = json.loads(file_bytes.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            logger.error("JSON extraction failed", extra={"error": str(exc)})
+            raise ValueError("Invalid JSON structure") from exc
+
+        intent_sections = self._intent_sections_from_json(payload)
+        if intent_sections:
+            return self._clean_text("\n\n".join(intent_sections))
+
+        generic_text = "\n".join(self._flatten_json_text(payload))
+        return self._clean_text(generic_text)
 
     def _clean_text(self, text: str) -> str:
         """
@@ -151,6 +165,9 @@ class ChunkerService:
             text = file_bytes.decode("utf-8", errors="ignore")
             text = self._clean_text(text)
 
+        elif filename_lower.endswith(".json"):
+            text = self.extract_text_from_json(file_bytes)
+
         elif filename_lower.endswith(".pdf"):
             text = self.extract_text_from_pdf(file_bytes)
 
@@ -162,6 +179,75 @@ class ChunkerService:
             return []
 
         return self.chunk_text(text)
+
+    def _intent_sections_from_json(self, payload: object) -> list[str]:
+        if not isinstance(payload, dict):
+            return []
+
+        raw_intents = payload.get("intents")
+        if not isinstance(raw_intents, dict):
+            return []
+
+        sections: list[str] = []
+        for intent_name, intent_payload in raw_intents.items():
+            if not isinstance(intent_payload, dict):
+                continue
+
+            lines = [f"## {str(intent_name).strip()}"]
+            answer = self._json_text_value(intent_payload.get("answer"))
+            if answer:
+                lines.append(f"answer: {answer}")
+
+            for field_name in ("synonyms", "keywords", "patterns"):
+                field_values = self._string_list_from_json(
+                    intent_payload.get(field_name)
+                )
+                if field_values:
+                    lines.append(f"{field_name}: {', '.join(field_values)}")
+
+            if len(lines) > 1:
+                sections.append("\n".join(lines))
+
+        return sections
+
+    def _flatten_json_text(self, payload: object, *, path: str = "") -> list[str]:
+        if isinstance(payload, dict):
+            dict_lines: list[str] = []
+            for key, value in payload.items():
+                key_path = f"{path}.{key}" if path else str(key)
+                dict_lines.extend(self._flatten_json_text(value, path=key_path))
+            return dict_lines
+
+        if isinstance(payload, list):
+            list_lines: list[str] = []
+            for index, value in enumerate(payload):
+                index_path = f"{path}[{index}]" if path else f"[{index}]"
+                list_lines.extend(self._flatten_json_text(value, path=index_path))
+            return list_lines
+
+        text_value = self._json_text_value(payload)
+        if not text_value:
+            return []
+
+        return [f"{path}: {text_value}" if path else text_value]
+
+    def _json_text_value(self, value: object) -> str:
+        if isinstance(value, bool) or value is None:
+            return ""
+        if isinstance(value, (int, float, str)):
+            return str(value).strip()
+        return ""
+
+    def _string_list_from_json(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+
+        result: list[str] = []
+        for item in value:
+            text_value = self._json_text_value(item)
+            if text_value:
+                result.append(text_value)
+        return result
 
 
 class _SectionChunkBuilder:

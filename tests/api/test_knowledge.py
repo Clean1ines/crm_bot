@@ -145,6 +145,47 @@ class TestKnowledgeUpload:
         data = response.json()
         assert data["chunks"] == 1
 
+    def test_upload_success_json(self, client, mock_project_repo, mock_pool):
+        """Успешная загрузка .json файла"""
+        project_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
+            mock_chunker = AsyncMock()
+            MockChunker.return_value = mock_chunker
+            mock_chunker.process_file = AsyncMock(
+                return_value=[{"content": "## value_proposition\nanswer: useful"}]
+            )
+
+            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
+                mock_repo = AsyncMock()
+                MockRepo.return_value = mock_repo
+                mock_repo.create_document = AsyncMock(return_value="doc-1")
+                mock_repo.add_knowledge_batch = AsyncMock(return_value=1)
+
+                with patch(
+                    "src.interfaces.http.knowledge.jwt.decode",
+                    return_value={"sub": TEST_USER_ID},
+                ):
+                    files = {
+                        "file": (
+                            "knowledge.json",
+                            b'{"intents":{}}',
+                            "application/json",
+                        )
+                    }
+                    headers = {"Authorization": "Bearer valid-token"}
+
+                    response = client.post(
+                        f"/api/projects/{project_id}/knowledge",
+                        files=files,
+                        headers=headers,
+                    )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["chunks"] == 1
+
     def test_upload_empty_text(self, client, mock_project_repo, mock_pool):
         """Загрузка файла без текста"""
         project_id = str(uuid4())

@@ -90,8 +90,8 @@ async def upload_knowledge(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """
-    Загружает текстовый файл или PDF, разбивает на чанки, генерирует эмбеддинги
-    и сохраняет в базу знаний проекта.
+    Загружает текстовый, Markdown, JSON файл или PDF, разбивает на чанки,
+    генерирует эмбеддинги и сохраняет в базу знаний проекта.
     """
     service = KnowledgeService(
         project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder

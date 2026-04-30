@@ -36,6 +36,7 @@ class ClientMessageService:
         threads,
         thread_messages=None,
         thread_read=None,
+        manager_replies=None,
         queue_repo,
         runtime_guards,
         runtime_loader,
@@ -49,6 +50,7 @@ class ClientMessageService:
         self.threads = threads
         self.thread_messages = thread_messages or threads
         self.thread_read = thread_read or threads
+        self.manager_replies = manager_replies
         self.queue_repo = queue_repo
         self.runtime_guards = runtime_guards
         self.runtime_loader = runtime_loader
@@ -82,7 +84,7 @@ class ClientMessageService:
             full_name=full_name,
             source=source,
         )
-        thread_id = await self._get_or_create_thread(client_id)
+        thread_id = await self._get_or_create_thread(project_id, client_id)
         thread_id_str = str(thread_id)
 
         lock_acquired = await self.thread_lock.acquire_thread_lock(thread_id_str)
@@ -127,10 +129,66 @@ class ClientMessageService:
             full_name=full_name,
         )
 
-    async def _get_or_create_thread(self, client_id):
-        return await self.threads.get_active_thread(
-            client_id
-        ) or await self.threads.create_thread(client_id)
+    async def _get_or_create_thread(self, project_id: str, client_id: str):
+        thread_id = await self.threads.get_active_thread(client_id)
+        if thread_id is None:
+            return await self.threads.create_thread(client_id)
+
+        thread_id_str = str(thread_id)
+        if await self._should_create_fresh_thread(thread_id_str):
+            await self._auto_close_stale_manager_ticket(
+                project_id=project_id,
+                thread_id=thread_id_str,
+            )
+            return await self.threads.create_thread(client_id)
+
+        return thread_id
+
+    async def _should_create_fresh_thread(self, thread_id: str) -> bool:
+        thread_view = await self.thread_read.get_thread_with_project_view(thread_id)
+        thread_snapshot = ThreadRuntimeSnapshot.from_record(
+            thread_view.to_record() if thread_view else None
+        )
+        if not thread_snapshot or not thread_snapshot.status:
+            return False
+
+        if thread_snapshot.status == ThreadStatus.CLOSED.value:
+            return True
+
+        if thread_snapshot.status != ThreadStatus.MANUAL.value:
+            return False
+
+        redis = await self.cache()
+        try:
+            raw_session = await redis.get(f"awaiting_reply_thread:{thread_id}")
+        except Exception as exc:
+            self.logger.warning(
+                "Manager session lookup failed while selecting thread",
+                extra={"thread_id": thread_id, "error": str(exc)},
+            )
+            return False
+
+        session = ManagerReplySession.from_redis_value(
+            thread_id=thread_id,
+            raw_value=raw_session,
+        )
+        return session is None
+
+    async def _auto_close_stale_manager_ticket(
+        self, *, project_id: str, thread_id: str
+    ) -> None:
+        if self.manager_replies is None:
+            return
+
+        self.logger.info(
+            "Auto-closing stale manager ticket before creating a fresh active thread",
+            extra={"project_id": project_id, "thread_id": thread_id},
+        )
+        await self.manager_replies.close_thread_for_manager(
+            thread_id,
+            manually_closed=False,
+            close_reason="manager_claim_timeout",
+        )
 
     def _locked_response(self, thread_id: str) -> str:
         self.logger.warning(
@@ -212,6 +270,8 @@ class ClientMessageService:
     ) -> str:
         manager_response = await self._try_redirect_to_manager(
             project_id=project_id,
+            chat_id=chat_id,
+            thread_id=thread_id,
             thread_id_str=thread_id_str,
             text=text,
         )
@@ -235,10 +295,20 @@ class ClientMessageService:
         )
 
     async def _try_redirect_to_manager(
-        self, *, project_id: str, thread_id_str: str, text: str
+        self,
+        *,
+        project_id: str,
+        chat_id: int,
+        thread_id,
+        thread_id_str: str,
+        text: str,
     ) -> str | None:
         redis = await self.cache()
         awaiting_reply_key = f"awaiting_reply_thread:{thread_id_str}"
+        thread_view = await self.thread_read.get_thread_with_project_view(thread_id_str)
+        thread_snapshot = ThreadRuntimeSnapshot.from_record(
+            thread_view.to_record() if thread_view else None
+        )
         raw_session = await redis.get(awaiting_reply_key)
         manager_session = ManagerReplySession.from_redis_value(
             thread_id=thread_id_str,
@@ -249,17 +319,34 @@ class ClientMessageService:
             redis=redis,
             awaiting_reply_key=awaiting_reply_key,
             thread_id_str=thread_id_str,
+            thread_snapshot=thread_snapshot,
             manager_session=manager_session,
         )
-        if not manager_session or not manager_session.manager_chat_id:
+        if manager_session is None:
             return None
 
-        await self._enqueue_manager_notification(
+        await self._record_user_message(
             project_id=project_id,
-            thread_id_str=thread_id_str,
+            chat_id=chat_id,
             text=text,
-            manager_session=manager_session,
+            thread_id=thread_id,
+            thread_id_str=thread_id_str,
         )
+
+        if manager_session.manager_chat_id:
+            await self._enqueue_manager_notification(
+                project_id=project_id,
+                thread_id_str=thread_id_str,
+                text=text,
+                manager_session=manager_session,
+            )
+        elif thread_snapshot and thread_snapshot.status == ThreadStatus.MANUAL.value:
+            self.logger.info(
+                "Message held for platform manager ticket owner",
+                extra={"thread_id": thread_id_str},
+            )
+        else:
+            return None
         return self.graph_executor.outcome(MANAGER_HANDOFF_TEXT).text
 
     async def _clear_stale_manager_session(
@@ -268,15 +355,12 @@ class ClientMessageService:
         redis,
         awaiting_reply_key: str,
         thread_id_str: str,
+        thread_snapshot: ThreadRuntimeSnapshot | None,
         manager_session: ManagerReplySession | None,
     ) -> ManagerReplySession | None:
-        if not manager_session or not manager_session.manager_chat_id:
+        if not manager_session:
             return manager_session
 
-        thread_view = await self.thread_read.get_thread_with_project_view(thread_id_str)
-        thread_snapshot = ThreadRuntimeSnapshot.from_record(
-            thread_view.to_record() if thread_view else None
-        )
         if not thread_snapshot or thread_snapshot.status != ThreadStatus.ACTIVE.value:
             return manager_session
 

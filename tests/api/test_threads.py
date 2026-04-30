@@ -13,6 +13,7 @@ from src.interfaces.http.dependencies import (
     get_current_user_id,
     get_thread_query_service,
     get_thread_command_service,
+    get_ticket_command_service,
     get_project_repo,
     get_event_repo,
     get_orchestrator,
@@ -47,6 +48,16 @@ def mock_orchestrator():
 @pytest.fixture
 def client():
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def mock_ticket_commands():
+    mock = AsyncMock()
+    mock.claim_ticket = AsyncMock(return_value={"status": "claimed"})
+    mock.close_ticket = AsyncMock(return_value={"status": "closed"})
+    mock.mark_ticket_replied = AsyncMock(return_value=None)
+    app.dependency_overrides[get_ticket_command_service] = lambda: mock
+    yield mock
 
 
 def make_thread_query_service(
@@ -443,7 +454,7 @@ class TestThreadsAPI:
     # ------------------------------------------------------------------
     # POST /api/threads/{thread_id}/reply
     # ------------------------------------------------------------------
-    def test_reply_success(self, client):
+    def test_reply_success(self, client, mock_ticket_commands):
         user_id = str(uuid4())
         thread_id = str(uuid4())
         project_id = str(uuid4())
@@ -482,6 +493,10 @@ class TestThreadsAPI:
             thread_id,
             "Hello manager reply",
             manager_chat_id=None,
+            manager_user_id=user_id,
+        )
+        mock_ticket_commands.mark_ticket_replied.assert_awaited_once_with(
+            thread_id=thread_id,
             manager_user_id=user_id,
         )
 
@@ -575,7 +590,9 @@ class TestThreadsAPI:
 
         self._restore_auth()
 
-    def test_reply_user_without_linked_telegram_still_allowed(self, client):
+    def test_reply_user_without_linked_telegram_still_allowed(
+        self, client, mock_ticket_commands
+    ):
         user_id = str(uuid4())
         thread_id = str(uuid4())
         project_id = str(uuid4())
@@ -613,6 +630,10 @@ class TestThreadsAPI:
             manager_chat_id=None,
             manager_user_id=user_id,
         )
+        mock_ticket_commands.mark_ticket_replied.assert_awaited_once_with(
+            thread_id=thread_id,
+            manager_user_id=user_id,
+        )
 
         self._restore_auth()
 
@@ -625,6 +646,79 @@ class TestThreadsAPI:
         assert response.status_code == 422
         errors = response.json()["detail"]
         assert any(err["loc"] == ["body", "message"] for err in errors)
+
+        self._restore_auth()
+
+    def test_claim_ticket_success(self, client):
+        user_id = str(uuid4())
+        thread_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+
+        mock_thread_repo = AsyncMock()
+        mock_thread_repo.get_thread_with_project_view = AsyncMock(
+            return_value=ThreadWithProjectView(
+                thread_id=thread_id,
+                project_id=project_id,
+                status="waiting_manager",
+            )
+        )
+        mock_project_repo = AsyncMock()
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
+        mock_ticket_commands = AsyncMock()
+        mock_ticket_commands.claim_ticket = AsyncMock(
+            return_value={"status": "claimed"}
+        )
+
+        app.dependency_overrides[get_thread_query_service] = lambda: (
+            make_thread_query_service(mock_thread_repo, project_repo=mock_project_repo)
+        )
+        app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
+        app.dependency_overrides[get_ticket_command_service] = lambda: (
+            mock_ticket_commands
+        )
+
+        response = client.post(f"/api/threads/{thread_id}/claim")
+        assert response.status_code == 200
+        assert response.json() == {"status": "claimed"}
+        mock_ticket_commands.claim_ticket.assert_awaited_once_with(
+            thread_id=thread_id,
+            manager_user_id=user_id,
+        )
+
+        self._restore_auth()
+
+    def test_close_ticket_success(self, client):
+        user_id = str(uuid4())
+        thread_id = str(uuid4())
+        project_id = str(uuid4())
+        self._override_auth(user_id)
+
+        mock_thread_repo = AsyncMock()
+        mock_thread_repo.get_thread_with_project_view = AsyncMock(
+            return_value=ThreadWithProjectView(
+                thread_id=thread_id,
+                project_id=project_id,
+                status="manual",
+            )
+        )
+        mock_project_repo = AsyncMock()
+        mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
+        mock_ticket_commands = AsyncMock()
+        mock_ticket_commands.close_ticket = AsyncMock(return_value={"status": "closed"})
+
+        app.dependency_overrides[get_thread_query_service] = lambda: (
+            make_thread_query_service(mock_thread_repo, project_repo=mock_project_repo)
+        )
+        app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
+        app.dependency_overrides[get_ticket_command_service] = lambda: (
+            mock_ticket_commands
+        )
+
+        response = client.post(f"/api/threads/{thread_id}/close")
+        assert response.status_code == 200
+        assert response.json() == {"status": "closed"}
+        mock_ticket_commands.close_ticket.assert_awaited_once_with(thread_id=thread_id)
 
         self._restore_auth()
 

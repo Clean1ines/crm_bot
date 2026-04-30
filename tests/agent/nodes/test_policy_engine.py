@@ -69,3 +69,37 @@ async def test_policy_engine_loads_dialog_state_from_user_memory_when_missing_di
 
     assert result["topic"] == "integration"
     assert result["dialog_state"]["repeat_count"] >= 3
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_keeps_sales_cta_without_marking_handoff():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "lifecycle": "warm",
+                "intent": "sales",
+                "dialog_state": {
+                    "last_intent": "feedback",
+                    "last_cta": "none",
+                    "last_topic": "other",
+                    "repeat_count": 0,
+                    "lead_status": "warm",
+                    "lifecycle": "warm",
+                },
+            }
+        )
+
+    assert result["decision"] == "LLM_GENERATE"
+    assert result["cta"] == "call_manager"
+    assert result["topic"] == "product"
+    assert result["lead_status"] == "warm"

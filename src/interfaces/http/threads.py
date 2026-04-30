@@ -4,6 +4,7 @@ from pydantic import BaseModel, Json
 from src.application.orchestration.conversation_orchestrator import (
     ConversationOrchestrator,
 )
+from src.application.services.ticket_command_service import TicketCommandService
 from src.application.services.thread_command_service import ThreadCommandService
 from src.application.services.thread_query_service import ThreadQueryService
 from src.infrastructure.logging.logger import get_logger
@@ -12,6 +13,7 @@ from src.interfaces.http.dependencies import (
     get_orchestrator,
     get_thread_command_service,
     get_thread_query_service,
+    get_ticket_command_service,
 )
 
 logger = get_logger(__name__)
@@ -38,13 +40,20 @@ class ThreadResponse(BaseModel):
     unread_count: int
 
 
+class ThreadActionResponse(BaseModel):
+    status: str
+
+
 @router.get("", response_model=list[ThreadResponse])
 async def list_dialogs(
     project_id: str = Query(..., description="Project ID to filter threads"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status_filter: str | None = Query(
-        None, description="Filter by thread status (active, manual, closed)"
+        None,
+        description=(
+            "Filter by thread status (active, waiting_manager, manual, closed, manager)"
+        ),
     ),
     search: str | None = Query(None, description="Search by client name or username"),
     current_user_id: str = Depends(get_current_user_id),
@@ -89,6 +98,7 @@ async def reply_to_thread(
     current_user_id: str = Depends(get_current_user_id),
     thread_queries: ThreadQueryService = Depends(get_thread_query_service),
     orchestrator: ConversationOrchestrator = Depends(get_orchestrator),
+    ticket_commands: TicketCommandService = Depends(get_ticket_command_service),
 ):
     """Send a manager reply to a thread while it is in manual mode."""
     await thread_queries.get_manual_reply_thread_for_user(thread_id, current_user_id)
@@ -99,7 +109,52 @@ async def reply_to_thread(
         manager_chat_id=None,
         manager_user_id=current_user_id,
     )
+    await ticket_commands.mark_ticket_replied(
+        thread_id=thread_id,
+        manager_user_id=current_user_id,
+    )
     return {"status": "sent"}
+
+
+@router.post("/{thread_id}/claim", response_model=ThreadActionResponse)
+async def claim_thread(
+    thread_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    thread_queries: ThreadQueryService = Depends(get_thread_query_service),
+    ticket_commands: TicketCommandService = Depends(get_ticket_command_service),
+):
+    """Claim a waiting ticket for a manager in the web panel."""
+    thread = await thread_queries.require_thread_access(
+        thread_id,
+        current_user_id,
+        ["owner", "admin", "manager"],
+    )
+    if thread.status == "closed":
+        return {"status": "closed"}
+    if thread.status == "manual" and thread.manager_user_id == current_user_id:
+        return {"status": "claimed"}
+    return await ticket_commands.claim_ticket(
+        thread_id=thread_id,
+        manager_user_id=current_user_id,
+    )
+
+
+@router.post("/{thread_id}/close", response_model=ThreadActionResponse)
+async def close_thread(
+    thread_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    thread_queries: ThreadQueryService = Depends(get_thread_query_service),
+    ticket_commands: TicketCommandService = Depends(get_ticket_command_service),
+):
+    """Close a ticket from the web panel and return the next client message to AI."""
+    thread = await thread_queries.require_thread_access(
+        thread_id,
+        current_user_id,
+        ["owner", "admin", "manager"],
+    )
+    if thread.status == "closed":
+        return {"status": "closed"}
+    return await ticket_commands.close_ticket(thread_id=thread_id)
 
 
 @router.get("/{thread_id}/timeline")

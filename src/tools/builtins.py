@@ -12,6 +12,7 @@ Tool interface for dynamic execution from agent tool calls.
 
 import httpx
 
+from src.domain.project_plane.thread_status import ThreadStatus
 from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import Tool, ToolExecutionError
 from src.infrastructure.llm.rag_service import RAGService
@@ -317,9 +318,9 @@ class EscalateTool(Tool):
         )
 
         try:
-            # Update thread status to MANUAL
+            # Mark ticket as waiting for a human to claim it.
             await self._thread_lifecycle_repo.update_status(
-                thread_id=str(thread_id), status="manual"
+                thread_id=str(thread_id), status=ThreadStatus.WAITING_MANAGER
             )
 
             # Get managers for this project

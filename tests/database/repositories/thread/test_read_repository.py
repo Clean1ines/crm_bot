@@ -24,13 +24,13 @@ def read_repo(mock_pool):
 
 
 @pytest.mark.asyncio
-async def test_get_dialogs_expands_manual_filter_to_handoff_statuses(
+async def test_get_dialogs_expands_manager_filter_to_handoff_statuses(
     read_repo, mock_pool
 ):
     project_id = str(uuid4())
     mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
 
-    await read_repo.get_dialogs(project_id=project_id, status_filter="manual")
+    await read_repo.get_dialogs(project_id=project_id, status_filter="manager")
 
     query, stored_project_id, statuses, search, client_id, limit, offset = (
         mock_pool.mock_conn.fetch.await_args.args
@@ -42,6 +42,17 @@ async def test_get_dialogs_expands_manual_filter_to_handoff_statuses(
     assert client_id is None
     assert limit == 20
     assert offset == 0
+
+
+@pytest.mark.asyncio
+async def test_get_dialogs_keeps_manual_filter_narrow(read_repo, mock_pool):
+    project_id = str(uuid4())
+    mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
+
+    await read_repo.get_dialogs(project_id=project_id, status_filter="manual")
+
+    _, _, statuses, _, _, _, _ = mock_pool.mock_conn.fetch.await_args.args
+    assert statuses == ["manual"]
 
 
 @pytest.mark.asyncio

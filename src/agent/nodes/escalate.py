@@ -8,6 +8,7 @@ from typing import cast
 
 from src.agent.state import AgentState
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.thread_status import ThreadStatus
 from src.domain.runtime.escalation import EscalationContext, EscalationResult
 from src.domain.runtime.state_contracts import RuntimeStateInput, RuntimeStatePatch
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
@@ -46,6 +47,23 @@ def create_escalate_node(
                 "user_input": context.user_input[:50],
             },
         )
+
+        try:
+            await thread_lifecycle_repo.update_status(
+                context.thread_id,
+                ThreadStatus.WAITING_MANAGER,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to move thread into waiting_manager status",
+                extra={
+                    "thread_id": context.thread_id,
+                    "project_id": context.project_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "policy": "degrade_continue",
+                },
+            )
 
         try:
             result = await ticket_create_tool.run(

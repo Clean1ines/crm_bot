@@ -59,10 +59,14 @@ class ThreadLifecycleRepository:
                 """
                 SELECT id FROM threads
                 WHERE client_id = $1
+                  AND status <> $2
+                  AND status <> $3
                 ORDER BY updated_at DESC
                 LIMIT 1
             """,
                 ensure_uuid(client_id),
+                ThreadStatus.CLOSED.value,
+                "archived",
             )
 
         if row:
@@ -175,5 +179,23 @@ class ThreadLifecycleRepository:
                 WHERE id = $2
             """,
                 ThreadStatus.ACTIVE.value,
+                ensure_uuid(thread_id),
+            )
+
+    async def close_manager_ticket(self, thread_id: str) -> None:
+        logger.info("Closing manager ticket", extra={"thread_id": thread_id})
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE threads
+                SET
+                    status = $1,
+                    manager_user_id = NULL,
+                    manager_chat_id = NULL,
+                    updated_at = NOW()
+                WHERE id = $2
+            """,
+                ThreadStatus.CLOSED.value,
                 ensure_uuid(thread_id),
             )

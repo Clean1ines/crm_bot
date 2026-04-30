@@ -25,6 +25,7 @@ from src.application.ports.project_port import (
     ProjectMemberResolverPort,
     ProjectTokenPort,
 )
+from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
 from src.interfaces.composition.project_repositories import (
     build_project_member_repository,
     build_project_repository,
@@ -50,7 +51,9 @@ from src.application.services.project_query_service import ProjectQueryService
 from src.application.services.project_service import ProjectAccessService
 from src.application.services.thread_command_service import ThreadCommandService
 from src.application.services.thread_query_service import ThreadQueryService
+from src.application.services.ticket_command_service import TicketCommandService
 from src.infrastructure.redis.client import get_redis_client
+from src.infrastructure.redis.cache_adapter import RedisCacheAdapter
 
 import src.interfaces.composition.fastapi_lifespan
 
@@ -314,6 +317,16 @@ def get_thread_command_service(
 ) -> ThreadCommandService:
     """Return the application write service for thread-focused mutations."""
     return ThreadCommandService(thread_lifecycle_repo, memory_repo)
+
+
+async def get_ticket_command_service(
+    orchestrator: object = Depends(get_orchestrator),
+) -> TicketCommandService:
+    redis_client = await get_redis_client()
+    return TicketCommandService(
+        cast(ManagerBotOrchestratorPort, orchestrator),
+        RedisCacheAdapter(redis_client),
+    )
 
 
 def get_tool_registry() -> "ToolRegistry":

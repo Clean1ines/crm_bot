@@ -1,4 +1,5 @@
 from src.domain.runtime.dialog_state import default_dialog_state
+from src.domain.runtime.policy.repeat_detection import build_dialog_state_update
 from src.domain.runtime.policy_decision import (
     PolicyDecisionContext,
     PolicyDecisionResult,
@@ -64,3 +65,18 @@ def test_policy_decision_result_serializes_state_patch_and_event_payload():
         "lead_status": "handoff_to_manager",
         "confidence": 0.8,
     }
+
+
+def test_dialog_state_call_manager_cta_does_not_force_handoff_without_escalation():
+    dialog_state = build_dialog_state_update(
+        {},
+        intent="sales",
+        topic="product",
+        cta="call_manager",
+        lifecycle="warm",
+        decision="LLM_GENERATE",
+    )
+
+    assert dialog_state["last_cta"] == "call_manager"
+    assert dialog_state["lead_status"] == "warm"
+    assert dialog_state["lifecycle"] == "warm"
