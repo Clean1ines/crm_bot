@@ -1,19 +1,52 @@
 from dataclasses import asdict, dataclass
 
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgePreprocessingMode,
+    normalize_preprocessing_mode,
+)
 
 
 @dataclass(slots=True)
 class KnowledgeUploadResultDto:
     message: str
     chunks: int
+    document_id: str | None = None
+    preprocessing_mode: str | None = None
+    preprocessing_status: str | None = None
+    structured_entries: int | None = None
 
     @classmethod
-    def create(cls, *, message: str, chunks: int) -> "KnowledgeUploadResultDto":
-        return cls(message=message, chunks=chunks)
+    def create(
+        cls,
+        *,
+        message: str,
+        chunks: int,
+        document_id: str | None = None,
+        preprocessing_mode: str | None = None,
+        preprocessing_status: str | None = None,
+        structured_entries: int | None = None,
+    ) -> "KnowledgeUploadResultDto":
+        return cls(
+            message=message,
+            chunks=chunks,
+            document_id=document_id,
+            preprocessing_mode=preprocessing_mode,
+            preprocessing_status=preprocessing_status,
+            structured_entries=structured_entries,
+        )
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        payload = asdict(self)
+        return {key: value for key, value in payload.items() if value is not None}
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeUploadRequestDto:
+    preprocessing_mode: str = "plain"
+
+    def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
+        return normalize_preprocessing_mode(self.preprocessing_mode)
 
 
 @dataclass(frozen=True, slots=True)

@@ -37,6 +37,8 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
     repo.create_document = AsyncMock(return_value="doc-1")
     repo.add_knowledge_batch = AsyncMock(return_value=2)
     repo.update_document_status = AsyncMock()
+    repo.update_document_preprocessing_status = AsyncMock()
+    repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
 
     chunker_factory = Mock(return_value=chunker)
     knowledge_repo_factory = Mock(return_value=repo)
@@ -54,7 +56,14 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
         logger=logger,
     )
 
-    assert result.to_dict() == {"message": "Uploaded 2 chunks", "chunks": 2}
+    assert result.to_dict() == {
+        "message": "Uploaded 2 chunks",
+        "chunks": 2,
+        "document_id": "doc-1",
+        "preprocessing_mode": "plain",
+        "preprocessing_status": "not_requested",
+        "structured_entries": 0,
+    }
     knowledge_repo_factory.assert_called_once_with(pool)
     repo.create_document.assert_awaited_once_with(
         project_id="project-1",
@@ -66,6 +75,11 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
         "project-1",
         [{"content": "first chunk"}, {"content": "second chunk"}],
         document_id="doc-1",
+    )
+    repo.update_document_preprocessing_status.assert_awaited_once_with(
+        "doc-1",
+        mode="plain",
+        status="not_requested",
     )
     repo.update_document_status.assert_awaited_once_with("doc-1", "processed")
 
@@ -88,6 +102,8 @@ async def test_upload_marks_document_error_when_batch_processing_fails():
     repo.create_document = AsyncMock(return_value="doc-err")
     repo.add_knowledge_batch = AsyncMock(side_effect=RuntimeError("embed failed"))
     repo.update_document_status = AsyncMock()
+    repo.update_document_preprocessing_status = AsyncMock()
+    repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
 
     service = KnowledgeService(project_repo, user_repo, pool, "secret", FakeJwt)
 

@@ -2,45 +2,18 @@
 
 from typing import cast
 
-import httpx
-
 from src.application.dto.webhook_dto import WebhookAckDto
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
-from src.application.ports.telegram_port import TelegramClientPort
 from src.application.services.manager_bot_service import ManagerBotService
-from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.redis.cache_adapter import RedisCacheAdapter
+from src.infrastructure.telegram.http_client import HttpTelegramClient
 from src.application.orchestration.conversation_orchestrator import (
     ConversationOrchestrator,
 )
 from src.infrastructure.redis.client import get_redis_client
 
 logger = get_logger(__name__)
-
-
-class _HttpTelegramClient(TelegramClientPort):
-    async def post_json(
-        self,
-        bot_token: str,
-        method: str,
-        payload: JsonObject,
-    ) -> JsonObject:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://api.telegram.org/bot{bot_token}/{method}",
-                json=payload,
-            )
-
-        try:
-            body = response.json()
-        except ValueError:
-            return {"ok": response.is_success, "status_code": response.status_code}
-
-        if isinstance(body, dict):
-            return {str(key): value for key, value in body.items()}
-
-        return {"ok": response.is_success, "status_code": response.status_code}
 
 
 async def process_manager_update(
@@ -59,7 +32,8 @@ async def process_manager_update(
         RedisCacheAdapter(redis_client),
         bot_token,
         project_id,
-        telegram_client=_HttpTelegramClient(),
+        telegram_client=HttpTelegramClient(),
+        logger=logger,
     )
     manager_user_id_value = update.get("_manager_user_id")
     manager_user_id = str(manager_user_id_value) if manager_user_id_value else None

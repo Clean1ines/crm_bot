@@ -6,6 +6,7 @@ Clean Architecture contract:
 - Repository read methods do not return dict/Mapping compatibility objects.
 """
 
+import json
 from typing import Protocol
 
 import asyncpg
@@ -15,6 +16,8 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
 )
+from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.infrastructure.llm.embedding_service import embed_batch, embed_text
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
@@ -48,6 +51,12 @@ def _normalize_timestamp(value: object) -> str | None:
     if hasattr(value, "isoformat"):
         return str(value.isoformat())
     return str(value)
+
+
+def _jsonb_array(value: object) -> str:
+    if not isinstance(value, list):
+        value = []
+    return json.dumps(value, ensure_ascii=False)
 
 
 class KnowledgeRepository:
@@ -186,6 +195,7 @@ class KnowledgeRepository:
         chunks: list[dict[str, object]],
         document_id: str | None = None,
     ) -> int:
+        """Persist plain chunks using the legacy knowledge_base insert contract."""
         if not chunks:
             return 0
 
@@ -199,7 +209,6 @@ class KnowledgeRepository:
                     embedding_as_pg_vector = (
                         "[" + ",".join(str(x) for x in embedding) + "]"
                     )
-
                     await conn.execute(
                         """
                         INSERT INTO knowledge_base (project_id, document_id, content, embedding)
@@ -209,6 +218,64 @@ class KnowledgeRepository:
                         ensure_uuid(document_id) if document_id else None,
                         str(chunk["content"]),
                         embedding_as_pg_vector,
+                    )
+
+        return len(chunks)
+
+    async def add_structured_knowledge_batch(
+        self,
+        project_id: str,
+        chunks: list[JsonObject],
+        document_id: str | None = None,
+    ) -> int:
+        """Persist LLM-normalized structured knowledge entries."""
+        if not chunks:
+            return 0
+
+        texts = [
+            str(chunk.get("embedding_text") or chunk["content"]) for chunk in chunks
+        ]
+        embeddings = await embed_batch(texts)
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for index, chunk in enumerate(chunks):
+                    embedding = embeddings[index]
+                    embedding_as_pg_vector = (
+                        "[" + ",".join(str(x) for x in embedding) + "]"
+                    )
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_base (
+                            project_id,
+                            document_id,
+                            content,
+                            embedding,
+                            entry_type,
+                            title,
+                            source_excerpt,
+                            questions,
+                            synonyms,
+                            tags,
+                            embedding_text
+                        )
+                        VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
+                        """,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id) if document_id else None,
+                        str(chunk["content"]),
+                        embedding_as_pg_vector,
+                        str(chunk.get("entry_type") or "chunk"),
+                        str(chunk["title"]) if chunk.get("title") is not None else None,
+                        str(chunk["source_excerpt"])
+                        if chunk.get("source_excerpt") is not None
+                        else None,
+                        _jsonb_array(chunk.get("questions")),
+                        _jsonb_array(chunk.get("synonyms")),
+                        _jsonb_array(chunk.get("tags")),
+                        str(chunk["embedding_text"])
+                        if chunk.get("embedding_text") is not None
+                        else None,
                     )
 
         return len(chunks)
@@ -366,6 +433,41 @@ class KnowledgeRepository:
             """,
                 status,
                 error,
+                ensure_uuid(document_id),
+            )
+
+    async def update_document_preprocessing_status(
+        self,
+        document_id: str,
+        *,
+        mode: KnowledgePreprocessingMode,
+        status: str,
+        error: str | None = None,
+        model: str | None = None,
+        prompt_version: str | None = None,
+        metrics: JsonObject | None = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_documents
+                SET preprocessing_mode = $1,
+                    preprocessing_status = $2,
+                    preprocessing_error = $3,
+                    preprocessing_model = COALESCE($4, preprocessing_model),
+                    preprocessing_prompt_version = COALESCE($5, preprocessing_prompt_version),
+                    preprocessing_metrics = COALESCE($6::jsonb, preprocessing_metrics),
+                    updated_at = NOW()
+                WHERE id = $7
+                """,
+                mode,
+                status,
+                error,
+                model,
+                prompt_version,
+                json.dumps(metrics, ensure_ascii=False)
+                if metrics is not None
+                else None,
                 ensure_uuid(document_id),
             )
 

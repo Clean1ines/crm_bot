@@ -220,6 +220,46 @@ class TestKnowledgeRepository:
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
+    async def test_add_structured_knowledge_batch_success(
+        self, mock_embed_batch, knowledge_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        chunks = [
+            {
+                "content": "answer",
+                "entry_type": "faq",
+                "title": "Title",
+                "source_excerpt": "source",
+                "questions": ["question"],
+                "synonyms": ["synonym"],
+                "tags": ["tag"],
+                "embedding_text": "Title answer question",
+            }
+        ]
+        mock_embed_batch.return_value = [[0.1, 0.2]]
+
+        mock_transaction = AsyncMock()
+        mock_transaction.__aenter__.return_value = mock_pool.mock_conn
+        mock_transaction.__aexit__.return_value = None
+        mock_pool.mock_conn.transaction = MagicMock(return_value=mock_transaction)
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        result = await knowledge_repo.add_structured_knowledge_batch(
+            project_id,
+            chunks,
+            document_id,
+        )
+
+        assert result == 1
+        mock_embed_batch.assert_awaited_once_with(["Title answer question"])
+        executed_sql = mock_pool.mock_conn.execute.await_args.args[0]
+        assert "INSERT INTO knowledge_base" in executed_sql
+        assert "entry_type" in executed_sql
+        assert "embedding_text" in executed_sql
+
+    @pytest.mark.asyncio
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
     async def test_add_knowledge_batch_embed_batch_error(
         self, mock_embed_batch, knowledge_repo
     ):

@@ -44,6 +44,7 @@ from src.infrastructure.db.repositories.thread.runtime_state import (
     ThreadRuntimeStateRepository,
 )
 from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.telegram.http_client import HttpTelegramClient
 from src.tools import tool_registry
 from src.tools.builtins import (
     CRMCollectProfileTool,
@@ -142,6 +143,7 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
         event_repo=event_repo,
         tool_registry=tool_registry,
         memory_repo=memory_repo,
+        telegram_client=HttpTelegramClient(),
         logger=logger,
         agent_factory=create_agent,
     )

@@ -81,11 +81,32 @@ class FakeKnowledgeRepo:
     ) -> int:
         return len(chunks)
 
+    async def add_structured_knowledge_batch(
+        self,
+        project_id: str,
+        chunks: list[dict[str, object]],
+        document_id: str | None = None,
+    ) -> int:
+        return len(chunks)
+
     async def update_document_status(
         self,
         document_id: str,
         status: str,
         error: str | None = None,
+    ) -> None:
+        return None
+
+    async def update_document_preprocessing_status(
+        self,
+        document_id: str,
+        *,
+        mode: str,
+        status: str,
+        error: str | None = None,
+        model: str | None = None,
+        prompt_version: str | None = None,
+        metrics: dict[str, object] | None = None,
     ) -> None:
         return None
 

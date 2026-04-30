@@ -5,28 +5,42 @@ API endpoints for managing knowledge base (uploading documents).
 from typing import cast
 
 import jwt
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
-from src.domain.project_plane.json_types import JsonObject
+from src.application.dto.knowledge_dto import (
+    KnowledgePreviewRequestDto,
+    KnowledgeUploadRequestDto,
+)
 from src.application.ports.knowledge_port import (
     JwtDecoderPort,
     KnowledgeChunkerPort,
     KnowledgeDbPoolPort,
+    KnowledgePreprocessorPort,
     KnowledgeRepositoryPort,
 )
+from src.application.services.knowledge_service import KnowledgeService
+from src.domain.project_plane.json_types import JsonObject
+from src.infrastructure.config.settings import settings
+from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
+from src.infrastructure.db.repositories.user_repository import UserRepository
+from src.infrastructure.llm.chunker import ChunkerService
+from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
+from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
     get_pool,
     get_project_repo,
     get_user_repository,
 )
-from src.infrastructure.llm.chunker import ChunkerService
-from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
-from src.infrastructure.db.repositories.user_repository import UserRepository
-from src.infrastructure.logging.logger import get_logger
-from src.infrastructure.config.settings import settings
-from src.application.dto.knowledge_dto import KnowledgePreviewRequestDto
-from src.application.services.knowledge_service import KnowledgeService
 
 logger = get_logger(__name__)
 
@@ -62,6 +76,10 @@ def make_chunker() -> KnowledgeChunkerPort:
 
 def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
     return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
+
+
+def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:
+    return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
 
 
 @router.get("")
@@ -117,6 +135,7 @@ async def preview_knowledge(
 async def upload_knowledge(
     project_id: str,
     file: UploadFile = File(...),
+    preprocessing_mode: str = Form(default="plain"),
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
@@ -125,6 +144,12 @@ async def upload_knowledge(
     """
     Загружает текстовый, Markdown, JSON файл или PDF, разбивает на чанки,
     генерирует эмбеддинги и сохраняет в базу знаний проекта.
+
+    preprocessing_mode:
+    - plain: legacy chunk persistence, no LLM preprocessing
+    - faq: FAQ normalization
+    - price_list: price/menu/catalog normalization
+    - instruction: policy/procedure normalization
     """
     service = KnowledgeService(
         project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
@@ -133,7 +158,8 @@ async def upload_knowledge(
         file_content = await file.read()
     except Exception as exc:
         logger.error(f"Failed to read uploaded file: {exc}")
-        raise HTTPException(status_code=400, detail="Could not read file")
+        raise HTTPException(status_code=400, detail="Could not read file") from exc
+
     result = await service.upload(
         project_id,
         file.filename,
@@ -142,5 +168,9 @@ async def upload_knowledge(
         chunker_factory=make_chunker,
         knowledge_repo_factory=make_knowledge_repo,
         logger=logger,
+        upload_request=KnowledgeUploadRequestDto(
+            preprocessing_mode=preprocessing_mode,
+        ),
+        preprocessor_factory=make_knowledge_preprocessor,
     )
     return result.to_dict()
