@@ -36,15 +36,18 @@ from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
 from src.interfaces.http.dependencies import (
     get_pool,
     get_project_repo,
+    get_queue_repo,
     get_user_repository,
 )
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
+UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 
 
 class KnowledgePreviewRequestModel(BaseModel):
@@ -82,6 +85,21 @@ def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:
     return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
 
 
+async def _read_upload_bytes(file: UploadFile) -> bytearray:
+    buffer = bytearray()
+    max_bytes = settings.KNOWLEDGE_UPLOAD_MAX_BYTES
+    chunk_size = settings.KNOWLEDGE_UPLOAD_READ_CHUNK_BYTES
+
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            return buffer
+
+        buffer.extend(chunk)
+        if len(buffer) > max_bytes:
+            raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
+
+
 @router.get("")
 async def list_knowledge_documents(
     project_id: str,
@@ -112,6 +130,7 @@ async def preview_knowledge(
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
+    queue_repo=Depends(get_queue_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """
@@ -139,6 +158,7 @@ async def upload_knowledge(
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
+    queue_repo=Depends(get_queue_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """
@@ -155,8 +175,10 @@ async def upload_knowledge(
         project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
     )
     try:
-        file_content = await file.read()
+        file_content = await _read_upload_bytes(file)
     except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
         logger.error(f"Failed to read uploaded file: {exc}")
         raise HTTPException(status_code=400, detail="Could not read file") from exc
 
@@ -168,6 +190,8 @@ async def upload_knowledge(
         chunker_factory=make_chunker,
         knowledge_repo_factory=make_knowledge_repo,
         logger=logger,
+        queue_repo=queue_repo,
+        knowledge_upload_task_type=TASK_PROCESS_KNOWLEDGE_UPLOAD,
         upload_request=KnowledgeUploadRequestDto(
             preprocessing_mode=preprocessing_mode,
         ),

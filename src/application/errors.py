@@ -31,3 +31,40 @@ class ConflictError(ApplicationError):
 
 class InternalServiceError(ApplicationError):
     status_code = 500
+
+
+class EmbeddingProviderError(ApplicationError):
+    status_code = 503
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        provider: str,
+        task: str,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.provider = provider
+        self.task = task
+        self.model = model
+
+    @property
+    def retryable(self) -> bool:
+        return False
+
+
+class PermanentEmbeddingProviderError(EmbeddingProviderError):
+    """Configuration or provider response error that should not be retried."""
+
+
+class TransientEmbeddingProviderError(EmbeddingProviderError):
+    """Temporary provider/network error that may succeed on retry."""
+
+    @property
+    def retryable(self) -> bool:
+        return True
+
+
+class EmbeddingProviderDisabledError(PermanentEmbeddingProviderError):
+    """Embeddings are intentionally disabled by configuration."""

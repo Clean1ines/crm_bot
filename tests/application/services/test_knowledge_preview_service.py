@@ -62,7 +62,8 @@ class FakeLogger:
 
 class FakeKnowledgeRepo:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, int, bool]] = []
+        self.search_calls: list[tuple[str, str, int, bool]] = []
+        self.preview_calls: list[tuple[str, str, int]] = []
 
     async def create_document(
         self,
@@ -117,7 +118,26 @@ class FakeKnowledgeRepo:
         limit: int = 10,
         hybrid_fallback: bool = True,
     ) -> list[KnowledgeSearchResultView]:
-        self.calls.append((project_id, query, limit, hybrid_fallback))
+        self.search_calls.append((project_id, query, limit, hybrid_fallback))
+        return [
+            KnowledgeSearchResultView(
+                id="chunk-1",
+                content="Р”РѕСЃС‚Р°РІРєР° Р·Р°РЅРёРјР°РµС‚ 2-3 РґРЅСЏ.",
+                score=0.82,
+                method="hybrid",
+                document_id="doc-1",
+                source="delivery.md",
+                document_status="processed",
+            )
+        ]
+
+    async def preview_search(
+        self,
+        project_id: str,
+        query: str,
+        limit: int = 10,
+    ) -> list[KnowledgeSearchResultView]:
+        self.preview_calls.append((project_id, query, limit))
         return [
             KnowledgeSearchResultView(
                 id="chunk-1",
@@ -131,7 +151,7 @@ class FakeKnowledgeRepo:
         ]
 
     async def clear_project_knowledge(self, project_id: str) -> None:
-        self.calls.append((project_id, "clear", 0, False))
+        self.preview_calls.append((project_id, "clear", 0))
 
 
 @pytest.mark.asyncio
@@ -153,7 +173,8 @@ async def test_preview_query_uses_existing_search_without_generation() -> None:
         logger=FakeLogger(),
     )
 
-    assert repo.calls == [("project-1", "Сколько идёт доставка?", 5, True)]
+    assert repo.preview_calls == [("project-1", "Сколько идёт доставка?", 5)]
+    assert repo.search_calls == []
     assert result.best_result is not None
     assert result.best_result.content == "Доставка занимает 2-3 дня."
     assert result.best_result.source == "delivery.md"
@@ -178,7 +199,8 @@ async def test_preview_query_returns_empty_for_blank_question() -> None:
         logger=FakeLogger(),
     )
 
-    assert repo.calls == []
+    assert repo.preview_calls == []
+    assert repo.search_calls == []
     assert result.is_empty is True
     assert result.best_result is None
     assert result.top_results == []

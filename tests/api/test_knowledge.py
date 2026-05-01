@@ -8,8 +8,11 @@ from src.interfaces.http.app import app
 from src.interfaces.http.dependencies import (
     get_project_repo,
     get_pool,
+    get_queue_repo,
     get_user_repository,
 )
+from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
+from src.interfaces.http.knowledge import UPLOAD_TOO_LARGE_DETAIL
 
 
 TEST_USER_ID = "knowledge-user-id"
@@ -41,12 +44,22 @@ def mock_pool():
     return pool
 
 
+@pytest.fixture
+def mock_queue_repo():
+    repo = AsyncMock()
+    repo.enqueue = AsyncMock(return_value="job-1")
+    return repo
+
+
 @pytest.fixture(autouse=True)
-def override_dependencies(mock_project_repo, mock_pool, mock_user_repo):
+def override_dependencies(
+    mock_project_repo, mock_pool, mock_user_repo, mock_queue_repo
+):
     original_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
     app.dependency_overrides[get_pool] = lambda: mock_pool
     app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
+    app.dependency_overrides[get_queue_repo] = lambda: mock_queue_repo
     yield
     app.dependency_overrides.clear()
     app.dependency_overrides.update(original_overrides)
@@ -60,7 +73,9 @@ def client():
 class TestKnowledgeUpload:
     """Тесты для POST /api/projects/{project_id}/knowledge"""
 
-    def test_upload_success_txt(self, client, mock_project_repo, mock_pool):
+    def test_upload_success_txt(
+        self, client, mock_project_repo, mock_pool, mock_queue_repo
+    ):
         """Успешная загрузка .txt файла"""
         project_id = str(uuid4())
         mock_project_repo.project_exists.return_value = True
@@ -97,7 +112,7 @@ class TestKnowledgeUpload:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["message"] == "Uploaded 2 chunks"
+        assert data["message"] == "Queued 2 chunks for processing"
         assert data["chunks"] == 2
 
         mock_project_repo.project_exists.assert_awaited_once_with(project_id)
@@ -108,8 +123,16 @@ class TestKnowledgeUpload:
             file_size=len(b"Test content"),
             uploaded_by=TEST_USER_ID,
         )
-        mock_repo.add_knowledge_batch.assert_awaited_once_with(
-            project_id, chunks, document_id="doc-1"
+        mock_repo.update_document_status.assert_awaited_once_with("doc-1", "processing")
+        mock_queue_repo.enqueue.assert_awaited_once_with(
+            TASK_PROCESS_KNOWLEDGE_UPLOAD,
+            payload={
+                "project_id": project_id,
+                "document_id": "doc-1",
+                "file_name": "test.txt",
+                "preprocessing_mode": "plain",
+                "chunks": chunks,
+            },
         )
 
     def test_upload_success_pdf(self, client, mock_project_repo, mock_pool):
@@ -311,6 +334,24 @@ class TestKnowledgeUpload:
         assert response.status_code == 400
         assert response.json()["detail"] == "Could not read file"
         mock_logger.error.assert_called_once()
+
+    def test_upload_rejects_oversized_file(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+        oversized = b"a" * (8 * 1024 * 1024 + 1)
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            response = client.post(
+                f"/api/projects/{project_id}/knowledge",
+                files={"file": ("large.txt", oversized, "text/plain")},
+                headers={"Authorization": "Bearer valid-token"},
+            )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == UPLOAD_TOO_LARGE_DETAIL
 
     def test_upload_chunking_error(self, client, mock_project_repo):
         """Ошибка при разбиении на чанки"""

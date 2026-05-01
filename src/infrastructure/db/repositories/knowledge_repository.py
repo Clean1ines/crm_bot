@@ -7,6 +7,7 @@ Clean Architecture contract:
 """
 
 import json
+from collections.abc import Iterator
 from typing import Protocol
 
 import asyncpg
@@ -19,6 +20,7 @@ from src.domain.project_plane.knowledge_views import (
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.infrastructure.llm.embedding_service import embed_batch, embed_text
+from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
 
@@ -59,6 +61,17 @@ def _jsonb_array(value: object) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _pg_vector_text(embedding: list[float]) -> str:
+    return "[" + ",".join(str(x) for x in embedding) + "]"
+
+
+def _batched_chunks(
+    chunks: list[JsonObject], batch_size: int
+) -> Iterator[list[JsonObject]]:
+    for start in range(0, len(chunks), batch_size):
+        yield chunks[start : start + batch_size]
+
+
 class KnowledgeRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
@@ -77,8 +90,12 @@ class KnowledgeRepository:
         limit: int = 10,
         hybrid_fallback: bool = True,
     ) -> list[KnowledgeSearchResultView]:
+        if limit <= 0:
+            return []
+
         query_embedding = await embed_text(query)
         query_embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        project_uuid = ensure_uuid(project_id)
 
         async with self.pool.acquire() as conn:
             vector_results = await conn.fetch(
@@ -93,31 +110,31 @@ class KnowledgeRepository:
                 FROM knowledge_base AS kb
                 LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                 WHERE kb.project_id = $2
+                  AND (d.status = 'processed' OR d.status IS NULL)
                 ORDER BY kb.embedding <=> $1
                 LIMIT $3
                 """,
                 query_embedding_str,
-                ensure_uuid(project_id),
+                project_uuid,
                 limit * 2,
             )
 
-        vector_items: list[KnowledgeSearchResultView] = [
-            KnowledgeSearchResultView(
-                id=str(row["id"]),
-                content=str(row["content"]),
-                score=float(row["score"]),
-                method="vector",
-                document_id=_optional_row_text(row, "document_id"),
-                source=_optional_row_text(row, "source"),
-                document_status=_optional_row_text(row, "document_status"),
-            )
-            for row in vector_results
-        ]
+            vector_items: list[KnowledgeSearchResultView] = [
+                KnowledgeSearchResultView(
+                    id=str(row["id"]),
+                    content=str(row["content"]),
+                    score=float(row["score"]),
+                    method="vector",
+                    document_id=_optional_row_text(row, "document_id"),
+                    source=_optional_row_text(row, "source"),
+                    document_status=_optional_row_text(row, "document_status"),
+                )
+                for row in vector_results
+            ]
 
-        if not hybrid_fallback:
-            return vector_items[:limit]
+            if not hybrid_fallback:
+                return vector_items[:limit]
 
-        async with self.pool.acquire() as conn:
             fts_results = await conn.fetch(
                 """
                 SELECT
@@ -130,12 +147,13 @@ class KnowledgeRepository:
                 FROM knowledge_base AS kb
                 LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                 WHERE kb.project_id = $2
+                  AND (d.status = 'processed' OR d.status IS NULL)
                   AND kb.tsv @@ plainto_tsquery('russian', $1)
                 ORDER BY score DESC
                 LIMIT $3
                 """,
                 query,
-                ensure_uuid(project_id),
+                project_uuid,
                 limit * 2,
             )
 
@@ -189,36 +207,82 @@ class KnowledgeRepository:
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:limit]
 
+    async def preview_search(
+        self,
+        project_id: str,
+        query: str,
+        limit: int = 10,
+    ) -> list[KnowledgeSearchResultView]:
+        if limit <= 0:
+            return []
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    kb.id,
+                    kb.content,
+                    kb.document_id,
+                    d.file_name AS source,
+                    d.status AS document_status,
+                    ts_rank_cd(kb.tsv, plainto_tsquery('russian', $1)) AS score
+                FROM knowledge_documents AS d
+                JOIN knowledge_base AS kb ON kb.document_id = d.id
+                WHERE d.project_id = $2
+                  AND d.status = 'processed'
+                  AND kb.tsv @@ plainto_tsquery('russian', $1)
+                ORDER BY score DESC
+                LIMIT $3
+                """,
+                query,
+                ensure_uuid(project_id),
+                limit,
+            )
+
+        results = [
+            KnowledgeSearchResultView(
+                id=str(row["id"]),
+                content=str(row["content"]),
+                score=float(row["score"])
+                + self._keyword_overlap(query, str(row["content"])) * 0.15,
+                method="fts",
+                document_id=_optional_row_text(row, "document_id"),
+                source=_optional_row_text(row, "source"),
+                document_status=_optional_row_text(row, "document_status"),
+            )
+            for row in rows
+        ]
+        results.sort(key=lambda item: item.score, reverse=True)
+        return results
+
     async def add_knowledge_batch(
         self,
         project_id: str,
-        chunks: list[dict[str, object]],
+        chunks: list[JsonObject],
         document_id: str | None = None,
     ) -> int:
         """Persist plain chunks using the legacy knowledge_base insert contract."""
         if not chunks:
             return 0
 
-        texts = [str(chunk["content"]) for chunk in chunks]
-        embeddings = await embed_batch(texts)
-
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                for index, chunk in enumerate(chunks):
-                    embedding = embeddings[index]
-                    embedding_as_pg_vector = (
-                        "[" + ",".join(str(x) for x in embedding) + "]"
-                    )
-                    await conn.execute(
-                        """
-                        INSERT INTO knowledge_base (project_id, document_id, content, embedding)
-                        VALUES ($1, $2, $3, $4::vector)
-                        """,
-                        ensure_uuid(project_id),
-                        ensure_uuid(document_id) if document_id else None,
-                        str(chunk["content"]),
-                        embedding_as_pg_vector,
-                    )
+                for batch in _batched_chunks(
+                    chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE
+                ):
+                    texts = [str(chunk["content"]) for chunk in batch]
+                    embeddings = await embed_batch(texts)
+                    for index, chunk in enumerate(batch):
+                        await conn.execute(
+                            """
+                            INSERT INTO knowledge_base (project_id, document_id, content, embedding)
+                            VALUES ($1, $2, $3, $4::vector)
+                            """,
+                            ensure_uuid(project_id),
+                            ensure_uuid(document_id) if document_id else None,
+                            str(chunk["content"]),
+                            _pg_vector_text(embeddings[index]),
+                        )
 
         return len(chunks)
 
@@ -232,51 +296,52 @@ class KnowledgeRepository:
         if not chunks:
             return 0
 
-        texts = [
-            str(chunk.get("embedding_text") or chunk["content"]) for chunk in chunks
-        ]
-        embeddings = await embed_batch(texts)
-
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                for index, chunk in enumerate(chunks):
-                    embedding = embeddings[index]
-                    embedding_as_pg_vector = (
-                        "[" + ",".join(str(x) for x in embedding) + "]"
-                    )
-                    await conn.execute(
-                        """
-                        INSERT INTO knowledge_base (
-                            project_id,
-                            document_id,
-                            content,
-                            embedding,
-                            entry_type,
-                            title,
-                            source_excerpt,
-                            questions,
-                            synonyms,
-                            tags,
-                            embedding_text
+                for batch in _batched_chunks(
+                    chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE
+                ):
+                    texts = [
+                        str(chunk.get("embedding_text") or chunk["content"])
+                        for chunk in batch
+                    ]
+                    embeddings = await embed_batch(texts)
+                    for index, chunk in enumerate(batch):
+                        await conn.execute(
+                            """
+                            INSERT INTO knowledge_base (
+                                project_id,
+                                document_id,
+                                content,
+                                embedding,
+                                entry_type,
+                                title,
+                                source_excerpt,
+                                questions,
+                                synonyms,
+                                tags,
+                                embedding_text
+                            )
+                            VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
+                            """,
+                            ensure_uuid(project_id),
+                            ensure_uuid(document_id) if document_id else None,
+                            str(chunk["content"]),
+                            _pg_vector_text(embeddings[index]),
+                            str(chunk.get("entry_type") or "chunk"),
+                            str(chunk["title"])
+                            if chunk.get("title") is not None
+                            else None,
+                            str(chunk["source_excerpt"])
+                            if chunk.get("source_excerpt") is not None
+                            else None,
+                            _jsonb_array(chunk.get("questions")),
+                            _jsonb_array(chunk.get("synonyms")),
+                            _jsonb_array(chunk.get("tags")),
+                            str(chunk["embedding_text"])
+                            if chunk.get("embedding_text") is not None
+                            else None,
                         )
-                        VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
-                        """,
-                        ensure_uuid(project_id),
-                        ensure_uuid(document_id) if document_id else None,
-                        str(chunk["content"]),
-                        embedding_as_pg_vector,
-                        str(chunk.get("entry_type") or "chunk"),
-                        str(chunk["title"]) if chunk.get("title") is not None else None,
-                        str(chunk["source_excerpt"])
-                        if chunk.get("source_excerpt") is not None
-                        else None,
-                        _jsonb_array(chunk.get("questions")),
-                        _jsonb_array(chunk.get("synonyms")),
-                        _jsonb_array(chunk.get("tags")),
-                        str(chunk["embedding_text"])
-                        if chunk.get("embedding_text") is not None
-                        else None,
-                    )
 
         return len(chunks)
 
@@ -468,6 +533,13 @@ class KnowledgeRepository:
                 json.dumps(metrics, ensure_ascii=False)
                 if metrics is not None
                 else None,
+                ensure_uuid(document_id),
+            )
+
+    async def delete_document_chunks(self, document_id: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM knowledge_base WHERE document_id = $1",
                 ensure_uuid(document_id),
             )
 

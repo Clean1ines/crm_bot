@@ -69,6 +69,37 @@ def request_shutdown(shutdown_event: asyncio.Event) -> None:
     shutdown_event.set()
 
 
+async def _run_configured_worker_loops(
+    *,
+    queue_repo: QueueRepository,
+    dispatcher: JobDispatcher,
+    shutdown_event: asyncio.Event,
+) -> None:
+    worker_count = settings.WORKER_CONCURRENCY
+    tasks = [
+        asyncio.create_task(
+            run_worker_loop(
+                queue_repo=queue_repo,
+                dispatcher=dispatcher,
+                shutdown_event=shutdown_event,
+                worker_id=f"worker-{index + 1}",
+                idle_sleep_seconds=settings.WORKER_IDLE_SLEEP_SECONDS,
+                error_sleep_seconds=settings.WORKER_ERROR_SLEEP_SECONDS,
+                stale_timeout_minutes=settings.WORKER_STALE_TIMEOUT_MINUTES,
+            )
+        )
+        for index in range(worker_count)
+    ]
+
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def worker_loop(pool: asyncpg.Pool) -> None:
     """
     Compatibility worker entrypoint.
@@ -91,7 +122,7 @@ async def worker_loop(pool: asyncpg.Pool) -> None:
         redis_getter=_get_notify_manager_redis,
     )
 
-    await run_worker_loop(
+    await _run_configured_worker_loops(
         queue_repo=queue_repo,
         dispatcher=dispatcher,
         shutdown_event=shutdown_event,
@@ -109,7 +140,12 @@ async def main() -> None:
     if not db_url:
         raise RuntimeError("DATABASE_URL not set")
 
-    pool = await asyncpg.create_pool(db_url, min_size=1, max_size=10)
+    pool = await asyncpg.create_pool(
+        db_url,
+        min_size=settings.WORKER_DB_POOL_MIN_SIZE,
+        max_size=settings.WORKER_DB_POOL_MAX_SIZE,
+        command_timeout=settings.DB_COMMAND_TIMEOUT,
+    )
     try:
         queue_repo = QueueRepository(pool)
         thread_read_repo = ThreadReadRepository(pool)
@@ -125,7 +161,7 @@ async def main() -> None:
             redis_getter=_get_notify_manager_redis,
         )
 
-        await run_worker_loop(
+        await _run_configured_worker_loops(
             queue_repo=queue_repo,
             dispatcher=dispatcher,
             shutdown_event=shutdown_event,

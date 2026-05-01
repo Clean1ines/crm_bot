@@ -125,6 +125,7 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 data.get("default_timezone"),
                 data.get("system_prompt_override"),
             )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def update_project_policies(
         self, project_id: ProjectId, data: JsonMap
@@ -153,6 +154,7 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 data.get("response_policy_json"),
                 data.get("privacy_policy_json"),
             )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def update_project_limit_profile(
         self, project_id: ProjectId, data: JsonMap
@@ -181,3 +183,4 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 data.get("priority"),
                 data.get("fallback_model"),
             )
+        self._invalidate_project_runtime_cache(project_id)

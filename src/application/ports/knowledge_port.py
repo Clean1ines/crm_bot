@@ -68,6 +68,8 @@ class KnowledgeRepositoryPort(Protocol):
         document_id: str | None = None,
     ) -> int: ...
 
+    async def delete_document_chunks(self, document_id: str) -> None: ...
+
     async def update_document_status(
         self,
         document_id: str,
@@ -95,6 +97,13 @@ class KnowledgeRepositoryPort(Protocol):
         hybrid_fallback: bool = True,
     ) -> list[KnowledgeSearchResultView]: ...
 
+    async def preview_search(
+        self,
+        project_id: str,
+        query: str,
+        limit: int = 10,
+    ) -> list[KnowledgeSearchResultView]: ...
+
     async def clear_project_knowledge(self, project_id: str) -> None: ...
 
 
@@ -102,9 +111,18 @@ class KnowledgeRepositoryFactoryPort(Protocol):
     def __call__(self, pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort: ...
 
 
+class KnowledgeQueuePort(Protocol):
+    async def enqueue(
+        self,
+        task_type: str,
+        payload: JsonObject | None = None,
+        max_attempts: int = 3,
+    ) -> str: ...
+
+
 class KnowledgeChunkerPort(Protocol):
     async def process_file(
-        self, file_content: bytes, file_name: str
+        self, file_content: bytes | bytearray, file_name: str
     ) -> list[str | JsonObject]: ...
 
 

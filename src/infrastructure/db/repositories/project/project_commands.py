@@ -21,6 +21,7 @@ class ProjectCommandRepository(ProjectRepositoryBase):
                 enabled,
                 ensure_uuid(project_id),
             )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def get_is_pro_mode(self, project_id: ProjectId) -> bool:
         async with self.pool.acquire() as conn:
@@ -80,9 +81,11 @@ class ProjectCommandRepository(ProjectRepositoryBase):
                 name,
                 ensure_uuid(project_id),
             )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def delete_project(self, project_id: ProjectId) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
                 "DELETE FROM projects WHERE id = $1", ensure_uuid(project_id)
             )
+        self._invalidate_project_runtime_cache(project_id)

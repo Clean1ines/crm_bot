@@ -3,6 +3,7 @@ from collections.abc import Mapping, Sequence
 from src.application.dto.knowledge_dto import (
     KnowledgePreviewRequestDto,
     KnowledgePreviewResponseDto,
+    KnowledgeUploadJobPayloadDto,
     KnowledgeUploadRequestDto,
     KnowledgeUploadResultDto,
 )
@@ -18,6 +19,7 @@ from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     KnowledgePreprocessorFactoryPort,
     KnowledgeProjectAccessPort,
+    KnowledgeQueuePort,
     KnowledgeRepositoryFactoryPort,
     PlatformUserAdminPort,
 )
@@ -25,11 +27,8 @@ from src.application.ports.logger_port import LoggerPort
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
-    PREPROCESSING_STATUS_COMPLETED,
-    PREPROCESSING_STATUS_FAILED,
     PREPROCESSING_STATUS_NOT_REQUESTED,
     PREPROCESSING_STATUS_PROCESSING,
-    KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
 )
 
@@ -92,12 +91,14 @@ class KnowledgeService:
         self,
         project_id: str,
         file_name: str | None,
-        file_content: bytes,
+        file_content: bytes | bytearray,
         authorization: str | None,
         *,
         chunker_factory: KnowledgeChunkerFactoryPort,
         knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         logger: LoggerPort,
+        queue_repo: KnowledgeQueuePort,
+        knowledge_upload_task_type: str,
         upload_request: KnowledgeUploadRequestDto | None = None,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None = None,
     ) -> KnowledgeUploadResultDto:
@@ -133,32 +134,57 @@ class KnowledgeService:
                 message="No text extracted", chunks=0
             )
 
-        (
-            document_id,
-            preprocessing_status,
-            structured_entries,
-        ) = await self._create_and_process_document(
+        repo = knowledge_repo_factory(self.pool)
+        document_id = await repo.create_document(
             project_id=project_id,
             file_name=normalized_file_name,
             file_size=len(file_content),
             uploaded_by=uploaded_by,
-            chunks=chunks,
-            mode=mode,
-            knowledge_repo_factory=knowledge_repo_factory,
-            preprocessor_factory=preprocessor_factory,
-            logger=logger,
         )
 
-        logger.info(
-            f"Successfully uploaded {len(chunks)} chunks to project {project_id}"
+        await repo.update_document_status(document_id, "processing")
+
+        if mode != MODE_PLAIN:
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_PROCESSING,
+            )
+
+        job_payload = KnowledgeUploadJobPayloadDto(
+            project_id=project_id,
+            document_id=document_id,
+            file_name=normalized_file_name,
+            preprocessing_mode=mode,
+            chunks=chunks,
         )
+
+        try:
+            await queue_repo.enqueue(
+                knowledge_upload_task_type,
+                payload=job_payload.to_dict(),
+            )
+        except Exception as exc:
+            logger.exception(
+                "Knowledge upload enqueue failed",
+                extra={"project_id": project_id, "document_id": document_id},
+            )
+            await repo.update_document_status(document_id, "error", str(exc))
+            raise
+
+        preprocessing_status = (
+            PREPROCESSING_STATUS_NOT_REQUESTED
+            if mode == MODE_PLAIN
+            else PREPROCESSING_STATUS_PROCESSING
+        )
+        logger.info("Knowledge upload queued", extra={"document_id": document_id})
         return KnowledgeUploadResultDto.create(
-            message=f"Uploaded {len(chunks)} chunks",
+            message=f"Queued {len(chunks)} chunks for processing",
             chunks=len(chunks),
             document_id=document_id,
             preprocessing_mode=mode,
             preprocessing_status=preprocessing_status,
-            structured_entries=structured_entries,
+            structured_entries=0,
         )
 
     async def preview_query(
@@ -178,11 +204,10 @@ class KnowledgeService:
             return KnowledgePreviewResponseDto.empty(query=query)
 
         repo = knowledge_repo_factory(self.pool)
-        results = await repo.search(
+        results = await repo.preview_search(
             project_id=project_id,
             query=query,
             limit=request.normalized_limit(),
-            hybrid_fallback=True,
         )
 
         logger.info(
@@ -218,7 +243,7 @@ class KnowledgeService:
 
     async def _extract_chunks(
         self,
-        file_content: bytes,
+        file_content: bytes | bytearray,
         file_name: str,
         *,
         chunker_factory: KnowledgeChunkerFactoryPort,
@@ -232,103 +257,6 @@ class KnowledgeService:
             raise ValidationError(str(exc)) from None
 
         return _normalize_chunks(raw_chunks)
-
-    async def _create_and_process_document(
-        self,
-        *,
-        project_id: str,
-        file_name: str,
-        file_size: int,
-        uploaded_by: str,
-        chunks: list[JsonObject],
-        mode: KnowledgePreprocessingMode,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
-        preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
-        logger: LoggerPort,
-    ) -> tuple[str, str, int]:
-        repo = knowledge_repo_factory(self.pool)
-        document_id = await repo.create_document(
-            project_id=project_id,
-            file_name=file_name,
-            file_size=file_size,
-            uploaded_by=uploaded_by,
-        )
-
-        try:
-            await repo.add_knowledge_batch(project_id, chunks, document_id=document_id)
-        except Exception as exc:
-            logger.exception(
-                "Knowledge upload processing failed",
-                extra={"project_id": project_id, "document_id": document_id},
-            )
-            await repo.update_document_status(document_id, "error", str(exc))
-            raise
-
-        if mode == MODE_PLAIN:
-            await repo.update_document_preprocessing_status(
-                document_id,
-                mode=mode,
-                status=PREPROCESSING_STATUS_NOT_REQUESTED,
-            )
-            await repo.update_document_status(document_id, "processed")
-            return str(document_id), PREPROCESSING_STATUS_NOT_REQUESTED, 0
-
-        if preprocessor_factory is None:
-            raise ValidationError(
-                "Knowledge preprocessing adapter is required for non-plain upload modes"
-            )
-
-        await repo.update_document_preprocessing_status(
-            document_id,
-            mode=mode,
-            status=PREPROCESSING_STATUS_PROCESSING,
-        )
-
-        try:
-            result = await preprocessor_factory().preprocess(
-                mode=mode,
-                chunks=chunks,
-                file_name=file_name,
-            )
-            structured_chunks = result.to_chunks()
-            if structured_chunks:
-                await repo.add_structured_knowledge_batch(
-                    project_id,
-                    structured_chunks,
-                    document_id=document_id,
-                )
-            await repo.update_document_preprocessing_status(
-                document_id,
-                mode=mode,
-                status=PREPROCESSING_STATUS_COMPLETED,
-                model=result.model,
-                prompt_version=result.prompt_version,
-                metrics=result.metrics,
-            )
-            await repo.update_document_status(document_id, "processed")
-            return (
-                str(document_id),
-                PREPROCESSING_STATUS_COMPLETED,
-                len(structured_chunks),
-            )
-        except Exception as exc:
-            logger.warning(
-                "Knowledge preprocessing failed; original chunks remain usable",
-                extra={
-                    "project_id": project_id,
-                    "document_id": document_id,
-                    "mode": mode,
-                    "error_type": type(exc).__name__,
-                },
-            )
-            await repo.update_document_preprocessing_status(
-                document_id,
-                mode=mode,
-                status=PREPROCESSING_STATUS_FAILED,
-                error=str(exc)[:1000],
-            )
-            await repo.update_document_status(document_id, "processed")
-            return str(document_id), PREPROCESSING_STATUS_FAILED, 0
 
 
 def _extract_bearer_token(authorization: str | None) -> str:

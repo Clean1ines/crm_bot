@@ -60,8 +60,8 @@ class TestKnowledgeRepository:
         # Embedding call
         mock_embed_text.assert_awaited_once_with(query)
 
-        # acquire called twice
-        assert mock_pool.acquire.call_count == 2
+        # Both vector and FTS queries now share a single acquired connection.
+        assert mock_pool.acquire.call_count == 1
 
         # First fetch (vector)
         vector_sql = """
@@ -75,6 +75,7 @@ class TestKnowledgeRepository:
                 FROM knowledge_base AS kb
                 LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                 WHERE kb.project_id = $2
+                  AND (d.status = 'processed' OR d.status IS NULL)
                 ORDER BY kb.embedding <=> $1
                 LIMIT $3
                 """
@@ -94,6 +95,7 @@ class TestKnowledgeRepository:
                 FROM knowledge_base AS kb
                 LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                 WHERE kb.project_id = $2
+                  AND (d.status = 'processed' OR d.status IS NULL)
                   AND kb.tsv @@ plainto_tsquery('russian', $1)
                 ORDER BY score DESC
                 LIMIT $3
@@ -143,12 +145,9 @@ class TestKnowledgeRepository:
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
     async def test_search_limit_zero(self, mock_embed_text, knowledge_repo, mock_pool):
-        mock_embed_text.return_value = [0.1]
-        mock_pool.mock_conn.fetch = AsyncMock(
-            side_effect=asyncpg.exceptions.InvalidParameterValueError("LIMIT 0")
-        )
-        with pytest.raises(asyncpg.exceptions.InvalidParameterValueError):
-            await knowledge_repo.search(str(uuid4()), "q", limit=0)
+        result = await knowledge_repo.search(str(uuid4()), "q", limit=0)
+        assert result == []
+        mock_embed_text.assert_not_awaited()
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
@@ -159,6 +158,44 @@ class TestKnowledgeRepository:
         mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
         result = await knowledge_repo.search(str(uuid4()), "q")
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_preview_search_uses_fts_only(self, knowledge_repo, mock_pool):
+        project_id = str(uuid4())
+        rows = [
+            {
+                "id": uuid4(),
+                "content": "Доставка занимает 2-3 дня",
+                "document_id": uuid4(),
+                "source": "delivery.md",
+                "document_status": "processed",
+                "score": 0.9,
+            }
+        ]
+        mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
+
+        result = await knowledge_repo.preview_search(
+            project_id,
+            "доставка",
+            limit=5,
+        )
+
+        assert len(result) == 1
+        assert result[0].method == "fts"
+        assert result[0].source == "delivery.md"
+        mock_pool.mock_conn.fetch.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
+    async def test_preview_search_does_not_request_embeddings(
+        self, mock_embed_text, knowledge_repo, mock_pool
+    ):
+        mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
+
+        result = await knowledge_repo.preview_search(str(uuid4()), "q", limit=5)
+
+        assert result == []
+        mock_embed_text.assert_not_awaited()
 
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_text")
@@ -198,20 +235,52 @@ class TestKnowledgeRepository:
         assert mock_pool.acquire.call_count == 1
         mock_embed_batch.assert_awaited_once_with(["chunk1", "chunk2"])
         mock_pool.mock_conn.transaction.assert_called_once()
-
-        expected_sql = """
-                        INSERT INTO knowledge_base (project_id, document_id, content, embedding)
-                        VALUES ($1, $2, $3, $4::vector)
-                        """
         assert mock_pool.mock_conn.execute.call_count == len(chunks)
-        # Check first call parameters
-        mock_pool.mock_conn.execute.assert_any_call(
-            expected_sql, UUID(project_id), UUID(document_id), "chunk1", ANY
+        execute_calls = mock_pool.mock_conn.execute.await_args_list
+        assert all(
+            "INSERT INTO knowledge_base" in call_args.args[0]
+            for call_args in execute_calls
         )
-        mock_pool.mock_conn.execute.assert_any_call(
-            expected_sql, UUID(project_id), UUID(document_id), "chunk2", ANY
+        assert execute_calls[0].args[1:] == (
+            UUID(project_id),
+            UUID(document_id),
+            "chunk1",
+            ANY,
+        )
+        assert execute_calls[1].args[1:] == (
+            UUID(project_id),
+            UUID(document_id),
+            "chunk2",
+            ANY,
         )
         assert result == len(chunks)
+
+    @pytest.mark.asyncio
+    @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
+    async def test_add_knowledge_batch_splits_large_embedding_batches(
+        self, mock_embed_batch, knowledge_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        chunks = [{"content": f"chunk-{index}"} for index in range(35)]
+        mock_embed_batch.side_effect = [
+            [[0.1, 0.2] for _ in range(32)],
+            [[0.3, 0.4] for _ in range(3)],
+        ]
+
+        mock_transaction = AsyncMock()
+        mock_transaction.__aenter__.return_value = mock_pool.mock_conn
+        mock_transaction.__aexit__.return_value = None
+        mock_pool.mock_conn.transaction = MagicMock(return_value=mock_transaction)
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        result = await knowledge_repo.add_knowledge_batch(project_id, chunks)
+
+        assert result == len(chunks)
+        assert mock_embed_batch.await_args_list == [
+            call([f"chunk-{index}" for index in range(32)]),
+            call([f"chunk-{index}" for index in range(32, 35)]),
+        ]
+        assert mock_pool.mock_conn.execute.await_count == len(chunks)
 
     @pytest.mark.asyncio
     async def test_add_knowledge_batch_empty_chunks(self, knowledge_repo):
@@ -261,9 +330,13 @@ class TestKnowledgeRepository:
     @pytest.mark.asyncio
     @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
     async def test_add_knowledge_batch_embed_batch_error(
-        self, mock_embed_batch, knowledge_repo
+        self, mock_embed_batch, knowledge_repo, mock_pool
     ):
         mock_embed_batch.side_effect = ValueError("embed batch failed")
+        mock_transaction = AsyncMock()
+        mock_transaction.__aenter__.return_value = mock_pool.mock_conn
+        mock_transaction.__aexit__.return_value = None
+        mock_pool.mock_conn.transaction = MagicMock(return_value=mock_transaction)
         with pytest.raises(ValueError):
             await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "x"}])
 

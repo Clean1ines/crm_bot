@@ -1,5 +1,7 @@
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
@@ -39,6 +41,68 @@ class KnowledgeUploadResultDto:
     def to_dict(self) -> dict[str, object]:
         payload = asdict(self)
         return {key: value for key, value in payload.items() if value is not None}
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeUploadJobPayloadDto:
+    project_id: str
+    document_id: str
+    file_name: str
+    preprocessing_mode: str
+    chunks: list[JsonObject]
+
+    def to_dict(self) -> JsonObject:
+        return {
+            "project_id": self.project_id,
+            "document_id": self.document_id,
+            "file_name": self.file_name,
+            "preprocessing_mode": self.preprocessing_mode,
+            "chunks": json_value_from_unknown(self.chunks),
+        }
+
+    def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
+        return normalize_preprocessing_mode(self.preprocessing_mode)
+
+    @classmethod
+    def from_mapping(
+        cls, payload: Mapping[str, object]
+    ) -> "KnowledgeUploadJobPayloadDto":
+        project_id = str(payload.get("project_id") or "").strip()
+        document_id = str(payload.get("document_id") or "").strip()
+        file_name = str(payload.get("file_name") or "").strip()
+        preprocessing_mode = str(payload.get("preprocessing_mode") or "").strip()
+        raw_chunks = payload.get("chunks")
+
+        if not project_id:
+            raise ValueError("knowledge upload payload missing project_id")
+        if not document_id:
+            raise ValueError("knowledge upload payload missing document_id")
+        if not file_name:
+            raise ValueError("knowledge upload payload missing file_name")
+        if not preprocessing_mode:
+            raise ValueError("knowledge upload payload missing preprocessing_mode")
+        if not isinstance(raw_chunks, list):
+            raise ValueError("knowledge upload payload chunks must be a list")
+
+        chunks: list[JsonObject] = []
+        for item in raw_chunks:
+            if not isinstance(item, Mapping):
+                raise ValueError("knowledge upload payload chunk must be an object")
+            chunk = {
+                str(key): json_value_from_unknown(value) for key, value in item.items()
+            }
+            content = str(chunk.get("content") or "").strip()
+            if not content:
+                raise ValueError("knowledge upload payload chunk missing content")
+            chunks.append(chunk)
+
+        return cls(
+            project_id=project_id,
+            document_id=document_id,
+            file_name=file_name,
+            preprocessing_mode=preprocessing_mode,
+            chunks=chunks,
+        )
 
 
 @dataclass(frozen=True, slots=True)

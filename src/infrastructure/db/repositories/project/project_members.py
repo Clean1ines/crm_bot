@@ -106,6 +106,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                 project_uuid,
                 user_id,
             )
+        self._invalidate_project_runtime_cache(project_id)
 
         return ManagerMembershipMutationView(
             status="added",
@@ -132,6 +133,7 @@ class ProjectMemberRepository(ProjectRepositoryBase):
                 ensure_uuid(project_id),
                 int(manager_chat_id),
             )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def resolve_manager_user_id_by_telegram(
         self,

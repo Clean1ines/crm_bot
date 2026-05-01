@@ -14,6 +14,11 @@ class ProjectQueryRepository(ProjectRepositoryBase):
     async def get_project_settings(
         self, project_id: ProjectId
     ) -> ProjectRuntimeSettingsView:
+        cache_key = self._canonical_project_cache_key(project_id)
+        cached_settings = self._get_project_settings_cache_entry(cache_key)
+        if cached_settings is not None:
+            return cached_settings
+
         logger.info("Fetching project settings", extra={"project_id": str(project_id)})
 
         async with self.pool.acquire() as conn:
@@ -32,7 +37,9 @@ class ProjectQueryRepository(ProjectRepositoryBase):
                 logger.warning(
                     "Project not found", extra={"project_id": str(project_id)}
                 )
-                return ProjectRuntimeSettingsView.empty()
+                empty_settings = ProjectRuntimeSettingsView.empty()
+                self._set_project_settings_cache_entry(cache_key, empty_settings)
+                return empty_settings
 
             project_settings = dict(row)
             project_settings["bot_token"] = self._decrypt_if_present(
@@ -63,9 +70,11 @@ class ProjectQueryRepository(ProjectRepositoryBase):
             for r in manager_rows
             if r.get("manager_chat_id") is not None or r.get("telegram_id") is not None
         ]
-        return ProjectRuntimeSettingsView.from_record(
+        settings_view = ProjectRuntimeSettingsView.from_record(
             project_settings, manager_targets=targets
         )
+        self._set_project_settings_cache_entry(cache_key, settings_view)
+        return settings_view
 
     async def get_all_projects(self) -> list[ProjectSummaryView]:
         async with self.pool.acquire() as conn:
