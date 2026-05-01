@@ -23,7 +23,7 @@ interface Document {
   id: string;
   file_name: string;
   file_size: number;
-  status: 'pending' | 'processed' | 'error';
+  status: 'pending' | 'processing' | 'processed' | 'error';
   chunk_count: number;
   created_at: string;
 }
@@ -90,6 +90,12 @@ export const KnowledgePage: React.FC = () => {
       return list as Document[];
     },
     enabled: !!projectId,
+    refetchInterval: (query) => {
+      const docs = Array.isArray(query.state.data) ? query.state.data as Document[] : [];
+      return docs.some((doc) => doc.status === 'pending' || doc.status === 'processing')
+        ? 5000
+        : false;
+    },
   });
 
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
@@ -109,7 +115,7 @@ export const KnowledgePage: React.FC = () => {
       return await response.json();
     },
     onSuccess: async () => {
-      toast.success('Документ успешно загружен и отправлен на обработку');
+      toast.success('Документ принят и поставлен в очередь на обработку');
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
     },
     onError: (err: unknown) => {
@@ -199,6 +205,31 @@ export const KnowledgePage: React.FC = () => {
   ));
 
   const previewResult = previewMutation.data;
+
+  const getStatusBadge = (status: Document['status']) => {
+    if (status === 'processed') {
+      return {
+        label: 'Обработан',
+        className: 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]',
+      };
+    }
+    if (status === 'error') {
+      return {
+        label: 'Ошибка',
+        className: 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]',
+      };
+    }
+    if (status === 'processing') {
+      return {
+        label: 'Обрабатывается',
+        className: 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]',
+      };
+    }
+    return {
+      label: 'В очереди',
+      className: 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]',
+    };
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500">
@@ -337,48 +368,48 @@ export const KnowledgePage: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
-          {filteredDocuments.map((doc) => (
-            <div
-              key={doc.id}
-              className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
-            >
-              <div className="mb-4 flex items-start justify-between">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
-                  <FileText className="h-5 w-5" />
-                </div>
-                <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                  <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                  <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
-                    <ExternalLink className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+          {filteredDocuments.map((doc) => {
+            const statusBadge = getStatusBadge(doc.status);
 
-              <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
-                {doc.file_name}
-              </h4>
-              <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-                <span>{formatSize(doc.file_size)}</span>
-                <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
-                <span>{doc.chunk_count} фрагментов</span>
-              </div>
+            return (
+              <div
+                key={doc.id}
+                className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
+              >
+                <div className="mb-4 flex items-start justify-between">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                    <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                    <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
+                      <ExternalLink className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
 
-              <div className="flex items-center justify-between">
-                <span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-                  doc.status === 'processed'
-                    ? 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]'
-                    : 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]'
-                }`}>
-                  {doc.status === 'processed' ? 'Обработан' : 'В очереди'}
-                </span>
-                <span className="text-[10px] text-[var(--text-muted)]">
-                  {new Date(doc.created_at).toLocaleDateString()}
-                </span>
+                <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
+                  {doc.file_name}
+                </h4>
+                <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+                  <span>{formatSize(doc.file_size)}</span>
+                  <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
+                  <span>{doc.chunk_count} фрагментов</span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadge.className}`}>
+                    {statusBadge.label}
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    {new Date(doc.created_at).toLocaleDateString()}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

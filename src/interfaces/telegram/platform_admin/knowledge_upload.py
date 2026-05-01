@@ -8,7 +8,6 @@ from telegram import InlineKeyboardMarkup
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.llm.chunker import ChunkerService
-from src.infrastructure.llm.embedding_service import embed_text
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.telegram.platform_admin.handlers import (
     _clear_state,
@@ -112,29 +111,16 @@ async def _chunk_document(file_id: str, filename: str) -> list[str]:
     return await chunker.process_file(file_bytes, filename)
 
 
-async def _build_embeddings(chunks: list[str]) -> list[list[float]]:
-    embeddings: list[list[float]] = []
-    for index, chunk in enumerate(chunks):
-        embeddings.append(await embed_text(chunk))
-        if index % 10 == 0:
-            logger.debug("Embedding progress", extra={"processed": index})
-    return embeddings
-
-
 async def _store_knowledge(
     *,
     pool: object,
     project_id: str,
     chunks: list[str],
-    embeddings: list[list[float]],
 ) -> None:
     repo = KnowledgeRepository(pool)
     await repo.add_knowledge_batch(
         project_id,
-        [
-            {"content": chunk, "embedding": embedding}
-            for chunk, embedding in zip(chunks, embeddings, strict=True)
-        ],
+        [{"content": chunk} for chunk in chunks],
     )
 
 
@@ -209,12 +195,10 @@ async def handle_knowledge_upload(
             logger.warning("No chunks generated", extra={"filename": filename})
             return _no_chunks_response()
 
-        embeddings = await _build_embeddings(chunks)
         await _store_knowledge(
             pool=pool,
             project_id=project_id,
             chunks=chunks,
-            embeddings=embeddings,
         )
 
         logger.info(

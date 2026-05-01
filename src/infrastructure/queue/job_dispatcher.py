@@ -12,6 +12,9 @@ from src.infrastructure.queue.handlers.metrics import (
     handle_aggregate_metrics,
     handle_update_metrics,
 )
+from src.infrastructure.queue.handlers.knowledge_upload import (
+    handle_process_knowledge_upload,
+)
 from src.infrastructure.queue.handlers.notify_manager import (
     RedisGetter,
     handle_notify_manager,
@@ -20,6 +23,7 @@ from src.infrastructure.queue.job_exceptions import PermanentJobError
 from src.infrastructure.queue.job_types import (
     TASK_AGGREGATE_METRICS,
     TASK_NOTIFY_MANAGER,
+    TASK_PROCESS_KNOWLEDGE_UPLOAD,
     TASK_UPDATE_METRICS,
 )
 from src.infrastructure.queue.telegram_sender import TelegramSender
@@ -61,6 +65,13 @@ class JobDispatcher:
             await handle_aggregate_metrics(
                 job,
                 metrics_repo=self.metrics_repo,
+            )
+            return
+
+        if task_type == TASK_PROCESS_KNOWLEDGE_UPLOAD:
+            await handle_process_knowledge_upload(
+                job,
+                db_pool=self.db_pool,
             )
             return
 

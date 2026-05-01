@@ -19,7 +19,7 @@ class ChunkerService:
         self.chunk_size = chunk_size
         self.overlap = overlap
 
-    def extract_text_from_pdf(self, file_bytes: bytes) -> str:
+    def extract_text_from_pdf(self, file_bytes: bytes | bytearray) -> str:
         text = ""
         try:
             from PyPDF2 import PdfReader
@@ -35,7 +35,7 @@ class ChunkerService:
 
         return self._clean_text(text)
 
-    def extract_text_from_json(self, file_bytes: bytes) -> str:
+    def extract_text_from_json(self, file_bytes: bytes | bytearray) -> str:
         try:
             payload = json.loads(file_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -158,7 +158,9 @@ class ChunkerService:
     def _non_empty_chunks(self, chunks: list[str]) -> list[str]:
         return [chunk.strip() for chunk in chunks if chunk.strip()]
 
-    async def process_file(self, file_bytes: bytes, filename: str) -> list[str]:
+    async def process_file(
+        self, file_bytes: bytes | bytearray, filename: str
+    ) -> list[str]:
         filename_lower = filename.lower()
 
         if filename_lower.endswith((".txt", ".md")):

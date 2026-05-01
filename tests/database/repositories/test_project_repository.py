@@ -30,6 +30,21 @@ def project_repo(mock_pool):
     return ProjectRepository(mock_pool)
 
 
+@pytest.fixture(autouse=True)
+def clear_project_repository_caches():
+    ProjectRepository._bot_token_cache.clear()
+    ProjectRepository._manager_bot_token_cache.clear()
+    ProjectRepository._webhook_secret_cache.clear()
+    ProjectRepository._manager_webhook_secret_cache.clear()
+    ProjectRepository._project_settings_cache.clear()
+    yield
+    ProjectRepository._bot_token_cache.clear()
+    ProjectRepository._manager_bot_token_cache.clear()
+    ProjectRepository._webhook_secret_cache.clear()
+    ProjectRepository._manager_webhook_secret_cache.clear()
+    ProjectRepository._project_settings_cache.clear()
+
+
 class TestProjectRepository:
     def test_init(self, project_repo, mock_pool):
         assert project_repo.pool is mock_pool
@@ -126,6 +141,23 @@ class TestProjectRepository:
         assert token == "decrypted_token"
 
     @pytest.mark.asyncio
+    async def test_get_bot_token_uses_cache_on_repeat(self, project_repo, mock_pool):
+        project_id = str(uuid4())
+        mock_pool.mock_conn.fetchval = AsyncMock(return_value="encrypted_token")
+
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            return_value="decrypted_token",
+        ) as decrypt_mock:
+            first = await project_repo.get_bot_token(project_id)
+            second = await project_repo.get_bot_token(project_id)
+
+        assert first == "decrypted_token"
+        assert second == "decrypted_token"
+        mock_pool.mock_conn.fetchval.assert_awaited_once()
+        decrypt_mock.assert_called_once_with("encrypted_token")
+
+    @pytest.mark.asyncio
     async def test_get_bot_token_none(self, project_repo, mock_pool):
         mock_pool.mock_conn.fetchval = AsyncMock(return_value=None)
 
@@ -169,6 +201,28 @@ class TestProjectRepository:
         assert args[1:] == (None, None, UUID(project_id))
 
     @pytest.mark.asyncio
+    async def test_set_bot_token_invalidates_cached_runtime_values(
+        self, project_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        fetchval_values = ["encrypted_old", "encrypted_new"]
+        mock_pool.mock_conn.fetchval = AsyncMock(side_effect=fetchval_values)
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            side_effect=["old_token", "new_token"],
+        ) as decrypt_mock:
+            first = await project_repo.get_bot_token(project_id)
+            await project_repo.set_bot_token(project_id, None)
+            second = await project_repo.get_bot_token(project_id)
+
+        assert first == "old_token"
+        assert second == "new_token"
+        assert mock_pool.mock_conn.fetchval.await_count == 2
+        assert decrypt_mock.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_get_manager_bot_token_success(self, project_repo, mock_pool):
         project_id = str(uuid4())
         mock_pool.mock_conn.fetchval = AsyncMock(return_value="encrypted")
@@ -180,6 +234,79 @@ class TestProjectRepository:
             token = await project_repo.get_manager_bot_token(project_id)
 
         assert token == "decrypted"
+
+    @pytest.mark.asyncio
+    async def test_get_project_settings_uses_cache_on_repeat(
+        self, project_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        row = {
+            "system_prompt": "prompt",
+            "bot_token": "encrypted_token",
+            "webhook_url": "https://example.com",
+            "manager_bot_token": "encrypted_manager_token",
+            "webhook_secret": "secret",
+            "is_pro_mode": True,
+            "client_bot_username": "client_bot",
+            "manager_bot_username": "manager_bot",
+        }
+        manager_rows = [{"manager_chat_id": "123"}]
+
+        mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
+        mock_pool.mock_conn.fetch = AsyncMock(return_value=manager_rows)
+
+        with patch(
+            "src.infrastructure.db.repositories.project.base.decrypt_token",
+            side_effect=["decrypted_token", "decrypted_manager_token"],
+        ) as decrypt_mock:
+            first = await project_repo.get_project_settings(project_id)
+            second = await project_repo.get_project_settings(project_id)
+
+        assert first.to_record() == second.to_record()
+        mock_pool.mock_conn.fetchrow.assert_awaited_once()
+        mock_pool.mock_conn.fetch.assert_awaited_once()
+        assert decrypt_mock.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_update_project_settings_invalidates_cached_project_settings(
+        self, project_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        first_row = {
+            "system_prompt": "prompt-1",
+            "bot_token": None,
+            "webhook_url": None,
+            "manager_bot_token": None,
+            "webhook_secret": None,
+            "is_pro_mode": False,
+            "client_bot_username": None,
+            "manager_bot_username": None,
+        }
+        second_row = {
+            "system_prompt": "prompt-2",
+            "bot_token": None,
+            "webhook_url": None,
+            "manager_bot_token": None,
+            "webhook_secret": None,
+            "is_pro_mode": False,
+            "client_bot_username": None,
+            "manager_bot_username": None,
+        }
+
+        mock_pool.mock_conn.fetchrow = AsyncMock(side_effect=[first_row, second_row])
+        mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        first = await project_repo.get_project_settings(project_id)
+        await project_repo.update_project_settings(
+            project_id,
+            {"system_prompt_override": "updated prompt"},
+        )
+        second = await project_repo.get_project_settings(project_id)
+
+        assert first.system_prompt == "prompt-1"
+        assert second.system_prompt == "prompt-2"
+        assert mock_pool.mock_conn.fetchrow.await_count == 2
 
     @pytest.mark.asyncio
     async def test_get_manager_bot_token_none(self, project_repo, mock_pool):
