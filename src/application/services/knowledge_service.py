@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 
 from src.application.dto.knowledge_dto import (
     KnowledgePreviewRequestDto,
@@ -7,6 +8,7 @@ from src.application.dto.knowledge_dto import (
     KnowledgeUploadRequestDto,
     KnowledgeUploadResultDto,
 )
+from src.application.dto.model_usage_dto import ModelUsageSummaryDto
 from src.application.errors import (
     ForbiddenError,
     NotFoundError,
@@ -17,6 +19,7 @@ from src.application.ports.knowledge_port import (
     JwtDecoderPort,
     KnowledgeChunkerFactoryPort,
     KnowledgeDbPoolPort,
+    ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     KnowledgeProjectAccessPort,
     KnowledgeQueuePort,
@@ -31,6 +34,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
+from src.infrastructure.config.settings import settings
 
 
 BEARER_PREFIX = "Bearer "
@@ -233,6 +237,43 @@ class KnowledgeService:
             "Knowledge base cleared",
             extra={"project_id": project_id},
         )
+
+    async def usage(
+        self,
+        project_id: str,
+        authorization: str | None,
+        *,
+        model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
+    ) -> ModelUsageSummaryDto:
+        await self.require_access(project_id, authorization)
+        if not await self.project_repo.project_exists(project_id):
+            raise NotFoundError("Project not found")
+
+        monthly_budget_tokens = max(
+            int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET),
+            int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+        )
+        if not settings.MODEL_USAGE_COUNTER_ENABLED:
+            return ModelUsageSummaryDto.disabled(
+                monthly_budget_tokens=monthly_budget_tokens
+            )
+
+        now = datetime.now(UTC)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if month_start.month == 12:
+            month_end = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            month_end = month_start.replace(month=month_start.month + 1)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        repo = model_usage_repo_factory(self.pool)
+        summary = await repo.get_project_usage_summary(
+            project_id=project_id,
+            month_start_utc=month_start,
+            month_end_utc=month_end,
+            today_start_utc=today_start,
+            monthly_budget_tokens=monthly_budget_tokens,
+        )
+        return ModelUsageSummaryDto.from_view(summary, counter_enabled=True)
 
     async def _ensure_project_exists(self, project_id: str, logger: LoggerPort) -> None:
         if await self.project_repo.project_exists(project_id):

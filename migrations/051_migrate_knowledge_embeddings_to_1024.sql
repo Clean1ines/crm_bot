@@ -11,7 +11,7 @@ SET status = 'error',
 WHERE status = 'processed';
 
 ALTER TABLE knowledge_base
-    ALTER COLUMN embedding TYPE vector(512);
+    ALTER COLUMN embedding TYPE vector(1024);
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_embedding_ivfflat
     ON knowledge_base USING ivfflat (embedding vector_cosine_ops)

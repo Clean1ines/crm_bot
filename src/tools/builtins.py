@@ -12,6 +12,7 @@ Tool interface for dynamic execution from agent tool calls.
 
 import httpx
 
+from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.domain.project_plane.thread_status import ThreadStatus
 from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import Tool, ToolExecutionError
@@ -58,6 +59,18 @@ def _as_float(value: object, default: float = 0.0) -> float:
         except ValueError:
             return default
     return default
+
+
+def _knowledge_result_payload(result: KnowledgeSearchResultView) -> dict[str, object]:
+    return {
+        "id": result.id,
+        "content": result.content,
+        "score": result.score,
+        "method": result.method,
+        "source": result.source,
+        "title": None,
+        "chunk_index": None,
+    }
 
 
 class SearchKnowledgeTool(Tool):
@@ -167,22 +180,14 @@ class SearchKnowledgeTool(Tool):
         try:
             # Use RAGService with expansion
             results = await self._rag_service.search_with_expansion(
-                project_id=str(project_id), query=query, final_limit=limit
+                project_id=str(project_id),
+                query=query,
+                thread_id=_as_text(context.get("thread_id")) or None,
+                final_limit=limit,
             )
 
             # Format results for agent consumption
-            formatted_results = [
-                {
-                    "id": r.get("id"),
-                    "content": r.get("content", ""),
-                    "score": _as_float(r.get("score"), 0.0),
-                    "method": r.get("method"),
-                    "source": r.get("source"),
-                    "title": r.get("title"),
-                    "chunk_index": r.get("chunk_index"),
-                }
-                for r in results
-            ]
+            formatted_results = results
 
             logger.debug(
                 "Knowledge search completed",

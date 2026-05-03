@@ -14,6 +14,8 @@ import { useParams } from 'react-router-dom';
 
 import {
   knowledgeApi,
+  type KnowledgeUsageBreakdown,
+  type KnowledgeUsageResponse,
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
 } from '@shared/api/modules/knowledge';
@@ -26,6 +28,10 @@ interface Document {
   status: 'pending' | 'processing' | 'processed' | 'error';
   chunk_count: number;
   created_at: string;
+}
+
+interface UsageSummaryCardProps {
+  usage: KnowledgeUsageResponse;
 }
 
 const formatSize = (bytes: number) => {
@@ -43,6 +49,28 @@ const confidenceLabel = (score: number): string => {
 };
 
 const scoreLabel = (score: number): string => score.toFixed(3);
+
+const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
+
+const formatUsd = (value: number): string => new Intl.NumberFormat('ru-RU', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+}).format(value);
+
+const sumTokensBySource = (breakdown: KnowledgeUsageBreakdown[], source: string): number => (
+  breakdown
+    .filter((item) => item.source === source)
+    .reduce((acc, item) => acc + item.tokens_total, 0)
+);
+
+const providerModelsLabel = (breakdown: KnowledgeUsageBreakdown[]): string => (
+  breakdown
+    .map((item) => `${item.provider}: ${item.model}`)
+    .filter((value, index, items) => items.indexOf(value) === index)
+    .join(', ')
+);
 
 const PreviewResultCard: React.FC<{
   title: string;
@@ -66,6 +94,66 @@ const PreviewResultCard: React.FC<{
     </div>
   </div>
 );
+
+const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
+  const uploadTokens = sumTokensBySource(usage.breakdown, 'knowledge_upload');
+  const ragTokens = sumTokensBySource(usage.breakdown, 'rag_search');
+  const providerModels = providerModelsLabel(usage.breakdown);
+
+  return (
+    <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+          <BookOpen className="h-5 w-5" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Usage моделей</h2>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
+            Токены embeddings и preprocessing по базе знаний.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+          <div className="text-xs text-[var(--text-muted)]">Embeddings: used / remaining</div>
+          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+            {formatNumber(usage.tokens_month_total)} / {formatNumber(usage.remaining_tokens)}
+          </div>
+        </div>
+        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+          <div className="text-xs text-[var(--text-muted)]">Today</div>
+          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+            {formatNumber(usage.tokens_today_total)}
+          </div>
+        </div>
+        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+          <div className="text-xs text-[var(--text-muted)]">This month</div>
+          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+            {formatNumber(usage.tokens_month_total)}
+          </div>
+        </div>
+        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+          <div className="text-xs text-[var(--text-muted)]">Uploads</div>
+          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+            {formatNumber(uploadTokens)}
+          </div>
+        </div>
+        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+          <div className="text-xs text-[var(--text-muted)]">RAG answers</div>
+          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+            {formatNumber(ragTokens)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2 text-sm text-[var(--text-muted)] lg:flex-row lg:items-center lg:justify-between">
+        <span>Модели: {providerModels || 'Нет данных'}</span>
+        <span>Estimated cost: {formatUsd(usage.estimated_cost_month_usd)}</span>
+      </div>
+    </section>
+  );
+};
 
 export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -99,7 +187,20 @@ export const KnowledgePage: React.FC = () => {
   });
 
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
+  const hasProcessingDocuments = documents.some((doc) => doc.status === 'pending' || doc.status === 'processing');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const usageQuery = useQuery({
+    queryKey: ['knowledge-usage', projectId],
+    queryFn: async () => {
+      if (!projectId) return null;
+      const { data } = await knowledgeApi.usage(projectId);
+      return data;
+    },
+    enabled: !!projectId,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 5000 : false,
+  });
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -117,6 +218,7 @@ export const KnowledgePage: React.FC = () => {
     onSuccess: async () => {
       toast.success('Документ принят и поставлен в очередь на обработку');
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : 'Ошибка при загрузке документа';
@@ -149,6 +251,7 @@ export const KnowledgePage: React.FC = () => {
       previewMutation.reset();
       toast.success('База знаний очищена');
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : 'Не удалось очистить базу знаний';
@@ -205,6 +308,7 @@ export const KnowledgePage: React.FC = () => {
   ));
 
   const previewResult = previewMutation.data;
+  const usage = usageQuery.data;
 
   const getStatusBadge = (status: Document['status']) => {
     if (status === 'processed') {
@@ -293,6 +397,8 @@ export const KnowledgePage: React.FC = () => {
           PDF, JSON, Markdown или TXT
         </p>
       </div>
+
+      {usage && usage.counter_enabled && <UsageSummaryCard usage={usage} />}
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex items-start gap-3">

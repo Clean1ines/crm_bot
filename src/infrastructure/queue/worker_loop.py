@@ -9,6 +9,10 @@ from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_dispatcher import JobDispatcher
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
+from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
+from src.infrastructure.queue.handlers.knowledge_upload import (
+    mark_process_knowledge_upload_exhausted,
+)
 from src.infrastructure.queue.retry_policy import build_retry_decision
 from src.infrastructure.queue.stale_recovery import recover_stale_jobs
 
@@ -61,9 +65,16 @@ async def run_worker_loop(
                 )
                 await queue_repo.complete_job(job_id, success=False, error=str(exc))
             except TransientJobError as exc:
-                decision = build_retry_decision(job_record, str(exc))
+                decision = build_retry_decision(
+                    job_record,
+                    str(exc),
+                    retry_after_seconds=exc.retry_after_seconds,
+                )
                 await queue_repo.fail_job(
-                    job_id, error=decision.error, increment_attempt=True
+                    job_id,
+                    error=decision.error,
+                    increment_attempt=True,
+                    retry_delay_seconds=decision.backoff_seconds,
                 )
 
                 if decision.should_retry:
@@ -75,12 +86,16 @@ async def run_worker_loop(
                             "backoff_seconds": decision.backoff_seconds,
                         },
                     )
-                    await asyncio.sleep(decision.backoff_seconds)
                 else:
                     logger.warning(
                         "Job retry attempts exhausted",
                         extra={"job_id": job_id, "task_type": task_type},
                     )
+                    if task_type == TASK_PROCESS_KNOWLEDGE_UPLOAD:
+                        await mark_process_knowledge_upload_exhausted(
+                            job_record,
+                            db_pool=dispatcher.db_pool,
+                        )
             else:
                 await queue_repo.complete_job(job_id, success=True)
 

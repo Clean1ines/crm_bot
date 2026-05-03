@@ -17,12 +17,14 @@ def hash_query(query: str) -> str:
 @dataclass(slots=True)
 class KnowledgeSearchContext:
     project_id: str | None
+    thread_id: str | None = None
     query: str = ""
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "KnowledgeSearchContext":
         return cls(
             project_id=state.get("project_id"),
+            thread_id=state.get("thread_id"),
             query=str(state.get("user_input") or ""),
         )
 

@@ -7,6 +7,7 @@ from secrets import SystemRandom
 from typing import Mapping
 
 MAX_RETRIES = 3
+MIN_TRANSIENT_RETRY_SECONDS = 60.0
 
 
 def _coerce_int(value: object, default: int) -> int:
@@ -48,7 +49,12 @@ def calculate_backoff(attempt: int) -> float:
     return delay + jitter
 
 
-def build_retry_decision(job: Mapping[str, object], error: str) -> RetryDecision:
+def build_retry_decision(
+    job: Mapping[str, object],
+    error: str,
+    *,
+    retry_after_seconds: float | None = None,
+) -> RetryDecision:
     """
     Decide whether a transient job failure should be retried.
 
@@ -59,9 +65,13 @@ def build_retry_decision(job: Mapping[str, object], error: str) -> RetryDecision
     max_attempts = _coerce_int(job.get("max_attempts"), MAX_RETRIES)
 
     exhausted = attempts + 1 >= max_attempts
+    resolved_backoff = calculate_backoff(attempts)
+    if retry_after_seconds is not None:
+        resolved_backoff = max(float(retry_after_seconds), MIN_TRANSIENT_RETRY_SECONDS)
+
     return RetryDecision(
         should_retry=not exhausted,
         exhausted=exhausted,
-        backoff_seconds=0.0 if exhausted else calculate_backoff(attempts),
+        backoff_seconds=0.0 if exhausted else resolved_backoff,
         error=error,
     )

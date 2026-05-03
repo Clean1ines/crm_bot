@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping, Sequence, TypeAlias, cast
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 
 KnowledgePreprocessingMode: TypeAlias = Literal[
     "plain", "faq", "price_list", "instruction"
@@ -67,6 +68,12 @@ class KnowledgePreprocessingResult:
 
     def to_chunks(self) -> list[JsonObject]:
         return [entry.to_chunk(entry_type=self.mode) for entry in self.entries]
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePreprocessingExecutionResult:
+    result: KnowledgePreprocessingResult
+    usage: ModelUsageMeasurement | None = None
 
 
 def normalize_preprocessing_mode(value: object) -> KnowledgePreprocessingMode:

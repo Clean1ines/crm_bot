@@ -27,11 +27,15 @@ from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     KnowledgePreprocessorPort,
     KnowledgeRepositoryPort,
+    ModelUsageRepositoryPort,
 )
 from src.application.services.knowledge_service import KnowledgeService
 from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
+from src.infrastructure.db.repositories.model_usage_repository import (
+    ModelUsageRepository,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
@@ -83,6 +87,10 @@ def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
 
 def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:
     return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
+
+
+def make_model_usage_repo(pool: KnowledgeDbPoolPort) -> ModelUsageRepositoryPort:
+    return cast(ModelUsageRepositoryPort, ModelUsageRepository(pool))
 
 
 async def _read_upload_bytes(file: UploadFile) -> bytearray:
@@ -146,6 +154,25 @@ async def preview_knowledge(
         authorization,
         knowledge_repo_factory=make_knowledge_repo,
         logger=logger,
+    )
+    return result.to_dict()
+
+
+@router.get("/usage")
+async def knowledge_usage(
+    project_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    service = KnowledgeService(
+        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+    )
+    result = await service.usage(
+        project_id,
+        authorization,
+        model_usage_repo_factory=make_model_usage_repo,
     )
     return result.to_dict()
 

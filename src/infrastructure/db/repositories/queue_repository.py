@@ -44,9 +44,9 @@ class QueueRepository:
                 """
                 INSERT INTO public.execution_queue (
                     id, task_type, payload, status, 
-                    attempts, max_attempts, created_at, updated_at
+                    attempts, max_attempts, next_attempt_at, created_at, updated_at
                 )
-                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NULL, NOW(), NOW())
                 RETURNING id
             """,
                 task_type,
@@ -75,6 +75,7 @@ class QueueRepository:
                     SELECT id
                     FROM public.execution_queue
                     WHERE status = 'pending'
+                    AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                     AND (attempts < max_attempts OR max_attempts IS NULL)
                     ORDER BY created_at ASC
                     LIMIT 1
@@ -130,7 +131,8 @@ class QueueRepository:
                     updated_at = NOW(),
                     locked_at = NULL,
                     worker_id = NULL,
-                    error = $2
+                    error = $2,
+                    next_attempt_at = NULL
                 WHERE id = $3
             """,
                 new_status,
@@ -151,7 +153,8 @@ class QueueRepository:
                     status = 'pending',
                     updated_at = NOW(),
                     locked_at = NULL,
-                    worker_id = NULL
+                    worker_id = NULL,
+                    next_attempt_at = NOW()
                 WHERE id = $1 AND status = 'processing'
             """,
                 job_id,
@@ -168,7 +171,11 @@ class QueueRepository:
             return released
 
     async def fail_job(
-        self, job_id: str, error: str, increment_attempt: bool = True
+        self,
+        job_id: str,
+        error: str,
+        increment_attempt: bool = True,
+        retry_delay_seconds: float | None = None,
     ) -> bool:
         logger.info(
             "Failing job",
@@ -176,6 +183,7 @@ class QueueRepository:
                 "job_id": job_id,
                 "error": error,
                 "increment_attempt": increment_attempt,
+                "retry_delay_seconds": retry_delay_seconds,
             },
         )
         async with self.pool.acquire() as conn:
@@ -192,11 +200,16 @@ class QueueRepository:
                         status = CASE 
                             WHEN attempts + 1 >= max_attempts THEN 'failed'
                             ELSE 'pending'
+                        END,
+                        next_attempt_at = CASE
+                            WHEN attempts + 1 >= max_attempts THEN NOW()
+                            ELSE NOW() + ($3::double precision * INTERVAL '1 second')
                         END
                     WHERE id = $2
                 """,
                     error,
                     job_id,
+                    0.0 if retry_delay_seconds is None else float(retry_delay_seconds),
                 )
             else:
                 result = await conn.execute(
@@ -207,7 +220,8 @@ class QueueRepository:
                         updated_at = NOW(),
                         locked_at = NULL,
                         worker_id = NULL,
-                        status = 'failed'
+                        status = 'failed',
+                        next_attempt_at = NULL
                     WHERE id = $2
                 """,
                     error,

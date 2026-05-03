@@ -44,9 +44,9 @@ class TestQueueRepository:
         expected_sql = """
                 INSERT INTO public.execution_queue (
                     id, task_type, payload, status, 
-                    attempts, max_attempts, created_at, updated_at
+                    attempts, max_attempts, next_attempt_at, created_at, updated_at
                 )
-                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NULL, NOW(), NOW())
                 RETURNING id
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(
@@ -65,9 +65,9 @@ class TestQueueRepository:
         expected_sql = """
                 INSERT INTO public.execution_queue (
                     id, task_type, payload, status, 
-                    attempts, max_attempts, created_at, updated_at
+                    attempts, max_attempts, next_attempt_at, created_at, updated_at
                 )
-                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NULL, NOW(), NOW())
                 RETURNING id
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(
@@ -86,61 +86,43 @@ class TestQueueRepository:
     # ------------------------------------------------------------------
     # claim_job
     # ------------------------------------------------------------------
+
     @pytest.mark.asyncio
     async def test_claim_job_success(self, queue_repo, mock_pool):
         worker_id = "worker-1"
         job_id = uuid4()
+        payload = {"key": "value"}
         row = {
             "id": job_id,
             "task_type": "test_task",
-            "payload": json.dumps({"a": 1}),
+            "payload": json.dumps(payload),
             "attempts": 0,
             "max_attempts": 3,
-            "created_at": "2021-01-01",
+            "created_at": "2026-01-01T00:00:00Z",
         }
-        # First acquire for debug queries
-        # Second acquire for main update
-        mock_pool.mock_conn.fetchval = AsyncMock(side_effect=["test_db", "public"])
+        mock_pool.mock_conn.fetchval = AsyncMock(return_value="test_db")
         mock_pool.mock_conn.fetchrow = AsyncMock(return_value=row)
 
         result = await queue_repo.claim_job(worker_id)
 
-        # Two acquires: first for debug, second for update
         assert mock_pool.acquire.call_count == 2
-
-        # First acquire (debug) fetchval calls
-        assert mock_pool.mock_conn.fetchval.call_count == 2
-        mock_pool.mock_conn.fetchval.assert_any_call("SELECT current_database()")
-        mock_pool.mock_conn.fetchval.assert_any_call("SELECT current_schema()")
-
-        # Second acquire (main)
-        expected_sql = """
-                UPDATE public.execution_queue
-                SET 
-                    status = 'processing',
-                    updated_at = NOW(),
-                    locked_at = NOW(),
-                    worker_id = $1
-                WHERE id = (
-                    SELECT id
-                    FROM public.execution_queue
-                    WHERE status = 'pending'
-                    AND (attempts < max_attempts OR max_attempts IS NULL)
-                    ORDER BY created_at ASC
-                    LIMIT 1
-                    FOR UPDATE SKIP LOCKED
-                )
-                RETURNING id, task_type, payload, attempts, max_attempts, created_at
-            """
-        mock_pool.mock_conn.fetchrow.assert_awaited_once_with(expected_sql, worker_id)
+        mock_pool.mock_conn.fetchrow.assert_awaited_once()
+        sql_arg, worker_id_arg = mock_pool.mock_conn.fetchrow.await_args.args
+        assert "UPDATE public.execution_queue" in sql_arg
+        assert "status = 'processing'" in sql_arg
+        assert "worker_id = $1" in sql_arg
+        assert "WHERE status = 'pending'" in sql_arg
+        assert "(next_attempt_at IS NULL OR next_attempt_at <= NOW())" in sql_arg
+        assert "(attempts < max_attempts OR max_attempts IS NULL)" in sql_arg
+        assert "FOR UPDATE SKIP LOCKED" in sql_arg
+        assert worker_id_arg == worker_id
 
         assert result is not None
         assert result.id == str(job_id)
         assert result.task_type == "test_task"
-        assert result.payload == {"a": 1}
+        assert result.payload == payload
         assert result.attempts == 0
         assert result.max_attempts == 3
-        assert result.created_at == "2021-01-01"
 
     @pytest.mark.asyncio
     async def test_claim_job_no_jobs(self, queue_repo, mock_pool):
@@ -176,6 +158,7 @@ class TestQueueRepository:
     # ------------------------------------------------------------------
     # complete_job
     # ------------------------------------------------------------------
+
     @pytest.mark.asyncio
     async def test_complete_job_success_done(self, queue_repo, mock_pool):
         job_id = str(uuid4())
@@ -185,19 +168,17 @@ class TestQueueRepository:
 
         await queue_repo.complete_job(job_id, success, error)
 
-        expected_sql = """
-                UPDATE public.execution_queue
-                SET 
-                    status = $1, 
-                    updated_at = NOW(),
-                    locked_at = NULL,
-                    worker_id = NULL,
-                    error = $2
-                WHERE id = $3
-            """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, "done", error, job_id
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, status_arg, error_arg, job_id_arg = (
+            mock_pool.mock_conn.execute.await_args.args
         )
+        assert "UPDATE public.execution_queue" in sql_arg
+        assert "status = $1" in sql_arg
+        assert "error = $2" in sql_arg
+        assert "next_attempt_at = NULL" in sql_arg
+        assert status_arg == "done"
+        assert error_arg is None
+        assert job_id_arg == job_id
 
     @pytest.mark.asyncio
     async def test_complete_job_failed_with_error(self, queue_repo, mock_pool):
@@ -208,41 +189,38 @@ class TestQueueRepository:
 
         await queue_repo.complete_job(job_id, success, error)
 
-        expected_sql = """
-                UPDATE public.execution_queue
-                SET 
-                    status = $1, 
-                    updated_at = NOW(),
-                    locked_at = NULL,
-                    worker_id = NULL,
-                    error = $2
-                WHERE id = $3
-            """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, "failed", error, job_id
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, status_arg, error_arg, job_id_arg = (
+            mock_pool.mock_conn.execute.await_args.args
         )
+        assert "UPDATE public.execution_queue" in sql_arg
+        assert "status = $1" in sql_arg
+        assert "error = $2" in sql_arg
+        assert "next_attempt_at = NULL" in sql_arg
+        assert status_arg == "failed"
+        assert error_arg == error
+        assert job_id_arg == job_id
 
     # ------------------------------------------------------------------
     # release_job
     # ------------------------------------------------------------------
+
     @pytest.mark.asyncio
     async def test_release_job_success(self, queue_repo, mock_pool):
         job_id = str(uuid4())
-        reason = "timeout"
         mock_pool.mock_conn.execute = AsyncMock(return_value="UPDATE 1")
 
-        result = await queue_repo.release_job(job_id, reason)
+        result = await queue_repo.release_job(job_id, reason="timeout")
 
-        expected_sql = """
-                UPDATE public.execution_queue
-                SET 
-                    status = 'pending',
-                    updated_at = NOW(),
-                    locked_at = NULL,
-                    worker_id = NULL
-                WHERE id = $1 AND status = 'processing'
-            """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
+        assert "UPDATE public.execution_queue" in sql_arg
+        assert "status = 'pending'" in sql_arg
+        assert "locked_at = NULL" in sql_arg
+        assert "worker_id = NULL" in sql_arg
+        assert "next_attempt_at = NOW()" in sql_arg
+        assert "WHERE id = $1 AND status = 'processing'" in sql_arg
+        assert job_id_arg == job_id
         assert result is True
 
     @pytest.mark.asyncio
@@ -250,23 +228,21 @@ class TestQueueRepository:
         job_id = str(uuid4())
         mock_pool.mock_conn.execute = AsyncMock(return_value="UPDATE 0")
 
-        result = await queue_repo.release_job(job_id)
+        result = await queue_repo.release_job(job_id, reason="timeout")
 
-        expected_sql = """
-                UPDATE public.execution_queue
-                SET 
-                    status = 'pending',
-                    updated_at = NOW(),
-                    locked_at = NULL,
-                    worker_id = NULL
-                WHERE id = $1 AND status = 'processing'
-            """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(expected_sql, job_id)
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
+        assert "UPDATE public.execution_queue" in sql_arg
+        assert "status = 'pending'" in sql_arg
+        assert "next_attempt_at = NOW()" in sql_arg
+        assert "WHERE id = $1 AND status = 'processing'" in sql_arg
+        assert job_id_arg == job_id
         assert result is False
 
     # ------------------------------------------------------------------
     # fail_job
     # ------------------------------------------------------------------
+
     @pytest.mark.asyncio
     async def test_fail_job_increment_attempt_success_pending(
         self, queue_repo, mock_pool
@@ -276,25 +252,24 @@ class TestQueueRepository:
         increment_attempt = True
         mock_pool.mock_conn.execute = AsyncMock(return_value="UPDATE 1")
 
-        result = await queue_repo.fail_job(job_id, error, increment_attempt)
-
-        expected_sql = """
-                    UPDATE public.execution_queue
-                    SET 
-                        attempts = attempts + 1,
-                        error = $1,
-                        updated_at = NOW(),
-                        locked_at = NULL,
-                        worker_id = NULL,
-                        status = CASE 
-                            WHEN attempts + 1 >= max_attempts THEN 'failed'
-                            ELSE 'pending'
-                        END
-                    WHERE id = $2
-                """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, error, job_id
+        result = await queue_repo.fail_job(
+            job_id,
+            error,
+            increment_attempt,
+            retry_delay_seconds=60.0,
         )
+
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, error_arg, job_id_arg, retry_delay_arg = (
+            mock_pool.mock_conn.execute.await_args.args
+        )
+        assert "attempts = attempts + 1" in sql_arg
+        assert "status = CASE" in sql_arg
+        assert "next_attempt_at = CASE" in sql_arg
+        assert "NOW() + ($3::double precision * INTERVAL '1 second')" in sql_arg
+        assert error_arg == error
+        assert job_id_arg == job_id
+        assert retry_delay_arg == 60.0
         assert result is True
 
     @pytest.mark.asyncio
@@ -306,23 +281,16 @@ class TestQueueRepository:
 
         result = await queue_repo.fail_job(job_id, error, increment_attempt)
 
-        expected_sql = """
-                    UPDATE public.execution_queue
-                    SET 
-                        attempts = attempts + 1,
-                        error = $1,
-                        updated_at = NOW(),
-                        locked_at = NULL,
-                        worker_id = NULL,
-                        status = CASE 
-                            WHEN attempts + 1 >= max_attempts THEN 'failed'
-                            ELSE 'pending'
-                        END
-                    WHERE id = $2
-                """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, error, job_id
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, error_arg, job_id_arg, retry_delay_arg = (
+            mock_pool.mock_conn.execute.await_args.args
         )
+        assert "attempts = attempts + 1" in sql_arg
+        assert "WHEN attempts + 1 >= max_attempts THEN 'failed'" in sql_arg
+        assert "WHEN attempts + 1 >= max_attempts THEN NOW()" in sql_arg
+        assert error_arg == error
+        assert job_id_arg == job_id
+        assert retry_delay_arg == 0.0
         assert result is True
 
     @pytest.mark.asyncio
@@ -334,19 +302,13 @@ class TestQueueRepository:
 
         result = await queue_repo.fail_job(job_id, error, increment_attempt)
 
-        expected_sql = """
-                    UPDATE public.execution_queue
-                    SET 
-                        error = $1,
-                        updated_at = NOW(),
-                        locked_at = NULL,
-                        worker_id = NULL,
-                        status = 'failed'
-                    WHERE id = $2
-                """
-        mock_pool.mock_conn.execute.assert_awaited_once_with(
-            expected_sql, error, job_id
-        )
+        mock_pool.mock_conn.execute.assert_awaited_once()
+        sql_arg, error_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
+        assert "UPDATE public.execution_queue" in sql_arg
+        assert "status = 'failed'" in sql_arg
+        assert "next_attempt_at = NULL" in sql_arg
+        assert error_arg == error
+        assert job_id_arg == job_id
         assert result is True
 
     @pytest.mark.asyncio

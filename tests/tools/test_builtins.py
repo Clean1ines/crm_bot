@@ -121,7 +121,14 @@ class FakeRAGService:
     def __init__(self):
         self.calls = []
 
-    async def search_with_expansion(self, *, project_id, query, final_limit):
+    async def search_with_expansion(
+        self,
+        *,
+        project_id,
+        query,
+        final_limit,
+        thread_id=None,
+    ):
         self.calls.append(
             {
                 "project_id": project_id,

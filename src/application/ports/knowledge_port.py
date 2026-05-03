@@ -6,10 +6,14 @@ from typing import Protocol
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
-    KnowledgePreprocessingResult,
 )
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+from src.domain.project_plane.model_usage_views import (
+    ModelUsageEventCreate,
+    ModelUsageSummaryView,
+)
 
 
 class KnowledgeDbPoolPort(Protocol):
@@ -95,6 +99,7 @@ class KnowledgeRepositoryPort(Protocol):
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
+        thread_id: str | None = None,
     ) -> list[KnowledgeSearchResultView]: ...
 
     async def preview_search(
@@ -137,8 +142,26 @@ class KnowledgePreprocessorPort(Protocol):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-    ) -> KnowledgePreprocessingResult: ...
+    ) -> KnowledgePreprocessingExecutionResult: ...
 
 
 class KnowledgePreprocessorFactoryPort(Protocol):
     def __call__(self) -> KnowledgePreprocessorPort: ...
+
+
+class ModelUsageRepositoryPort(Protocol):
+    async def record_event(self, event: ModelUsageEventCreate) -> None: ...
+
+    async def get_project_usage_summary(
+        self,
+        *,
+        project_id: str,
+        month_start_utc: object,
+        month_end_utc: object,
+        today_start_utc: object,
+        monthly_budget_tokens: int,
+    ) -> ModelUsageSummaryView: ...
+
+
+class ModelUsageRepositoryFactoryPort(Protocol):
+    def __call__(self, pool: KnowledgeDbPoolPort) -> ModelUsageRepositoryPort: ...
