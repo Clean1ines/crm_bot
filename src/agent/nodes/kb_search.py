@@ -48,7 +48,10 @@ def create_kb_search_node(tool_registry: ToolRegistry):
             payload = await tool_registry.execute(
                 "search_knowledge",
                 {"query": context.query, "limit": 10},
-                context={"project_id": context.project_id},
+                context={
+                    "project_id": context.project_id,
+                    "thread_id": context.thread_id,
+                },
             )
             result = KnowledgeSearchResult.from_tool_payload(payload)
 

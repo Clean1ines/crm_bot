@@ -17,12 +17,13 @@ from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     MODE_INSTRUCTION,
     MODE_PRICE_LIST,
+    KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
-    KnowledgePreprocessingResult,
     KnowledgePreprocessingValidationError,
     parse_preprocessing_payload,
     prompt_version_for_mode,
 )
+from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 
@@ -34,6 +35,14 @@ MODE_PROMPT_FILES = {
     MODE_PRICE_LIST: "knowledge_preprocess_price_list.txt",
     MODE_INSTRUCTION: "knowledge_preprocess_instruction.txt",
 }
+
+
+def _usage_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
@@ -58,7 +67,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-    ) -> KnowledgePreprocessingResult:
+    ) -> KnowledgePreprocessingExecutionResult:
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(mode=mode, chunks=chunks, file_name=file_name)
 
@@ -70,11 +79,17 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 max_tokens=4000,
             )
             content = response.choices[0].message.content or ""
-            return parse_preprocessing_payload(
-                content,
-                mode=mode,
-                model=self._model,
-                prompt_version=prompt_version,
+            result = parse_preprocessing_payload(
+                content, mode=mode, model=self._model, prompt_version=prompt_version
+            )
+            return KnowledgePreprocessingExecutionResult(
+                result=result,
+                usage=_response_usage_measurement(
+                    response=response,
+                    model=self._model,
+                    prompt=prompt,
+                    content=content,
+                ),
             )
         except (
             APIConnectionError,
@@ -131,3 +146,46 @@ def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
 
     path = PROMPTS_DIR / prompt_file
     return path.read_text(encoding="utf-8")
+
+
+def _response_usage_measurement(
+    *,
+    response: object,
+    model: str,
+    prompt: str,
+    content: str,
+) -> ModelUsageMeasurement:
+    usage = getattr(response, "usage", None)
+    prompt_tokens = _usage_int(getattr(usage, "prompt_tokens", None))
+    completion_tokens = _usage_int(getattr(usage, "completion_tokens", None))
+    total_tokens = _usage_int(getattr(usage, "total_tokens", None))
+
+    has_exact_usage = all(
+        isinstance(value, int) and not isinstance(value, bool)
+        for value in (prompt_tokens, completion_tokens, total_tokens)
+    )
+
+    if has_exact_usage:
+        return ModelUsageMeasurement(
+            provider="groq",
+            model=model,
+            usage_type="llm",
+            tokens_input=int(prompt_tokens or 0),
+            tokens_output=int(completion_tokens or 0),
+            tokens_total=int(total_tokens or 0),
+            estimated_cost_usd=None,
+            metadata={"is_estimated": False, "source_kind": "knowledge_preprocessing"},
+        )
+
+    estimated_prompt_tokens = max(1, (len(prompt) + 3) // 4)
+    estimated_completion_tokens = max(1, (len(content) + 3) // 4)
+    return ModelUsageMeasurement(
+        provider="groq",
+        model=model,
+        usage_type="llm",
+        tokens_input=estimated_prompt_tokens,
+        tokens_output=estimated_completion_tokens,
+        tokens_total=estimated_prompt_tokens + estimated_completion_tokens,
+        estimated_cost_usd=None,
+        metadata={"is_estimated": True, "source_kind": "knowledge_preprocessing"},
+    )

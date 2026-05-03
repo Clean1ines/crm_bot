@@ -61,6 +61,18 @@ class PermanentEmbeddingProviderError(EmbeddingProviderError):
 class TransientEmbeddingProviderError(EmbeddingProviderError):
     """Temporary provider/network error that may succeed on retry."""
 
+    def __init__(
+        self,
+        detail: str,
+        *,
+        provider: str,
+        task: str,
+        model: str | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(detail, provider=provider, task=task, model=model)
+        self.retry_after_seconds = retry_after_seconds
+
     @property
     def retryable(self) -> bool:
         return True

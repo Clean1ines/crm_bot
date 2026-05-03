@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from src.application.errors import EmbeddingProviderError, ValidationError
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
+    ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     KnowledgeRepositoryFactoryPort,
 )
@@ -16,6 +17,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingMode,
 )
+from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,10 +40,12 @@ class KnowledgeIngestionService:
         chunks: list[JsonObject],
         mode: KnowledgePreprocessingMode,
         knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
         logger: LoggerPort,
     ) -> KnowledgeDocumentProcessingResult:
         repo = knowledge_repo_factory(self.pool)
+        usage_repo = model_usage_repo_factory(self.pool)
         await repo.delete_document_chunks(document_id)
 
         try:
@@ -107,11 +111,21 @@ class KnowledgeIngestionService:
         )
 
         try:
-            result = await preprocessor_factory().preprocess(
+            execution = await preprocessor_factory().preprocess(
                 mode=mode,
                 chunks=chunks,
                 file_name=file_name,
             )
+            if execution.usage is not None:
+                await usage_repo.record_event(
+                    ModelUsageEventCreate.from_measurement(
+                        project_id=project_id,
+                        source="knowledge_preprocessing",
+                        measurement=execution.usage,
+                        document_id=document_id,
+                    )
+                )
+            result = execution.result
             structured_chunks = result.to_chunks()
             if structured_chunks:
                 await repo.add_structured_knowledge_batch(

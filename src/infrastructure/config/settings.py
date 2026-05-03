@@ -173,7 +173,7 @@ class Settings(BaseSettings):
         description="Embedding provider selection for semantic knowledge RAG",
     )
     EMBEDDING_VECTOR_DIMENSIONS: int = Field(
-        512,
+        1024,
         ge=1,
         le=4096,
         description="Expected embedding vector dimensions for pgvector writes and searches",
@@ -215,7 +215,7 @@ class Settings(BaseSettings):
         description="Voyage embedding model name used for semantic knowledge RAG",
     )
     VOYAGE_EMBEDDING_BATCH_SIZE: int = Field(
-        16,
+        4,
         ge=1,
         le=256,
         description="Maximum number of texts per Voyage embeddings API request",
@@ -227,10 +227,48 @@ class Settings(BaseSettings):
         description="HTTP timeout for Voyage embeddings requests in seconds",
     )
     VOYAGE_EMBEDDING_OUTPUT_DIMENSIONS: int = Field(
-        512,
+        1024,
         ge=1,
         le=4096,
         description="Requested output dimensions for Voyage embeddings",
+    )
+    VOYAGE_EMBEDDING_REQUEST_DELAY_SECONDS: float = Field(
+        0.5,
+        ge=0.0,
+        le=60.0,
+        description="Minimum delay between Voyage embedding requests",
+    )
+    VOYAGE_EMBEDDING_MAX_RETRIES: int = Field(
+        4,
+        ge=0,
+        le=10,
+        description="Maximum in-client retries for transient Voyage embedding failures",
+    )
+    VOYAGE_EMBEDDING_RETRY_BASE_SECONDS: float = Field(
+        2.0,
+        gt=0.0,
+        le=300.0,
+        description="Base retry delay for Voyage embedding backoff",
+    )
+    VOYAGE_EMBEDDING_RETRY_MAX_SECONDS: float = Field(
+        90.0,
+        gt=0.0,
+        le=900.0,
+        description="Maximum retry delay for Voyage embedding backoff",
+    )
+    MODEL_USAGE_COUNTER_ENABLED: bool = Field(
+        True,
+        description="Enable model usage event accounting and reporting",
+    )
+    MODEL_USAGE_MONTHLY_TOKEN_BUDGET: int = Field(
+        200_000_000,
+        ge=0,
+        description="Configured monthly model token budget for project knowledge usage reporting",
+    )
+    VOYAGE_FREE_MONTHLY_TOKENS: int = Field(
+        200_000_000,
+        ge=0,
+        description="Reference free monthly Voyage token allowance for dashboards",
     )
     WORKER_CONCURRENCY: int = Field(
         1,

@@ -19,6 +19,7 @@ class FakeKnowledgeRepository:
         project_id: str,
         query: str,
         limit: int = 10,
+        thread_id: str | None = None,
         hybrid_fallback: bool = True,
     ) -> list[Mapping[str, object]]:
         self.calls.append(

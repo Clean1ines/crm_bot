@@ -17,8 +17,12 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
 )
+from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
+from src.infrastructure.db.repositories.model_usage_repository import (
+    ModelUsageRepository,
+)
 from src.infrastructure.llm.embedding_service import embed_batch, embed_text
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
@@ -75,6 +79,7 @@ def _batched_chunks(
 class KnowledgeRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
+        self._usage_repo = ModelUsageRepository(pool)
 
     def _keyword_overlap(self, query: str, text: str) -> float:
         q = set(query.lower().split())
@@ -89,13 +94,26 @@ class KnowledgeRepository:
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
+        thread_id: str | None = None,
     ) -> list[KnowledgeSearchResultView]:
         if limit <= 0:
             return []
 
-        query_embedding = await embed_text(query)
-        query_embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        query_embedding_result = await embed_text(query)
+        query_embedding_str = (
+            "[" + ",".join(str(x) for x in query_embedding_result.embedding) + "]"
+        )
         project_uuid = ensure_uuid(project_id)
+
+        if query_embedding_result.usage is not None:
+            await self._usage_repo.record_event(
+                ModelUsageEventCreate.from_measurement(
+                    project_id=project_id,
+                    source="rag_search",
+                    measurement=query_embedding_result.usage,
+                    thread_id=thread_id,
+                )
+            )
 
         async with self.pool.acquire() as conn:
             vector_results = await conn.fetch(
@@ -265,13 +283,21 @@ class KnowledgeRepository:
         if not chunks:
             return 0
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                for batch in _batched_chunks(
-                    chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE
-                ):
-                    texts = [str(chunk["content"]) for chunk in batch]
-                    embeddings = await embed_batch(texts)
+        for batch in _batched_chunks(chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE):
+            texts = [str(chunk["content"]) for chunk in batch]
+            embedding_result = await embed_batch(texts)
+            embeddings = embedding_result.embeddings
+            if embedding_result.usage is not None:
+                await self._usage_repo.record_event(
+                    ModelUsageEventCreate.from_measurement(
+                        project_id=project_id,
+                        source="knowledge_upload",
+                        measurement=embedding_result.usage,
+                        document_id=document_id,
+                    )
+                )
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
                     for index, chunk in enumerate(batch):
                         await conn.execute(
                             """
@@ -296,16 +322,23 @@ class KnowledgeRepository:
         if not chunks:
             return 0
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                for batch in _batched_chunks(
-                    chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE
-                ):
-                    texts = [
-                        str(chunk.get("embedding_text") or chunk["content"])
-                        for chunk in batch
-                    ]
-                    embeddings = await embed_batch(texts)
+        for batch in _batched_chunks(chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE):
+            texts = [
+                str(chunk.get("embedding_text") or chunk["content"]) for chunk in batch
+            ]
+            embedding_result = await embed_batch(texts)
+            embeddings = embedding_result.embeddings
+            if embedding_result.usage is not None:
+                await self._usage_repo.record_event(
+                    ModelUsageEventCreate.from_measurement(
+                        project_id=project_id,
+                        source="knowledge_upload",
+                        measurement=embedding_result.usage,
+                        document_id=document_id,
+                    )
+                )
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
                     for index, chunk in enumerate(batch):
                         await conn.execute(
                             """

@@ -18,6 +18,35 @@ export type KnowledgePreviewResponse = {
   is_empty: boolean;
 };
 
+export type KnowledgeUsageBreakdown = {
+  provider: string;
+  model: string;
+  usage_type: string;
+  source: string;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_total: number;
+  estimated_cost_usd: number;
+  events_count: number;
+};
+
+export type KnowledgeUsageDaily = {
+  day: string;
+  tokens_total: number;
+  estimated_cost_usd: number;
+};
+
+export type KnowledgeUsageResponse = {
+  counter_enabled: boolean;
+  monthly_budget_tokens: number;
+  remaining_tokens: number;
+  tokens_month_total: number;
+  tokens_today_total: number;
+  estimated_cost_month_usd: number;
+  breakdown: KnowledgeUsageBreakdown[];
+  daily: KnowledgeUsageDaily[];
+};
+
 export const knowledgeApi = {
   list: (projectId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge`, {
@@ -37,6 +66,11 @@ export const knowledgeApi = {
         body: { question, limit },
       },
     ),
+
+  usage: (projectId: string) =>
+    authedJsonRequest<KnowledgeUsageResponse>(`/api/projects/${projectId}/knowledge/usage`, {
+      method: 'GET',
+    }),
 
   upload: (projectId: string, file: File) => {
     const formData = new FormData();

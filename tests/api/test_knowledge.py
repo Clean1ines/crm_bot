@@ -1,7 +1,9 @@
 import pytest
 from src.domain.control_plane.project_views import ProjectSummaryView
+from src.domain.project_plane.model_usage_views import ModelUsageSummaryView
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from src.interfaces.http.app import app
@@ -577,3 +579,44 @@ class TestKnowledgeUpload:
         response = client.delete(f"/api/projects/{uuid4()}/knowledge")
         assert response.status_code == 401
         assert response.json()["detail"] == "Authorization header required"
+
+    def test_knowledge_usage_success(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.interfaces.http.knowledge.ModelUsageRepository"
+            ) as MockUsageRepo:
+                usage_repo = AsyncMock()
+                MockUsageRepo.return_value = usage_repo
+                usage_repo.get_project_usage_summary = AsyncMock(
+                    return_value=ModelUsageSummaryView(
+                        project_id=project_id,
+                        month_start=datetime(2026, 5, 1, tzinfo=UTC),
+                        month_end=datetime(2026, 6, 1, tzinfo=UTC),
+                        today_start=datetime(2026, 5, 2, tzinfo=UTC),
+                        tokens_month_total=1200,
+                        tokens_today_total=300,
+                        estimated_cost_month_usd=1.25,
+                        monthly_budget_tokens=200000000,
+                        remaining_tokens=199998800,
+                        breakdown=(),
+                        daily=(),
+                    )
+                )
+
+                response = client.get(
+                    f"/api/projects/{project_id}/knowledge/usage",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["counter_enabled"] is True
+        assert payload["tokens_month_total"] == 1200
+        assert payload["tokens_today_total"] == 300
+        assert payload["remaining_tokens"] == 199998800

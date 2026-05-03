@@ -218,6 +218,7 @@ class RAGService:
         self,
         project_id: str,
         query: str,
+        thread_id: str | None = None,
         limit_per_query: int | None = None,
         final_limit: int | None = None,
     ) -> list[dict[str, object]]:
@@ -245,6 +246,7 @@ class RAGService:
                 query=variant,
                 limit=runtime_config.limit_per_query,
                 hybrid_fallback=True,
+                thread_id=thread_id,
             )
             raw_candidates.extend(results)
 

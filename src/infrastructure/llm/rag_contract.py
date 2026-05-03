@@ -172,4 +172,5 @@ class KnowledgeSearchRepository(Protocol):
         query: str,
         limit: int = 10,
         hybrid_fallback: bool = True,
+        thread_id: str | None = None,
     ) -> list[Mapping[str, object] | KnowledgeSearchResultView]: ...
