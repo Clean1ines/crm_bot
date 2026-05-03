@@ -145,8 +145,11 @@ async def test_add_knowledge_batch_success(
     )
 
     assert result == 2
-    mock_embed_batch.assert_awaited_once_with(["chunk1", "chunk2"])
-    mock_pool.mock_conn.transaction.assert_called_once()
+    assert mock_embed_batch.await_args_list == [
+        call(["chunk1"]),
+        call(["chunk2"]),
+    ]
+    assert mock_pool.mock_conn.transaction.call_count == 2
     assert mock_pool.mock_conn.execute.await_count == 2
     usage_repo.record_event.assert_not_awaited()
 

@@ -31,7 +31,18 @@ from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
-EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"
+
+def _local_embedding_model_name() -> str:
+    return (
+        settings.EMBEDDING_LOCAL_MODEL.strip()
+        or "sentence-transformers/all-MiniLM-L6-v2"
+    )
+
+
+def _local_embedding_threads() -> int:
+    return max(1, int(settings.EMBEDDING_LOCAL_THREADS))
+
+
 EmbeddingProviderName = Literal["local", "jina", "voyage", "disabled"]
 EmbeddingTask = Literal["retrieval.query", "retrieval.passage"]
 ExternalEmbeddingTask = Literal["query", "document"]
@@ -99,7 +110,13 @@ def _create_model() -> EmbeddingModel:
     """
     from fastembed import TextEmbedding
 
-    return cast(EmbeddingModel, TextEmbedding(EMBEDDING_MODEL_NAME))
+    return cast(
+        EmbeddingModel,
+        TextEmbedding(
+            model_name=_local_embedding_model_name(),
+            threads=_local_embedding_threads(),
+        ),
+    )
 
 
 def _get_executor() -> ThreadPoolExecutor:
@@ -131,7 +148,7 @@ async def _get_model() -> EmbeddingModel:
 
     async with _get_model_init_lock():
         if _model is None:
-            logger.info("Loading embedding model '%s'", EMBEDDING_MODEL_NAME)
+            logger.info("Loading embedding model '%s'", _local_embedding_model_name())
             loop = asyncio.get_running_loop()
             _model = await loop.run_in_executor(_get_executor(), _create_model)
 
@@ -1060,9 +1077,10 @@ async def _embed_local_text(text: str) -> list[float]:
 
 
 async def _embed_local_batch(texts: list[str]) -> list[list[float]]:
-    loop = asyncio.get_running_loop()
-    model = await _get_model()
-    return await loop.run_in_executor(_get_executor(), _embed_batch_sync, model, texts)
+    vectors: list[list[float]] = []
+    for text in texts:
+        vectors.append(await _embed_local_text(text))
+    return vectors
 
 
 async def embed_text(text: str) -> EmbeddingTextResult:
@@ -1103,7 +1121,7 @@ async def embed_text(text: str) -> EmbeddingTextResult:
             [vector],
             provider=provider,
             task="retrieval.query",
-            model=EMBEDDING_MODEL_NAME,
+            model=_local_embedding_model_name(),
         )[0]
     )
 
@@ -1145,6 +1163,6 @@ async def embed_batch(texts: list[str]) -> EmbeddingBatchResult:
             vectors,
             provider=provider,
             task="retrieval.passage",
-            model=EMBEDDING_MODEL_NAME,
+            model=_local_embedding_model_name(),
         )
     )
