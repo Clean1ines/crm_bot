@@ -133,7 +133,7 @@ class Settings(BaseSettings):
         description="Chunk size for streaming uploaded knowledge files into memory",
     )
     KNOWLEDGE_EMBED_BATCH_SIZE: int = Field(
-        32,
+        1,
         ge=1,
         le=256,
         description="Maximum number of knowledge chunks to embed in a single batch",
@@ -151,7 +151,7 @@ class Settings(BaseSettings):
         description="Maximum number of cached project repository entries per cache bucket",
     )
     EMBEDDING_EXECUTOR_MAX_WORKERS: int = Field(
-        2,
+        1,
         ge=1,
         le=8,
         description="Maximum thread workers reserved for embedding model initialization and inference",
@@ -172,8 +172,18 @@ class Settings(BaseSettings):
         "local",
         description="Embedding provider selection for semantic knowledge RAG",
     )
+    EMBEDDING_LOCAL_MODEL: str = Field(
+        "sentence-transformers/all-MiniLM-L6-v2",
+        description="FastEmbed local model name used when EMBEDDING_PROVIDER=local",
+    )
+    EMBEDDING_LOCAL_THREADS: int = Field(
+        1,
+        ge=1,
+        le=4,
+        description="Thread count passed to the local FastEmbed model",
+    )
     EMBEDDING_VECTOR_DIMENSIONS: int = Field(
-        1024,
+        384,
         ge=1,
         le=4096,
         description="Expected embedding vector dimensions for pgvector writes and searches",
