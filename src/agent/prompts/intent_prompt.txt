@@ -55,3 +55,9 @@ Reply using JSON only:
   "should_generate_answer": true|false,
   "should_offer_manager": true|false
 }}
+
+
+Hard routing rules for short replies:
+- If user_input is a short confirmation like "да", "ага", "ок", "yes" and it answers the previous assistant question, set turn_relation=short_reply and should_search_kb=false.
+- Do not use the literal short reply as a knowledge-base query.
+- Preserve the previous topic/cta from dialog_state when the reply is a continuation.

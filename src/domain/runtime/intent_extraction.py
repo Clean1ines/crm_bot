@@ -360,7 +360,7 @@ def _normalize_affirmative_reply(
             intent="sales",
             topic=previous_topic or result.topic,
             cta=previous_cta,
-            should_search_kb=True,
+            should_search_kb=False,
             should_generate_answer=True,
             should_offer_manager=False,
         )

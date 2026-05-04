@@ -145,7 +145,7 @@ async def test_try_redirect_to_telegram_manager_records_message_and_enqueues_not
 
 
 @pytest.mark.asyncio
-async def test_get_or_create_thread_auto_closes_manual_ticket_after_session_timeout():
+async def test_get_or_create_thread_keeps_manual_ticket_even_after_session_timeout():
     threads = AsyncMock()
     threads.get_active_thread = AsyncMock(return_value="thread-old")
     threads.create_thread = AsyncMock(return_value="thread-new")
@@ -157,6 +157,8 @@ async def test_get_or_create_thread_auto_closes_manual_ticket_after_session_time
             client_id="client-1",
             status="manual",
             chat_id=123,
+            updated_at=datetime.now(UTC)
+            - timedelta(seconds=MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS + 1),
         )
     )
     manager_replies = AsyncMock()
@@ -185,12 +187,38 @@ async def test_get_or_create_thread_auto_closes_manual_ticket_after_session_time
 
     thread_id = await service._get_or_create_thread("project-1", "client-1")
 
-    assert thread_id == "thread-new"
-    manager_replies.close_thread_for_manager.assert_awaited_once_with(
-        "thread-old",
-        manually_closed=False,
-        close_reason="manager_claim_timeout",
+    assert thread_id == "thread-old"
+    manager_replies.close_thread_for_manager.assert_not_awaited()
+    threads.create_thread.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_thread_creates_new_thread_when_previous_is_closed():
+    threads = AsyncMock()
+    threads.get_active_thread = AsyncMock(return_value="thread-closed")
+    threads.create_thread = AsyncMock(return_value="thread-new")
+    thread_read = AsyncMock()
+    thread_read.get_thread_with_project_view = AsyncMock(
+        return_value=ThreadWithProjectView(
+            thread_id="thread-closed",
+            project_id="project-1",
+            client_id="client-1",
+            status="closed",
+            chat_id=123,
+        )
     )
+
+    service = make_service(
+        threads=threads,
+        thread_read=thread_read,
+        manager_replies=AsyncMock(),
+        cache=AsyncMock(),
+        event_reader=AsyncMock(),
+    )
+
+    thread_id = await service._get_or_create_thread("project-1", "client-1")
+
+    assert thread_id == "thread-new"
     threads.create_thread.assert_awaited_once_with("client-1")
 
 

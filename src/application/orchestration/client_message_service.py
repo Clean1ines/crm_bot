@@ -5,7 +5,7 @@ Client message orchestration.
 import asyncio
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from src.application.ports.cache_port import NullCache
 from src.application.ports.event_port import EventReaderPort
@@ -23,9 +23,14 @@ PROJECT_RATE_LIMIT_TEXT = (
     "This project is receiving too many messages right now. Please try again later."
 )
 PROJECT_CONCURRENCY_LIMIT_TEXT = "This project already has too many active conversations in progress. Please try again later."
-MANAGER_HANDOFF_TEXT = (
-    "Your message has been handed off to a manager. Please wait for a reply."
+CLIENT_THREAD_SESSION_TIMEOUT = timedelta(days=2)
+PENDING_MANAGER_TICKET_TEXT = (
+    "Ваше обращение уже у менеджера. "
+    "Если вопрос решён или вы хотите снова пообщаться с AI-ассистентом, "
+    "напишите «закрыть обращение: решено» или «вернуться к ассистенту». "
+    "Если менеджер долго не отвечает, напишите «долго жду» — мы зафиксируем это в обращении."
 )
+MANAGER_HANDOFF_TEXT = PENDING_MANAGER_TICKET_TEXT
 GRAPH_FAILURE_TEXT = "Something went wrong while processing the request."
 
 
@@ -143,10 +148,6 @@ class ClientMessageService:
 
         thread_id_str = str(thread_id)
         if await self._should_create_fresh_thread(thread_id_str):
-            await self._auto_close_stale_manager_ticket(
-                project_id=project_id,
-                thread_id=thread_id_str,
-            )
             return await self.threads.create_thread(client_id)
 
         return thread_id
@@ -157,15 +158,22 @@ class ClientMessageService:
             thread_view.to_record() if thread_view else None
         )
         if not thread_snapshot or not thread_snapshot.status:
-            return False
+            return True
 
         if thread_snapshot.status == ThreadStatus.CLOSED.value:
             return True
 
-        if thread_snapshot.status != ThreadStatus.MANUAL.value:
+        # Manager tickets are not silently closed by sessionization.
+        # They require explicit manager closure or explicit client recovery action.
+        if thread_snapshot.status in {
+            ThreadStatus.WAITING_MANAGER.value,
+            ThreadStatus.MANUAL.value,
+        }:
             return False
 
-        return await self._manual_thread_should_rollover(thread_id, thread_snapshot)
+        return self._client_session_timeout_expired(
+            thread_view.updated_at if thread_view else None
+        )
 
     async def _manual_thread_should_rollover(
         self,
@@ -235,6 +243,19 @@ class ClientMessageService:
     def _reply_timeout_expired(last_manager_reply_at: datetime) -> bool:
         elapsed = datetime.now(UTC) - last_manager_reply_at
         return elapsed.total_seconds() >= MANAGER_CLAIM_IDLE_TIMEOUT_SECONDS
+
+    @staticmethod
+    def _client_session_timeout_expired(updated_at: datetime | None) -> bool:
+        if updated_at is None:
+            return False
+
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+
+        return (
+            datetime.now(UTC) - updated_at.astimezone(UTC)
+            > CLIENT_THREAD_SESSION_TIMEOUT
+        )
 
     async def _auto_close_stale_manager_ticket(
         self, *, project_id: str, thread_id: str
@@ -407,7 +428,10 @@ class ClientMessageService:
                 text=text,
                 manager_session=manager_session,
             )
-        elif thread_snapshot and thread_snapshot.status == ThreadStatus.MANUAL.value:
+        elif thread_snapshot and thread_snapshot.status in {
+            ThreadStatus.MANUAL.value,
+            ThreadStatus.WAITING_MANAGER.value,
+        }:
             self.logger.info(
                 "Message held for platform manager ticket owner",
                 extra={"thread_id": thread_id_str},
