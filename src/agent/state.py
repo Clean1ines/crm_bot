@@ -96,6 +96,11 @@ class AgentState(TypedDict):
         ProjectRuntimeConfigurationState | None
     )  # Explicit project personalization config
     close_ticket: bool | None  # Added hidden field discovered during audit
+    technical_failure_count: int | None
+    technical_failure_stage: str | None
+    technical_failure_error: str | None
+    technical_incident_created: bool | None
+    technical_ticket_id: str | None
 
     # Analytics fields
     intent: str | None  # Detected intent (e.g., "pricing", "support", "sales")
@@ -110,3 +115,8 @@ class AgentState(TypedDict):
     topic: str | None  # Current conversation topic
     lead_status: str | None  # Lead status (e.g., "new", "qualified", "lost")
     repeat_count: int | None  # Number of times user repeated a question
+    domain: str | None
+    turn_relation: str | None
+    should_search_kb: bool | None
+    should_generate_answer: bool | None
+    should_offer_manager: bool | None

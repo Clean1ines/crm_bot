@@ -19,6 +19,7 @@ from src.agent.nodes.persist import create_persist_node
 from src.agent.nodes.policy_engine import create_policy_engine_node
 from src.agent.nodes.responder import create_responder_node
 from src.agent.nodes.response_generator import create_response_generator_node
+from src.agent.nodes.template_response import template_response_node
 from src.agent.nodes.rules import rules_node
 from src.agent.nodes.tool_executor import create_tool_executor_node
 from src.agent.state import AgentState
@@ -117,6 +118,7 @@ def create_agent(
         event_repo=event_repo,
         memory_repo=memory_repo,
         queue_repo=queue_repo,
+        ticket_create_tool=ticket_create_tool,
     )
 
     graph_builder = StateGraph(AgentState)
@@ -130,6 +132,9 @@ def create_agent(
     graph_builder.add_node(AgentGraphNode.ESCALATE.value, escalate_node)
     graph_builder.add_node(
         AgentGraphNode.RESPONSE_GENERATOR.value, response_generator_node
+    )
+    graph_builder.add_node(
+        AgentGraphNode.TEMPLATE_RESPONSE.value, template_response_node
     )
     graph_builder.add_node(AgentGraphNode.RESPONDER.value, responder_node)
     graph_builder.add_node(AgentGraphNode.PERSIST.value, persist_node)
@@ -173,6 +178,7 @@ def create_agent(
         route_from_policy,
         {
             _decision_value(AgentGraphDecision.RESPOND): AgentGraphNode.RESPONDER.value,
+            "RESPOND_TEMPLATE": AgentGraphNode.TEMPLATE_RESPONSE.value,
             _decision_value(
                 AgentGraphDecision.LLM_GENERATE
             ): AgentGraphNode.KB_SEARCH.value,
@@ -210,6 +216,10 @@ def create_agent(
     )
     graph_builder.add_edge(
         AgentGraphNode.RESPONSE_GENERATOR.value,
+        AgentGraphNode.RESPONDER.value,
+    )
+    graph_builder.add_edge(
+        AgentGraphNode.TEMPLATE_RESPONSE.value,
         AgentGraphNode.RESPONDER.value,
     )
     graph_builder.add_edge(

@@ -41,6 +41,11 @@ def test_intent_extraction_result_serializes_validated_payload():
         "cta_hint": None,
         "emotion": "negative",
         "is_repeat_like": True,
+        "domain": "business",
+        "turn_relation": "unknown",
+        "should_search_kb": True,
+        "should_generate_answer": True,
+        "should_offer_manager": False,
     }
 
 

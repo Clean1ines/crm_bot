@@ -107,3 +107,36 @@ def test_persistence_context_does_not_store_raw_issue_text():
     )
 
     assert issue_candidate.value == {"kind": "support", "emotion": "negative"}
+
+
+def test_persistence_context_detects_repeated_technical_failure_incident():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "technical_failure_count": 2,
+            "technical_failure_stage": "response_generator",
+            "technical_failure_error": "PermissionDeniedError",
+            "technical_incident_created": False,
+        }
+    )
+
+    assert context.should_create_technical_incident() is True
+    payload = context.technical_incident_payload()
+    assert payload["priority"] == "high"
+    assert "LLM response generation failed" in payload["title"]
+    assert "PermissionDeniedError" in payload["description"]
+
+
+def test_persistence_context_skips_already_created_technical_incident():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "technical_failure_count": 3,
+            "technical_incident_created": True,
+        }
+    )
+
+    assert context.should_create_technical_incident() is False

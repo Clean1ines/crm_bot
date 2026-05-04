@@ -14,6 +14,13 @@ NEGATIVE_REPLIES = frozenset({"нет", "неа", "не", "no", "nope"})
 PRICE_OBJECTION_MARKERS = ("дорого", "слишком дорого", "expensive", "too expensive")
 ISSUE_MARKERS = ("не работает", "ошибка", "сломалось", "error", "issue", "problem")
 ACTION_CTAS = frozenset({"call_manager", "book_consultation"})
+
+KNOWN_DOMAINS = frozenset(
+    {"business", "out_of_domain", "greeting", "ambiguous", "technical_failure"}
+)
+KNOWN_TURN_RELATIONS = frozenset(
+    {"new_topic", "continuation", "short_reply", "reopening", "unknown"}
+)
 KNOWN_INTENTS = frozenset(
     {"pricing", "support", "sales", "feedback", "handoff_request", "other", "unknown"}
 )
@@ -30,7 +37,7 @@ KNOWN_TOPICS = frozenset(
     }
 )
 KNOWN_CTAS = frozenset({"call_manager", "book_consultation", "none"})
-KNOWN_EMOTIONS = frozenset({"neutral", "positive", "negative"})
+KNOWN_EMOTIONS = frozenset({"neutral", "positive", "negative", "angry"})
 
 
 @dataclass(slots=True)
@@ -42,6 +49,11 @@ class IntentExtractionPayload:
     cta_hint: str | None = None
     emotion: str = "neutral"
     is_repeat_like: bool = False
+    domain: str = "business"
+    turn_relation: str = "unknown"
+    should_search_kb: bool = True
+    should_generate_answer: bool = True
+    should_offer_manager: bool = False
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "IntentExtractionPayload":
@@ -56,6 +68,22 @@ class IntentExtractionPayload:
                     continue
 
         cta_hint = payload.get("cta_hint")
+        domain = _normalized_enum_value(
+            payload.get("domain"), KNOWN_DOMAINS, "business"
+        )
+        should_search_kb = _coerce_bool(
+            payload.get("should_search_kb"),
+            default=domain == "business",
+        )
+        should_generate_answer = _coerce_bool(
+            payload.get("should_generate_answer"),
+            default=domain == "business",
+        )
+
+        if domain in {"out_of_domain", "greeting", "ambiguous"}:
+            should_search_kb = False
+            should_generate_answer = False
+
         return cls(
             intent=_normalized_enum_value(
                 payload.get("intent"), KNOWN_INTENTS, "unknown"
@@ -67,7 +95,19 @@ class IntentExtractionPayload:
             emotion=_normalized_enum_value(
                 payload.get("emotion"), KNOWN_EMOTIONS, "neutral"
             ),
-            is_repeat_like=bool(payload.get("is_repeat_like", False)),
+            is_repeat_like=_coerce_bool(payload.get("is_repeat_like"), default=False),
+            domain=domain,
+            turn_relation=_normalized_enum_value(
+                payload.get("turn_relation"),
+                KNOWN_TURN_RELATIONS,
+                "unknown",
+            ),
+            should_search_kb=should_search_kb,
+            should_generate_answer=should_generate_answer,
+            should_offer_manager=_coerce_bool(
+                payload.get("should_offer_manager"),
+                default=False,
+            ),
         )
 
 
@@ -103,6 +143,11 @@ class IntentExtractionResult:
     cta_hint: str | None
     emotion: str
     is_repeat_like: bool
+    domain: str
+    turn_relation: str
+    should_search_kb: bool
+    should_generate_answer: bool
+    should_offer_manager: bool
 
     @classmethod
     def from_llm_payload(
@@ -117,6 +162,11 @@ class IntentExtractionResult:
             cta_hint=validated.cta_hint,
             emotion=validated.emotion,
             is_repeat_like=validated.is_repeat_like,
+            domain=validated.domain,
+            turn_relation=validated.turn_relation,
+            should_search_kb=validated.should_search_kb,
+            should_generate_answer=validated.should_generate_answer,
+            should_offer_manager=validated.should_offer_manager,
         )
 
     def normalized_for_context(
@@ -145,20 +195,26 @@ class IntentExtractionResult:
         if reply_kind == "price_objection":
             return replace(
                 self,
+                domain="business",
                 intent="pricing",
                 topic="pricing",
                 cta="none",
                 emotion="negative",
                 is_repeat_like=True,
+                should_search_kb=True,
+                should_generate_answer=True,
             )
         if reply_kind == "issue_report":
             return replace(
                 self,
+                domain="business",
                 intent="support",
                 topic="integration" if previous_topic == "integration" else "support",
                 cta="none",
                 emotion="negative",
                 is_repeat_like=True,
+                should_search_kb=True,
+                should_generate_answer=True,
             )
         return self
 
@@ -171,7 +227,26 @@ class IntentExtractionResult:
             "cta_hint": self.cta_hint,
             "emotion": self.emotion,
             "is_repeat_like": self.is_repeat_like,
+            "domain": self.domain,
+            "turn_relation": self.turn_relation,
+            "should_search_kb": self.should_search_kb,
+            "should_generate_answer": self.should_generate_answer,
+            "should_offer_manager": self.should_offer_manager,
         }
+
+
+def _coerce_bool(value: object, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "да"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "нет"}:
+            return False
+    return bool(value)
 
 
 def _optional_text(value: object) -> str | None:
@@ -189,7 +264,8 @@ def _normalized_enum_value(
     text = _optional_text(value)
     if text is None:
         return default
-    return text if text in allowed else default
+    normalized = text.strip().lower()
+    return normalized if normalized in allowed else default
 
 
 def _dialog_state_or_none(value: object) -> DialogState | None:
@@ -280,12 +356,16 @@ def _normalize_affirmative_reply(
     if previous_cta in ACTION_CTAS:
         return replace(
             result,
+            domain="business",
             intent="sales",
             topic=previous_topic or result.topic,
             cta=previous_cta,
+            should_search_kb=True,
+            should_generate_answer=True,
+            should_offer_manager=False,
         )
     if result.intent in {"other", "unknown"} and previous_topic:
-        return replace(result, intent="sales", topic=previous_topic)
+        return replace(result, domain="business", intent="sales", topic=previous_topic)
     return result
 
 
@@ -298,7 +378,9 @@ def _normalize_negative_reply(
     if previous_cta in ACTION_CTAS:
         return replace(
             result,
+            domain="business",
             topic=previous_topic or result.topic,
             cta="none",
+            should_offer_manager=False,
         )
     return result

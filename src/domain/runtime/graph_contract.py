@@ -24,6 +24,7 @@ class AgentGraphNode(StrEnum):
     TOOL_EXECUTOR = "tool_executor"
     ESCALATE = "escalate"
     RESPONSE_GENERATOR = "response_generator"
+    TEMPLATE_RESPONSE = "template_response"
     RESPONDER = "responder"
     PERSIST = "persist"
 

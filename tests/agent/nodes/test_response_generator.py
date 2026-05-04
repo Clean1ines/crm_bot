@@ -117,10 +117,44 @@ async def test_response_generator_returns_typed_fallback_when_llm_fails():
         )
 
     assert result["response_text"] == (
-        "Sorry, something went wrong while generating the response. Please try again later."
+        "Не получилось сгенерировать ответ из-за технической ошибки. "
+        "Можете повторить запрос, а если вопрос срочный — я передам диалог менеджеру."
     )
+    assert result["technical_failure_count"] == 1
+    assert result["technical_failure_stage"] == "response_generator"
+    assert result["technical_failure_error"] == "RuntimeError"
+    assert result["requires_human"] is False
     logger.exception.assert_called_once()
     assert (
         logger.exception.call_args.kwargs["extra"]["policy"]
-        == "fallback_user_visible_error"
+        == "technical_failure_user_choice"
     )
+
+
+@pytest.mark.asyncio
+async def test_response_generator_repeated_llm_failure_uses_incident_text():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=RuntimeError("llm unavailable"))
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Привет ещё раз",
+                "project_configuration": {},
+                "technical_failure_count": 1,
+            }
+        )
+
+    assert result["technical_failure_count"] == 2
+    assert "технический инцидент" in result["response_text"].lower()
+    assert result["requires_human"] is False

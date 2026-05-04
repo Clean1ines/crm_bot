@@ -87,6 +87,11 @@ class PersistenceContext:
     user_input: str
     client_id: str | None
     close_ticket: bool
+    technical_failure_count: int = 0
+    technical_failure_stage: str | None = None
+    technical_failure_error: str | None = None
+    technical_incident_created: bool = False
+    technical_ticket_id: str | None = None
     intent: str | None = None
     lifecycle: str | None = None
     cta: str | None = None
@@ -100,6 +105,11 @@ class PersistenceContext:
     lead_status: str | None = None
     topic: str | None = None
     emotion: str | None = None
+    domain: str | None = None
+    turn_relation: str | None = None
+    should_search_kb: bool = True
+    should_generate_answer: bool = True
+    should_offer_manager: bool = False
     state_payload: RuntimeStatePatch | None = None
     user_memory: RuntimeMemory | None = None
 
@@ -116,6 +126,17 @@ class PersistenceContext:
             user_input=str(state.get("user_input") or "").lower(),
             client_id=state.get("client_id"),
             close_ticket=coerce_bool(state.get("close_ticket"), False),
+            technical_failure_count=coerce_int(state.get("technical_failure_count"), 0),
+            technical_failure_stage=_optional_text(
+                state.get("technical_failure_stage")
+            ),
+            technical_failure_error=_optional_text(
+                state.get("technical_failure_error")
+            ),
+            technical_incident_created=coerce_bool(
+                state.get("technical_incident_created"), False
+            ),
+            technical_ticket_id=_optional_text(state.get("technical_ticket_id")),
             intent=state.get("intent"),
             lifecycle=state.get("lifecycle"),
             cta=state.get("cta"),
@@ -129,6 +150,13 @@ class PersistenceContext:
             lead_status=state.get("lead_status"),
             topic=state.get("topic"),
             emotion=state.get("emotion"),
+            domain=_optional_text(state.get("domain")),
+            turn_relation=_optional_text(state.get("turn_relation")),
+            should_search_kb=coerce_bool(state.get("should_search_kb"), True),
+            should_generate_answer=coerce_bool(
+                state.get("should_generate_answer"), True
+            ),
+            should_offer_manager=coerce_bool(state.get("should_offer_manager"), False),
             state_payload=state_copy,
             user_memory=state.get("user_memory"),
         )
@@ -249,6 +277,27 @@ class PersistenceContext:
 
         return candidates
 
+    def should_create_technical_incident(self) -> bool:
+        return (
+            self.technical_failure_count >= 2
+            and not self.technical_incident_created
+            and bool(self.project_id)
+            and bool(self.thread_id)
+        )
+
+    def technical_incident_payload(self) -> dict[str, object]:
+        return {
+            "title": "Technical incident: LLM response generation failed",
+            "description": (
+                "The assistant failed at an LLM-dependent stage at least twice.\n"
+                f"Stage: {self.technical_failure_stage or 'unknown'}\n"
+                f"Error: {self.technical_failure_error or 'unknown'}\n"
+                f"Thread ID: {self.thread_id or 'unknown'}\n"
+                f"Client ID: {self.client_id or 'unknown'}"
+            ),
+            "priority": "high",
+        }
+
 
 def _ensure_repeat_count(dialog_state: DialogState) -> DialogState:
     if dialog_state["repeat_count"] <= 0 and dialog_state["last_intent"]:
@@ -259,6 +308,13 @@ def _ensure_repeat_count(dialog_state: DialogState) -> DialogState:
 
 def _contains_phrase(text: str, phrases: tuple[str, ...]) -> bool:
     return any(phrase in text for phrase in phrases)
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _contains_price_objection(
@@ -375,6 +431,28 @@ def _copy_runtime_flags(
         state_copy["features"] = state["features"]
     if "dialog_state" in state:
         state_copy["dialog_state"] = state["dialog_state"]
+
+    if "technical_failure_count" in state:
+        state_copy["technical_failure_count"] = state["technical_failure_count"]
+    if "technical_failure_stage" in state:
+        state_copy["technical_failure_stage"] = state["technical_failure_stage"]
+    if "technical_failure_error" in state:
+        state_copy["technical_failure_error"] = state["technical_failure_error"]
+    if "technical_incident_created" in state:
+        state_copy["technical_incident_created"] = state["technical_incident_created"]
+    if "technical_ticket_id" in state:
+        state_copy["technical_ticket_id"] = state["technical_ticket_id"]
+
+    if "domain" in state:
+        state_copy["domain"] = state["domain"]
+    if "turn_relation" in state:
+        state_copy["turn_relation"] = state["turn_relation"]
+    if "should_search_kb" in state:
+        state_copy["should_search_kb"] = state["should_search_kb"]
+    if "should_generate_answer" in state:
+        state_copy["should_generate_answer"] = state["should_generate_answer"]
+    if "should_offer_manager" in state:
+        state_copy["should_offer_manager"] = state["should_offer_manager"]
 
 
 def _copy_tool_state_fields(
