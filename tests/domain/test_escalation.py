@@ -25,6 +25,6 @@ def test_escalation_result_serializes_state_patch():
 
     assert result.to_state_patch() == {
         "requires_human": True,
-        "response_text": "Your request has been handed off to a manager. Please wait for a reply.",
+        "response_text": "Передал обращение менеджеру. Он ответит здесь, как только подключится.",
         "tool_result": None,
     }

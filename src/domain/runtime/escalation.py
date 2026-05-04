@@ -49,7 +49,7 @@ class EscalationContext:
 class EscalationResult:
     requires_human: bool = True
     response_text: str = (
-        "Your request has been handed off to a manager. Please wait for a reply."
+        "Передал обращение менеджеру. Он ответит здесь, как только подключится."
     )
     tool_result: ToolResultPayload | object | None = None
 

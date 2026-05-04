@@ -4,6 +4,10 @@ Provides a middleware for FastAPI to inject correlation IDs.
 """
 
 import logging
+
+# Do not let httpx/httpcore INFO request logs expose provider URLs with secrets.
+# Telegram Bot API puts the bot token in the URL path, so INFO request logging is unsafe.
+
 import sys
 import time
 import uuid
@@ -15,6 +19,9 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.application.ports.logger_port import LoggerPort
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def configure_logging():
