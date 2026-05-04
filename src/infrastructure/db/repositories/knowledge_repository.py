@@ -7,6 +7,7 @@ Clean Architecture contract:
 """
 
 import json
+import re
 from collections.abc import Iterator
 from typing import Protocol
 
@@ -81,9 +82,25 @@ class KnowledgeRepository:
         self.pool = pool
         self._usage_repo = ModelUsageRepository(pool)
 
+    def _query_tokens(self, text: str) -> set[str]:
+        """
+        Lightweight lexical normalization for hybrid ranking.
+
+        This is intentionally deterministic and domain-agnostic:
+        - works without LLM;
+        - handles punctuation better than str.split();
+        - keeps Russian and English words;
+        - ignores very short noise tokens.
+        """
+        return {
+            token
+            for token in re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]+", text.lower())
+            if len(token) >= 3
+        }
+
     def _keyword_overlap(self, query: str, text: str) -> float:
-        q = set(query.lower().split())
-        t = set(text.lower().split())
+        q = self._query_tokens(query)
+        t = self._query_tokens(text)
         if not q:
             return 0.0
         return len(q & t) / len(q)
@@ -104,6 +121,9 @@ class KnowledgeRepository:
             "[" + ",".join(str(x) for x in query_embedding_result.embedding) + "]"
         )
         project_uuid = ensure_uuid(project_id)
+        # First-stage retrieval must be broad enough for hybrid ranking.
+        # Ranking cannot rescue a relevant chunk that never entered the candidate set.
+        candidate_limit = max(limit * 20, 80)
 
         if query_embedding_result.usage is not None:
             await self._usage_repo.record_event(
@@ -115,114 +135,292 @@ class KnowledgeRepository:
                 )
             )
 
+        # Wider candidate pool matters more than tiny top-N changes.
+        # For small KBs this is cheap; for larger KBs it gives ranking enough room.
+        candidate_limit = max(limit * 10, 50)
+
         async with self.pool.acquire() as conn:
-            vector_results = await conn.fetch(
-                """
-                SELECT
-                    kb.id,
-                    kb.content,
-                    kb.document_id,
-                    d.file_name AS source,
-                    d.status AS document_status,
-                    (1 - (kb.embedding <=> $1)) AS score
-                FROM knowledge_base AS kb
-                LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
-                WHERE kb.project_id = $2
-                  AND (d.status = 'processed' OR d.status IS NULL)
-                ORDER BY kb.embedding <=> $1
-                LIMIT $3
-                """,
-                query_embedding_str,
-                project_uuid,
-                limit * 2,
+            if not hybrid_fallback:
+                rows = await conn.fetch(
+                    """
+                    SELECT
+                        kb.id,
+                        kb.content,
+                        kb.document_id,
+                        d.file_name AS source,
+                        d.status AS document_status,
+                        COALESCE(kb.embedding_text, kb.content, '') AS search_text,
+                        (1 - (kb.embedding <=> $1::vector)) AS vector_score,
+                        0.0::double precision AS lexical_score,
+                        0.0::double precision AS exact_score,
+                        (1 - (kb.embedding <=> $1::vector)) AS combined_score
+                    FROM knowledge_base AS kb
+                    LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
+                    WHERE kb.project_id = $2
+                      AND kb.embedding IS NOT NULL
+                      AND (d.status = 'processed' OR d.status IS NULL)
+                    ORDER BY kb.embedding <=> $1::vector
+                    LIMIT $3
+                    """,
+                    query_embedding_str,
+                    project_uuid,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    WITH q AS (
+                        SELECT
+                            $1::vector AS query_embedding,
+                            websearch_to_tsquery('russian', $2) AS query_ts,
+                            lower($2) AS query_text
+                    ),
+                    base AS (
+                        SELECT
+                            kb.id,
+                            kb.content,
+                            kb.document_id,
+                            d.file_name AS source,
+                            d.status AS document_status,
+                            trim(concat_ws(
+                                E'\n',
+                                kb.title,
+                                kb.entry_type,
+                                kb.embedding_text,
+                                kb.source_excerpt,
+                                kb.content,
+                                CASE
+                                    WHEN jsonb_typeof(kb.questions) = 'array'
+                                    THEN (
+                                        SELECT string_agg(value, ' ')
+                                        FROM jsonb_array_elements_text(kb.questions) AS value
+                                    )
+                                    ELSE ''
+                                END,
+                                CASE
+                                    WHEN jsonb_typeof(kb.synonyms) = 'array'
+                                    THEN (
+                                        SELECT string_agg(value, ' ')
+                                        FROM jsonb_array_elements_text(kb.synonyms) AS value
+                                    )
+                                    ELSE ''
+                                END,
+                                CASE
+                                    WHEN jsonb_typeof(kb.tags) = 'array'
+                                    THEN (
+                                        SELECT string_agg(value, ' ')
+                                        FROM jsonb_array_elements_text(kb.tags) AS value
+                                    )
+                                    ELSE ''
+                                END
+                            )) AS search_text,
+                            kb.embedding
+                        FROM knowledge_base AS kb
+                        LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
+                        WHERE kb.project_id = $3
+                          AND kb.embedding IS NOT NULL
+                          AND (d.status = 'processed' OR d.status IS NULL)
+                    ),
+                    vector_candidates AS (
+                        SELECT
+                            base.*,
+                            (1 - (base.embedding <=> q.query_embedding)) AS vector_score,
+                            row_number() OVER (ORDER BY base.embedding <=> q.query_embedding) AS vector_rank
+                        FROM base, q
+                        ORDER BY base.embedding <=> q.query_embedding
+                        LIMIT $4
+                    ),
+                    lexical_candidates AS (
+                        SELECT
+                            base.*,
+                            ts_rank_cd(
+                                to_tsvector('russian', COALESCE(base.search_text, '')),
+                                q.query_ts
+                            ) AS lexical_score,
+                            row_number() OVER (
+                                ORDER BY ts_rank_cd(
+                                    to_tsvector('russian', COALESCE(base.search_text, '')),
+                                    q.query_ts
+                                ) DESC
+                            ) AS lexical_rank
+                        FROM base, q
+                        WHERE to_tsvector('russian', COALESCE(base.search_text, '')) @@ q.query_ts
+                        ORDER BY lexical_score DESC
+                        LIMIT $4
+                    ),
+                    candidates AS (
+                        SELECT
+                            id,
+                            content,
+                            document_id,
+                            source,
+                            document_status,
+                            search_text,
+                            vector_score,
+                            0.0::double precision AS lexical_score,
+                            vector_rank,
+                            NULL::bigint AS lexical_rank
+                        FROM vector_candidates
+
+                        UNION ALL
+
+                        SELECT
+                            id,
+                            content,
+                            document_id,
+                            source,
+                            document_status,
+                            search_text,
+                            0.0::double precision AS vector_score,
+                            lexical_score,
+                            NULL::bigint AS vector_rank,
+                            lexical_rank
+                        FROM lexical_candidates
+                    ),
+                    merged AS (
+                        SELECT
+                            id,
+                            max(content) AS content,
+                            max(document_id::text)::uuid AS document_id,
+                            max(source) AS source,
+                            max(document_status) AS document_status,
+                            max(search_text) AS search_text,
+                            max(vector_score) AS vector_score,
+                            max(lexical_score) AS lexical_score,
+                            min(vector_rank) AS vector_rank,
+                            min(lexical_rank) AS lexical_rank
+                        FROM candidates
+                        GROUP BY id
+                    )
+                    SELECT
+                        id,
+                        content,
+                        document_id,
+                        source,
+                        document_status,
+                        search_text,
+                        vector_score,
+                        lexical_score,
+                        CASE
+                            WHEN lower(search_text) LIKE ('%' || (SELECT query_text FROM q) || '%')
+                            THEN 1.0
+                            ELSE 0.0
+                        END AS exact_score,
+                        (
+                            COALESCE(vector_score, 0.0) * 0.72
+                            + LEAST(COALESCE(lexical_score, 0.0), 1.0) * 0.18
+                            + CASE
+                                WHEN lower(search_text) LIKE ('%' || (SELECT query_text FROM q) || '%')
+                                THEN 0.10
+                                ELSE 0.0
+                              END
+                            + CASE
+                                WHEN vector_rank IS NOT NULL
+                                THEN 0.04 / (60.0 + vector_rank)
+                                ELSE 0.0
+                              END
+                            + CASE
+                                WHEN lexical_rank IS NOT NULL
+                                THEN 0.04 / (60.0 + lexical_rank)
+                                ELSE 0.0
+                              END
+                        ) AS combined_score
+                    FROM merged
+                    ORDER BY combined_score DESC
+                    LIMIT $5
+                    """,
+                    query_embedding_str,
+                    query,
+                    project_uuid,
+                    candidate_limit,
+                    candidate_limit,
+                )
+
+        results: list[KnowledgeSearchResultView] = []
+        query_tokens = self._query_tokens(query)
+        query_lower = query.lower().strip()
+
+        for row in rows:
+            content = str(row["content"])
+            try:
+                raw_search_text = row["search_text"]
+            except KeyError:
+                raw_search_text = None
+            search_text = str(raw_search_text or content)
+            search_lower = search_text.lower()
+            search_tokens = self._query_tokens(search_text)
+
+            try:
+                raw_vector_score = row["vector_score"]
+            except KeyError:
+                raw_vector_score = row["score"] if "score" in row else 0.0
+
+            try:
+                raw_lexical_score = row["lexical_score"]
+            except KeyError:
+                raw_lexical_score = 0.0
+
+            try:
+                raw_exact_score = row["exact_score"]
+            except KeyError:
+                raw_exact_score = 0.0
+
+            vector_score = float(raw_vector_score or 0.0)
+            lexical_score = float(raw_lexical_score or 0.0)
+            exact_score = float(raw_exact_score or 0.0)
+
+            token_overlap = 0.0
+            if query_tokens:
+                token_overlap = len(query_tokens & search_tokens) / len(query_tokens)
+
+            # Rare/important query words should beat generic semantic similarity.
+            # Example: "ночью", "подписку", "заменит", "стиль", "менеджер".
+            rare_token_hits = 0
+            for token in query_tokens:
+                if len(token) >= 5 and token in search_tokens:
+                    rare_token_hits += 1
+
+            rare_token_bonus = min(0.24, rare_token_hits * 0.08)
+            exact_phrase_bonus = (
+                0.22 if query_lower and query_lower in search_lower else 0.0
             )
 
-            vector_items: list[KnowledgeSearchResultView] = [
+            # ts_rank values are often tiny, so normalize by amplification + cap.
+            lexical_bonus = min(0.35, lexical_score * 4.0)
+
+            # Final ranking:
+            # - vector keeps semantic recall;
+            # - lexical/token bonuses rescue precise domain markers;
+            # - exact phrase catches FAQ-like chunks.
+            score = (
+                vector_score * 0.48
+                + lexical_bonus
+                + exact_score * 0.20
+                + token_overlap * 0.32
+                + rare_token_bonus
+                + exact_phrase_bonus
+            )
+
+            method = "hybrid"
+            if lexical_score <= 0.0 and token_overlap <= 0.0:
+                method = "vector"
+            elif vector_score <= 0.0:
+                method = "fts"
+
+            results.append(
                 KnowledgeSearchResultView(
                     id=str(row["id"]),
-                    content=str(row["content"]),
-                    score=float(row["score"]),
-                    method="vector",
+                    content=content,
+                    score=score,
+                    method=method,
                     document_id=_optional_row_text(row, "document_id"),
                     source=_optional_row_text(row, "source"),
                     document_status=_optional_row_text(row, "document_status"),
                 )
-                for row in vector_results
-            ]
-
-            if not hybrid_fallback:
-                return vector_items[:limit]
-
-            fts_results = await conn.fetch(
-                """
-                SELECT
-                    kb.id,
-                    kb.content,
-                    kb.document_id,
-                    d.file_name AS source,
-                    d.status AS document_status,
-                    ts_rank_cd(kb.tsv, plainto_tsquery('russian', $1)) AS score
-                FROM knowledge_base AS kb
-                LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
-                WHERE kb.project_id = $2
-                  AND (d.status = 'processed' OR d.status IS NULL)
-                  AND kb.tsv @@ plainto_tsquery('russian', $1)
-                ORDER BY score DESC
-                LIMIT $3
-                """,
-                query,
-                project_uuid,
-                limit * 2,
             )
-
-        merged: dict[str, KnowledgeSearchResultView] = {
-            item.id: item for item in vector_items
-        }
-
-        for row in fts_results:
-            row_id = str(row["id"])
-            row_content = str(row["content"])
-            row_score = float(row["score"])
-            row_document_id = _optional_row_text(row, "document_id")
-            row_source = _optional_row_text(row, "source")
-            row_document_status = _optional_row_text(row, "document_status")
-
-            if row_id in merged:
-                current = merged[row_id]
-                merged[row_id] = KnowledgeSearchResultView(
-                    id=current.id,
-                    content=current.content,
-                    score=current.score * 0.7 + row_score * 0.3,
-                    method="hybrid",
-                    document_id=current.document_id,
-                    source=current.source,
-                    document_status=current.document_status,
-                )
-            else:
-                merged[row_id] = KnowledgeSearchResultView(
-                    id=row_id,
-                    content=row_content,
-                    score=row_score * 0.8,
-                    method="fts",
-                    document_id=row_document_id,
-                    source=row_source,
-                    document_status=row_document_status,
-                )
-
-        results = [
-            KnowledgeSearchResultView(
-                id=item.id,
-                content=item.content,
-                score=item.score + self._keyword_overlap(query, item.content) * 0.15,
-                method=item.method,
-                document_id=item.document_id,
-                source=item.source,
-                document_status=item.document_status,
-            )
-            for item in merged.values()
-        ]
 
         results.sort(key=lambda item: item.score, reverse=True)
+
         return results[:limit]
 
     async def preview_search(

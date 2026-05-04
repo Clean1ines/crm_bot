@@ -1,8 +1,13 @@
 import React, { useState } from 'react';
 import { useNotification } from '@/shared/lib/notification/useNotifications';
-import { knowledgeApi } from '@shared/api/modules/knowledge';
+import {
+  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
+  knowledgeApi,
+  type KnowledgePreprocessingMode,
+} from '@shared/api/modules/knowledge';
 
 export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) => {
+  const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const { showNotification } = useNotification();
@@ -11,7 +16,7 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
     if (!file) return;
     setUploading(true);
     try {
-      const response = await knowledgeApi.upload(projectId, file);
+      const response = await knowledgeApi.upload(projectId, file, preprocessingMode);
       if (!response.ok) {
         const error = await response.text();
         throw new Error(error);
@@ -27,6 +32,23 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
 
   return (
     <div className="space-y-3">
+      <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Режим предобработки</span>
+        <select
+          value={preprocessingMode}
+          onChange={(event) => setPreprocessingMode(event.target.value as KnowledgePreprocessingMode)}
+        >
+          {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <span style={{ fontSize: 12, opacity: 0.75 }}>
+          {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.description}
+        </span>
+      </label>
+
       <input
         type="file"
         accept=".txt,.pdf"

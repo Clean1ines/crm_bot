@@ -1,5 +1,36 @@
 import { authedJsonRequest, authedMultipartRequest } from '../core/http';
 
+export type KnowledgePreprocessingMode = 'plain' | 'faq' | 'price_list' | 'instruction';
+
+export type KnowledgePreprocessingModeOption = {
+  value: KnowledgePreprocessingMode;
+  label: string;
+  description: string;
+};
+
+export const KNOWLEDGE_PREPROCESSING_MODE_OPTIONS: KnowledgePreprocessingModeOption[] = [
+  {
+    value: 'faq',
+    label: 'FAQ / база знаний',
+    description: 'Лучше для вопросов клиентов, описания услуг, условий, частых ответов.',
+  },
+  {
+    value: 'price_list',
+    label: 'Прайс / каталог',
+    description: 'Лучше для тарифов, меню, товаров, услуг и цен.',
+  },
+  {
+    value: 'instruction',
+    label: 'Инструкции / правила',
+    description: 'Лучше для регламентов, политик, процедур и внутренних правил.',
+  },
+  {
+    value: 'plain',
+    label: 'Без предобработки',
+    description: 'Быстрая загрузка обычными чанками без LLM-нормализации.',
+  },
+];
+
 export type KnowledgePreviewResult = {
   id: string;
   content: string;
@@ -72,9 +103,14 @@ export const knowledgeApi = {
       method: 'GET',
     }),
 
-  upload: (projectId: string, file: File) => {
+  upload: (
+    projectId: string,
+    file: File,
+    preprocessingMode: KnowledgePreprocessingMode = 'faq',
+  ) => {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('preprocessing_mode', preprocessingMode);
 
     return authedMultipartRequest(`/api/projects/${projectId}/knowledge`, formData);
   },
