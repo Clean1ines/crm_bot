@@ -21,6 +21,16 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
 
+TECHNICAL_FAILURE_FIRST_TEXT = (
+    "Не получилось сгенерировать ответ из-за технической ошибки. "
+    "Можете повторить запрос, а если вопрос срочный — я передам диалог менеджеру."
+)
+
+TECHNICAL_FAILURE_REPEAT_TEXT = (
+    "Похоже, техническая ошибка повторилась. Я уже передал технический инцидент "
+    "владельцу проекта. Можете позвать менеджера, чтобы не ждать восстановления ассистента."
+)
+
 
 class ChatMessageResponse(Protocol):
     content: str | None
@@ -150,6 +160,52 @@ def _prompt_features(value: object) -> dict[str, float] | None:
     return features
 
 
+def _coerce_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
+def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
+    previous_count = _coerce_int(state.get("technical_failure_count"), 0)
+    next_count = previous_count + 1
+
+    response_text = (
+        TECHNICAL_FAILURE_REPEAT_TEXT
+        if next_count >= 2
+        else TECHNICAL_FAILURE_FIRST_TEXT
+    )
+
+    patch = dict(
+        ResponseGenerationResult(
+            response_text=response_text,
+        ).to_state_patch()
+    )
+    patch.update(
+        {
+            "technical_failure_count": next_count,
+            "technical_failure_stage": "response_generator",
+            "technical_failure_error": type(exc).__name__,
+            "requires_human": False,
+        }
+    )
+
+    patch["technical_incident_created"] = bool(
+        state.get("technical_incident_created") or False
+    )
+
+    return patch
+
+
 def create_response_generator_node(
     llm: ChatGroqClient | None = None,
     model_name: str | None = None,
@@ -245,14 +301,10 @@ def create_response_generator_node(
                     "decision": context.decision,
                     "error": str(exc),
                     "error_type": type(exc).__name__,
-                    "policy": "fallback_user_visible_error",
+                    "policy": "technical_failure_user_choice",
                 },
             )
-            return dict(
-                ResponseGenerationResult(
-                    response_text="Sorry, something went wrong while generating the response. Please try again later.",
-                ).to_state_patch()
-            )
+            return _technical_failure_patch(state, exc)
 
     def _get_response_input_size(state: AgentState) -> int:
         context = ResponseGenerationContext.from_state(cast(RuntimeStateInput, state))

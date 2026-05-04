@@ -1,7 +1,7 @@
 """
 Intent extraction node for LangGraph pipeline.
 
-Uses a lightweight LLM to extract intent, CTA, topic, emotion, and feature hints.
+Uses a lightweight LLM to extract domain, intent, CTA, topic, emotion, and feature hints.
 """
 
 import json
@@ -18,6 +18,16 @@ from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
+
+TECHNICAL_CLASSIFICATION_FIRST_TEXT = (
+    "Не получилось обработать запрос из-за технической ошибки. "
+    "Можете повторить запрос, а если вопрос срочный — я передам диалог менеджеру."
+)
+
+TECHNICAL_CLASSIFICATION_REPEAT_TEXT = (
+    "Техническая ошибка повторилась. Я уже передал технический инцидент владельцу проекта. "
+    "Можете позвать менеджера, чтобы не ждать восстановления ассистента."
+)
 
 
 class ChatMessageResponse(Protocol):
@@ -39,10 +49,6 @@ class ChatGroqFactory(Protocol):
     ) -> ChatGroqClient: ...
 
 
-# Test hook and lazy runtime cache.
-# Keep this symbol module-level so existing tests can patch
-# src.agent.nodes.intent_extractor.ChatGroq without importing langchain_groq
-# at import time.
 ChatGroq: ChatGroqFactory | None = None
 
 
@@ -87,6 +93,46 @@ def _unwrap_json_block(content: str) -> str:
     return text.strip()
 
 
+def _coerce_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
+def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
+    previous_count = _coerce_int(state.get("technical_failure_count"), 0)
+    next_count = previous_count + 1
+    return {
+        "decision": "RESPOND",
+        "response_text": (
+            TECHNICAL_CLASSIFICATION_REPEAT_TEXT
+            if next_count >= 2
+            else TECHNICAL_CLASSIFICATION_FIRST_TEXT
+        ),
+        "requires_human": False,
+        "domain": "technical_failure",
+        "turn_relation": "unknown",
+        "should_search_kb": False,
+        "should_generate_answer": False,
+        "should_offer_manager": True,
+        "technical_failure_count": next_count,
+        "technical_failure_stage": "intent_extractor",
+        "technical_failure_error": type(exc).__name__,
+        "technical_incident_created": bool(
+            state.get("technical_incident_created") or False
+        ),
+    }
+
+
 def create_intent_extractor_node(
     llm: ChatGroqClient | None = None,
     model_name: str = "llama-3.1-8b-instant",
@@ -99,7 +145,7 @@ def create_intent_extractor_node(
         llm = _chat_groq_class()(
             model=model_name,
             temperature=0.0,
-            max_tokens=150,
+            max_tokens=220,
             api_key=settings.GROQ_API_KEY,
         )
 
@@ -125,21 +171,31 @@ def create_intent_extractor_node(
             logger.debug(
                 "Intent extracted",
                 extra={
+                    "domain": result.domain,
+                    "turn_relation": result.turn_relation,
                     "intent": result.intent,
                     "cta": result.cta,
                     "topic": result.topic,
                     "emotion": result.emotion,
                     "is_repeat_like": result.is_repeat_like,
                     "features": result.features,
+                    "should_search_kb": result.should_search_kb,
+                    "should_generate_answer": result.should_generate_answer,
+                    "should_offer_manager": result.should_offer_manager,
                 },
             )
             return dict(result.to_state_patch())
         except Exception as exc:
             logger.warning(
                 "Intent extraction failed",
-                extra={"error": str(exc), "user_input": context.user_input[:100]},
+                extra={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "user_input": context.user_input[:100],
+                    "policy": "technical_failure_user_choice",
+                },
             )
-            return {}
+            return _technical_failure_patch(state, exc)
 
     def _get_intent_input_size(state: AgentState) -> int:
         context = IntentExtractionContext.from_state(cast(RuntimeStateInput, state))

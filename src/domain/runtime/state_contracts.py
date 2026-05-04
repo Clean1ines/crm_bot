@@ -96,9 +96,19 @@ class RuntimeStateInput(TypedDict, total=False):
     cta_hint: str | None
     emotion: str | None
     is_repeat_like: bool
+    domain: str | None
+    turn_relation: str | None
+    should_search_kb: bool
+    should_generate_answer: bool
+    should_offer_manager: bool
     confidence: float | None
     requires_human: bool
     close_ticket: bool
+    technical_failure_count: int
+    technical_failure_stage: str | None
+    technical_failure_error: str | None
+    technical_incident_created: bool
+    technical_ticket_id: str | None
     features: Mapping[str, object]
     dialog_state: object
     tool_name: str | None
@@ -129,9 +139,19 @@ class RuntimeStatePatch(TypedDict, total=False):
     cta_hint: str | None
     emotion: str
     is_repeat_like: bool
+    domain: str | None
+    turn_relation: str | None
+    should_search_kb: bool
+    should_generate_answer: bool
+    should_offer_manager: bool
     confidence: float | None
     requires_human: bool
     close_ticket: bool
+    technical_failure_count: int
+    technical_failure_stage: str | None
+    technical_failure_error: str | None
+    technical_incident_created: bool
+    technical_ticket_id: str | None
     repeat_count: int | object
     features: Mapping[str, object]
     dialog_state: object

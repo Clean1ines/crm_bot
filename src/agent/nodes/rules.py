@@ -41,6 +41,27 @@ ANGER_KEYWORDS = [
 
 CAPS_THRESHOLD = 0.5
 
+HANDOFF_REQUEST_KEYWORDS = (
+    "позвать менеджера",
+    "позови менеджера",
+    "позовите менеджера",
+    "менеджера",
+    "оператора",
+    "живого человека",
+    "человека",
+    "с менеджером",
+    "с оператором",
+    "call manager",
+    "human",
+    "operator",
+    "manager",
+)
+
+
+def _detect_handoff_request(text: str) -> bool:
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in HANDOFF_REQUEST_KEYWORDS)
+
 
 def _detect_anger(text: str) -> bool:
     text_lower = text.lower()
@@ -68,6 +89,14 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
         return {"decision": "PROCEED_TO_LLM"}
 
     dialog_state = merge_dialog_state(state.get("dialog_state"))
+
+    if _detect_handoff_request(user_input):
+        logger.info("Rule triggered: explicit handoff request")
+        return {
+            "decision": "ESCALATE",
+            "dialog_state": clear_handoff_confirmation(dialog_state),
+        }
+
     if is_handoff_confirmation_pending(dialog_state):
         confirmation_reply = resolve_handoff_confirmation_reply(user_input)
         cleared_dialog_state = clear_handoff_confirmation(dialog_state)

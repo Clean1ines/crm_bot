@@ -57,6 +57,47 @@ def _handoff_confirmation_result(
     )
 
 
+def _template_policy_result(
+    context: PolicyDecisionContext,
+    *,
+    domain: str,
+    turn_relation: str,
+) -> PolicyDecisionResult:
+    topic = "other"
+    normalized_intent = "other"
+    cta = "none"
+
+    if domain == "greeting":
+        topic = "other"
+    elif domain == "out_of_domain":
+        topic = "other"
+    elif domain == "ambiguous":
+        topic = str(context.dialog_state.get("last_topic") or "other")
+
+    next_dialog_state = merge_dialog_state(
+        build_dialog_state_update(
+            context.dialog_state,
+            intent=normalized_intent,
+            topic=topic,
+            cta=cta,
+            lifecycle=context.lifecycle,
+            decision="RESPOND_TEMPLATE",
+            features=context.features,
+        ),
+        lifecycle=context.lifecycle,
+    )
+
+    return PolicyDecisionResult(
+        lifecycle=context.lifecycle,
+        decision="RESPOND_TEMPLATE",
+        cta=cta,
+        topic=topic,
+        lead_status=str(next_dialog_state.get("lead_status") or context.lifecycle),
+        dialog_state=next_dialog_state,
+        requires_human=False,
+    )
+
+
 class PolicyEventAppender(Protocol):
     async def append(
         self,
@@ -79,6 +120,51 @@ def create_policy_engine_node(
 ):
     async def _policy_engine_node_impl(state: AgentState) -> dict[str, object]:
         context = PolicyDecisionContext.from_state(cast(RuntimeStateInput, state))
+
+        # Preserve deterministic response patches produced before policy_engine,
+        # especially technical failures from intent_extractor.
+        if state.get("decision") == "RESPOND" and state.get("response_text"):
+            return {
+                "decision": "RESPOND",
+                "response_text": state.get("response_text"),
+                "requires_human": False,
+                "domain": state.get("domain"),
+                "turn_relation": state.get("turn_relation"),
+                "should_search_kb": False,
+                "should_generate_answer": False,
+                "should_offer_manager": state.get("should_offer_manager") or False,
+                "technical_failure_count": state.get("technical_failure_count") or 0,
+                "technical_failure_stage": state.get("technical_failure_stage"),
+                "technical_failure_error": state.get("technical_failure_error"),
+                "technical_incident_created": state.get("technical_incident_created")
+                or False,
+            }
+
+        domain = str(state.get("domain") or "business").strip().lower()
+        turn_relation = str(state.get("turn_relation") or "unknown").strip().lower()
+        should_generate_answer = bool(state.get("should_generate_answer", True))
+
+        if (
+            domain in {"greeting", "out_of_domain", "ambiguous"}
+            or not should_generate_answer
+        ):
+            result = _template_policy_result(
+                context,
+                domain=domain,
+                turn_relation=turn_relation,
+            )
+            patch = dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
+            patch.update(
+                {
+                    "domain": domain,
+                    "turn_relation": turn_relation,
+                    "should_search_kb": False,
+                    "should_generate_answer": False,
+                    "requires_human": False,
+                }
+            )
+            return patch
+
         normalized_intent = normalize_intent(context.intent)
         topic = resolve_topic(normalized_intent, context.features)
 

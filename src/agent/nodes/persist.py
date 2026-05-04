@@ -22,6 +22,7 @@ from src.infrastructure.db.repositories.thread.runtime_state import (
 )
 from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
+from src.tools.builtins import TicketCreateTool
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,7 @@ def create_persist_node(
     memory_repo: MemoryRepository | None = None,
     summarizer: object | None = None,
     queue_repo: QueueRepository | None = None,
+    ticket_create_tool: TicketCreateTool | None = None,
 ):
     """
     Create the persist node with injected repositories.
@@ -65,6 +67,61 @@ def create_persist_node(
                         "policy": "degrade_continue",
                     },
                 )
+
+        if context.should_create_technical_incident():
+            if ticket_create_tool is not None:
+                try:
+                    ticket_result = await ticket_create_tool.run(
+                        args=context.technical_incident_payload(),
+                        context={
+                            "project_id": context.project_id,
+                            "thread_id": context.thread_id,
+                            "user_id": context.client_id,
+                        },
+                    )
+                    ticket_id = str(ticket_result.get("ticket_id") or "")
+                    if context.state_payload is not None:
+                        context.state_payload["technical_incident_created"] = True
+                        if ticket_id:
+                            context.state_payload["technical_ticket_id"] = ticket_id
+                    logger.warning(
+                        "Technical incident ticket created",
+                        extra={
+                            "thread_id": context.thread_id,
+                            "ticket_id": ticket_id,
+                            "technical_failure_count": context.technical_failure_count,
+                        },
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to create technical incident ticket",
+                        extra={
+                            "thread_id": context.thread_id,
+                            "project_id": context.project_id,
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "policy": "degrade_continue",
+                        },
+                    )
+
+            if queue_repo is not None:
+                try:
+                    await queue_repo.enqueue(
+                        "technical_incident",
+                        {
+                            "project_id": context.project_id,
+                            "thread_id": context.thread_id,
+                            "client_id": context.client_id,
+                            "failure_count": context.technical_failure_count,
+                            "stage": context.technical_failure_stage,
+                            "error": context.technical_failure_error,
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to enqueue technical incident notification",
+                        extra={"thread_id": context.thread_id, "error": str(exc)},
+                    )
 
         try:
             await thread_runtime_state_repo.save_state_json(
@@ -120,6 +177,38 @@ def create_persist_node(
                 except Exception as exc:
                     logger.warning(
                         "Failed to emit tool_called event",
+                        extra={"thread_id": context.thread_id, "error": str(exc)},
+                    )
+
+            if context.technical_failure_count > 0:
+                try:
+                    await event_repo.append(
+                        stream_id=UUID(context.thread_id),
+                        project_id=UUID(context.project_id),
+                        event_type="technical_failure",
+                        payload=json_object_from_unknown(
+                            {
+                                "stage": context.technical_failure_stage,
+                                "error": context.technical_failure_error,
+                                "failure_count": context.technical_failure_count,
+                                "incident_created": bool(
+                                    (context.state_payload or {}).get(
+                                        "technical_incident_created",
+                                        context.technical_incident_created,
+                                    )
+                                ),
+                                "technical_ticket_id": (
+                                    context.state_payload or {}
+                                ).get(
+                                    "technical_ticket_id",
+                                    context.technical_ticket_id,
+                                ),
+                            }
+                        ),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to emit technical_failure event",
                         extra={"thread_id": context.thread_id, "error": str(exc)},
                     )
 
