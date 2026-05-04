@@ -13,7 +13,9 @@ import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 
 import {
+  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
   knowledgeApi,
+  type KnowledgePreprocessingMode,
   type KnowledgeUsageBreakdown,
   type KnowledgeUsageResponse,
   type KnowledgePreviewResponse,
@@ -160,6 +162,7 @@ export const KnowledgePage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [previewQuestion, setPreviewQuestion] = useState('');
+  const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
 
   const documentsQuery = useQuery({
@@ -206,7 +209,7 @@ export const KnowledgePage: React.FC = () => {
     mutationFn: async (file: File) => {
       if (!projectId) throw new Error('Project ID is missing');
 
-      const response = await knowledgeApi.upload(projectId, file);
+      const response = await knowledgeApi.upload(projectId, file, preprocessingMode);
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -375,28 +378,62 @@ export const KnowledgePage: React.FC = () => {
         </div>
       </div>
 
-      <div
-        onClick={triggerUpload}
-        onDragOver={handleDragOver}
-        onDrop={handleDrop}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl bg-[var(--surface-card)] p-6 shadow-sm transition-colors group sm:p-8 lg:p-12 ${
-          uploadMutation.isPending
-            ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 cursor-wait'
-            : 'border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)]'
-        }`}
-      >
-        <div className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full transition-transform sm:h-16 sm:w-16 ${
-          uploadMutation.isPending ? 'bg-[var(--accent-primary)]/20 animate-pulse' : 'bg-[var(--accent-primary)]/10 group-hover:scale-110'
-        }`}>
-          <Upload className="h-7 w-7 text-[var(--accent-primary)] sm:h-8 sm:w-8" />
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
+        <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+              Загрузка документа
+            </h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              Выберите режим предобработки перед загрузкой. Для FAQ и условий бизнеса лучше оставить режим FAQ.
+            </p>
+          </div>
+
+          <label className="flex w-full flex-col gap-2 lg:w-80">
+            <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              Режим предобработки
+            </span>
+            <select
+              value={preprocessingMode}
+              onChange={(event) => setPreprocessingMode(event.target.value as KnowledgePreprocessingMode)}
+              disabled={uploadMutation.isPending}
+              className="min-h-11 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 disabled:cursor-wait disabled:opacity-60"
+            >
+              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs leading-relaxed text-[var(--text-muted)]">
+              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.description}
+            </span>
+          </label>
         </div>
-        <h3 className="text-center text-base font-semibold text-[var(--text-primary)] sm:text-lg">
-          {uploadMutation.isPending ? 'Загрузка...' : 'Нажмите или перетащите файл'}
-        </h3>
-        <p className="mt-1 text-center text-sm text-[var(--text-muted)]">
-          PDF, JSON, Markdown или TXT
-        </p>
-      </div>
+
+        <div
+          onClick={triggerUpload}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl bg-[var(--surface-card)] p-6 shadow-sm transition-colors group sm:p-8 lg:p-12 ${
+            uploadMutation.isPending
+              ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 cursor-wait'
+              : 'border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)]'
+          }`}
+        >
+          <div className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full transition-transform sm:h-16 sm:w-16 ${
+            uploadMutation.isPending ? 'bg-[var(--accent-primary)]/20 animate-pulse' : 'bg-[var(--accent-primary)]/10 group-hover:scale-110'
+          }`}>
+            <Upload className="h-7 w-7 text-[var(--accent-primary)] sm:h-8 sm:w-8" />
+          </div>
+          <h3 className="text-center text-base font-semibold text-[var(--text-primary)] sm:text-lg">
+            {uploadMutation.isPending ? 'Загрузка...' : 'Нажмите или перетащите файл'}
+          </h3>
+          <p className="mt-1 text-center text-sm text-[var(--text-muted)]">
+            PDF, JSON, Markdown или TXT · {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.label}
+          </p>
+        </div>
+      </section>
 
       {usage && usage.counter_enabled && <UsageSummaryCard usage={usage} />}
 

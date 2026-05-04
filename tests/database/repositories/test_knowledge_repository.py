@@ -38,15 +38,45 @@ async def test_search_success_hybrid_true(
     project_id = str(uuid4())
     query = "test query"
     mock_embed_text.return_value = EmbeddingTextResult(embedding=[0.1, 0.2, 0.3])
-    vector_rows = [
-        {"id": uuid4(), "content": "vector chunk 1", "score": 0.9},
-        {"id": uuid4(), "content": "vector chunk 2", "score": 0.8},
+    rows = [
+        {
+            "id": uuid4(),
+            "content": "vector chunk 1",
+            "document_id": None,
+            "source": None,
+            "document_status": None,
+            "search_text": "vector chunk 1 test query",
+            "vector_score": 0.9,
+            "lexical_score": 0.85,
+            "exact_score": 0.0,
+            "method": "hybrid",
+        },
+        {
+            "id": uuid4(),
+            "content": "vector chunk 2",
+            "document_id": None,
+            "source": None,
+            "document_status": None,
+            "search_text": "vector chunk 2",
+            "vector_score": 0.8,
+            "lexical_score": 0.0,
+            "exact_score": 0.0,
+            "method": "vector",
+        },
+        {
+            "id": uuid4(),
+            "content": "fts only chunk",
+            "document_id": None,
+            "source": None,
+            "document_status": None,
+            "search_text": "fts only chunk test query",
+            "vector_score": 0.0,
+            "lexical_score": 0.7,
+            "exact_score": 0.0,
+            "method": "fts",
+        },
     ]
-    fts_rows = [
-        {"id": vector_rows[0]["id"], "content": "vector chunk 1", "score": 0.85},
-        {"id": uuid4(), "content": "fts only chunk", "score": 0.7},
-    ]
-    mock_pool.mock_conn.fetch = AsyncMock(side_effect=[vector_rows, fts_rows])
+    mock_pool.mock_conn.fetch = AsyncMock(return_value=rows)
 
     result = await knowledge_repo.search(
         project_id,
