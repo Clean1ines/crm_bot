@@ -32,8 +32,9 @@ interface Document {
   created_at: string;
 }
 
-const ACTIVE_JOB_STATUSES = new Set(['pending', 'running', 'retrying']);
-const ACTIVE_RUN_STATUSES = new Set(['created', 'generating', 'ready', 'running']);
+const ACTIVE_JOB_STATUSES = new Set(['pending', 'processing', 'running', 'retrying', 'paused', 'running_or_locked']);
+const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
+const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
 const PAUSED_STATUSES = new Set(['paused', 'manual_pause', 'manual-pause']);
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
@@ -53,12 +54,19 @@ const clampPercent = (value: unknown): number => {
   return Math.max(0, Math.min(100, Math.round(numeric)));
 };
 
+type RagEvalJobWithEffectiveStatus = RagEvalJob & { effective_status?: string };
+
+const getJobStatus = (job: RagEvalJob | null | undefined): string => {
+  const jobWithEffectiveStatus = job as RagEvalJobWithEffectiveStatus | null | undefined;
+  return String(jobWithEffectiveStatus?.effective_status || jobWithEffectiveStatus?.status || '');
+};
+
 const isJobActive = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && ACTIVE_JOB_STATUSES.has(String(job.status || '')))
+  Boolean(job && ACTIVE_JOB_STATUSES.has(getJobStatus(job)))
 );
 
 const isJobPaused = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && PAUSED_STATUSES.has(String(job.status || '')))
+  Boolean(job && PAUSED_STATUSES.has(getJobStatus(job)))
 );
 
 const stageLabel = (stage: string): string => {
@@ -197,7 +205,7 @@ const JobProgressCard: React.FC<{
         <StatPill label="Attempts" value={`${job.attempts}/${job.max_attempts}`} />
       </div>
 
-      {job.error && (
+      {ERROR_VISIBLE_JOB_STATUSES.has(getJobStatus(job)) && job.error && (
         <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
           {job.error}
         </div>
@@ -373,7 +381,6 @@ export const RagEvalPage: React.FC = () => {
       toast.error(error instanceof Error ? error.message : 'Не удалось отменить задачу');
     },
   });
-
   const latestReportPayload = statusQuery.data?.report ?? null;
   const latestReport = getRecord(latestReportPayload);
   const latestRun = statusQuery.data?.run ?? null;
