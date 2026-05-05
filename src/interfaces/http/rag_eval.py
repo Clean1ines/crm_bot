@@ -47,6 +47,7 @@ MODE_LIMITS: dict[RagEvalMode, int] = {
 }
 
 PROJECT_RAG_EVAL_ROLES = ["owner", "admin"]
+RAG_EVAL_GROQ_MODEL = "llama-3.1-8b-instant"
 
 ModeQuery = Annotated[
     str,
@@ -391,10 +392,10 @@ async def run_rag_eval_for_document(
     )
     rag_eval_repo = RagEvalRepository(pool)
 
-    json_llm = GroqRagEvalJsonLlmAdapter(model="llama-3.1-8b-instant")
+    json_llm = GroqRagEvalJsonLlmAdapter(model=RAG_EVAL_GROQ_MODEL)
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=json_llm,
-        model_name=settings.GROQ_MODEL,
+        model_name=RAG_EVAL_GROQ_MODEL,
     )
     answer_judge = LlmRagEvalAnswerJudge(llm=json_llm)
 

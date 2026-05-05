@@ -34,6 +34,8 @@ from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswer
 
 logger = get_logger(__name__)
 
+RAG_EVAL_GROQ_MODEL = "llama-3.1-8b-instant"
+
 
 def _coerce_int(
     value: object,
@@ -364,11 +366,11 @@ async def _run_full_document_rag_eval(
     )
 
     json_llm = GroqRagEvalJsonLlmAdapter(
-        model="llama-3.1-8b-instant", max_tokens=llm_max_tokens
+        model=RAG_EVAL_GROQ_MODEL, max_tokens=llm_max_tokens
     )
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=json_llm,
-        model_name=settings.GROQ_MODEL,
+        model_name=RAG_EVAL_GROQ_MODEL,
     )
     answer_judge = LlmRagEvalAnswerJudge(llm=json_llm)
 
