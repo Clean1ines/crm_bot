@@ -384,6 +384,73 @@ class RagEvalRepository:
                 report.created_at,
             )
 
+    async def get_latest_run_summary(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    r.id,
+                    r.dataset_id,
+                    r.project_id,
+                    r.document_id,
+                    r.status,
+                    r.started_at,
+                    r.finished_at,
+                    r.retriever_version,
+                    r.reranker_version,
+                    r.generator_model,
+                    COUNT(rr.id)::int AS result_count
+                FROM rag_eval_runs AS r
+                LEFT JOIN rag_eval_results AS rr ON rr.run_id = r.id
+                WHERE r.project_id = $1::uuid
+                  AND r.document_id = $2::uuid
+                GROUP BY
+                    r.id,
+                    r.dataset_id,
+                    r.project_id,
+                    r.document_id,
+                    r.status,
+                    r.started_at,
+                    r.finished_at,
+                    r.retriever_version,
+                    r.reranker_version,
+                    r.generator_model
+                ORDER BY r.started_at DESC, r.id DESC
+                LIMIT 1
+                """,
+                project_id,
+                document_id,
+            )
+
+        if row is None:
+            return None
+
+        started_at = row["started_at"]
+        finished_at = row["finished_at"]
+
+        return {
+            "id": str(row["id"]),
+            "dataset_id": str(row["dataset_id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]),
+            "status": str(row["status"]),
+            "started_at": started_at.isoformat()
+            if hasattr(started_at, "isoformat")
+            else str(started_at),
+            "finished_at": finished_at.isoformat()
+            if hasattr(finished_at, "isoformat")
+            else (str(finished_at) if finished_at is not None else None),
+            "retriever_version": str(row["retriever_version"]),
+            "reranker_version": str(row["reranker_version"]),
+            "generator_model": str(row["generator_model"] or ""),
+            "result_count": int(row["result_count"] or 0),
+        }
+
     async def get_latest_report(
         self,
         *,
