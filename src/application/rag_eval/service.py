@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 
 from src.application.rag_eval.ports import (
     RagEvalChunkSourcePort,
+    RagEvalDatasetControlCallback,
     RagEvalDatasetGeneratorPort,
+    RagEvalDatasetProgressCallback,
     RagEvalReportSinkPort,
     RagEvalStorePort,
 )
@@ -41,6 +43,8 @@ class RagEvalService:
         project_id: str,
         document_id: str,
         max_questions: int,
+        progress_callback: RagEvalDatasetProgressCallback | None = None,
+        control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> tuple[RagEvalRun, RagQualityReport]:
         chunks = await self._chunk_source.load_document_chunks(
             project_id=project_id,
@@ -52,6 +56,8 @@ class RagEvalService:
             document_id=document_id,
             chunks=chunks,
             max_questions=max_questions,
+            progress_callback=progress_callback,
+            control_callback=control_callback,
         )
 
         if self._store is not None:

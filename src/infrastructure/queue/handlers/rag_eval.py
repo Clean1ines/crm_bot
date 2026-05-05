@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import cast
 
 import asyncpg
 from groq import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
-from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
+from src.application.rag_eval.dataset_generator import (
+    LlmRagEvalDatasetGenerator,
+    MAX_CHUNKS_PER_LLM_BATCH,
+)
 from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.reporter import RagQualityReporter
 from src.application.rag_eval.runner import RagEvalRunner
@@ -97,6 +103,163 @@ def _transient_from_provider_error(exc: BaseException) -> TransientJobError:
     )
 
 
+RAG_EVAL_PROGRESS_PAYLOAD_KEY = "rag_eval_progress"
+RAG_EVAL_CONTROL_PAYLOAD_KEY = "rag_eval_control"
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _coerce_payload_mapping(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return dict(value)
+
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+
+        if isinstance(decoded, dict):
+            return dict(decoded)
+
+    return {}
+
+
+async def _write_rag_eval_job_progress(
+    *,
+    db_pool: asyncpg.Pool,
+    job_id: str,
+    stage: str,
+    status: str,
+    message: str,
+    target_questions: int,
+    generated_questions: int,
+    processed_batches: int,
+    total_batches: int,
+    extra: Mapping[str, object] | None = None,
+) -> None:
+    safe_target = max(target_questions, 1)
+    percent = min(
+        100.0,
+        round((max(generated_questions, 0) / safe_target) * 100.0, 2),
+    )
+
+    progress: dict[str, object] = {
+        "stage": stage,
+        "status": status,
+        "message": message,
+        "target_questions": target_questions,
+        "generated_questions": generated_questions,
+        "processed_batches": processed_batches,
+        "total_batches": max(total_batches, processed_batches, 1),
+        "percent": percent,
+        "updated_at": _utc_now_iso(),
+    }
+
+    if extra:
+        progress.update(extra)
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE execution_queue
+            SET
+                payload = COALESCE(payload, '{}'::jsonb)
+                    || jsonb_build_object($2::text, $3::jsonb),
+                updated_at = NOW()
+            WHERE id = $1::uuid
+            """,
+            job_id,
+            RAG_EVAL_PROGRESS_PAYLOAD_KEY,
+            json.dumps(progress, ensure_ascii=False),
+        )
+
+
+async def _read_rag_eval_job_state(
+    *,
+    db_pool: asyncpg.Pool,
+    job_id: str,
+) -> tuple[str, dict[str, object]]:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT status, payload
+            FROM execution_queue
+            WHERE id = $1::uuid
+            """,
+            job_id,
+        )
+
+    if row is None:
+        return "missing", {}
+
+    return str(row["status"]), _coerce_payload_mapping(row["payload"])
+
+
+def _control_action(payload: Mapping[str, object]) -> str:
+    control = payload.get(RAG_EVAL_CONTROL_PAYLOAD_KEY)
+    if not isinstance(control, Mapping):
+        return ""
+
+    raw_action = control.get("action")
+    if not isinstance(raw_action, str):
+        return ""
+
+    return raw_action.strip().lower()
+
+
+async def _wait_if_rag_eval_job_paused_or_cancelled(
+    *,
+    db_pool: asyncpg.Pool,
+    job_id: str,
+    target_questions: int,
+    generated_questions: int,
+    processed_batches: int,
+    total_batches: int,
+) -> None:
+    while True:
+        queue_status, payload = await _read_rag_eval_job_state(
+            db_pool=db_pool,
+            job_id=job_id,
+        )
+        action = _control_action(payload)
+
+        if queue_status in {"missing", "failed", "cancelled"} or action == "cancel":
+            await _write_rag_eval_job_progress(
+                db_pool=db_pool,
+                job_id=job_id,
+                stage="cancelled",
+                status="cancelled",
+                message="RAG eval cancelled before next LLM batch",
+                target_questions=target_questions,
+                generated_questions=generated_questions,
+                processed_batches=processed_batches,
+                total_batches=total_batches,
+                extra={"queue_status": queue_status, "control_action": action},
+            )
+            raise PermanentJobError("RAG eval job cancelled manually")
+
+        if queue_status == "paused" or action == "pause":
+            await _write_rag_eval_job_progress(
+                db_pool=db_pool,
+                job_id=job_id,
+                stage="paused",
+                status="paused",
+                message="RAG eval paused; waiting for resume",
+                target_questions=target_questions,
+                generated_questions=generated_questions,
+                processed_batches=processed_batches,
+                total_batches=total_batches,
+                extra={"queue_status": queue_status, "control_action": action},
+            )
+            await asyncio.sleep(5.0)
+            continue
+
+        return
+
+
 async def handle_run_full_rag_eval(
     job: Mapping[str, object],
     *,
@@ -111,6 +274,7 @@ async def handle_run_full_rag_eval(
 
     try:
         await _run_full_document_rag_eval(
+            job_id=str(job.get("id") or ""),
             payload=payload,
             db_pool=db_pool,
         )
@@ -141,6 +305,7 @@ async def handle_run_full_rag_eval(
 
 async def _run_full_document_rag_eval(
     *,
+    job_id: str,
     payload: Mapping[str, object],
     db_pool: asyncpg.Pool,
 ) -> None:
@@ -173,6 +338,12 @@ async def _run_full_document_rag_eval(
     if explicit_max_questions is not None:
         full_document_target = min(full_document_target, explicit_max_questions)
 
+    source_chunk_count = len(chunks)
+    total_batches = max(
+        (source_chunk_count + MAX_CHUNKS_PER_LLM_BATCH - 1) // MAX_CHUNKS_PER_LLM_BATCH,
+        1,
+    )
+
     retrieval_limit = _coerce_int(
         payload.get("retrieval_limit"),
         default=5,
@@ -192,7 +363,9 @@ async def _run_full_document_rag_eval(
         query_expander=GroqQueryExpander(),
     )
 
-    json_llm = GroqRagEvalJsonLlmAdapter(max_tokens=llm_max_tokens)
+    json_llm = GroqRagEvalJsonLlmAdapter(
+        model="llama-3.1-8b-instant", max_tokens=llm_max_tokens
+    )
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=json_llm,
         model_name=settings.GROQ_MODEL,
@@ -221,17 +394,100 @@ async def _run_full_document_rag_eval(
             "project_id": project_id,
             "document_id": document_id,
             "requested_by": requested_by,
-            "source_chunk_count": len(chunks),
+            "source_chunk_count": source_chunk_count,
             "questions_per_chunk": questions_per_chunk,
             "target_questions": full_document_target,
             "retrieval_limit": retrieval_limit,
         },
     )
 
+    progress_state: dict[str, int] = {
+        "generated_questions": 0,
+        "processed_batches": 0,
+    }
+
+    await _write_rag_eval_job_progress(
+        db_pool=db_pool,
+        job_id=job_id,
+        stage="dataset_generation",
+        status="running",
+        message="Starting RAG eval dataset generation",
+        target_questions=full_document_target,
+        generated_questions=0,
+        processed_batches=0,
+        total_batches=total_batches,
+        extra={
+            "project_id": project_id,
+            "document_id": document_id,
+            "source_chunk_count": source_chunk_count,
+            "questions_per_chunk": questions_per_chunk,
+            "retrieval_limit": retrieval_limit,
+        },
+    )
+
+    async def _on_dataset_progress(
+        generated_questions: int,
+        target_questions: int,
+        batch_index: int,
+    ) -> None:
+        progress_state["generated_questions"] = generated_questions
+        progress_state["processed_batches"] = batch_index
+
+        await _write_rag_eval_job_progress(
+            db_pool=db_pool,
+            job_id=job_id,
+            stage="dataset_generation",
+            status="running",
+            message="Generating RAG eval questions from document chunks",
+            target_questions=target_questions,
+            generated_questions=generated_questions,
+            processed_batches=batch_index,
+            total_batches=total_batches,
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "source_chunk_count": source_chunk_count,
+                "questions_per_chunk": questions_per_chunk,
+                "retrieval_limit": retrieval_limit,
+            },
+        )
+
+    async def _control_callback() -> None:
+        await _wait_if_rag_eval_job_paused_or_cancelled(
+            db_pool=db_pool,
+            job_id=job_id,
+            target_questions=full_document_target,
+            generated_questions=progress_state["generated_questions"],
+            processed_batches=progress_state["processed_batches"],
+            total_batches=total_batches,
+        )
+
     run, report = await service.generate_dataset_and_run(
         project_id=project_id,
         document_id=document_id,
         max_questions=full_document_target,
+        progress_callback=_on_dataset_progress,
+        control_callback=_control_callback,
+    )
+
+    await _write_rag_eval_job_progress(
+        db_pool=db_pool,
+        job_id=job_id,
+        stage="completed",
+        status="completed",
+        message="Full-document RAG eval completed",
+        target_questions=full_document_target,
+        generated_questions=len(run.results),
+        processed_batches=total_batches,
+        total_batches=total_batches,
+        extra={
+            "project_id": project_id,
+            "document_id": document_id,
+            "run_id": run.id,
+            "dataset_id": run.dataset_id,
+            "score": report.score,
+            "readiness": report.readiness,
+        },
     )
 
     logger.info(
