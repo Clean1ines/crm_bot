@@ -22,6 +22,7 @@ from src.interfaces.http.knowledge import (
     UPLOAD_TOO_LARGE_DETAIL,
     router as knowledge_router,
 )
+from src.interfaces.http.rag_eval import router as rag_eval_router
 from src.interfaces.http.limits import router as limits_router
 from src.interfaces.http.logs import router as logs_router
 from src.interfaces.http.metrics import router as metrics_router
@@ -179,6 +180,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.include_router(webhooks_router)
 app.include_router(knowledge_router)
+app.include_router(rag_eval_router)
 app.include_router(auth_router)
 app.include_router(bot_router)
 app.include_router(projects_router)
