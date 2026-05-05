@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from src.interfaces.http.app import app
+from src.interfaces.http.app import (
+    KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES,
+    app,
+)
 from src.interfaces.http.dependencies import (
     get_project_repo,
     get_pool,
@@ -354,6 +357,31 @@ class TestKnowledgeUpload:
 
         assert response.status_code == 413
         assert response.json()["detail"] == UPLOAD_TOO_LARGE_DETAIL
+
+    def test_upload_rejects_request_too_large_before_multipart_parsing(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        oversized = b"a" * (
+            8 * 1024 * 1024 + KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES + 1
+        )
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
+                response = client.post(
+                    f"/api/projects/{project_id}/knowledge",
+                    files={"file": ("huge.txt", oversized, "text/plain")},
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == UPLOAD_TOO_LARGE_DETAIL
+        MockChunker.assert_not_called()
 
     def test_upload_chunking_error(self, client, mock_project_repo):
         """Ошибка при разбиении на чанки"""

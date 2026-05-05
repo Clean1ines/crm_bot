@@ -432,44 +432,167 @@ class KnowledgeRepository:
         if limit <= 0:
             return []
 
+        normalized_query = query.strip()
+        if not normalized_query:
+            return []
+
+        candidate_limit = max(limit * 12, 50)
+
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
+                WITH q AS (
+                    SELECT
+                        websearch_to_tsquery('russian', $1) AS query_ts,
+                        lower($1) AS query_text
+                ),
+                base AS (
+                    SELECT
+                        kb.id,
+                        kb.content,
+                        kb.document_id,
+                        d.file_name AS source,
+                        d.status AS document_status,
+                        kb.entry_type,
+                        kb.title,
+                        kb.source_excerpt,
+                        kb.embedding_text,
+                        kb.questions,
+                        kb.synonyms,
+                        kb.tags,
+                        trim(concat_ws(
+                            E'\n',
+                            kb.title,
+                            kb.entry_type,
+                            kb.embedding_text,
+                            kb.source_excerpt,
+                            kb.content,
+                            CASE
+                                WHEN jsonb_typeof(kb.questions) = 'array'
+                                THEN (
+                                    SELECT string_agg(value, ' ')
+                                    FROM jsonb_array_elements_text(kb.questions) AS value
+                                )
+                                ELSE ''
+                            END,
+                            CASE
+                                WHEN jsonb_typeof(kb.synonyms) = 'array'
+                                THEN (
+                                    SELECT string_agg(value, ' ')
+                                    FROM jsonb_array_elements_text(kb.synonyms) AS value
+                                )
+                                ELSE ''
+                            END,
+                            CASE
+                                WHEN jsonb_typeof(kb.tags) = 'array'
+                                THEN (
+                                    SELECT string_agg(value, ' ')
+                                    FROM jsonb_array_elements_text(kb.tags) AS value
+                                )
+                                ELSE ''
+                            END
+                        )) AS search_text
+                    FROM knowledge_documents AS d
+                    JOIN knowledge_base AS kb ON kb.document_id = d.id
+                    WHERE d.project_id = $2
+                      AND d.status = 'processed'
+                ),
+                scored AS (
+                    SELECT
+                        base.*,
+                        ts_rank_cd(
+                            to_tsvector('russian', COALESCE(base.search_text, '')),
+                            q.query_ts
+                        ) AS lexical_score,
+                        (
+                            SELECT COUNT(DISTINCT token)::double precision
+                            FROM regexp_split_to_table(q.query_text, '[^[:alnum:]а-яё]+') AS token
+                            WHERE length(token) >= 4
+                              AND token NOT IN (
+                                  'чем', 'этот', 'этого', 'этой', 'есть',
+                                  'можно', 'какие', 'какая', 'какой',
+                                  'перед', 'после', 'нужно', 'просто',
+                                  'словами', 'ваша', 'вашей', 'вашу'
+                              )
+                              AND lower(base.search_text) LIKE '%' || token || '%'
+                        ) AS token_overlap,
+                        CASE
+                            WHEN COALESCE(base.entry_type, '') <> ''
+                             AND base.entry_type <> 'chunk'
+                            THEN 0.45::double precision
+                            ELSE 0.0::double precision
+                        END AS structured_boost,
+                        CASE
+                            WHEN lower(base.content) LIKE '%ожидаемая тема:%'
+                            THEN 0.25::double precision
+                            ELSE 0.0::double precision
+                        END AS legacy_penalty,
+                        CASE
+                            WHEN COALESCE(base.title, '') <> ''
+                            THEN 0.05::double precision
+                            ELSE 0.0::double precision
+                        END AS title_boost
+                    FROM base, q
+                )
                 SELECT
-                    kb.id,
-                    kb.content,
-                    kb.document_id,
-                    d.file_name AS source,
-                    d.status AS document_status,
-                    ts_rank_cd(kb.tsv, plainto_tsquery('russian', $1)) AS score
-                FROM knowledge_documents AS d
-                JOIN knowledge_base AS kb ON kb.document_id = d.id
-                WHERE d.project_id = $2
-                  AND d.status = 'processed'
-                  AND kb.tsv @@ plainto_tsquery('russian', $1)
+                    id,
+                    content,
+                    document_id,
+                    source,
+                    document_status,
+                    entry_type,
+                    title,
+                    source_excerpt,
+                    embedding_text,
+                    questions,
+                    synonyms,
+                    tags,
+                    (
+                        lexical_score
+                        + (token_overlap * 0.06)
+                        + structured_boost
+                        + title_boost
+                        - legacy_penalty
+                    ) AS score
+                FROM scored
+                WHERE lexical_score > 0.0
+                   OR token_overlap > 0.0
                 ORDER BY score DESC
                 LIMIT $3
                 """,
-                query,
+                normalized_query,
                 ensure_uuid(project_id),
-                limit,
+                candidate_limit,
             )
 
         results = [
             KnowledgeSearchResultView(
                 id=str(row["id"]),
                 content=str(row["content"]),
-                score=float(row["score"])
-                + self._keyword_overlap(query, str(row["content"])) * 0.15,
-                method="fts",
+                score=max(
+                    0.0,
+                    float(row["score"] or 0.0)
+                    + self._keyword_overlap(normalized_query, str(row["content"]))
+                    * 0.05,
+                ),
+                method="structured_lexical"
+                if _optional_row_text(row, "entry_type") not in {None, "", "chunk"}
+                else "fts",
                 document_id=_optional_row_text(row, "document_id"),
                 source=_optional_row_text(row, "source"),
                 document_status=_optional_row_text(row, "document_status"),
+                entry_type=_optional_row_text(row, "entry_type"),
+                title=_optional_row_text(row, "title"),
+                source_excerpt=_optional_row_text(row, "source_excerpt"),
+                embedding_text=_optional_row_text(row, "embedding_text"),
+                questions=row["questions"],
+                synonyms=row["synonyms"],
+                tags=row["tags"],
             )
             for row in rows
         ]
         results.sort(key=lambda item: item.score, reverse=True)
-        return results
+        return results[:limit]
 
     async def add_knowledge_batch(
         self,
@@ -628,7 +751,17 @@ class KnowledgeRepository:
                     d.uploaded_by,
                     d.created_at,
                     d.updated_at,
-                    COUNT(kb.id)::int AS chunk_count
+                    d.preprocessing_mode,
+                    d.preprocessing_status,
+                    d.preprocessing_error,
+                    d.preprocessing_model,
+                    d.preprocessing_prompt_version,
+                    d.preprocessing_metrics,
+                    COUNT(kb.id)::int AS chunk_count,
+                    COUNT(kb.id) FILTER (
+                        WHERE COALESCE(kb.entry_type, '') <> ''
+                          AND kb.entry_type <> 'chunk'
+                    )::int AS structured_chunk_count
                 FROM knowledge_documents AS d
                 LEFT JOIN knowledge_base AS kb ON kb.document_id = d.id
                 WHERE d.project_id = $1
@@ -640,7 +773,13 @@ class KnowledgeRepository:
                     d.error,
                     d.uploaded_by,
                     d.created_at,
-                    d.updated_at
+                    d.updated_at,
+                    d.preprocessing_mode,
+                    d.preprocessing_status,
+                    d.preprocessing_error,
+                    d.preprocessing_model,
+                    d.preprocessing_prompt_version,
+                    d.preprocessing_metrics
                 ORDER BY d.created_at DESC
                 LIMIT $2 OFFSET $3
             """,
@@ -664,6 +803,24 @@ class KnowledgeRepository:
                 created_at=_normalize_timestamp(row["created_at"]),
                 updated_at=_normalize_timestamp(row["updated_at"]),
                 chunk_count=int(row["chunk_count"] or 0),
+                preprocessing_mode=str(row["preprocessing_mode"])
+                if row["preprocessing_mode"] is not None
+                else None,
+                preprocessing_status=str(row["preprocessing_status"])
+                if row["preprocessing_status"] is not None
+                else None,
+                preprocessing_error=str(row["preprocessing_error"])
+                if row["preprocessing_error"] is not None
+                else None,
+                preprocessing_model=str(row["preprocessing_model"])
+                if row["preprocessing_model"] is not None
+                else None,
+                preprocessing_prompt_version=str(row["preprocessing_prompt_version"])
+                if row["preprocessing_prompt_version"] is not None
+                else None,
+                preprocessing_metrics=row["preprocessing_metrics"],
+                structured_entries=int(row["structured_chunk_count"] or 0),
+                structured_chunk_count=int(row["structured_chunk_count"] or 0),
             )
             for row in rows or []
         ]
@@ -679,7 +836,22 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, project_id, file_name, file_size, status, error, uploaded_by, created_at, updated_at
+                SELECT
+                    id,
+                    project_id,
+                    file_name,
+                    file_size,
+                    status,
+                    error,
+                    uploaded_by,
+                    created_at,
+                    updated_at,
+                    preprocessing_mode,
+                    preprocessing_status,
+                    preprocessing_error,
+                    preprocessing_model,
+                    preprocessing_prompt_version,
+                    preprocessing_metrics
                 FROM knowledge_documents
                 WHERE id = $1
             """,
@@ -689,9 +861,22 @@ class KnowledgeRepository:
             if not row:
                 return None
 
-            chunk_count = await conn.fetchval(
-                "SELECT COUNT(*) FROM knowledge_base WHERE document_id = $1",
+            counts = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(id)::int AS chunk_count,
+                    COUNT(id) FILTER (
+                        WHERE COALESCE(entry_type, '') <> ''
+                          AND entry_type <> 'chunk'
+                    )::int AS structured_chunk_count
+                FROM knowledge_base
+                WHERE document_id = $1
+                """,
                 row["id"],
+            )
+            chunk_count = int(counts["chunk_count"] or 0) if counts else 0
+            structured_chunk_count = (
+                int(counts["structured_chunk_count"] or 0) if counts else 0
             )
 
         return KnowledgeDocumentDetailView(
@@ -707,6 +892,24 @@ class KnowledgeRepository:
             created_at=_normalize_timestamp(row["created_at"]),
             updated_at=_normalize_timestamp(row["updated_at"]),
             chunk_count=int(chunk_count or 0),
+            preprocessing_mode=str(row["preprocessing_mode"])
+            if row["preprocessing_mode"] is not None
+            else None,
+            preprocessing_status=str(row["preprocessing_status"])
+            if row["preprocessing_status"] is not None
+            else None,
+            preprocessing_error=str(row["preprocessing_error"])
+            if row["preprocessing_error"] is not None
+            else None,
+            preprocessing_model=str(row["preprocessing_model"])
+            if row["preprocessing_model"] is not None
+            else None,
+            preprocessing_prompt_version=str(row["preprocessing_prompt_version"])
+            if row["preprocessing_prompt_version"] is not None
+            else None,
+            preprocessing_metrics=row["preprocessing_metrics"],
+            structured_entries=structured_chunk_count,
+            structured_chunk_count=structured_chunk_count,
         )
 
     async def update_document_status(

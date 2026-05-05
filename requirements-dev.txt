@@ -1,7 +1,13 @@
-pytest 
-pytest-asyncio 
-pytest-cov 
-pytest-env 
+pytest
+pytest-asyncio
+pytest-cov
+pytest-env
 pytest-timeout
 httpx
 testcontainers
+ruff
+mypy
+bandit
+pip-audit
+radon
+pyinstrument

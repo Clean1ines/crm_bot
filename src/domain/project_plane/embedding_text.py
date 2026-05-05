@@ -14,7 +14,10 @@ import re
 _HEADING_RE = re.compile(
     r"^\s*(?:#{1,6}\s+|\d{1,3}[.)]\s+)?(?P<title>[A-ZА-ЯЁ0-9][^\n]{3,120})\s*$"
 )
-_QUESTION_RE = re.compile(r"(^|\s)(что|как|можно|сколько|когда|где|зачем|почему|кто|какие|какая|какой|can|how|what|when|where|why)\b", re.IGNORECASE)
+_QUESTION_RE = re.compile(
+    r"(^|\s)(что|как|можно|сколько|когда|где|зачем|почему|кто|какие|какая|какой|can|how|what|when|where|why)\b",
+    re.IGNORECASE,
+)
 _BULLET_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(?P<item>.+?)\s*$")
 _WS_RE = re.compile(r"\s+")
 
@@ -73,8 +76,24 @@ def extract_keyword_markers(text: str, *, limit: int = 24) -> list[str]:
     tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9+/#.-]{2,}", normalized)
 
     stop = {
-        "это", "как", "что", "для", "или", "если", "при", "где", "над", "под",
-        "the", "and", "for", "with", "that", "this", "you", "are",
+        "это",
+        "как",
+        "что",
+        "для",
+        "или",
+        "если",
+        "при",
+        "где",
+        "над",
+        "под",
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "you",
+        "are",
     }
 
     result: list[str] = []
