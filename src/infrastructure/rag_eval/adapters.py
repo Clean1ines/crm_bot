@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import re
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -20,6 +23,40 @@ from src.infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 
 
+_RAG_EVAL_LLM_LOCK = asyncio.Lock()
+_RAG_EVAL_LAST_CALL_MONOTONIC = 0.0
+
+
+def _rag_eval_llm_min_delay_seconds() -> float:
+    raw = os.getenv("RAG_EVAL_LLM_MIN_DELAY_SECONDS", "20").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 20.0
+    return max(0.0, value)
+
+
+async def _throttle_rag_eval_llm_call() -> None:
+    """Serialize RAG-eval LLM calls per process to reduce Groq TPM 429s.
+
+    This throttle is intentionally local to the RAG-eval JSON adapter. It does
+    not affect the production chatbot response generator.
+    """
+
+    global _RAG_EVAL_LAST_CALL_MONOTONIC
+
+    min_delay = _rag_eval_llm_min_delay_seconds()
+    if min_delay <= 0:
+        return
+
+    async with _RAG_EVAL_LLM_LOCK:
+        now = time.monotonic()
+        elapsed = now - _RAG_EVAL_LAST_CALL_MONOTONIC
+        if _RAG_EVAL_LAST_CALL_MONOTONIC > 0 and elapsed < min_delay:
+            await asyncio.sleep(min_delay - elapsed)
+        _RAG_EVAL_LAST_CALL_MONOTONIC = time.monotonic()
+
+
 class GroqRagEvalJsonLlmAdapter:
     """Groq-backed JSON-only LLM adapter for RAG eval generation and judging."""
 
@@ -29,7 +66,7 @@ class GroqRagEvalJsonLlmAdapter:
         client: AsyncGroq | None = None,
         model: str | None = None,
         temperature: float = 0.1,
-        max_tokens: int = 4096,
+        max_tokens: int = 2048,
     ) -> None:
         self._client = client or AsyncGroq(api_key=settings.GROQ_API_KEY)
         self._model = model or settings.GROQ_MODEL
@@ -44,6 +81,7 @@ class GroqRagEvalJsonLlmAdapter:
         schema_name: str,
     ) -> Mapping[str, object]:
         try:
+            await _throttle_rag_eval_llm_call()
             response = await self._client.chat.completions.create(
                 model=self._model,
                 messages=[

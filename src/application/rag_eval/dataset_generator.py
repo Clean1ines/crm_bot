@@ -16,8 +16,8 @@ from src.application.rag_eval.schemas import (
 ALLOWED_QUESTION_TYPES = set(get_args(RagEvalQuestionType))
 ALLOWED_SEVERITIES = set(get_args(RagEvalSeverity))
 
-MAX_CHUNKS_PER_LLM_BATCH = 8
-MAX_CHUNK_CHARS = 1600
+MAX_CHUNKS_PER_LLM_BATCH = 3
+MAX_CHUNK_CHARS = 900
 
 
 class LlmRagEvalDatasetGenerator:
@@ -105,7 +105,7 @@ class LlmRagEvalDatasetGenerator:
         dataset.total_questions = len(dataset.questions)
         dataset.status = "ready"
         dataset.metadata = {
-            "generation_strategy": "llm_per_chunk_batch",
+            "generation_strategy": "llm_full_chunk_coverage_batches",
             "max_questions": target,
             "source_chunk_count": len(chunks),
         }
@@ -165,13 +165,15 @@ Use short observable notes in metadata, not reasoning traces.
             for chunk in chunks
         ]
 
-        per_batch_target = min(max(remaining, 1), 24)
+        per_batch_target = min(max(remaining, len(chunks)), 12)
 
         return f"""
 Project id: {project_id}
 Document id: {document_id}
 Batch index: {batch_index}
 Generate up to {per_batch_target} eval questions for these chunks.
+You must cover every chunk in this batch with at least one answerable direct/paraphrase/short_vague question before adding optional negative/risky cases.
+Full-document mode depends on this: every chunk should be represented in the generated dataset whenever possible.
 
 Strict JSON shape:
 {{
