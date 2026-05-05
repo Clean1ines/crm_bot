@@ -134,6 +134,13 @@ class KnowledgePreviewResultDto:
     source: str | None
     document_id: str | None
     document_status: str | None
+    entry_type: str | None = None
+    title: str | None = None
+    source_excerpt: str | None = None
+    embedding_text: str | None = None
+    questions: object | None = None
+    synonyms: object | None = None
+    tags: object | None = None
 
     @classmethod
     def from_search_result(
@@ -148,10 +155,17 @@ class KnowledgePreviewResultDto:
             source=result.source,
             document_id=result.document_id,
             document_status=result.document_status,
+            entry_type=result.entry_type,
+            title=result.title,
+            source_excerpt=result.source_excerpt,
+            embedding_text=result.embedding_text,
+            questions=result.questions,
+            synonyms=result.synonyms,
+            tags=result.tags,
         )
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "content": self.content,
             "answer": self.content,
@@ -161,6 +175,21 @@ class KnowledgePreviewResultDto:
             "document_id": self.document_id,
             "document_status": self.document_status,
         }
+
+        optional_fields = {
+            "entry_type": self.entry_type,
+            "title": self.title,
+            "source_excerpt": self.source_excerpt,
+            "embedding_text": self.embedding_text,
+            "questions": self.questions,
+            "synonyms": self.synonyms,
+            "tags": self.tags,
+        }
+        for key, value in optional_fields.items():
+            if value is not None:
+                payload[key] = value
+
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

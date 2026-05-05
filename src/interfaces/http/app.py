@@ -18,7 +18,10 @@ from src.interfaces.http.auth import router as auth_router
 from src.interfaces.http.bot import router as bot_router
 from src.interfaces.http.chat import router as chat_router
 from src.interfaces.http.clients import router as clients_router
-from src.interfaces.http.knowledge import router as knowledge_router
+from src.interfaces.http.knowledge import (
+    UPLOAD_TOO_LARGE_DETAIL,
+    router as knowledge_router,
+)
 from src.interfaces.http.limits import router as limits_router
 from src.interfaces.http.logs import router as logs_router
 from src.interfaces.http.metrics import router as metrics_router
@@ -44,6 +47,68 @@ app.add_middleware(
 )
 
 app.add_middleware(CorrelationIdMiddleware)
+
+KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
+
+def _is_knowledge_upload_request(request: Request) -> bool:
+    """
+    Match only the document upload endpoint, not list/preview/usage/delete routes.
+
+    The upload route is:
+    POST /api/projects/{project_id}/knowledge
+    """
+    if request.method != "POST":
+        return False
+
+    path = request.url.path.strip("/")
+    parts = path.split("/")
+    return (
+        len(parts) == 4
+        and parts[0] == "api"
+        and parts[1] == "projects"
+        and parts[3] == "knowledge"
+    )
+
+
+@app.middleware("http")
+async def reject_oversized_knowledge_uploads(
+    request: Request,
+    call_next,
+):
+    """
+    Reject clearly oversized knowledge uploads before FastAPI parses multipart form data.
+
+    Endpoint-level UploadFile validation happens after Starlette/python-multipart has
+    parsed the request body. This guard uses Content-Length to avoid spending CPU/RAM
+    on requests that cannot possibly fit the configured upload limit.
+    """
+    if _is_knowledge_upload_request(request):
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = 0
+
+            max_request_size = (
+                settings.KNOWLEDGE_UPLOAD_MAX_BYTES
+                + KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES
+            )
+            if declared_size > max_request_size:
+                request_id = _request_id_from_request(request)
+                headers = _cors_headers()
+                headers["X-Request-ID"] = request_id
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": UPLOAD_TOO_LARGE_DETAIL,
+                        "request_id": request_id,
+                    },
+                    headers=headers,
+                )
+
+    return await call_next(request)
 
 
 def _cors_headers() -> dict[str, str]:
