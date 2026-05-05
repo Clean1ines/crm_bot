@@ -432,3 +432,403 @@ async def run_rag_eval_for_document(
         "readiness": report.readiness,
         "report": report.to_json(),
     }
+
+
+def _queue_json_payload(raw_payload: object) -> dict[str, object]:
+    import json
+
+    if isinstance(raw_payload, dict):
+        return cast(dict[str, object], raw_payload)
+
+    if isinstance(raw_payload, str):
+        decoded = json.loads(raw_payload)
+        if isinstance(decoded, dict):
+            return cast(dict[str, object], decoded)
+
+    return {}
+
+
+def _iso_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return str(isoformat())
+
+    return str(value)
+
+
+def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
+    raw_status = str(row["status"])
+    locked_at = row["locked_at"]
+    error = row["error"]
+
+    if raw_status == "pending" and locked_at is not None:
+        if isinstance(error, str) and error.startswith("paused:"):
+            return "paused"
+        return "running_or_locked"
+
+    return raw_status
+
+
+def _rag_eval_job_percent(row: asyncpg.Record) -> float:
+    effective_status = _rag_eval_job_effective_status(row)
+
+    if effective_status in {"completed", "succeeded", "success", "failed", "cancelled"}:
+        return 100.0
+
+    if effective_status == "running_or_locked":
+        return 10.0
+
+    return 0.0
+
+
+def _serialize_rag_eval_job(row: asyncpg.Record) -> dict[str, object]:
+    payload = _queue_json_payload(row["payload"])
+    effective_status = _rag_eval_job_effective_status(row)
+
+    return {
+        "id": str(row["id"]),
+        "task_type": str(row["task_type"]),
+        "status": str(row["status"]),
+        "effective_status": effective_status,
+        "percent": _rag_eval_job_percent(row),
+        "attempts": int(row["attempts"]),
+        "max_attempts": int(row["max_attempts"]),
+        "locked_at": _iso_or_none(row["locked_at"]),
+        "created_at": _iso_or_none(row["created_at"]),
+        "updated_at": _iso_or_none(row["updated_at"]),
+        "error": None if row["error"] is None else str(row["error"]),
+        "payload": payload,
+        "project_id": payload.get("project_id"),
+        "document_id": payload.get("document_id"),
+        "requested_by": payload.get("requested_by"),
+        "questions_per_chunk": payload.get("questions_per_chunk"),
+        "max_questions": payload.get("max_questions"),
+        "retrieval_limit": payload.get("retrieval_limit"),
+        "progress_kind": "queue_coarse",
+        "note": (
+            "Coarse queue-level progress. Exact chunk/question progress will be added "
+            "by worker heartbeat in the next patch."
+        ),
+    }
+
+
+async def _get_rag_eval_queue_job(
+    *,
+    pool: asyncpg.Pool,
+    job_id: str,
+) -> asyncpg.Record:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                id,
+                task_type,
+                status,
+                attempts,
+                max_attempts,
+                locked_at,
+                created_at,
+                updated_at,
+                error,
+                payload
+            FROM public.execution_queue
+            WHERE id = $1::uuid
+              AND task_type = $2
+            """,
+            job_id,
+            TASK_RUN_FULL_RAG_EVAL,
+        )
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RAG eval job not found: {job_id}",
+        )
+
+    return row
+
+
+async def _require_rag_eval_queue_job_access(
+    *,
+    pool: asyncpg.Pool,
+    job_id: str,
+    current_user_id: str,
+    project_repo: ProjectRepository,
+    user_repo: UserRepository,
+) -> asyncpg.Record:
+    row = await _get_rag_eval_queue_job(pool=pool, job_id=job_id)
+    payload = _queue_json_payload(row["payload"])
+    project_id = payload.get("project_id")
+
+    if not isinstance(project_id, str) or not project_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="RAG eval job payload does not contain project_id",
+        )
+
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    return row
+
+
+@router.get("/documents/{document_id}/jobs")
+async def list_rag_eval_jobs_for_document(
+    document_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    resolved_document_id = await _resolve_document_id(pool, document_id)
+    health = await _document_health(pool, resolved_document_id)
+    project_id = health["project_id"]
+
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id,
+                task_type,
+                status,
+                attempts,
+                max_attempts,
+                locked_at,
+                created_at,
+                updated_at,
+                error,
+                payload
+            FROM public.execution_queue
+            WHERE task_type = $1
+              AND payload::jsonb ->> 'document_id' = $2
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            TASK_RUN_FULL_RAG_EVAL,
+            resolved_document_id,
+        )
+
+    return {
+        "ok": True,
+        "document": health,
+        "jobs": [_serialize_rag_eval_job(row) for row in rows],
+    }
+
+
+@router.get("/jobs/{job_id}/progress")
+async def get_rag_eval_job_progress(
+    job_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    row = await _require_rag_eval_queue_job_access(
+        pool=pool,
+        job_id=job_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    return {
+        "ok": True,
+        "job": _serialize_rag_eval_job(row),
+    }
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_rag_eval_job(
+    job_id: str,
+    reason: Annotated[
+        str | None,
+        Query(max_length=500, description="Optional cancellation reason."),
+    ] = None,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    await _require_rag_eval_queue_job_access(
+        pool=pool,
+        job_id=job_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    message = reason or "cancelled by user"
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE public.execution_queue
+            SET
+                status = 'failed',
+                attempts = max_attempts,
+                locked_at = NULL,
+                error = $2,
+                updated_at = now()
+            WHERE id = $1::uuid
+              AND task_type = $3
+              AND status NOT IN ('completed', 'failed')
+            RETURNING
+                id,
+                task_type,
+                status,
+                attempts,
+                max_attempts,
+                locked_at,
+                created_at,
+                updated_at,
+                error,
+                payload
+            """,
+            job_id,
+            f"manually cancelled: {message}",
+            TASK_RUN_FULL_RAG_EVAL,
+        )
+
+    if row is None:
+        row = await _get_rag_eval_queue_job(pool=pool, job_id=job_id)
+
+    return {
+        "ok": True,
+        "job": _serialize_rag_eval_job(row),
+    }
+
+
+@router.post("/jobs/{job_id}/pause")
+async def pause_rag_eval_job(
+    job_id: str,
+    reason: Annotated[
+        str | None,
+        Query(max_length=500, description="Optional pause reason."),
+    ] = None,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    existing = await _require_rag_eval_queue_job_access(
+        pool=pool,
+        job_id=job_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    if existing["locked_at"] is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Job is already locked/running. Pause is safe only before worker claim. "
+                "Use cancel to stop retries; an already in-flight LLM call may still finish."
+            ),
+        )
+
+    message = reason or "paused by user"
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE public.execution_queue
+            SET
+                locked_at = now() + interval '100 years',
+                error = $2,
+                updated_at = now()
+            WHERE id = $1::uuid
+              AND task_type = $3
+              AND status = 'pending'
+              AND locked_at IS NULL
+            RETURNING
+                id,
+                task_type,
+                status,
+                attempts,
+                max_attempts,
+                locked_at,
+                created_at,
+                updated_at,
+                error,
+                payload
+            """,
+            job_id,
+            f"paused: {message}",
+            TASK_RUN_FULL_RAG_EVAL,
+        )
+
+    if row is None:
+        row = await _get_rag_eval_queue_job(pool=pool, job_id=job_id)
+
+    return {
+        "ok": True,
+        "job": _serialize_rag_eval_job(row),
+    }
+
+
+@router.post("/jobs/{job_id}/resume")
+async def resume_rag_eval_job(
+    job_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    await _require_rag_eval_queue_job_access(
+        pool=pool,
+        job_id=job_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE public.execution_queue
+            SET
+                locked_at = NULL,
+                error = NULL,
+                updated_at = now()
+            WHERE id = $1::uuid
+              AND task_type = $2
+              AND status = 'pending'
+              AND error LIKE 'paused:%'
+            RETURNING
+                id,
+                task_type,
+                status,
+                attempts,
+                max_attempts,
+                locked_at,
+                created_at,
+                updated_at,
+                error,
+                payload
+            """,
+            job_id,
+            TASK_RUN_FULL_RAG_EVAL,
+        )
+
+    if row is None:
+        row = await _get_rag_eval_queue_job(pool=pool, job_id=job_id)
+
+    return {
+        "ok": True,
+        "job": _serialize_rag_eval_job(row),
+    }

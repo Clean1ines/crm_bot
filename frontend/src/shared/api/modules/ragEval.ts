@@ -1,153 +1,214 @@
-import { getSessionToken, handleUnauthorizedResponse } from '@shared/api/core/session';
+import { authedJsonRequest } from '@shared/api/core/http';
 
-export type RagEvalMode = 'quick' | 'standard' | 'deep' | 'paranoid';
-
-export interface RagEvalDocumentHealth {
-  id: string;
-  project_id: string;
-  status: string;
-  file_name: string;
-  chunk_count: number;
-}
-
-export interface RagEvalLatestRunSummary {
-  id: string;
-  dataset_id: string;
-  project_id: string;
-  document_id: string;
-  status: string;
-  started_at: string;
-  finished_at: string | null;
-  retriever_version: string;
-  reranker_version: string;
-  generator_model: string;
-  result_count: number;
-}
-
-export interface RagEvalLatestReportResponse {
+export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
-  document: RagEvalDocumentHealth;
-  report: unknown | null;
+  job_id: string;
+  document_id: string;
+  project_id: string;
+  source_chunk_count: number;
+  questions_per_chunk: number;
+  target_questions: number;
+  max_questions: number | null;
+  retrieval_limit: number;
 }
 
 export interface RagEvalDocumentStatusResponse {
   ok: boolean;
-  document: RagEvalDocumentHealth;
-  run: RagEvalLatestRunSummary | null;
-  report: unknown | null;
+  document: Record<string, unknown>;
+  run: Record<string, unknown> | null;
+  report: Record<string, unknown> | null;
 }
 
-export interface RagEvalRunResponse {
+export interface RagEvalLatestReportResponse {
   ok: boolean;
-  document: RagEvalDocumentHealth;
-  mode: RagEvalMode;
-  max_questions: number;
-  dataset_id: string;
-  run_id: string;
-  questions: number;
-  score: number;
-  readiness: string;
-  report: unknown;
+  document: Record<string, unknown>;
+  report: Record<string, unknown> | null;
 }
 
-export interface RagEvalFullRunAcceptedResponse {
+export interface RagEvalRunAcceptedResponse {
   ok: boolean;
-  queued: boolean;
-  job_id: string;
-  document: RagEvalDocumentHealth;
-  mode: 'full_document';
-  questions_per_chunk: number;
-  target_questions: number;
+  run_id?: string;
+  report?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL
-  || import.meta.env.VITE_API_URL
-  || ''
-).replace(/\/$/, '');
+export interface RagEvalProgressPayload {
+  stage?: string;
+  status?: string;
+  percent?: number;
+  generated_questions?: number;
+  target_questions?: number;
+  processed_questions?: number;
+  total_questions?: number;
+  source_chunk_count?: number;
+  processed_batches?: number;
+  total_batches?: number;
+  dataset_id?: string;
+  run_id?: string;
+  report_id?: string;
+  score?: number;
+  readiness?: string;
+  updated_at?: string;
+  message?: string;
+  [key: string]: unknown;
+}
 
-const buildUrl = (path: string): string => `${API_BASE_URL}${path}`;
+export interface RagEvalJob {
+  id: string;
+  task_type: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  created_at: string | null;
+  updated_at: string | null;
+  locked_at: string | null;
+  error: string | null;
+  payload: Record<string, unknown>;
+  progress: RagEvalProgressPayload | null;
+}
 
-const authHeaders = (): HeadersInit => {
-  const token = getSessionToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+export interface RagEvalJobsResponse {
+  ok: boolean;
+  document: Record<string, unknown>;
+  jobs: RagEvalJob[];
+}
 
-const readErrorMessage = async (response: Response): Promise<string> => {
-  const payload = await response.json().catch(() => null);
-  if (payload && typeof payload === 'object' && 'detail' in payload) {
-    const detail = (payload as { detail?: unknown }).detail;
-    if (typeof detail === 'string') return detail;
-    return JSON.stringify(detail);
-  }
-  return `HTTP ${response.status}`;
-};
+export interface RagEvalJobProgressResponse {
+  ok: boolean;
+  job: RagEvalJob;
+}
 
-const requestJson = async <T>(url: string, init: RequestInit): Promise<T> => {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      ...authHeaders(),
-      ...(init.headers || {}),
-    },
-  });
+export interface RagEvalJobActionResponse {
+  ok: boolean;
+  job: RagEvalJob;
+}
 
-  if (response.status === 401) {
-    handleUnauthorizedResponse();
-  }
+interface RunFullDocumentEvalOptions {
+  questionsPerChunk?: number;
+  maxQuestions?: number;
+}
 
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
+interface RunDocumentEvalOptions {
+  mode?: 'quick' | 'standard' | 'deep' | 'paranoid';
+  maxQuestions?: number;
+}
 
-  return (await response.json()) as T;
+const encode = (value: string): string => encodeURIComponent(value);
+
+const unwrap = async <T>(promise: Promise<{ data: T }>): Promise<T> => {
+  const response = await promise;
+  return response.data;
 };
 
 export const ragEvalApi = {
-  getLatestReport(documentId: string): Promise<RagEvalLatestReportResponse> {
-    return requestJson<RagEvalLatestReportResponse>(
-      buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/latest-report`),
-      { method: 'GET' },
+  async getLatestReport(documentId: string): Promise<RagEvalLatestReportResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalLatestReportResponse>(
+        `/api/rag-eval/documents/${encode(documentId)}/latest-report`,
+        { method: 'GET' },
+      ),
     );
   },
 
-  getStatus(documentId: string): Promise<RagEvalDocumentStatusResponse> {
-    return requestJson<RagEvalDocumentStatusResponse>(
-      buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/status`),
-      { method: 'GET' },
+  async getStatus(documentId: string): Promise<RagEvalDocumentStatusResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalDocumentStatusResponse>(
+        `/api/rag-eval/documents/${encode(documentId)}/status`,
+        { method: 'GET' },
+      ),
     );
   },
 
-  runFullDocumentEval(
+  async listJobs(documentId: string): Promise<RagEvalJobsResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalJobsResponse>(
+        `/api/rag-eval/documents/${encode(documentId)}/jobs`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async getJobProgress(jobId: string): Promise<RagEvalJobProgressResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalJobProgressResponse>(
+        `/api/rag-eval/jobs/${encode(jobId)}/progress`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async cancelJob(jobId: string): Promise<RagEvalJobActionResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalJobActionResponse>(
+        `/api/rag-eval/jobs/${encode(jobId)}/cancel`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  async pauseJob(jobId: string): Promise<RagEvalJobActionResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalJobActionResponse>(
+        `/api/rag-eval/jobs/${encode(jobId)}/pause`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  async resumeJob(jobId: string): Promise<RagEvalJobActionResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalJobActionResponse>(
+        `/api/rag-eval/jobs/${encode(jobId)}/resume`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  async runFullDocumentEval(
     documentId: string,
-    params: { questionsPerChunk: number; maxQuestions?: number | null },
+    options: RunFullDocumentEvalOptions = {},
   ): Promise<RagEvalFullRunAcceptedResponse> {
-    const query = new URLSearchParams({
-      questions_per_chunk: String(params.questionsPerChunk),
-    });
+    const query = new URLSearchParams();
 
-    if (params.maxQuestions != null) {
-      query.set('max_questions', String(params.maxQuestions));
+    if (options.questionsPerChunk !== undefined) {
+      query.set('questions_per_chunk', String(options.questionsPerChunk));
     }
 
-    return requestJson<RagEvalFullRunAcceptedResponse>(
-      buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/run-full?${query.toString()}`),
-      { method: 'POST' },
+    if (options.maxQuestions !== undefined) {
+      query.set('max_questions', String(options.maxQuestions));
+    }
+
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+
+    return unwrap(
+      authedJsonRequest<RagEvalFullRunAcceptedResponse>(
+        `/api/rag-eval/documents/${encode(documentId)}/run-full${suffix}`,
+        { method: 'POST' },
+      ),
     );
   },
 
-  runDocumentEval(
+  async runDocumentEval(
     documentId: string,
-    params: { mode: RagEvalMode; maxQuestions?: number | null },
-  ): Promise<RagEvalRunResponse> {
-    const query = new URLSearchParams({ mode: params.mode });
-    if (params.maxQuestions != null) {
-      query.set('max_questions', String(params.maxQuestions));
+    options: RunDocumentEvalOptions = {},
+  ): Promise<RagEvalRunAcceptedResponse> {
+    const query = new URLSearchParams();
+
+    if (options.mode) {
+      query.set('mode', options.mode);
     }
 
-    return requestJson<RagEvalRunResponse>(
-      buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/run?${query.toString()}`),
-      { method: 'POST' },
+    if (options.maxQuestions !== undefined) {
+      query.set('max_questions', String(options.maxQuestions));
+    }
+
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+
+    return unwrap(
+      authedJsonRequest<RagEvalRunAcceptedResponse>(
+        `/api/rag-eval/documents/${encode(documentId)}/run${suffix}`,
+        { method: 'POST' },
+      ),
     );
   },
 };

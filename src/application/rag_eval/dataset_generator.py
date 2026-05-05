@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import cast, get_args
 
 from src.application.rag_eval.ports import RagEvalJsonLlmPort
@@ -15,6 +15,9 @@ from src.application.rag_eval.schemas import (
 
 ALLOWED_QUESTION_TYPES = set(get_args(RagEvalQuestionType))
 ALLOWED_SEVERITIES = set(get_args(RagEvalSeverity))
+
+RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
+RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 
 MAX_CHUNKS_PER_LLM_BATCH = 3
 MAX_CHUNK_CHARS = 900
@@ -44,6 +47,8 @@ class LlmRagEvalDatasetGenerator:
         document_id: str,
         chunks: list[RagEvalChunk],
         max_questions: int,
+        progress_callback: RagEvalDatasetProgressCallback | None = None,
+        control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> RagEvalDataset:
         dataset_id = new_eval_id("dataset")
         dataset = RagEvalDataset(
@@ -58,14 +63,25 @@ class LlmRagEvalDatasetGenerator:
             dataset.status = "ready"
             dataset.total_questions = 0
             dataset.metadata = {"warning": "document_has_no_chunks"}
+            if progress_callback is not None:
+                await progress_callback(0, 0, 0)
             return dataset
 
         questions: list[RagEvalQuestion] = []
         target = max(max_questions, 1)
+        last_batch_index = 0
+
+        if progress_callback is not None:
+            await progress_callback(0, target, 0)
 
         for batch_index, batch in enumerate(self._batches(chunks), start=1):
+            last_batch_index = batch_index
+
             if len(questions) >= target:
                 break
+
+            if control_callback is not None:
+                await control_callback()
 
             response = await self._llm.complete_json(
                 system_prompt=self._system_prompt(),
@@ -83,6 +99,12 @@ class LlmRagEvalDatasetGenerator:
             if not isinstance(raw_questions, Sequence) or isinstance(
                 raw_questions, str
             ):
+                if progress_callback is not None:
+                    await progress_callback(
+                        min(len(self._dedupe(questions)), target),
+                        target,
+                        batch_index,
+                    )
                 continue
 
             for item in raw_questions:
@@ -101,6 +123,13 @@ class LlmRagEvalDatasetGenerator:
                 if len(questions) >= target:
                     break
 
+            if progress_callback is not None:
+                await progress_callback(
+                    min(len(self._dedupe(questions)), target),
+                    target,
+                    batch_index,
+                )
+
         dataset.questions = self._dedupe(questions)[:target]
         dataset.total_questions = len(dataset.questions)
         dataset.status = "ready"
@@ -109,6 +138,10 @@ class LlmRagEvalDatasetGenerator:
             "max_questions": target,
             "source_chunk_count": len(chunks),
         }
+
+        if progress_callback is not None:
+            await progress_callback(dataset.total_questions, target, last_batch_index)
+
         return dataset
 
     def _system_prompt(self) -> str:

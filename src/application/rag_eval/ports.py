@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -13,6 +14,10 @@ from src.application.rag_eval.schemas import (
     RagEvalRun,
     RagQualityReport,
 )
+
+
+RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
+RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 
 
 class RagEvalJsonLlmPort(Protocol):
@@ -42,6 +47,8 @@ class RagEvalDatasetGeneratorPort(Protocol):
         document_id: str,
         chunks: list[RagEvalChunk],
         max_questions: int,
+        progress_callback: RagEvalDatasetProgressCallback | None = None,
+        control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> RagEvalDataset: ...
 
 
