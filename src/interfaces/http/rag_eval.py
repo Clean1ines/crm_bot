@@ -391,7 +391,7 @@ async def run_rag_eval_for_document(
     )
     rag_eval_repo = RagEvalRepository(pool)
 
-    json_llm = GroqRagEvalJsonLlmAdapter()
+    json_llm = GroqRagEvalJsonLlmAdapter(model="llama-3.1-8b-instant")
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=json_llm,
         model_name=settings.GROQ_MODEL,

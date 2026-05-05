@@ -69,16 +69,23 @@ class RagEvalService:
         if self._store is not None:
             await self._store.create_run(run=run)
 
-        for question in dataset.questions:
-            result = await self._runner.run_question(
-                run_id=run.id,
-                project_id=project_id,
-                question=question,
-            )
-            run.results.append(result)
+        try:
+            for question in dataset.questions:
+                result = await self._runner.run_question(
+                    run_id=run.id,
+                    project_id=project_id,
+                    question=question,
+                )
+                run.results.append(result)
 
+                if self._store is not None:
+                    await self._store.save_result(result=result)
+        except Exception:
+            run.status = "failed"
+            run.finished_at = datetime.now(UTC)
             if self._store is not None:
-                await self._store.save_result(result=result)
+                await self._store.finish_run(run=run)
+            raise
 
         run.status = "completed"
         run.finished_at = datetime.now(UTC)

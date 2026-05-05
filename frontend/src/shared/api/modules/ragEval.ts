@@ -10,9 +10,30 @@ export interface RagEvalDocumentHealth {
   chunk_count: number;
 }
 
+export interface RagEvalLatestRunSummary {
+  id: string;
+  dataset_id: string;
+  project_id: string;
+  document_id: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  retriever_version: string;
+  reranker_version: string;
+  generator_model: string;
+  result_count: number;
+}
+
 export interface RagEvalLatestReportResponse {
   ok: boolean;
   document: RagEvalDocumentHealth;
+  report: unknown | null;
+}
+
+export interface RagEvalDocumentStatusResponse {
+  ok: boolean;
+  document: RagEvalDocumentHealth;
+  run: RagEvalLatestRunSummary | null;
   report: unknown | null;
 }
 
@@ -27,6 +48,16 @@ export interface RagEvalRunResponse {
   score: number;
   readiness: string;
   report: unknown;
+}
+
+export interface RagEvalFullRunAcceptedResponse {
+  ok: boolean;
+  queued: boolean;
+  job_id: string;
+  document: RagEvalDocumentHealth;
+  mode: 'full_document';
+  questions_per_chunk: number;
+  target_questions: number;
 }
 
 const API_BASE_URL = (
@@ -69,7 +100,7 @@ const requestJson = async <T>(url: string, init: RequestInit): Promise<T> => {
     throw new Error(await readErrorMessage(response));
   }
 
-  return await response.json() as T;
+  return (await response.json()) as T;
 };
 
 export const ragEvalApi = {
@@ -77,6 +108,31 @@ export const ragEvalApi = {
     return requestJson<RagEvalLatestReportResponse>(
       buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/latest-report`),
       { method: 'GET' },
+    );
+  },
+
+  getStatus(documentId: string): Promise<RagEvalDocumentStatusResponse> {
+    return requestJson<RagEvalDocumentStatusResponse>(
+      buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/status`),
+      { method: 'GET' },
+    );
+  },
+
+  runFullDocumentEval(
+    documentId: string,
+    params: { questionsPerChunk: number; maxQuestions?: number | null },
+  ): Promise<RagEvalFullRunAcceptedResponse> {
+    const query = new URLSearchParams({
+      questions_per_chunk: String(params.questionsPerChunk),
+    });
+
+    if (params.maxQuestions != null) {
+      query.set('max_questions', String(params.maxQuestions));
+    }
+
+    return requestJson<RagEvalFullRunAcceptedResponse>(
+      buildUrl(`/api/rag-eval/documents/${encodeURIComponent(documentId)}/run-full?${query.toString()}`),
+      { method: 'POST' },
     );
   },
 
