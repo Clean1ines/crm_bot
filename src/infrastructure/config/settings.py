@@ -62,6 +62,12 @@ class Settings(BaseSettings):
 
     # Groq
     GROQ_API_KEY: str = Field(..., description="API key for Groq LLM")
+    GROQ_API_KEY2: str | None = Field(
+        None, description="Optional secondary Groq API key for rate-limit rotation"
+    )
+    GROQ_API_KEY3: str | None = Field(
+        None, description="Optional tertiary Groq API key for rate-limit rotation"
+    )
     GROQ_MODEL: str = Field(
         "llama-3.3-70b-versatile", description="Default Groq model for agent"
     )

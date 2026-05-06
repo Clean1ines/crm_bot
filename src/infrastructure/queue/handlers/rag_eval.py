@@ -557,6 +557,8 @@ async def _run_full_document_rag_eval(
             "target_questions": full_document_target,
             "processed_questions": len(run.results),
             "total_questions": len(run.results),
+            "processed_batches": total_batches,
+            "total_batches": total_batches,
             "percent": 100.0,
             "updated_at": _utc_now_iso(),
         },
