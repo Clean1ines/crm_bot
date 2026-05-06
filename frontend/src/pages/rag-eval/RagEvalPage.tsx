@@ -32,10 +32,11 @@ interface Document {
   created_at: string;
 }
 
-const ACTIVE_JOB_STATUSES = new Set(['pending', 'processing', 'running', 'retrying', 'paused', 'running_or_locked']);
+const ACTIVE_JOB_STATUSES = new Set(['pending', 'processing', 'running', 'retrying', 'running_or_locked']);
 const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
 const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
 const PAUSED_STATUSES = new Set(['paused', 'manual_pause', 'manual-pause']);
+const TERMINAL_JOB_STATUSES = new Set(['completed', 'succeeded', 'success', 'failed', 'cancelled']);
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
 
@@ -61,12 +62,16 @@ const getJobStatus = (job: RagEvalJob | null | undefined): string => {
   return String(jobWithEffectiveStatus?.effective_status || jobWithEffectiveStatus?.status || '');
 };
 
+const isJobTerminal = (job: RagEvalJob | null | undefined): boolean => (
+  Boolean(job && TERMINAL_JOB_STATUSES.has(getJobStatus(job)))
+);
+
 const isJobActive = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && ACTIVE_JOB_STATUSES.has(getJobStatus(job)))
+  Boolean(job && !isJobTerminal(job) && ACTIVE_JOB_STATUSES.has(getJobStatus(job)))
 );
 
 const isJobPaused = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && PAUSED_STATUSES.has(getJobStatus(job)))
+  Boolean(job && !isJobTerminal(job) && PAUSED_STATUSES.has(getJobStatus(job)))
 );
 
 const stageLabel = (stage: string): string => {
@@ -119,9 +124,12 @@ const JobProgressCard: React.FC<{
     );
   }
 
+  const effectiveStatus = getJobStatus(job);
+  const terminal = isJobTerminal(job);
   const mergedProgress = progress ?? job.progress ?? {};
-  const percent = clampPercent(mergedProgress.percent);
-  const stage = String(mergedProgress.stage || job.status || '');
+  const percent = terminal ? 100 : clampPercent(mergedProgress.percent);
+  const progressStage = String(mergedProgress.stage || '');
+  const stage = terminal ? effectiveStatus : progressStage || effectiveStatus;
   const generatedQuestions = asNumber(mergedProgress.generated_questions);
   const targetQuestions = asNumber(mergedProgress.target_questions);
   const processedQuestions = asNumber(mergedProgress.processed_questions);
@@ -146,7 +154,7 @@ const JobProgressCard: React.FC<{
               Job: <span className="font-mono">{job.id}</span>
             </p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Статус: <span className="font-semibold text-[var(--text-primary)]">{job.status}</span>
+              Статус: <span className="font-semibold text-[var(--text-primary)]">{effectiveStatus || job.status}</span>
               {' · '}
               Этап: <span className="font-semibold text-[var(--text-primary)]">{stageLabel(stage)}</span>
             </p>
@@ -175,7 +183,7 @@ const JobProgressCard: React.FC<{
           <button
             type="button"
             onClick={onCancel}
-            disabled={(!active && !paused) || isMutating}
+            disabled={terminal || (!active && !paused) || isMutating}
             className="inline-flex items-center gap-2 rounded-xl border border-red-500/40 px-3 py-2 text-sm font-medium text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Square className="h-4 w-4" />
@@ -374,6 +382,7 @@ export const RagEvalPage: React.FC = () => {
   const cancelMutation = useMutation({
     mutationFn: async (jobId: string) => ragEvalApi.cancelJob(jobId),
     onSuccess: async () => {
+      setLastQueued(null);
       toast.success('RAG eval отменён');
       await invalidateEvalQueries();
     },
