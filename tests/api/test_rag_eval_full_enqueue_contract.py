@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -62,15 +64,20 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
 
     queue_repo = _QueueRepo()
 
-    response = await enqueue_full_rag_eval_for_document(
+    enqueue = cast(
+        Callable[..., Awaitable[dict[str, object]]],
+        enqueue_full_rag_eval_for_document,
+    )
+
+    response = await enqueue(
         document_id="00000000-0000-0000-0000-000000000002",
         questions_per_chunk=1,
         max_questions=None,
         current_user_id="user-1",
-        pool=_Pool(),  # type: ignore[arg-type]
-        project_repo=_ProjectRepo(),  # type: ignore[arg-type]
-        user_repo=_UserRepo(),  # type: ignore[arg-type]
-        queue_repo=queue_repo,  # type: ignore[arg-type]
+        pool=_Pool(),
+        project_repo=_ProjectRepo(),
+        user_repo=_UserRepo(),
+        queue_repo=queue_repo,
     )
 
     assert response["ok"] is True
@@ -80,9 +87,12 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
     assert response["target_questions"] == 17
 
     queue_repo.enqueue.assert_awaited_once()
-    task_type, payload = queue_repo.enqueue.await_args.args[:2]
+    awaited = queue_repo.enqueue.await_args
+    assert awaited is not None
+
+    task_type, payload = awaited.args[:2]
     assert task_type == TASK_RUN_FULL_RAG_EVAL
     assert payload["mode"] == "full_document"
     assert payload["questions_per_chunk"] == 1
     assert payload["document_id"] == "00000000-0000-0000-0000-000000000002"
-    assert queue_repo.enqueue.await_args.kwargs["max_attempts"] == 20
+    assert awaited.kwargs["max_attempts"] == 20

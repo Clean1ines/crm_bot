@@ -5,27 +5,13 @@ from typing import Annotated, Literal, TypedDict, cast
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
-from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
-from src.application.rag_eval.reporter import RagQualityReporter
-from src.application.rag_eval.runner import RagEvalRunner
-from src.application.rag_eval.service import RagEvalService
 from src.domain.project_plane.json_types import JsonValue
 from src.infrastructure.config.settings import settings
-from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.project import ProjectRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
 from src.infrastructure.db.repositories.user_repository import UserRepository
-from src.infrastructure.llm.query_expander import GroqQueryExpander
-from src.infrastructure.llm.rag_contract import KnowledgeSearchRepository
-from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.queue.job_types import TASK_RUN_FULL_RAG_EVAL
-from src.infrastructure.rag_eval.adapters import (
-    GroqRagEvalJsonLlmAdapter,
-    RagServiceRagEvalRetriever,
-)
-from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswerer
 from src.interfaces.http.dependencies import (
     get_current_user_id,
     get_pool,
@@ -387,6 +373,25 @@ async def run_rag_eval_for_document(
             detail="Document has no knowledge_base chunks",
         )
 
+    # Lazy imports keep plain FastAPI app import light.
+    # These runtime dependencies pull the agent graph stack, including langgraph.
+    from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
+    from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
+    from src.application.rag_eval.reporter import RagQualityReporter
+    from src.application.rag_eval.runner import RagEvalRunner
+    from src.application.rag_eval.service import RagEvalService
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
+    )
+    from src.infrastructure.llm.query_expander import GroqQueryExpander
+    from src.infrastructure.llm.rag_contract import KnowledgeSearchRepository
+    from src.infrastructure.llm.rag_service import RAGService
+    from src.infrastructure.rag_eval.adapters import (
+        GroqRagEvalJsonLlmAdapter,
+        RagServiceRagEvalRetriever,
+    )
+    from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswerer
+
     knowledge_repo = KnowledgeRepository(pool)
     rag_service = RAGService(
         cast(KnowledgeSearchRepository, knowledge_repo),
@@ -474,7 +479,7 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
         action = str(control.get("action") or "").strip().lower()
         if action == "cancel":
             return "cancelled"
-        if action == "pause" and raw_status not in {"completed", "failed"}:
+        if action == "pause" and raw_status not in {"completed", "done", "failed"}:
             return "paused"
 
     if raw_status == "failed":
@@ -482,8 +487,8 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
             return "cancelled"
         return "failed"
 
-    if raw_status in {"completed", "succeeded", "success"}:
-        return raw_status
+    if raw_status in {"completed", "done", "succeeded", "success"}:
+        return "completed"
 
     progress = payload.get(RAG_EVAL_PROGRESS_PAYLOAD_KEY)
     if isinstance(progress, dict):
@@ -502,7 +507,14 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
 def _rag_eval_job_percent(row: asyncpg.Record) -> float:
     effective_status = _rag_eval_job_effective_status(row)
 
-    if effective_status in {"completed", "succeeded", "success", "failed", "cancelled"}:
+    if effective_status in {
+        "completed",
+        "done",
+        "succeeded",
+        "success",
+        "failed",
+        "cancelled",
+    }:
         return 100.0
 
     payload = _queue_json_payload(row["payload"])
@@ -731,7 +743,7 @@ async def cancel_rag_eval_job(
                 updated_at = now()
             WHERE id = $1::uuid
               AND task_type = $3
-              AND status NOT IN ('completed', 'failed')
+              AND status NOT IN ('completed', 'done', 'failed')
             RETURNING
                 id,
                 task_type,
@@ -799,7 +811,7 @@ async def pause_rag_eval_job(
                 updated_at = now()
             WHERE id = $1::uuid
               AND task_type = $3
-              AND status NOT IN ('completed', 'failed')
+              AND status NOT IN ('completed', 'done', 'failed')
             RETURNING
                 id,
                 task_type,
@@ -852,7 +864,7 @@ async def resume_rag_eval_job(
                 updated_at = now()
             WHERE id = $1::uuid
               AND task_type = $2
-              AND status NOT IN ('completed', 'failed')
+              AND status NOT IN ('completed', 'done', 'failed')
             RETURNING
                 id,
                 task_type,

@@ -66,6 +66,14 @@ export interface RagEvalJob {
   error: string | null;
   payload: Record<string, unknown>;
   progress: RagEvalProgressPayload | null;
+  percent?: number;
+  progress_kind?: string;
+  project_id?: unknown;
+  document_id?: unknown;
+  requested_by?: unknown;
+  questions_per_chunk?: unknown;
+  max_questions?: unknown;
+  retrieval_limit?: unknown;
 }
 
 export interface RagEvalJobsResponse {

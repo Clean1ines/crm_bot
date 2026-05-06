@@ -8,6 +8,7 @@ from src.application.rag_eval.ports import (
     RagEvalDatasetGeneratorPort,
     RagEvalDatasetProgressCallback,
     RagEvalReportSinkPort,
+    RagEvalRunProgressCallback,
     RagEvalStorePort,
 )
 from src.application.rag_eval.reporter import RagQualityReporter
@@ -45,6 +46,7 @@ class RagEvalService:
         max_questions: int,
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
+        run_progress_callback: RagEvalRunProgressCallback | None = None,
     ) -> tuple[RagEvalRun, RagQualityReport]:
         chunks = await self._chunk_source.load_document_chunks(
             project_id=project_id,
@@ -76,7 +78,11 @@ class RagEvalService:
             await self._store.create_run(run=run)
 
         try:
-            for question in dataset.questions:
+            total_questions = len(dataset.questions)
+            for index, question in enumerate(dataset.questions, start=1):
+                if control_callback is not None:
+                    await control_callback()
+
                 result = await self._runner.run_question(
                     run_id=run.id,
                     project_id=project_id,
@@ -86,6 +92,9 @@ class RagEvalService:
 
                 if self._store is not None:
                     await self._store.save_result(result=result)
+
+                if run_progress_callback is not None:
+                    await run_progress_callback(index, total_questions)
         except Exception:
             run.status = "failed"
             run.finished_at = datetime.now(UTC)

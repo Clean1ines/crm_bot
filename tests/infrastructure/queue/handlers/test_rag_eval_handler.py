@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import cast
+
 import pytest
 
 from src.infrastructure.queue.handlers.rag_eval import (
@@ -44,8 +47,10 @@ def test_retry_after_seconds_parses_groq_message() -> None:
 
 @pytest.mark.asyncio
 async def test_handle_run_full_rag_eval_rejects_non_object_payload() -> None:
+    handler = cast(Callable[..., Awaitable[None]], handle_run_full_rag_eval)
+
     with pytest.raises(PermanentJobError, match="payload must be an object"):
-        await handle_run_full_rag_eval(
+        await handler(
             {"payload": "bad"},
-            db_pool=object(),  # type: ignore[arg-type]
+            db_pool=object(),
         )

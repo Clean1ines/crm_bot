@@ -18,6 +18,7 @@ from src.application.rag_eval.schemas import (
 
 RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
+RagEvalRunProgressCallback = Callable[[int, int], Awaitable[None]]
 
 
 class RagEvalJsonLlmPort(Protocol):
