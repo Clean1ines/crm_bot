@@ -17,8 +17,8 @@ from groq import (
     RateLimitError,
 )
 
-from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.llm.groq_keyring import RotatingAsyncGroq
 
 logger = get_logger(__name__)
 
@@ -42,7 +42,7 @@ class GroqQueryExpander:
         client: AsyncGroq | None = None,
         model: str = "llama-3.3-70b-versatile",
     ) -> None:
-        self._client = client or AsyncGroq(api_key=settings.GROQ_API_KEY)
+        self._client = client or RotatingAsyncGroq()
         self._model = model
 
     async def expand(self, query: str, *, max_expansions: int) -> list[str]:

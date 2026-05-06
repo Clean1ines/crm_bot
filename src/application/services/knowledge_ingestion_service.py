@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from src.application.errors import EmbeddingProviderError, ValidationError
@@ -6,6 +7,7 @@ from src.application.ports.knowledge_port import (
     ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     KnowledgeRepositoryFactoryPort,
+    KnowledgeRepositoryPort,
 )
 from src.application.ports.logger_port import LoggerPort
 from src.domain.project_plane.json_types import JsonObject
@@ -27,9 +29,103 @@ class KnowledgeDocumentProcessingResult:
     structured_entries: int
 
 
+_MIN_INDEXABLE_CHUNK_CHARS = 1
+
+
+def _chunk_content(chunk: JsonObject) -> str:
+    return str(chunk.get("content") or "").strip()
+
+
+def _is_separator_chunk(content: str) -> bool:
+    normalized = " ".join(content.split())
+    return normalized in {"---", "***", "___", "--", "-"} or bool(
+        re.fullmatch(r"[-*_]{3,}", normalized)
+    )
+
+
+def _looks_like_broken_fragment(content: str) -> bool:
+    normalized = " ".join(content.split())
+    if not normalized:
+        return True
+    if _is_separator_chunk(normalized):
+        return True
+    if len(normalized) < _MIN_INDEXABLE_CHUNK_CHARS:
+        return True
+    if normalized[0] in {",", ";", ":", ".", ")", "]"}:
+        return True
+
+    # Keep this intentionally conservative. The raw/structured mixing fix is
+    # the main production fix; this guard should only remove obvious garbage,
+    # not compact but valid FAQ/test chunks.
+    return False
+
+
+def _indexable_chunks(chunks: list[JsonObject]) -> list[JsonObject]:
+    return [
+        chunk
+        for chunk in chunks
+        if not _looks_like_broken_fragment(_chunk_content(chunk))
+    ]
+
+
 class KnowledgeIngestionService:
     def __init__(self, pool: KnowledgeDbPoolPort) -> None:
         self.pool = pool
+
+    async def _persist_plain_chunks(
+        self,
+        *,
+        repo: KnowledgeRepositoryPort,
+        project_id: str,
+        document_id: str,
+        chunks: list[JsonObject],
+        logger: LoggerPort,
+        context: str,
+    ) -> None:
+        try:
+            await repo.add_knowledge_batch(project_id, chunks, document_id=document_id)
+        except EmbeddingProviderError as exc:
+            if exc.retryable:
+                logger.warning(
+                    "Knowledge embedding provider temporary failure",
+                    extra={
+                        "project_id": project_id,
+                        "document_id": document_id,
+                        "provider": exc.provider,
+                        "task": exc.task,
+                        "model": exc.model,
+                        "error_type": type(exc).__name__,
+                        "context": context,
+                    },
+                )
+                raise
+
+            logger.warning(
+                "Knowledge embedding provider permanent failure",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "provider": exc.provider,
+                    "task": exc.task,
+                    "model": exc.model,
+                    "error_type": type(exc).__name__,
+                    "context": context,
+                },
+            )
+            await repo.update_document_status(document_id, "error", exc.detail)
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Knowledge plain chunk persistence failed",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "context": context,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            await repo.update_document_status(document_id, "error", str(exc))
+            raise
 
     async def process_document(
         self,
@@ -48,45 +144,21 @@ class KnowledgeIngestionService:
         usage_repo = model_usage_repo_factory(self.pool)
         await repo.delete_document_chunks(document_id)
 
-        try:
-            await repo.add_knowledge_batch(project_id, chunks, document_id=document_id)
-        except EmbeddingProviderError as exc:
-            if exc.retryable:
-                logger.warning(
-                    "Knowledge embedding provider temporary failure",
-                    extra={
-                        "project_id": project_id,
-                        "document_id": document_id,
-                        "provider": exc.provider,
-                        "task": exc.task,
-                        "model": exc.model,
-                        "error_type": type(exc).__name__,
-                    },
-                )
-                raise
-
-            logger.warning(
-                "Knowledge embedding provider permanent failure",
-                extra={
-                    "project_id": project_id,
-                    "document_id": document_id,
-                    "provider": exc.provider,
-                    "task": exc.task,
-                    "model": exc.model,
-                    "error_type": type(exc).__name__,
-                },
-            )
-            await repo.update_document_status(document_id, "error", exc.detail)
-            raise
-        except Exception as exc:
-            logger.exception(
-                "Knowledge upload processing failed",
-                extra={"project_id": project_id, "document_id": document_id},
-            )
-            await repo.update_document_status(document_id, "error", str(exc))
-            raise
+        indexable_chunks = _indexable_chunks(chunks)
+        if not indexable_chunks:
+            message = "No indexable knowledge chunks after filtering"
+            await repo.update_document_status(document_id, "error", message)
+            raise ValidationError(message)
 
         if mode == MODE_PLAIN:
+            await self._persist_plain_chunks(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                chunks=indexable_chunks,
+                logger=logger,
+                context="plain_upload",
+            )
             await repo.update_document_preprocessing_status(
                 document_id,
                 mode=mode,
@@ -113,7 +185,7 @@ class KnowledgeIngestionService:
         try:
             execution = await preprocessor_factory().preprocess(
                 mode=mode,
-                chunks=chunks,
+                chunks=indexable_chunks,
                 file_name=file_name,
             )
             if execution.usage is not None:
@@ -125,14 +197,19 @@ class KnowledgeIngestionService:
                         document_id=document_id,
                     )
                 )
+
             result = execution.result
-            structured_chunks = result.to_chunks()
-            if structured_chunks:
-                await repo.add_structured_knowledge_batch(
-                    project_id,
-                    structured_chunks,
-                    document_id=document_id,
+            structured_chunks = _indexable_chunks(result.to_chunks())
+            if not structured_chunks:
+                raise ValidationError(
+                    "Knowledge preprocessing produced no indexable structured chunks"
                 )
+
+            await repo.add_structured_knowledge_batch(
+                project_id,
+                structured_chunks,
+                document_id=document_id,
+            )
             await repo.update_document_preprocessing_status(
                 document_id,
                 mode=mode,
@@ -184,6 +261,14 @@ class KnowledgeIngestionService:
                     "mode": mode,
                     "error_type": type(exc).__name__,
                 },
+            )
+            await self._persist_plain_chunks(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                chunks=indexable_chunks,
+                logger=logger,
+                context="preprocessing_fallback",
             )
             await repo.update_document_preprocessing_status(
                 document_id,

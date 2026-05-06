@@ -25,6 +25,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
 )
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_keyring import RotatingAsyncGroq
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,7 +57,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         max_chunks: int = 30,
         max_chunk_chars: int = 1800,
     ) -> None:
-        self._client = client or AsyncGroq(api_key=settings.GROQ_API_KEY)
+        self._client = client or RotatingAsyncGroq()
         self._model = model or settings.GROQ_MODEL
         self._max_chunks = max(1, max_chunks)
         self._max_chunk_chars = max(200, max_chunk_chars)

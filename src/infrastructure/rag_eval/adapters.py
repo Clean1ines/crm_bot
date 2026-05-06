@@ -18,6 +18,7 @@ from groq import (
 
 from src.application.rag_eval.schemas import JsonObject, RagEvalChunk
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_keyring import RotatingAsyncGroq
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -68,7 +69,7 @@ class GroqRagEvalJsonLlmAdapter:
         temperature: float = 0.1,
         max_tokens: int = 2048,
     ) -> None:
-        self._client = client or AsyncGroq(api_key=settings.GROQ_API_KEY)
+        self._client = client or RotatingAsyncGroq()
         self._model = model or settings.GROQ_MODEL
         self._temperature = temperature
         self._max_tokens = max(256, max_tokens)

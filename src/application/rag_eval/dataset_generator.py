@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import cast, get_args
 
@@ -153,6 +154,8 @@ class LlmRagEvalDatasetGenerator:
 You generate an automatic RAG evaluation dataset for an uploaded knowledge document.
 
 You must infer what matters from the chunks. Do not rely on a fixed business topic list.
+Questions and expected_answer_summary must use the same language as the source chunks.
+If the chunks are Russian, generate Russian questions. Do not translate Russian source material into English.
 
 Generate questions that test:
 1. direct answerability from evidence;
@@ -207,6 +210,7 @@ Use short observable notes in metadata, not reasoning traces.
 Project id: {project_id}
 Document id: {document_id}
 Batch index: {batch_index}
+Source chunk language: {self._dominant_language([chunk.content for chunk in chunks])}
 Generate up to {per_batch_target} eval questions for these chunks.
 You must cover every chunk in this batch with at least one answerable direct/paraphrase/short_vague question before adding optional negative/risky cases.
 Full-document mode depends on this: every chunk should be represented in the generated dataset whenever possible.
@@ -266,6 +270,11 @@ Chunks:
         if severity not in ALLOWED_SEVERITIES:
             severity = "medium"
 
+        expected_chunk_ids = self._string_list(payload.get("expected_chunk_ids"))
+        should_answer = bool(payload.get("should_answer"))
+        if should_answer and not expected_chunk_ids:
+            return None
+
         return RagEvalQuestion(
             id=new_eval_id("question"),
             dataset_id=dataset_id,
@@ -273,11 +282,11 @@ Chunks:
             document_id=document_id,
             question=question[:1000],
             question_type=cast(RagEvalQuestionType, question_type),
-            expected_chunk_ids=self._string_list(payload.get("expected_chunk_ids")),
+            expected_chunk_ids=expected_chunk_ids,
             expected_answer_summary=str(
                 payload.get("expected_answer_summary") or ""
             ).strip()[:1200],
-            should_answer=bool(payload.get("should_answer")),
+            should_answer=should_answer,
             should_escalate=bool(payload.get("should_escalate")),
             difficulty=self._difficulty(payload.get("difficulty")),
             severity=cast(RagEvalSeverity, severity),
@@ -337,10 +346,37 @@ Chunks:
 
         return result
 
+    def _is_useful_chunk(self, chunk: RagEvalChunk) -> bool:
+        content = " ".join(chunk.content.split())
+        if not content:
+            return False
+        if content in {"---", "***", "___", "--", "-"}:
+            return False
+        if re.fullmatch(r"[-*_]{3,}", content):
+            return False
+        if len(content) < 1:
+            return False
+        if content[0] in {",", ";", ":", ".", ")", "]"}:
+            return False
+
+        # Do not reject compact chunks just because they are short. Unit tests
+        # and LLM-normalized FAQ entries can be intentionally concise.
+        return True
+
+    def _dominant_language(self, texts: list[str]) -> str:
+        cyrillic = sum(len(re.findall(r"[А-Яа-яЁё]", text)) for text in texts)
+        latin = sum(len(re.findall(r"[A-Za-z]", text)) for text in texts)
+        if cyrillic > latin:
+            return "Russian"
+        if latin > cyrillic:
+            return "English"
+        return "same as source chunks"
+
     def _batches(self, chunks: list[RagEvalChunk]) -> list[list[RagEvalChunk]]:
+        useful_chunks = [chunk for chunk in chunks if self._is_useful_chunk(chunk)]
         return [
-            chunks[index : index + MAX_CHUNKS_PER_LLM_BATCH]
-            for index in range(0, len(chunks), MAX_CHUNKS_PER_LLM_BATCH)
+            useful_chunks[index : index + MAX_CHUNKS_PER_LLM_BATCH]
+            for index in range(0, len(useful_chunks), MAX_CHUNKS_PER_LLM_BATCH)
         ]
 
     def _clip(self, value: str) -> str:
