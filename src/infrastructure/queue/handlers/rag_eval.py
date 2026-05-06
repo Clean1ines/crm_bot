@@ -209,6 +209,30 @@ async def _read_rag_eval_job_state(
     )
 
 
+def _build_rag_eval_answer_progress(
+    *,
+    base_progress: Mapping[str, object],
+    processed_questions: int,
+    total_questions: int,
+) -> dict[str, object]:
+    safe_total = max(total_questions, 1)
+    progress_ratio = min(max(processed_questions, 0) / safe_total, 1.0)
+    percent = round(60.0 + (progress_ratio * 38.0), 2)
+
+    return {
+        **dict(base_progress),
+        "stage": "answer_generation",
+        "status": "running",
+        "message": "Checking generated questions against project knowledge",
+        "generated_questions": base_progress.get("target_questions"),
+        "target_questions": base_progress.get("target_questions"),
+        "processed_questions": processed_questions,
+        "total_questions": total_questions,
+        "percent": percent,
+        "updated_at": _utc_now_iso(),
+    }
+
+
 async def _wait_if_paused_or_cancelled(
     *,
     db_pool: asyncpg.Pool,
@@ -413,11 +437,25 @@ async def _run_full_document_rag_eval(
         "updated_at": _utc_now_iso(),
     }
 
+    current_control_progress: dict[str, object] = {
+        **base_progress,
+        "stage": "started",
+        "status": "running",
+        "message": "Full-document RAG eval worker started",
+        "generated_questions": 0,
+        "target_questions": full_document_target,
+        "processed_batches": 0,
+        "total_batches": total_batches,
+        "percent": 0.0,
+        "updated_at": _utc_now_iso(),
+    }
+
     async def _on_dataset_progress(
         generated_questions: int,
         target_questions: int,
         processed_batches: int,
     ) -> None:
+        nonlocal current_control_progress
         safe_target = max(target_questions, 1)
         safe_batches = max(total_batches, 1)
         batch_percent = min(max(processed_batches, 0) / safe_batches, 1.0)
@@ -436,6 +474,24 @@ async def _run_full_document_rag_eval(
             "percent": percent,
             "updated_at": _utc_now_iso(),
         }
+        current_control_progress = progress
+        await _write_rag_eval_progress(
+            db_pool=db_pool,
+            job_id=job_id,
+            progress=progress,
+        )
+
+    async def _on_run_progress(
+        processed_questions: int,
+        total_questions: int,
+    ) -> None:
+        nonlocal current_control_progress
+        progress = _build_rag_eval_answer_progress(
+            base_progress=base_progress,
+            processed_questions=processed_questions,
+            total_questions=total_questions,
+        )
+        current_control_progress = progress
         await _write_rag_eval_progress(
             db_pool=db_pool,
             job_id=job_id,
@@ -446,14 +502,7 @@ async def _run_full_document_rag_eval(
         await _wait_if_paused_or_cancelled(
             db_pool=db_pool,
             job_id=job_id,
-            base_progress={
-                **base_progress,
-                "stage": "dataset_generation",
-                "status": "running",
-                "message": "Checking RAG eval job control state",
-                "percent": 0.0,
-                "updated_at": _utc_now_iso(),
-            },
+            base_progress=current_control_progress,
         )
 
     await _write_rag_eval_progress(

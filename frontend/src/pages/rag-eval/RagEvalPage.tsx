@@ -20,6 +20,8 @@ import {
   type RagEvalDocumentStatusResponse,
   type RagEvalFullRunAcceptedResponse,
   type RagEvalJob,
+  type RagEvalJobProgressResponse,
+  type RagEvalJobsResponse,
   type RagEvalProgressPayload,
 } from '@shared/api/modules/ragEval';
 
@@ -36,7 +38,7 @@ const ACTIVE_JOB_STATUSES = new Set(['pending', 'processing', 'running', 'retryi
 const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
 const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
 const PAUSED_STATUSES = new Set(['paused', 'manual_pause', 'manual-pause']);
-const TERMINAL_JOB_STATUSES = new Set(['completed', 'succeeded', 'success', 'failed', 'cancelled']);
+const TERMINAL_JOB_STATUSES = new Set(['completed', 'done', 'succeeded', 'success', 'failed', 'cancelled']);
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
 
@@ -75,14 +77,37 @@ const isJobPaused = (job: RagEvalJob | null | undefined): boolean => (
 );
 
 const stageLabel = (stage: string): string => {
-  if (stage === 'queued') return 'В очереди';
-  if (stage === 'dataset_generation') return 'Генерация eval-вопросов';
-  if (stage === 'running') return 'Прогон вопросов';
-  if (stage === 'completed') return 'Завершено';
-  if (stage === 'cancelled') return 'Отменено';
-  if (stage === 'paused') return 'Пауза';
+  if (stage === 'queued') return 'Ждёт очереди';
+  if (stage === 'started') return 'Запускаем проверку';
+  if (stage === 'dataset_generation') return 'Готовим вопросы по документу';
+  if (stage === 'answer_generation') return 'Проверяем ответы бота';
+  if (stage === 'running') return 'Идёт проверка';
+  if (stage === 'completed' || stage === 'done') return 'Готово';
+  if (stage === 'cancelled') return 'Остановлено';
+  if (stage === 'paused') return 'На паузе';
   if (stage === 'failed') return 'Ошибка';
   return stage || 'Ожидание';
+};
+
+const statusLabel = (status: string): string => {
+  if (status === 'pending') return 'В очереди';
+  if (status === 'processing' || status === 'running') return 'В работе';
+  if (status === 'paused') return 'На паузе';
+  if (status === 'completed' || status === 'done' || status === 'succeeded' || status === 'success') return 'Готово';
+  if (status === 'cancelled') return 'Остановлено';
+  if (status === 'failed') return 'Ошибка';
+  return status || 'Ожидание';
+};
+
+const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
+  const rawMessage = typeof progress.message === 'string' ? progress.message : '';
+  if (stage === 'dataset_generation') return 'Система читает чанки и составляет контрольные вопросы.';
+  if (stage === 'answer_generation') return 'Система задаёт эти вопросы боту, ищет релевантные чанки и оценивает ответы.';
+  if (stage === 'paused') return 'Пауза включена. Текущий запрос может завершиться, новые вопросы не начнутся до продолжения.';
+  if (stage === 'cancelled') return 'Задача остановлена пользователем.';
+  if (stage === 'failed') return rawMessage || 'Проверка завершилась с ошибкой.';
+  if (stage === 'completed' || stage === 'done') return 'Отчёт готов.';
+  return rawMessage || 'Проверка выполняется.';
 };
 
 const ReportJsonBlock: React.FC<{ value: unknown }> = ({ value }) => (
@@ -90,6 +115,111 @@ const ReportJsonBlock: React.FC<{ value: unknown }> = ({ value }) => (
     {JSON.stringify(value ?? null, null, 2)}
   </pre>
 );
+
+const parseJsonValue = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return value;
+  }
+};
+
+const asStringList = (value: unknown): string[] => {
+  const parsed = parseJsonValue(value);
+  if (Array.isArray(parsed)) {
+    return parsed.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
+  return [];
+};
+
+const readinessLabel = (value: unknown): string => {
+  const readiness = String(value || '').trim();
+  if (readiness === 'ready') return 'Готово к использованию';
+  if (readiness === 'needs_review') return 'Нужна ручная проверка';
+  if (readiness === 'not_ready') return 'Не готово к production';
+  return readiness || 'Нет статуса';
+};
+
+const MetricPill: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
+  <div className="rounded-xl bg-[var(--surface-elevated)] px-3 py-2 shadow-[var(--shadow-card)]">
+    <div className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
+    <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">{value}</div>
+  </div>
+);
+
+const ReportList: React.FC<{ title: string; items: string[] }> = ({ title, items }) => (
+  <div className="rounded-xl bg-[var(--control-bg)] p-4">
+    <h4 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h4>
+    {items.length ? (
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--text-secondary)]">
+        {items.map((item) => <li key={item}>{item}</li>)}
+      </ul>
+    ) : (
+      <p className="mt-2 text-sm text-[var(--text-muted)]">Нет данных.</p>
+    )}
+  </div>
+);
+
+const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ report }) => {
+  if (!Object.keys(report).length) {
+    return <p className="text-sm text-[var(--text-muted)]">Отчёт ещё не сформирован.</p>;
+  }
+
+  const metrics = getRecord(parseJsonValue(report.metrics));
+  const score = asNumber(report.score);
+  const total = asNumber(metrics.total);
+  const top1Rate = asNumber(metrics.top1_rate);
+  const top3Rate = asNumber(metrics.top3_rate);
+  const top5Rate = asNumber(metrics.top5_rate);
+  const answerSupportedRate = asNumber(metrics.answer_supported_rate);
+  const highHallucinationRisk = asNumber(metrics.high_hallucination_risk);
+  const wrongChunkTop1 = asNumber(metrics.wrong_chunk_top1);
+  const strengths = asStringList(report.strengths);
+  const problems = asStringList(report.problems);
+  const recommendations = asStringList(report.recommendations);
+
+  return (
+    <div className="space-y-4 rounded-2xl bg-[var(--control-bg)] p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-[var(--text-primary)]">Человекочитаемый отчёт</h3>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
+            Это итог проверки: насколько база знаний помогает боту находить правильные чанки и отвечать без галлюцинаций.
+          </p>
+        </div>
+        <div className="rounded-xl bg-[var(--surface-elevated)] px-4 py-3 text-right shadow-[var(--shadow-card)]">
+          <div className="text-2xl font-semibold text-[var(--text-primary)]">{score}/100</div>
+          <div className="text-xs text-[var(--text-muted)]">{readinessLabel(report.readiness)}</div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <MetricPill label="Всего вопросов" value={total || '—'} />
+        <MetricPill label="Top-1 chunk" value={`${top1Rate}%`} />
+        <MetricPill label="Top-3 chunks" value={`${top3Rate}%`} />
+        <MetricPill label="Top-5 chunks" value={`${top5Rate}%`} />
+        <MetricPill label="Ответы подтверждены" value={`${answerSupportedRate}%`} />
+        <MetricPill label="Риск галлюцинаций" value={highHallucinationRisk} />
+        <MetricPill label="Ошибочный первый chunk" value={wrongChunkTop1} />
+      </div>
+
+      <ReportList title="Сильные стороны" items={strengths} />
+      <ReportList title="Проблемы" items={problems} />
+      <ReportList title="Что делать дальше" items={recommendations} />
+
+      {typeof report.markdown === 'string' && report.markdown.trim() && (
+        <details className="rounded-xl bg-[var(--surface-elevated)] p-3 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-card)]">
+          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">Показать markdown-отчёт</summary>
+          <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{report.markdown}</pre>
+        </details>
+      )}
+    </div>
+  );
+};
 
 const StatPill: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
   <div className="rounded-xl bg-[var(--control-bg)] px-3 py-2">
@@ -127,7 +257,8 @@ const JobProgressCard: React.FC<{
   const effectiveStatus = getJobStatus(job);
   const terminal = isJobTerminal(job);
   const mergedProgress = progress ?? job.progress ?? {};
-  const percent = terminal ? 100 : clampPercent(mergedProgress.percent);
+  const percentSource = mergedProgress.percent ?? job.percent;
+  const percent = terminal ? 100 : clampPercent(percentSource);
   const progressStage = String(mergedProgress.stage || '');
   const stage = terminal ? effectiveStatus : progressStage || effectiveStatus;
   const generatedQuestions = asNumber(mergedProgress.generated_questions);
@@ -151,12 +282,12 @@ const JobProgressCard: React.FC<{
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс RAG eval</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Job: <span className="font-mono">{job.id}</span>
+              ID задачи: <span className="font-mono">{job.id.slice(0, 8)}…</span>
             </p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Статус: <span className="font-semibold text-[var(--text-primary)]">{effectiveStatus || job.status}</span>
+              Статус: <span className="font-semibold text-[var(--text-primary)]">{statusLabel(effectiveStatus || job.status)}</span>
               {' · '}
-              Этап: <span className="font-semibold text-[var(--text-primary)]">{stageLabel(stage)}</span>
+              Сейчас: <span className="font-semibold text-[var(--text-primary)]">{stageLabel(stage)}</span>
             </p>
           </div>
         </div>
@@ -205,12 +336,16 @@ const JobProgressCard: React.FC<{
         </div>
       </div>
 
+      <p className="mb-4 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-secondary)]">
+        {progressMessage(mergedProgress, stage)}
+      </p>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatPill label="Сгенерировано" value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
-        <StatPill label="Прогнано" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
-        <StatPill label="Batches" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
-        <StatPill label="Chunks" value={sourceChunkCount || '—'} />
-        <StatPill label="Attempts" value={`${job.attempts}/${job.max_attempts}`} />
+        <StatPill label="Вопросы готовы" value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
+        <StatPill label="Ответы проверены" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
+        <StatPill label="Пачки чанков" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
+        <StatPill label="Чанки" value={sourceChunkCount || '—'} />
+        <StatPill label="Попытки" value={`${job.attempts}/${job.max_attempts}`} />
       </div>
 
       {ERROR_VISIBLE_JOB_STATUSES.has(getJobStatus(job)) && job.error && (
@@ -318,6 +453,22 @@ export const RagEvalPage: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ['rag-eval-job-progress'] });
   };
 
+  const applyJobMutationResult = (job: RagEvalJob) => {
+    queryClient.setQueryData<RagEvalJobsResponse>(['rag-eval-jobs', activeDocumentId], (current) => {
+      if (!current) return current;
+      const exists = current.jobs.some((item) => item.id === job.id);
+      const jobs = exists
+        ? current.jobs.map((item) => (item.id === job.id ? job : item))
+        : [job, ...current.jobs];
+      return { ...current, jobs };
+    });
+
+    queryClient.setQueryData<RagEvalJobProgressResponse>(['rag-eval-job-progress', job.id], {
+      ok: true,
+      job,
+    });
+  };
+
   const runMutation = useMutation({
     mutationFn: async () => {
       if (!activeDocumentId) throw new Error('Нет обработанного документа для RAG eval');
@@ -349,19 +500,20 @@ export const RagEvalPage: React.FC = () => {
     },
     onSuccess: async (result) => {
       setLastQueued(result);
-      toast.success(`Full-document RAG eval поставлен в очередь: ${formatNumber(result.target_questions)} target questions`);
+      toast.success(`Проверка поставлена в очередь: ${formatNumber(result.target_questions)} вопросов`);
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось поставить full-document RAG eval в очередь');
+      toast.error(error instanceof Error ? error.message : 'Не удалось поставить проверку в очередь');
     },
   });
 
   const pauseMutation = useMutation({
     mutationFn: async (jobId: string) => ragEvalApi.pauseJob(jobId),
-    onSuccess: async () => {
-      toast.success('RAG eval поставлен на паузу');
-      await invalidateEvalQueries();
+    onSuccess: (result) => {
+      applyJobMutationResult(result.job);
+      toast.success('Пауза включена');
+      void invalidateEvalQueries();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Не удалось поставить задачу на паузу');
@@ -370,9 +522,10 @@ export const RagEvalPage: React.FC = () => {
 
   const resumeMutation = useMutation({
     mutationFn: async (jobId: string) => ragEvalApi.resumeJob(jobId),
-    onSuccess: async () => {
-      toast.success('RAG eval продолжен');
-      await invalidateEvalQueries();
+    onSuccess: (result) => {
+      applyJobMutationResult(result.job);
+      toast.success('Проверка продолжена');
+      void invalidateEvalQueries();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Не удалось продолжить задачу');
@@ -381,10 +534,11 @@ export const RagEvalPage: React.FC = () => {
 
   const cancelMutation = useMutation({
     mutationFn: async (jobId: string) => ragEvalApi.cancelJob(jobId),
-    onSuccess: async () => {
+    onSuccess: (result) => {
       setLastQueued(null);
-      toast.success('RAG eval отменён');
-      await invalidateEvalQueries();
+      applyJobMutationResult(result.job);
+      toast.success('Проверка остановлена');
+      void invalidateEvalQueries();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : 'Не удалось отменить задачу');
@@ -394,7 +548,11 @@ export const RagEvalPage: React.FC = () => {
   const latestReport = getRecord(latestReportPayload);
   const latestRun = statusQuery.data?.run ?? null;
   const progressJob = progressQuery.data?.job ?? visibleJob;
-  const progressPayload = progressJob?.progress ?? visibleJob?.progress ?? null;
+  const progressPayload = progressJob?.progress ?? visibleJob?.progress ?? (
+    progressJob
+      ? { percent: progressJob.percent, status: getJobStatus(progressJob) }
+      : null
+  );
   const isControlMutating = pauseMutation.isPending || resumeMutation.isPending || cancelMutation.isPending;
 
   if (documentsQuery.isLoading) {
@@ -534,7 +692,15 @@ export const RagEvalPage: React.FC = () => {
             </div>
             <div>
               <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Report</h3>
-              <ReportJsonBlock value={Object.keys(latestReport).length ? latestReport : null} />
+              <ReportSummaryCard report={latestReport} />
+              <details className="mt-4 rounded-xl border border-[var(--border-primary)] p-3">
+                <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
+                  Показать raw JSON
+                </summary>
+                <div className="mt-3">
+                  <ReportJsonBlock value={Object.keys(latestReport).length ? latestReport : null} />
+                </div>
+              </details>
             </div>
           </div>
         )}
