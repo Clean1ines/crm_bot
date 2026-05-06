@@ -466,15 +466,24 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
     raw_status = str(row["status"])
     locked_at = row["locked_at"]
     error = row["error"]
+    error_text = error if isinstance(error, str) else ""
     payload = _queue_json_payload(row["payload"])
 
     control = payload.get(RAG_EVAL_CONTROL_PAYLOAD_KEY)
     if isinstance(control, dict):
         action = str(control.get("action") or "").strip().lower()
-        if action == "pause":
-            return "paused"
         if action == "cancel":
             return "cancelled"
+        if action == "pause" and raw_status not in {"completed", "failed"}:
+            return "paused"
+
+    if raw_status == "failed":
+        if "cancel" in error_text.lower():
+            return "cancelled"
+        return "failed"
+
+    if raw_status in {"completed", "succeeded", "success"}:
+        return raw_status
 
     progress = payload.get(RAG_EVAL_PROGRESS_PAYLOAD_KEY)
     if isinstance(progress, dict):
@@ -483,7 +492,7 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
             return progress_status
 
     if raw_status == "pending" and locked_at is not None:
-        if isinstance(error, str) and error.startswith("paused:"):
+        if error_text.startswith("paused:"):
             return "paused"
         return "running"
 
@@ -491,6 +500,11 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
 
 
 def _rag_eval_job_percent(row: asyncpg.Record) -> float:
+    effective_status = _rag_eval_job_effective_status(row)
+
+    if effective_status in {"completed", "succeeded", "success", "failed", "cancelled"}:
+        return 100.0
+
     payload = _queue_json_payload(row["payload"])
     progress = payload.get(RAG_EVAL_PROGRESS_PAYLOAD_KEY)
 
@@ -498,11 +512,6 @@ def _rag_eval_job_percent(row: asyncpg.Record) -> float:
         raw_percent = progress.get("percent")
         if isinstance(raw_percent, int | float):
             return max(0.0, min(100.0, float(raw_percent)))
-
-    effective_status = _rag_eval_job_effective_status(row)
-
-    if effective_status in {"completed", "succeeded", "success", "failed", "cancelled"}:
-        return 100.0
 
     if effective_status == "running":
         return 1.0

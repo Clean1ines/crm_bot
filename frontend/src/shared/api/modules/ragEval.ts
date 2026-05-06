@@ -57,6 +57,7 @@ export interface RagEvalJob {
   id: string;
   task_type: string;
   status: string;
+  effective_status?: string;
   attempts: number;
   max_attempts: number;
   created_at: string | null;
