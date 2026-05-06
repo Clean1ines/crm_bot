@@ -48,6 +48,8 @@ MODE_LIMITS: dict[RagEvalMode, int] = {
 
 PROJECT_RAG_EVAL_ROLES = ["owner", "admin"]
 RAG_EVAL_GROQ_MODEL = "llama-3.1-8b-instant"
+RAG_EVAL_PROGRESS_PAYLOAD_KEY = "rag_eval_progress"
+RAG_EVAL_CONTROL_PAYLOAD_KEY = "rag_eval_control"
 
 ModeQuery = Annotated[
     str,
@@ -464,23 +466,46 @@ def _rag_eval_job_effective_status(row: asyncpg.Record) -> str:
     raw_status = str(row["status"])
     locked_at = row["locked_at"]
     error = row["error"]
+    payload = _queue_json_payload(row["payload"])
+
+    control = payload.get(RAG_EVAL_CONTROL_PAYLOAD_KEY)
+    if isinstance(control, dict):
+        action = str(control.get("action") or "").strip().lower()
+        if action == "pause":
+            return "paused"
+        if action == "cancel":
+            return "cancelled"
+
+    progress = payload.get(RAG_EVAL_PROGRESS_PAYLOAD_KEY)
+    if isinstance(progress, dict):
+        progress_status = str(progress.get("status") or "").strip()
+        if progress_status:
+            return progress_status
 
     if raw_status == "pending" and locked_at is not None:
         if isinstance(error, str) and error.startswith("paused:"):
             return "paused"
-        return "running_or_locked"
+        return "running"
 
     return raw_status
 
 
 def _rag_eval_job_percent(row: asyncpg.Record) -> float:
+    payload = _queue_json_payload(row["payload"])
+    progress = payload.get(RAG_EVAL_PROGRESS_PAYLOAD_KEY)
+
+    if isinstance(progress, dict):
+        raw_percent = progress.get("percent")
+        if isinstance(raw_percent, int | float):
+            return max(0.0, min(100.0, float(raw_percent)))
+
     effective_status = _rag_eval_job_effective_status(row)
 
     if effective_status in {"completed", "succeeded", "success", "failed", "cancelled"}:
         return 100.0
 
-    if effective_status == "running_or_locked":
-        return 10.0
+    if effective_status == "running":
+        return 1.0
 
     return 0.0
 
@@ -488,6 +513,8 @@ def _rag_eval_job_percent(row: asyncpg.Record) -> float:
 def _serialize_rag_eval_job(row: asyncpg.Record) -> dict[str, object]:
     payload = _queue_json_payload(row["payload"])
     effective_status = _rag_eval_job_effective_status(row)
+    progress = payload.get(RAG_EVAL_PROGRESS_PAYLOAD_KEY)
+    safe_progress = progress if isinstance(progress, dict) else None
 
     return {
         "id": str(row["id"]),
@@ -502,17 +529,16 @@ def _serialize_rag_eval_job(row: asyncpg.Record) -> dict[str, object]:
         "updated_at": _iso_or_none(row["updated_at"]),
         "error": None if row["error"] is None else str(row["error"]),
         "payload": payload,
+        "progress": safe_progress,
         "project_id": payload.get("project_id"),
         "document_id": payload.get("document_id"),
         "requested_by": payload.get("requested_by"),
         "questions_per_chunk": payload.get("questions_per_chunk"),
         "max_questions": payload.get("max_questions"),
         "retrieval_limit": payload.get("retrieval_limit"),
-        "progress_kind": "queue_coarse",
-        "note": (
-            "Coarse queue-level progress. Exact chunk/question progress will be added "
-            "by worker heartbeat in the next patch."
-        ),
+        "progress_kind": "worker_payload_heartbeat"
+        if safe_progress
+        else "queue_coarse",
     }
 
 
@@ -682,6 +708,16 @@ async def cancel_rag_eval_job(
                 status = 'failed',
                 attempts = max_attempts,
                 locked_at = NULL,
+                payload = jsonb_set(
+                    COALESCE(payload::jsonb, '{}'::jsonb),
+                    ARRAY['rag_eval_control'],
+                    jsonb_build_object(
+                        'action', 'cancel',
+                        'reason', $2::text,
+                        'requested_at', now()::text
+                    ),
+                    true
+                ),
                 error = $2,
                 updated_at = now()
             WHERE id = $1::uuid
@@ -725,22 +761,13 @@ async def pause_rag_eval_job(
     project_repo: ProjectRepository = Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ) -> dict[str, object]:
-    existing = await _require_rag_eval_queue_job_access(
+    await _require_rag_eval_queue_job_access(
         pool=pool,
         job_id=job_id,
         current_user_id=current_user_id,
         project_repo=project_repo,
         user_repo=user_repo,
     )
-
-    if existing["locked_at"] is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Job is already locked/running. Pause is safe only before worker claim. "
-                "Use cancel to stop retries; an already in-flight LLM call may still finish."
-            ),
-        )
 
     message = reason or "paused by user"
 
@@ -749,13 +776,21 @@ async def pause_rag_eval_job(
             """
             UPDATE public.execution_queue
             SET
-                locked_at = now() + interval '100 years',
+                payload = jsonb_set(
+                    COALESCE(payload::jsonb, '{}'::jsonb),
+                    ARRAY['rag_eval_control'],
+                    jsonb_build_object(
+                        'action', 'pause',
+                        'reason', $2::text,
+                        'requested_at', now()::text
+                    ),
+                    true
+                ),
                 error = $2,
                 updated_at = now()
             WHERE id = $1::uuid
               AND task_type = $3
-              AND status = 'pending'
-              AND locked_at IS NULL
+              AND status NOT IN ('completed', 'failed')
             RETURNING
                 id,
                 task_type,
@@ -803,13 +838,12 @@ async def resume_rag_eval_job(
             """
             UPDATE public.execution_queue
             SET
-                locked_at = NULL,
+                payload = COALESCE(payload::jsonb, '{}'::jsonb) - 'rag_eval_control',
                 error = NULL,
                 updated_at = now()
             WHERE id = $1::uuid
               AND task_type = $2
-              AND status = 'pending'
-              AND error LIKE 'paused:%'
+              AND status NOT IN ('completed', 'failed')
             RETURNING
                 id,
                 task_type,

@@ -19,8 +19,8 @@ ALLOWED_SEVERITIES = set(get_args(RagEvalSeverity))
 RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 
-MAX_CHUNKS_PER_LLM_BATCH = 3
-MAX_CHUNK_CHARS = 900
+MAX_CHUNKS_PER_LLM_BATCH = 1
+MAX_CHUNK_CHARS = 700
 
 
 class LlmRagEvalDatasetGenerator:
@@ -82,6 +82,9 @@ class LlmRagEvalDatasetGenerator:
 
             if control_callback is not None:
                 await control_callback()
+
+            if progress_callback is not None:
+                await progress_callback(len(questions), target, batch_index - 1)
 
             response = await self._llm.complete_json(
                 system_prompt=self._system_prompt(),
@@ -198,7 +201,7 @@ Use short observable notes in metadata, not reasoning traces.
             for chunk in chunks
         ]
 
-        per_batch_target = min(max(remaining, len(chunks)), 12)
+        per_batch_target = min(max(remaining, 1), 3)
 
         return f"""
 Project id: {project_id}
