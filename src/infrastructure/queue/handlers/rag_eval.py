@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 
 RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "openai/gpt-oss-120b")
 RAG_EVAL_JUDGE_MODEL = os.getenv("RAG_EVAL_JUDGE_MODEL", "llama-3.1-8b-instant")
-RAG_EVAL_QUESTION_MAX_TOKENS = 8192
+RAG_EVAL_QUESTION_MAX_TOKENS = 6144
 RAG_EVAL_JUDGE_MAX_TOKENS = 2048
 
 
@@ -379,7 +379,7 @@ async def _run_full_document_rag_eval(
         payload.get("question_llm_max_tokens"),
         default=RAG_EVAL_QUESTION_MAX_TOKENS,
         minimum=2048,
-        maximum=8192,
+        maximum=6144,
     )
     judge_max_tokens = _coerce_int(
         payload.get("judge_llm_max_tokens"),

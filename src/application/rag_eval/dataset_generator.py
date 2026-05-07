@@ -22,7 +22,7 @@ RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 
 MAX_CHUNKS_PER_LLM_BATCH = 1
-MAX_CHUNK_CHARS = 6000
+MAX_CHUNK_CHARS = 700
 MIN_VARIANTS_PER_FACT = 5
 
 
@@ -162,74 +162,21 @@ class LlmRagEvalDatasetGenerator:
         return dataset
 
     def _system_prompt(self) -> str:
-        question_types = ", ".join(sorted(ALLOWED_QUESTION_TYPES))
-        example = {
-            "questions": [
-                {
-                    "question": "будет ли бот доступен клиентам круглосуточно?",
-                    "question_type": "paraphrase",
-                    "expected_chunk_ids": ["chunk_id_from_input"],
-                    "expected_answer_summary": "Ассистент может отвечать в любое время суток, если проект и инфраструктура работают.",
-                    "should_answer": True,
-                    "should_escalate": False,
-                    "difficulty": 2,
-                    "severity": "medium",
-                    "metadata": {
-                        "source_chunk_ids": ["chunk_id_from_input"],
-                        "fact_id": "availability_24_7_if_project_and_infrastructure_work",
-                        "fact_summary": "Ассистент может отвечать в любое время суток при работающих проекте и инфраструктуре.",
-                        "variant_style": "semantic_paraphrase",
-                        "why": "Checks whether retrieval finds the availability fact from a natural client paraphrase.",
-                    },
-                }
-            ]
-        }
-        example_json = json.dumps(example, ensure_ascii=False, indent=2)
-
-        return f"""
-You generate an automatic RAG evaluation dataset for uploaded knowledge chunks.
-
-Your entire response MUST be one valid JSON object.
-Return JSON only.
-Do not return markdown.
-Do not return prose.
-Do not wrap JSON in code fences.
-Do not include comments.
-Do not include chain-of-thought or hidden reasoning.
-
-Universal task:
-1. Read each provided chunk.
-2. Extract every atomic answerable fact from the chunk.
-3. For every extracted fact, generate at least {MIN_VARIANTS_PER_FACT} semantically different user questions whenever possible.
-4. Each question must test whether production RAG can retrieve the correct chunk and answer the correct fact.
-5. Questions and expected_answer_summary must use the same language as the source chunk. Infer the language from the chunk itself. Do not translate the source material.
-
-Variant styles to create for each fact:
-- direct: close to the source heading or wording;
-- semantic_paraphrase: same meaning with different words;
-- short_vague: short, incomplete, natural user query;
-- situational: realistic client scenario that implies the same fact;
-- typo_noisy: typo, informal wording, wrong capitalization, missing punctuation;
-- boundary_negative: only when useful, a similar-but-wrong or overclaiming question that should not be answered as if supported.
-
-Allowed question_type values:
-{question_types}
-
-Map variant styles to question_type like this:
-- direct -> direct
-- semantic_paraphrase -> paraphrase
-- situational -> paraphrase
-- typo_noisy -> paraphrase or short_vague
-- short_vague -> short_vague
-- boundary_negative -> similar_wrong or unknown
-- contradiction -> contradiction only when the chunks imply a real conflict
-- risky -> risky only when the document fact requires escalation/no-answer caution
-
-Required JSON shape example.
-This example demonstrates output shape only. Do not copy its topic unless the input chunk contains that fact.
-
-{example_json}
-""".strip()
+        question_types = ",".join(sorted(ALLOWED_QUESTION_TYPES))
+        return (
+            "Role: generate RAG eval questions from one KB chunk. "
+            "Output: one compact valid JSON object only, top-level key questions. "
+            "No markdown, prose, comments, code fences, or reasoning. "
+            "Use source language. Extract every atomic answerable fact. "
+            f"For each fact emit >= {MIN_VARIANTS_PER_FACT} meaning-diverse questions when possible. "
+            "Variant styles: direct, paraphrase, vague, typo/slang, client_context, edge_case. "
+            "Add unknown/similar_wrong/risky/contradiction only when grounded and useful. "
+            f"Allowed question_type values: {question_types}. "
+            "Each item needs question, question_type, expected_chunk_ids, expected_answer_summary, "
+            "should_answer, should_escalate, difficulty, severity, metadata. "
+            "metadata must include fact_id, fact_summary, variant_style, source_chunk_ids. "
+            "Same fact variants reuse same fact_id and fact_summary."
+        )
 
     def _user_prompt(
         self,
@@ -238,69 +185,109 @@ This example demonstrates output shape only. Do not copy its topic unless the in
         document_id: str,
         chunks: list[RagEvalChunk],
         batch_index: int,
-        total_batches: int,
+        total_batches: int | None = None,
     ) -> str:
-        chunk_payload = [
+        chunks_json = json.dumps(
+            [
+                {
+                    "id": chunk.id,
+                    "src": chunk.source,
+                    "text": self._clip(chunk.content),
+                    "m": self._prompt_metadata(chunk.metadata),
+                }
+                for chunk in chunks
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        example_json = json.dumps(
             {
-                "chunk_id": chunk.id,
-                "source": chunk.source,
-                "content": self._clip(chunk.content),
-                "metadata": {
-                    str(key): value
-                    for key, value in chunk.metadata.items()
-                    if key
-                    in {
-                        "entry_type",
-                        "title",
-                        "source_excerpt",
-                        "questions",
-                        "synonyms",
-                        "tags",
+                "questions": [
+                    {
+                        "question": "будет ли бот отвечать ночью?",
+                        "question_type": "paraphrase",
+                        "expected_chunk_ids": ["chunk_id"],
+                        "expected_answer_summary": "Ассистент отвечает в любое время суток, если проект и инфраструктура работают.",
+                        "should_answer": True,
+                        "should_escalate": False,
+                        "difficulty": 2,
+                        "severity": "medium",
+                        "metadata": {
+                            "fact_id": "assistant_24_7_if_project_and_infra_work",
+                            "fact_summary": "Ассистент может отвечать в любое время суток при работающих проекте и инфраструктуре.",
+                            "variant_style": "semantic_paraphrase",
+                            "source_chunk_ids": ["chunk_id"],
+                        },
                     }
-                },
-            }
-            for chunk in chunks
+                ]
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        batch_label = (
+            f"{batch_index}/{total_batches}"
+            if total_batches is not None
+            else str(batch_index)
+        )
+
+        lines = [
+            f"p={project_id}",
+            f"d={document_id}",
+            f"b={batch_label}",
+            "Return JSON only. Minify.",
+            f"schema_example={example_json}",
+            "Rules:",
+            "- Extract all atomic facts from chunks.",
+            f"- For each fact emit >= {MIN_VARIANTS_PER_FACT} variants when possible.",
+            "- Required variants: direct, paraphrase, vague, typo/slang, client_context, edge_case.",
+            "- Same fact => same metadata.fact_id and metadata.fact_summary.",
+            "- Answerable => should_answer=true and expected_chunk_ids uses only input ids.",
+            "- Unsupported adjacent trap => should_answer=false and expected_chunk_ids=[].",
+            "- expected_answer_summary = compact expected answer/no-answer behavior.",
+            "- Do not invent ids. No reasoning.",
+            f"chunks={chunks_json}",
         ]
+        return chr(10).join(lines)
 
-        chunks_json = json.dumps(chunk_payload, ensure_ascii=False, indent=2)
+    def _prompt_metadata(self, metadata: Mapping[str, object]) -> dict[str, object]:
+        keep = {
+            "title": "t",
+            "entry_type": "type",
+            "source_excerpt": "ex",
+            "questions": "q",
+            "synonyms": "syn",
+            "tags": "tags",
+        }
+        result: dict[str, object] = {}
+        for source_key, compact_key in keep.items():
+            value = metadata.get(source_key)
+            compact = self._compact_prompt_value(value)
+            if compact is not None:
+                result[compact_key] = compact
+        return result
 
-        return f"""
-Project id: {project_id}
-Document id: {document_id}
-Batch: {batch_index}/{total_batches}
+    def _compact_prompt_value(self, value: object) -> object | None:
+        if value is None:
+            return None
 
-Generate a fact-variant RAG eval dataset for the chunks below.
+        if isinstance(value, str):
+            text = " ".join(value.split())
+            if not text:
+                return None
+            return text[:240]
 
-Strict rules:
-- Return only JSON with top-level key "questions".
-- Do not include any key other than "questions" at the top level.
-- Generate questions only from facts actually present in the chunk.
-- Do not invent facts.
-- Do not invent chunk ids.
-- expected_chunk_ids must contain only chunk ids from the input.
-- For answerable questions, expected_chunk_ids must not be empty.
-- expected_answer_summary must describe the required meaning, not exact wording.
-- Each question must include metadata.fact_id.
-- Each question must include metadata.fact_summary.
-- Each question must include metadata.variant_style.
-- Each question must include metadata.source_chunk_ids.
-- fact_id must be stable, short, lowercase snake_case, and derived from the fact meaning.
-- Different variants of the same fact must reuse the same fact_id.
-- Do not generate duplicate questions.
-- Do not add explanations outside JSON.
+        if isinstance(value, list | tuple):
+            result: list[str] = []
+            for item in value[:8]:
+                text = " ".join(str(item or "").split())
+                if text:
+                    result.append(text[:80])
+            return result or None
 
-For every extracted fact, generate at least {MIN_VARIANTS_PER_FACT} variants when possible:
-1. direct
-2. semantic_paraphrase
-3. short_vague
-4. situational
-5. typo_noisy
-
-Add boundary_negative / similar_wrong / unknown variants only when they are natural and useful for this chunk.
-
-Chunks JSON:
-{chunks_json}
-""".strip()
+        text = " ".join(str(value).split())
+        if not text:
+            return None
+        return text[:160]
 
     def _question_from_payload(
         self,
