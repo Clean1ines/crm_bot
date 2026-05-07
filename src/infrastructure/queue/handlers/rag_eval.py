@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import asyncio
 import json
 import re
@@ -34,7 +35,10 @@ from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswer
 
 logger = get_logger(__name__)
 
-RAG_EVAL_GROQ_MODEL = "llama-3.1-8b-instant"
+RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "openai/gpt-oss-120b")
+RAG_EVAL_JUDGE_MODEL = os.getenv("RAG_EVAL_JUDGE_MODEL", "llama-3.1-8b-instant")
+RAG_EVAL_QUESTION_MAX_TOKENS = 8192
+RAG_EVAL_JUDGE_MAX_TOKENS = 2048
 
 
 def _coerce_int(
@@ -358,21 +362,11 @@ async def _run_full_document_rag_eval(
     if not chunks:
         raise PermanentJobError("Document has no processed knowledge chunks")
 
-    questions_per_chunk = _coerce_int(
-        payload.get("questions_per_chunk"),
-        default=1,
-        minimum=1,
-        maximum=5,
+    total_batches = max(
+        1,
+        (len(chunks) + MAX_CHUNKS_PER_LLM_BATCH - 1) // MAX_CHUNKS_PER_LLM_BATCH,
     )
-    full_document_target = max(len(chunks) * questions_per_chunk, len(chunks))
-
-    explicit_max_questions = _optional_int(
-        payload.get("max_questions"),
-        minimum=1,
-        maximum=50000,
-    )
-    if explicit_max_questions is not None:
-        full_document_target = min(full_document_target, explicit_max_questions)
+    full_document_target = total_batches
 
     retrieval_limit = _coerce_int(
         payload.get("retrieval_limit"),
@@ -380,9 +374,16 @@ async def _run_full_document_rag_eval(
         minimum=1,
         maximum=20,
     )
-    llm_max_tokens = _coerce_int(
-        payload.get("llm_max_tokens"),
-        default=2048,
+
+    question_max_tokens = _coerce_int(
+        payload.get("question_llm_max_tokens"),
+        default=RAG_EVAL_QUESTION_MAX_TOKENS,
+        minimum=2048,
+        maximum=8192,
+    )
+    judge_max_tokens = _coerce_int(
+        payload.get("judge_llm_max_tokens"),
+        default=RAG_EVAL_JUDGE_MAX_TOKENS,
         minimum=512,
         maximum=4096,
     )
@@ -393,15 +394,19 @@ async def _run_full_document_rag_eval(
         query_expander=GroqQueryExpander(),
     )
 
-    json_llm = GroqRagEvalJsonLlmAdapter(
-        model=RAG_EVAL_GROQ_MODEL,
-        max_tokens=llm_max_tokens,
+    question_llm = GroqRagEvalJsonLlmAdapter(
+        model=RAG_EVAL_QUESTION_MODEL,
+        max_tokens=question_max_tokens,
+    )
+    judge_llm = GroqRagEvalJsonLlmAdapter(
+        model=RAG_EVAL_JUDGE_MODEL,
+        max_tokens=judge_max_tokens,
     )
     dataset_generator = LlmRagEvalDatasetGenerator(
-        llm=json_llm,
-        model_name=RAG_EVAL_GROQ_MODEL,
+        llm=question_llm,
+        model_name=RAG_EVAL_QUESTION_MODEL,
     )
-    answer_judge = LlmRagEvalAnswerJudge(llm=json_llm)
+    answer_judge = LlmRagEvalAnswerJudge(llm=judge_llm)
 
     runner = RagEvalRunner(
         retriever=RagServiceRagEvalRetriever(rag_service),
@@ -430,7 +435,6 @@ async def _run_full_document_rag_eval(
         "document_id": document_id,
         "requested_by": requested_by,
         "source_chunk_count": source_chunk_count,
-        "questions_per_chunk": questions_per_chunk,
         "target_questions": full_document_target,
         "retrieval_limit": retrieval_limit,
         "total_batches": total_batches,
@@ -526,7 +530,6 @@ async def _run_full_document_rag_eval(
         run, report = await service.generate_dataset_and_run(
             project_id=project_id,
             document_id=document_id,
-            max_questions=full_document_target,
             progress_callback=_on_dataset_progress,
             control_callback=_control_callback,
         )

@@ -43,7 +43,6 @@ class RagEvalService:
         *,
         project_id: str,
         document_id: str,
-        max_questions: int,
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
         run_progress_callback: RagEvalRunProgressCallback | None = None,
@@ -57,7 +56,6 @@ class RagEvalService:
             project_id=project_id,
             document_id=document_id,
             chunks=chunks,
-            max_questions=max_questions,
             progress_callback=progress_callback,
             control_callback=control_callback,
         )

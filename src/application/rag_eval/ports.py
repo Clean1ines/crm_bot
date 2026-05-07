@@ -47,7 +47,6 @@ class RagEvalDatasetGeneratorPort(Protocol):
         project_id: str,
         document_id: str,
         chunks: list[RagEvalChunk],
-        max_questions: int,
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> RagEvalDataset: ...
