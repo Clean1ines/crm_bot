@@ -2,14 +2,10 @@ import { authedJsonRequest } from '@shared/api/core/http';
 
 export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
+  queued: boolean;
   job_id: string;
-  document_id: string;
-  project_id: string;
-  source_chunk_count: number;
-  questions_per_chunk: number;
-  target_questions: number;
-  max_questions: number | null;
-  retrieval_limit: number;
+  document: Record<string, unknown>;
+  mode: string;
 }
 
 export interface RagEvalDocumentStatusResponse {
@@ -37,7 +33,6 @@ export interface RagEvalProgressPayload {
   status?: string;
   percent?: number;
   generated_questions?: number;
-  target_questions?: number;
   processed_questions?: number;
   total_questions?: number;
   source_chunk_count?: number;
@@ -71,8 +66,6 @@ export interface RagEvalJob {
   project_id?: unknown;
   document_id?: unknown;
   requested_by?: unknown;
-  questions_per_chunk?: unknown;
-  max_questions?: unknown;
   retrieval_limit?: unknown;
 }
 
@@ -92,14 +85,8 @@ export interface RagEvalJobActionResponse {
   job: RagEvalJob;
 }
 
-interface RunFullDocumentEvalOptions {
-  questionsPerChunk?: number;
-  maxQuestions?: number;
-}
-
 interface RunDocumentEvalOptions {
   mode?: 'quick' | 'standard' | 'deep' | 'paranoid';
-  maxQuestions?: number;
 }
 
 const encode = (value: string): string => encodeURIComponent(value);
@@ -173,25 +160,10 @@ export const ragEvalApi = {
     );
   },
 
-  async runFullDocumentEval(
-    documentId: string,
-    options: RunFullDocumentEvalOptions = {},
-  ): Promise<RagEvalFullRunAcceptedResponse> {
-    const query = new URLSearchParams();
-
-    if (options.questionsPerChunk !== undefined) {
-      query.set('questions_per_chunk', String(options.questionsPerChunk));
-    }
-
-    if (options.maxQuestions !== undefined) {
-      query.set('max_questions', String(options.maxQuestions));
-    }
-
-    const suffix = query.toString() ? `?${query.toString()}` : '';
-
+  async runFullDocumentEval(documentId: string): Promise<RagEvalFullRunAcceptedResponse> {
     return unwrap(
       authedJsonRequest<RagEvalFullRunAcceptedResponse>(
-        `/api/rag-eval/documents/${encode(documentId)}/run-full${suffix}`,
+        `/api/rag-eval/documents/${encode(documentId)}/run-full`,
         { method: 'POST' },
       ),
     );
@@ -205,10 +177,6 @@ export const ragEvalApi = {
 
     if (options.mode) {
       query.set('mode', options.mode);
-    }
-
-    if (options.maxQuestions !== undefined) {
-      query.set('max_questions', String(options.maxQuestions));
     }
 
     const suffix = query.toString() ? `?${query.toString()}` : '';

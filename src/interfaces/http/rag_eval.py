@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypedDict, cast
+import os
+from typing import Annotated, TypedDict, cast
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -23,17 +24,12 @@ from src.interfaces.http.dependencies import (
 
 router = APIRouter(prefix="/api/rag-eval", tags=["rag-eval"])
 
-RagEvalMode = Literal["quick", "standard", "deep", "paranoid"]
-
-MODE_LIMITS: dict[RagEvalMode, int] = {
-    "quick": 30,
-    "standard": 75,
-    "deep": 200,
-    "paranoid": 500,
-}
 
 PROJECT_RAG_EVAL_ROLES = ["owner", "admin"]
-RAG_EVAL_GROQ_MODEL = "llama-3.1-8b-instant"
+RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "openai/gpt-oss-120b")
+RAG_EVAL_JUDGE_MODEL = os.getenv("RAG_EVAL_JUDGE_MODEL", "llama-3.1-8b-instant")
+RAG_EVAL_QUESTION_MAX_TOKENS = 8192
+RAG_EVAL_JUDGE_MAX_TOKENS = 2048
 RAG_EVAL_PROGRESS_PAYLOAD_KEY = "rag_eval_progress"
 RAG_EVAL_CONTROL_PAYLOAD_KEY = "rag_eval_control"
 
@@ -42,32 +38,6 @@ ModeQuery = Annotated[
     Query(
         description="RAG eval mode.",
         pattern="^(quick|standard|deep|paranoid)$",
-    ),
-]
-MaxQuestionsQuery = Annotated[
-    int | None,
-    Query(
-        ge=1,
-        le=500,
-        description="Override question count. Keep small for HTTP smoke tests.",
-    ),
-]
-
-
-QuestionsPerChunkQuery = Annotated[
-    int,
-    Query(
-        ge=1,
-        le=5,
-        description="Full-document eval density. 1 means at least one generated eval question per source chunk.",
-    ),
-]
-MaxFullQuestionsQuery = Annotated[
-    int | None,
-    Query(
-        ge=1,
-        le=50000,
-        description="Optional hard cap for full-document eval. Leave empty to cover the whole document.",
     ),
 ]
 
@@ -86,27 +56,6 @@ def _require_groq_key() -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="GROQ_API_KEY is not configured",
         )
-
-
-def _mode_value(mode: str) -> RagEvalMode:
-    if mode == "quick":
-        return "quick"
-    if mode == "standard":
-        return "standard"
-    if mode == "deep":
-        return "deep"
-    if mode == "paranoid":
-        return "paranoid"
-
-    raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail="mode must be one of: quick, standard, deep, paranoid",
-    )
-
-
-def _question_limit(mode: str, max_questions: int | None) -> int:
-    parsed_mode = _mode_value(mode)
-    return max_questions if max_questions is not None else MODE_LIMITS[parsed_mode]
 
 
 async def _require_project_rag_eval_access(
@@ -275,8 +224,6 @@ async def get_rag_eval_document_status(
 @router.post("/documents/{document_id}/run-full", status_code=status.HTTP_202_ACCEPTED)
 async def enqueue_full_rag_eval_for_document(
     document_id: str,
-    questions_per_chunk: QuestionsPerChunkQuery = 1,
-    max_questions: MaxFullQuestionsQuery = None,
     current_user_id: str = Depends(get_current_user_id),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: ProjectRepository = Depends(get_project_repo),
@@ -313,8 +260,6 @@ async def enqueue_full_rag_eval_for_document(
         "document_id": resolved_document_id,
         "requested_by": current_user_id,
         "mode": "full_document",
-        "questions_per_chunk": questions_per_chunk,
-        "max_questions": max_questions,
         "retrieval_limit": 5,
     }
 
@@ -330,10 +275,6 @@ async def enqueue_full_rag_eval_for_document(
         "job_id": job_id,
         "document": health,
         "mode": "full_document",
-        "questions_per_chunk": questions_per_chunk,
-        "target_questions": int(health["chunk_count"]) * questions_per_chunk
-        if max_questions is None
-        else min(int(health["chunk_count"]) * questions_per_chunk, max_questions),
     }
 
 
@@ -341,14 +282,12 @@ async def enqueue_full_rag_eval_for_document(
 async def run_rag_eval_for_document(
     document_id: str,
     mode: ModeQuery = "quick",
-    max_questions: MaxQuestionsQuery = None,
     current_user_id: str = Depends(get_current_user_id),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: ProjectRepository = Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ) -> dict[str, object]:
     _require_groq_key()
-    questions_limit = _question_limit(mode, max_questions)
 
     resolved_document_id = await _resolve_document_id(pool, document_id)
     health = await _document_health(pool, resolved_document_id)
@@ -399,12 +338,19 @@ async def run_rag_eval_for_document(
     )
     rag_eval_repo = RagEvalRepository(pool)
 
-    json_llm = GroqRagEvalJsonLlmAdapter(model=RAG_EVAL_GROQ_MODEL)
-    dataset_generator = LlmRagEvalDatasetGenerator(
-        llm=json_llm,
-        model_name=RAG_EVAL_GROQ_MODEL,
+    question_llm = GroqRagEvalJsonLlmAdapter(
+        model=RAG_EVAL_QUESTION_MODEL,
+        max_tokens=RAG_EVAL_QUESTION_MAX_TOKENS,
     )
-    answer_judge = LlmRagEvalAnswerJudge(llm=json_llm)
+    judge_llm = GroqRagEvalJsonLlmAdapter(
+        model=RAG_EVAL_JUDGE_MODEL,
+        max_tokens=RAG_EVAL_JUDGE_MAX_TOKENS,
+    )
+    dataset_generator = LlmRagEvalDatasetGenerator(
+        llm=question_llm,
+        model_name=RAG_EVAL_QUESTION_MODEL,
+    )
+    answer_judge = LlmRagEvalAnswerJudge(llm=judge_llm)
 
     runner = RagEvalRunner(
         retriever=RagServiceRagEvalRetriever(rag_service),
@@ -425,14 +371,12 @@ async def run_rag_eval_for_document(
     run, report = await service.generate_dataset_and_run(
         project_id=project_id,
         document_id=resolved_document_id,
-        max_questions=questions_limit,
     )
 
     return {
         "ok": True,
         "document": health,
         "mode": mode,
-        "max_questions": questions_limit,
         "dataset_id": run.dataset_id,
         "run_id": run.id,
         "questions": len(run.results),
@@ -554,8 +498,6 @@ def _serialize_rag_eval_job(row: asyncpg.Record) -> dict[str, object]:
         "project_id": payload.get("project_id"),
         "document_id": payload.get("document_id"),
         "requested_by": payload.get("requested_by"),
-        "questions_per_chunk": payload.get("questions_per_chunk"),
-        "max_questions": payload.get("max_questions"),
         "retrieval_limit": payload.get("retrieval_limit"),
         "progress_kind": "worker_payload_heartbeat"
         if safe_progress

@@ -71,8 +71,6 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
 
     response = await enqueue(
         document_id="00000000-0000-0000-0000-000000000002",
-        questions_per_chunk=1,
-        max_questions=None,
         current_user_id="user-1",
         pool=_Pool(),
         project_repo=_ProjectRepo(),
@@ -84,7 +82,7 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
     assert response["queued"] is True
     assert response["job_id"] == "job-1"
     assert response["mode"] == "full_document"
-    assert response["target_questions"] == 17
+    assert "target_questions" not in response
 
     queue_repo.enqueue.assert_awaited_once()
     awaited = queue_repo.enqueue.await_args
@@ -93,6 +91,9 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
     task_type, payload = awaited.args[:2]
     assert task_type == TASK_RUN_FULL_RAG_EVAL
     assert payload["mode"] == "full_document"
-    assert payload["questions_per_chunk"] == 1
     assert payload["document_id"] == "00000000-0000-0000-0000-000000000002"
+    legacy_density_key = "questions" + "_per_chunk"
+    assert legacy_density_key not in payload
+    assert "max_questions" not in payload
+    assert "target_questions" not in payload
     assert awaited.kwargs["max_attempts"] == 20

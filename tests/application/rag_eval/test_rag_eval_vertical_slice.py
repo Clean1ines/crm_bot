@@ -18,7 +18,7 @@ class FakeJsonLlm:
         user_prompt: str,
         schema_name: str,
     ) -> Mapping[str, object]:
-        if schema_name == "rag_eval_questions_v1":
+        if schema_name == "rag_eval_questions_v2":
             return {
                 "questions": [
                     {
@@ -30,7 +30,12 @@ class FakeJsonLlm:
                         "should_escalate": False,
                         "difficulty": 1,
                         "severity": "medium",
-                        "metadata": {"why": "direct evidence retrieval"},
+                        "metadata": {
+                            "why": "direct evidence retrieval",
+                            "fact_id": "connection_time_one_business_day",
+                            "fact_summary": "Подключение занимает 1 рабочий день.",
+                            "variant_style": "direct",
+                        },
                     },
                     {
                         "question": "Можно вернуть деньги после отключения?",
@@ -41,7 +46,12 @@ class FakeJsonLlm:
                         "should_escalate": False,
                         "difficulty": 3,
                         "severity": "high",
-                        "metadata": {"why": "unsupported adjacent question"},
+                        "metadata": {
+                            "why": "unsupported adjacent question",
+                            "fact_id": "refund_policy_absence",
+                            "fact_summary": "В документе нет информации о возврате денег.",
+                            "variant_style": "unknown",
+                        },
                     },
                 ]
             }
@@ -115,7 +125,6 @@ async def test_llm_dataset_generator_creates_eval_artifact_without_topic_hardcod
                 content="Подключение занимает 1 рабочий день.",
             )
         ],
-        max_questions=10,
     )
 
     assert dataset.status == "ready"
@@ -139,7 +148,6 @@ async def test_runner_combines_retrieval_metrics_and_llm_judge() -> None:
                 content="Подключение занимает 1 рабочий день.",
             )
         ],
-        max_questions=10,
     )
 
     runner = RagEvalRunner(

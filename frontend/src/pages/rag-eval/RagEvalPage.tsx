@@ -362,8 +362,6 @@ export const RagEvalPage: React.FC = () => {
   const queryClient = useQueryClient();
 
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
-  const [questionsPerChunk, setQuestionsPerChunk] = useState('1');
-  const [maxQuestionsCap, setMaxQuestionsCap] = useState('');
   const [lastQueued, setLastQueued] = useState<RagEvalFullRunAcceptedResponse | null>(null);
 
   const documentsQuery = useQuery({
@@ -473,34 +471,11 @@ export const RagEvalPage: React.FC = () => {
     mutationFn: async () => {
       if (!activeDocumentId) throw new Error('Нет обработанного документа для RAG eval');
 
-      const parsedQuestionsPerChunk = Number(questionsPerChunk.trim() || '1');
-      if (
-        !Number.isInteger(parsedQuestionsPerChunk)
-        || parsedQuestionsPerChunk < 1
-        || parsedQuestionsPerChunk > 5
-      ) {
-        throw new Error('questions_per_chunk должен быть целым числом от 1 до 5');
-      }
-
-      const parsedMaxQuestions = maxQuestionsCap.trim()
-        ? Number(maxQuestionsCap.trim())
-        : undefined;
-
-      if (
-        parsedMaxQuestions !== undefined
-        && (!Number.isInteger(parsedMaxQuestions) || parsedMaxQuestions < 1 || parsedMaxQuestions > 50000)
-      ) {
-        throw new Error('max_questions cap должен быть целым числом от 1 до 50000 или пустым');
-      }
-
-      return await ragEvalApi.runFullDocumentEval(activeDocumentId, {
-        questionsPerChunk: parsedQuestionsPerChunk,
-        maxQuestions: parsedMaxQuestions,
-      });
+        return await ragEvalApi.runFullDocumentEval(activeDocumentId);
     },
     onSuccess: async (result) => {
       setLastQueued(result);
-      toast.success(`Проверка поставлена в очередь: ${formatNumber(result.target_questions)} вопросов`);
+      toast.success(`Проверка поставлена в очередь: ${result.job_id.slice(0, 8)}…`);
       await invalidateEvalQueries();
     },
     onError: (error) => {
@@ -583,12 +558,12 @@ export const RagEvalPage: React.FC = () => {
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Запуск полной проверки</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              По умолчанию создаётся минимум один eval-вопрос на каждый chunk документа. Поле cap можно оставить пустым.
+              Система сама извлекает факты из каждого chunk и генерирует набор пользовательских перефразов для проверки retrieval.
             </p>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_160px_180px_auto]">
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Документ</span>
             <select
@@ -604,26 +579,7 @@ export const RagEvalPage: React.FC = () => {
             </select>
           </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">questions/chunk</span>
-            <input
-              value={questionsPerChunk}
-              onChange={(event) => setQuestionsPerChunk(event.target.value)}
-              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-              inputMode="numeric"
-            />
-          </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">cap</span>
-            <input
-              value={maxQuestionsCap}
-              onChange={(event) => setMaxQuestionsCap(event.target.value)}
-              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-              placeholder="empty"
-              inputMode="numeric"
-            />
-          </label>
 
           <button
             type="button"

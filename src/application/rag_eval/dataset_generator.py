@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import cast, get_args
@@ -21,15 +22,19 @@ RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 
 MAX_CHUNKS_PER_LLM_BATCH = 1
-MAX_CHUNK_CHARS = 700
+MAX_CHUNK_CHARS = 6000
+MIN_VARIANTS_PER_FACT = 5
 
 
 class LlmRagEvalDatasetGenerator:
-    """Generates a universal RAG eval dataset from document chunks.
+    """Generates a universal fact/variant RAG eval dataset from document chunks.
 
-    No document-topic keyword dictionaries here.
-    The LLM receives chunks and decides what is important in this document.
-    Application code only validates question taxonomy and JSON shape.
+    The LLM must:
+    1. extract atomic facts from each chunk;
+    2. generate multiple user-question variants for every extracted fact;
+    3. return strict JSON only.
+
+    Application code validates taxonomy, chunk ids and JSON shape.
     """
 
     def __init__(
@@ -47,7 +52,6 @@ class LlmRagEvalDatasetGenerator:
         project_id: str,
         document_id: str,
         chunks: list[RagEvalChunk],
-        max_questions: int,
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> RagEvalDataset:
@@ -60,32 +64,37 @@ class LlmRagEvalDatasetGenerator:
             model_used=self._model_name,
         )
 
-        if not chunks:
+        batches = self._batches(chunks)
+        total_batches = len(batches)
+
+        if not batches:
             dataset.status = "ready"
             dataset.total_questions = 0
-            dataset.metadata = {"warning": "document_has_no_chunks"}
+            dataset.metadata = {"warning": "document_has_no_useful_chunks"}
             if progress_callback is not None:
                 await progress_callback(0, 0, 0)
             return dataset
 
         questions: list[RagEvalQuestion] = []
-        target = max(max_questions, 1)
-        last_batch_index = 0
+        valid_chunk_ids = {chunk.id for chunk in chunks if chunk.id}
 
         if progress_callback is not None:
-            await progress_callback(0, target, 0)
+            await progress_callback(0, total_batches, 0)
 
-        for batch_index, batch in enumerate(self._batches(chunks), start=1):
+        last_batch_index = 0
+
+        for batch_index, batch in enumerate(batches, start=1):
             last_batch_index = batch_index
-
-            if len(questions) >= target:
-                break
 
             if control_callback is not None:
                 await control_callback()
 
             if progress_callback is not None:
-                await progress_callback(len(questions), target, batch_index - 1)
+                await progress_callback(
+                    len(self._dedupe(questions)),
+                    max(len(self._dedupe(questions)), total_batches),
+                    batch_index - 1,
+                )
 
             response = await self._llm.complete_json(
                 system_prompt=self._system_prompt(),
@@ -93,10 +102,10 @@ class LlmRagEvalDatasetGenerator:
                     project_id=project_id,
                     document_id=document_id,
                     chunks=batch,
-                    remaining=max(target - len(questions), 1),
                     batch_index=batch_index,
+                    total_batches=total_batches,
                 ),
-                schema_name="rag_eval_questions_v1",
+                schema_name="rag_eval_questions_v2",
             )
 
             raw_questions = response.get("questions")
@@ -105,8 +114,8 @@ class LlmRagEvalDatasetGenerator:
             ):
                 if progress_callback is not None:
                     await progress_callback(
-                        min(len(self._dedupe(questions)), target),
-                        target,
+                        len(self._dedupe(questions)),
+                        max(len(self._dedupe(questions)), total_batches),
                         batch_index,
                     )
                 continue
@@ -120,57 +129,106 @@ class LlmRagEvalDatasetGenerator:
                     project_id=project_id,
                     document_id=document_id,
                     payload=item,
+                    valid_chunk_ids=valid_chunk_ids,
                 )
-                if question is not None:
-                    questions.append(question)
+                if question is None:
+                    continue
 
-                if len(questions) >= target:
-                    break
+                questions.append(question)
 
             if progress_callback is not None:
                 await progress_callback(
-                    min(len(self._dedupe(questions)), target),
-                    target,
+                    len(self._dedupe(questions)),
+                    max(len(self._dedupe(questions)), total_batches),
                     batch_index,
                 )
 
-        dataset.questions = self._dedupe(questions)[:target]
+        dataset.questions = self._dedupe(questions)
         dataset.total_questions = len(dataset.questions)
         dataset.status = "ready"
         dataset.metadata = {
-            "generation_strategy": "llm_full_chunk_coverage_batches",
-            "max_questions": target,
+            "generation_strategy": "llm_fact_variant_coverage_batches",
             "source_chunk_count": len(chunks),
+            "useful_chunk_count": sum(len(batch) for batch in batches),
+            "llm_batches": total_batches,
+            "min_variants_per_fact": MIN_VARIANTS_PER_FACT,
         }
 
         if progress_callback is not None:
-            await progress_callback(dataset.total_questions, target, last_batch_index)
+            await progress_callback(
+                dataset.total_questions, total_batches, last_batch_index
+            )
 
         return dataset
 
     def _system_prompt(self) -> str:
         question_types = ", ".join(sorted(ALLOWED_QUESTION_TYPES))
+        example = {
+            "questions": [
+                {
+                    "question": "будет ли бот доступен клиентам круглосуточно?",
+                    "question_type": "paraphrase",
+                    "expected_chunk_ids": ["chunk_id_from_input"],
+                    "expected_answer_summary": "Ассистент может отвечать в любое время суток, если проект и инфраструктура работают.",
+                    "should_answer": True,
+                    "should_escalate": False,
+                    "difficulty": 2,
+                    "severity": "medium",
+                    "metadata": {
+                        "source_chunk_ids": ["chunk_id_from_input"],
+                        "fact_id": "availability_24_7_if_project_and_infrastructure_work",
+                        "fact_summary": "Ассистент может отвечать в любое время суток при работающих проекте и инфраструктуре.",
+                        "variant_style": "semantic_paraphrase",
+                        "why": "Checks whether retrieval finds the availability fact from a natural client paraphrase.",
+                    },
+                }
+            ]
+        }
+        example_json = json.dumps(example, ensure_ascii=False, indent=2)
+
         return f"""
-You generate an automatic RAG evaluation dataset for an uploaded knowledge document.
+You generate an automatic RAG evaluation dataset for uploaded knowledge chunks.
 
-You must infer what matters from the chunks. Do not rely on a fixed business topic list.
-Questions and expected_answer_summary must use the same language as the source chunks.
-If the chunks are Russian, generate Russian questions. Do not translate Russian source material into English.
+Your entire response MUST be one valid JSON object.
+Return JSON only.
+Do not return markdown.
+Do not return prose.
+Do not wrap JSON in code fences.
+Do not include comments.
+Do not include chain-of-thought or hidden reasoning.
 
-Generate questions that test:
-1. direct answerability from evidence;
-2. paraphrases;
-3. short vague user queries;
-4. similar-but-wrong questions that must not use nearby evidence incorrectly;
-5. unknown questions where the bot should say there is no information;
-6. risky questions where escalation/no-answer may be required;
-7. contradiction checks only if the chunks imply conflict.
+Universal task:
+1. Read each provided chunk.
+2. Extract every atomic answerable fact from the chunk.
+3. For every extracted fact, generate at least {MIN_VARIANTS_PER_FACT} semantically different user questions whenever possible.
+4. Each question must test whether production RAG can retrieve the correct chunk and answer the correct fact.
+5. Questions and expected_answer_summary must use the same language as the source chunk. Infer the language from the chunk itself. Do not translate the source material.
+
+Variant styles to create for each fact:
+- direct: close to the source heading or wording;
+- semantic_paraphrase: same meaning with different words;
+- short_vague: short, incomplete, natural user query;
+- situational: realistic client scenario that implies the same fact;
+- typo_noisy: typo, informal wording, wrong capitalization, missing punctuation;
+- boundary_negative: only when useful, a similar-but-wrong or overclaiming question that should not be answered as if supported.
 
 Allowed question_type values:
 {question_types}
 
-Return strict JSON only. Do not include hidden chain-of-thought.
-Use short observable notes in metadata, not reasoning traces.
+Map variant styles to question_type like this:
+- direct -> direct
+- semantic_paraphrase -> paraphrase
+- situational -> paraphrase
+- typo_noisy -> paraphrase or short_vague
+- short_vague -> short_vague
+- boundary_negative -> similar_wrong or unknown
+- contradiction -> contradiction only when the chunks imply a real conflict
+- risky -> risky only when the document fact requires escalation/no-answer caution
+
+Required JSON shape example.
+This example demonstrates output shape only. Do not copy its topic unless the input chunk contains that fact.
+
+{example_json}
 """.strip()
 
     def _user_prompt(
@@ -179,8 +237,8 @@ Use short observable notes in metadata, not reasoning traces.
         project_id: str,
         document_id: str,
         chunks: list[RagEvalChunk],
-        remaining: int,
         batch_index: int,
+        total_batches: int,
     ) -> str:
         chunk_payload = [
             {
@@ -204,49 +262,44 @@ Use short observable notes in metadata, not reasoning traces.
             for chunk in chunks
         ]
 
-        per_batch_target = min(max(remaining, 1), 3)
+        chunks_json = json.dumps(chunk_payload, ensure_ascii=False, indent=2)
 
         return f"""
 Project id: {project_id}
 Document id: {document_id}
-Batch index: {batch_index}
-Source chunk language: {self._dominant_language([chunk.content for chunk in chunks])}
-Generate up to {per_batch_target} eval questions for these chunks.
-You must cover every chunk in this batch with at least one answerable direct/paraphrase/short_vague question before adding optional negative/risky cases.
-Full-document mode depends on this: every chunk should be represented in the generated dataset whenever possible.
+Batch: {batch_index}/{total_batches}
 
-Strict JSON shape:
-{{
-  "questions": [
-    {{
-      "question": "client question",
-      "question_type": "direct | paraphrase | short_vague | similar_wrong | unknown | risky | contradiction",
-      "expected_chunk_ids": ["chunk id"],
-      "expected_answer_summary": "short summary of what the bot should answer, or no-answer behavior",
-      "should_answer": true,
-      "should_escalate": false,
-      "difficulty": 1,
-      "severity": "low | medium | high | critical",
-      "metadata": {{
-        "why": "short observable test purpose",
-        "source_chunk_ids": ["chunk id"]
-      }}
-    }}
-  ]
-}}
+Generate a fact-variant RAG eval dataset for the chunks below.
 
-Rules:
-- For direct/paraphrase/short_vague: expected_chunk_ids should contain supporting chunk ids.
-- For unknown/similar_wrong: expected_chunk_ids can be empty if the document does not support an answer.
+Strict rules:
+- Return only JSON with top-level key "questions".
+- Do not include any key other than "questions" at the top level.
+- Generate questions only from facts actually present in the chunk.
+- Do not invent facts.
 - Do not invent chunk ids.
-- Do not expect exact wording.
-- Expected evidence is chunk ids, not full answer text.
-- Include negative cases when adjacent unsupported questions are plausible.
-- Include risky/escalation cases only when useful for this document.
-- Do not include chain-of-thought.
+- expected_chunk_ids must contain only chunk ids from the input.
+- For answerable questions, expected_chunk_ids must not be empty.
+- expected_answer_summary must describe the required meaning, not exact wording.
+- Each question must include metadata.fact_id.
+- Each question must include metadata.fact_summary.
+- Each question must include metadata.variant_style.
+- Each question must include metadata.source_chunk_ids.
+- fact_id must be stable, short, lowercase snake_case, and derived from the fact meaning.
+- Different variants of the same fact must reuse the same fact_id.
+- Do not generate duplicate questions.
+- Do not add explanations outside JSON.
 
-Chunks:
-{chunk_payload}
+For every extracted fact, generate at least {MIN_VARIANTS_PER_FACT} variants when possible:
+1. direct
+2. semantic_paraphrase
+3. short_vague
+4. situational
+5. typo_noisy
+
+Add boundary_negative / similar_wrong / unknown variants only when they are natural and useful for this chunk.
+
+Chunks JSON:
+{chunks_json}
 """.strip()
 
     def _question_from_payload(
@@ -256,6 +309,7 @@ Chunks:
         project_id: str,
         document_id: str,
         payload: Mapping[str, object],
+        valid_chunk_ids: set[str],
     ) -> RagEvalQuestion | None:
         question = str(payload.get("question") or "").strip()
         question_type = str(payload.get("question_type") or "").strip()
@@ -270,10 +324,46 @@ Chunks:
         if severity not in ALLOWED_SEVERITIES:
             severity = "medium"
 
-        expected_chunk_ids = self._string_list(payload.get("expected_chunk_ids"))
-        should_answer = bool(payload.get("should_answer"))
+        expected_chunk_ids = [
+            chunk_id
+            for chunk_id in self._string_list(payload.get("expected_chunk_ids"))
+            if chunk_id in valid_chunk_ids
+        ]
+
+        raw_should_answer = payload.get("should_answer")
+        should_answer = (
+            raw_should_answer
+            if isinstance(raw_should_answer, bool)
+            else bool(expected_chunk_ids)
+        )
+
         if should_answer and not expected_chunk_ids:
             return None
+
+        metadata = self._metadata(payload.get("metadata"))
+        source_chunk_ids = [
+            chunk_id
+            for chunk_id in self._string_list(metadata.get("source_chunk_ids"))
+            if chunk_id in valid_chunk_ids
+        ]
+        if not source_chunk_ids and expected_chunk_ids:
+            source_chunk_ids = list(expected_chunk_ids)
+
+        if source_chunk_ids:
+            metadata["source_chunk_ids"] = source_chunk_ids
+
+        if not str(metadata.get("fact_id") or "").strip():
+            metadata["fact_id"] = self._fallback_fact_id(
+                str(payload.get("expected_answer_summary") or question)
+            )
+
+        if not str(metadata.get("fact_summary") or "").strip():
+            metadata["fact_summary"] = str(
+                payload.get("expected_answer_summary") or ""
+            ).strip()[:500]
+
+        if not str(metadata.get("variant_style") or "").strip():
+            metadata["variant_style"] = question_type
 
         return RagEvalQuestion(
             id=new_eval_id("question"),
@@ -286,11 +376,11 @@ Chunks:
             expected_answer_summary=str(
                 payload.get("expected_answer_summary") or ""
             ).strip()[:1200],
-            should_answer=should_answer,
+            should_answer=bool(should_answer),
             should_escalate=bool(payload.get("should_escalate")),
             difficulty=self._difficulty(payload.get("difficulty")),
             severity=cast(RagEvalSeverity, severity),
-            metadata=self._metadata(payload.get("metadata")),
+            metadata=metadata,
         )
 
     def _metadata(self, value: object) -> dict[str, object]:
@@ -334,17 +424,25 @@ Chunks:
         return max(1, min(5, parsed))
 
     def _dedupe(self, questions: list[RagEvalQuestion]) -> list[RagEvalQuestion]:
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
         result: list[RagEvalQuestion] = []
 
         for question in questions:
-            key = (question.question_type, question.question.lower().strip())
+            key = self._normalized_question(question.question)
             if key in seen:
                 continue
             seen.add(key)
             result.append(question)
 
         return result
+
+    def _normalized_question(self, value: str) -> str:
+        return " ".join(value.lower().strip().split())
+
+    def _fallback_fact_id(self, value: str) -> str:
+        normalized = re.sub(r"[^0-9A-Za-zА-Яа-яЁё]+", "_", value.lower())
+        normalized = re.sub(r"_+", "_", normalized).strip("_")
+        return (normalized or "fact")[:80]
 
     def _is_useful_chunk(self, chunk: RagEvalChunk) -> bool:
         content = " ".join(chunk.content.split())
@@ -354,23 +452,10 @@ Chunks:
             return False
         if re.fullmatch(r"[-*_]{3,}", content):
             return False
-        if len(content) < 1:
-            return False
         if content[0] in {",", ";", ":", ".", ")", "]"}:
             return False
 
-        # Do not reject compact chunks just because they are short. Unit tests
-        # and LLM-normalized FAQ entries can be intentionally concise.
         return True
-
-    def _dominant_language(self, texts: list[str]) -> str:
-        cyrillic = sum(len(re.findall(r"[А-Яа-яЁё]", text)) for text in texts)
-        latin = sum(len(re.findall(r"[A-Za-z]", text)) for text in texts)
-        if cyrillic > latin:
-            return "Russian"
-        if latin > cyrillic:
-            return "English"
-        return "same as source chunks"
 
     def _batches(self, chunks: list[RagEvalChunk]) -> list[list[RagEvalChunk]]:
         useful_chunks = [chunk for chunk in chunks if self._is_useful_chunk(chunk)]
