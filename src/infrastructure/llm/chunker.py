@@ -44,14 +44,18 @@ class ChunkerService:
 
         intent_sections = self._intent_sections_from_json(payload)
         if intent_sections:
-            return self._clean_text("\n\n".join(intent_sections))
+            return self._clean_structured_text("\n\n".join(intent_sections))
 
         generic_text = "\n".join(self._flatten_json_text(payload))
         return self._clean_text(generic_text)
 
     def _clean_text(self, text: str) -> str:
         """
-        FIX: убираем мусорные переносы и склейки PDF
+        Clean unstructured text such as PDF/plain text extraction.
+
+        This method intentionally folds single newlines because PDF extraction
+        often breaks one paragraph into many physical lines. Do not use it for
+        Markdown-like structured text: it destroys heading boundaries.
         """
         text = text.replace("\r", "\n")
 
@@ -64,6 +68,19 @@ class ChunkerService:
         # восстанавливаем абзацы
         text = re.sub(r"\n{3,}", "\n\n", text)
 
+        return text.strip()
+
+    def _clean_structured_text(self, text: str) -> str:
+        """
+        Clean Markdown / structured text without collapsing heading boundaries.
+
+        Knowledge-base Markdown must keep newlines before headings and lists,
+        otherwise section-aware chunking cannot split by semantic sections.
+        """
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [re.sub(r"[ \t]+", " ", line).rstrip() for line in text.split("\n")]
+        text = "\n".join(lines)
+        text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
     def chunk_text(self, text: str) -> list[str]:
@@ -91,6 +108,9 @@ class ChunkerService:
     def _normalized_input(self, text: str) -> str:
         if not text:
             return ""
+
+        if re.search(r"(?m)^#{1,6}\s+\S", text):
+            return self._clean_structured_text(text)
 
         return self._clean_text(text)
 
@@ -165,7 +185,6 @@ class ChunkerService:
 
         if filename_lower.endswith((".txt", ".md")):
             text = file_bytes.decode("utf-8", errors="ignore")
-            text = self._clean_text(text)
 
         elif filename_lower.endswith(".json"):
             text = self.extract_text_from_json(file_bytes)
@@ -259,56 +278,91 @@ class _SectionChunkBuilder:
         self._current_header = ""
         self._buffer = ""
 
-    def add(self, raw_part: str) -> None:
-        part = raw_part.strip()
+    def add(self, part: str) -> None:
+        part = part.strip()
         if not part:
             return
 
         if _is_markdown_header(part):
-            self._flush_buffer()
-            self._current_header = _header_text(part)
+            self._flush()
+            self._current_header = part
+            self._buffer = ""
             return
 
-        self._add_body_part(part)
+        if self._buffer:
+            self._buffer = f"{self._buffer}\\n\\n{part}"
+        else:
+            self._buffer = part
 
     def finish(self) -> list[str]:
-        self._flush_buffer()
+        self._flush()
         return self._chunks
 
-    def _add_body_part(self, part: str) -> None:
-        combined = self._with_current_header(part)
+    def _flush(self) -> None:
+        body = self._buffer.strip()
 
-        if len(combined) >= self._chunker.chunk_size:
-            self._flush_buffer()
-            self._chunks.extend(self._chunker._split_buffer(combined))
+        if not self._current_header and not body:
             return
 
-        self._append_to_buffer(combined)
-
-    def _with_current_header(self, part: str) -> str:
         if not self._current_header:
-            return part
-
-        return f"{self._current_header}\n{part}".strip()
-
-    def _append_to_buffer(self, combined: str) -> None:
-        next_buffer = (
-            f"{self._buffer}\n\n{combined}".strip() if self._buffer else combined
-        )
-
-        if len(next_buffer) >= self._chunker.chunk_size:
-            self._flush_buffer()
-            self._buffer = combined
+            self._chunks.extend(self._chunker._split_buffer(body))
+            self._buffer = ""
             return
 
-        self._buffer = next_buffer
-
-    def _flush_buffer(self) -> None:
-        if not self._buffer.strip():
+        if not body:
+            self._chunks.append(self._current_header)
+            self._current_header = ""
+            self._buffer = ""
             return
 
-        self._chunks.extend(self._chunker._split_buffer(self._buffer.strip()))
+        self._chunks.extend(self._split_section_with_header(self._current_header, body))
+        self._current_header = ""
         self._buffer = ""
+
+    def _split_section_with_header(self, header: str, body: str) -> list[str]:
+        prefix = f"{header}\\n\\n"
+        budget = self._chunker.chunk_size - len(prefix)
+
+        if budget < 200:
+            return self._chunker._split_buffer(f"{prefix}{body}".strip())
+
+        body_chunks = self._split_body(body, budget=budget)
+        return [f"{prefix}{chunk}".strip() for chunk in body_chunks if chunk.strip()]
+
+    def _split_body(self, text: str, *, budget: int) -> list[str]:
+        if len(text) <= budget:
+            return [text]
+
+        chunks: list[str] = []
+        start = 0
+        overlap = min(self._chunker.overlap, max(0, budget // 4))
+
+        while start < len(text):
+            end = min(start + budget, len(text))
+            cut = max(
+                text.rfind(". ", start, end),
+                text.rfind("! ", start, end),
+                text.rfind("? ", start, end),
+                text.rfind("\n", start, end),
+            )
+
+            if cut > start:
+                end = cut + 1
+
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+
+            if end >= len(text):
+                break
+
+            next_start = max(end - overlap, 0)
+            if next_start <= start:
+                next_start = end
+
+            start = next_start
+
+        return chunks
 
 
 def _is_markdown_header(text: str) -> bool:
