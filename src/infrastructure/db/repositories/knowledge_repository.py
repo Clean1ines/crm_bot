@@ -612,38 +612,12 @@ class KnowledgeRepository:
         chunks: list[JsonObject],
         document_id: str | None = None,
     ) -> int:
-        """Persist plain chunks using the legacy knowledge_base insert contract."""
-        if not chunks:
-            return 0
-
-        for batch in _batched_chunks(chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE):
-            texts = [str(chunk["content"]) for chunk in batch]
-            embedding_result = await embed_batch(texts)
-            embeddings = embedding_result.embeddings
-            if embedding_result.usage is not None:
-                await self._usage_repo.record_event(
-                    ModelUsageEventCreate.from_measurement(
-                        project_id=project_id,
-                        source="knowledge_upload",
-                        measurement=embedding_result.usage,
-                        document_id=document_id,
-                    )
-                )
-            async with self.pool.acquire() as conn:
-                async with conn.transaction():
-                    for index, chunk in enumerate(batch):
-                        await conn.execute(
-                            """
-                            INSERT INTO knowledge_base (project_id, document_id, content, embedding)
-                            VALUES ($1, $2, $3, $4::vector)
-                            """,
-                            ensure_uuid(project_id),
-                            ensure_uuid(document_id) if document_id else None,
-                            str(chunk["content"]),
-                            _pg_vector_text(embeddings[index]),
-                        )
-
-        return len(chunks)
+        """Persist plain chunks while preserving optional chunk metadata."""
+        return await self.add_structured_knowledge_batch(
+            project_id,
+            chunks,
+            document_id=document_id,
+        )
 
     async def add_structured_knowledge_batch(
         self,

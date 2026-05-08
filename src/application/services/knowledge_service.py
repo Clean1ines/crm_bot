@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from src.application.dto.knowledge_dto import (
@@ -34,11 +35,18 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
-from src.infrastructure.config.settings import settings
 
 
 BEARER_PREFIX = "Bearer "
 UPLOAD_FALLBACK_NAME = "upload"
+
+
+@dataclass(frozen=True)
+class KnowledgeServiceConfig:
+    jwt_algorithm: str = "HS256"
+    model_usage_monthly_token_budget: int = 0
+    voyage_free_monthly_tokens: int = 0
+    model_usage_counter_enabled: bool = True
 
 
 class KnowledgeService:
@@ -49,12 +57,14 @@ class KnowledgeService:
         pool: KnowledgeDbPoolPort,
         jwt_secret: str,
         jwt_module: JwtDecoderPort,
+        service_config: KnowledgeServiceConfig | None = None,
     ) -> None:
         self.project_repo = project_repo
         self.user_repo = user_repo
         self.pool = pool
         self.jwt_secret = jwt_secret
         self.jwt = jwt_module
+        self.config = service_config or KnowledgeServiceConfig()
 
     async def require_access(self, project_id: str, authorization: str | None) -> str:
         user_id = self._user_id_from_authorization(authorization)
@@ -62,6 +72,28 @@ class KnowledgeService:
             return user_id
 
         raise ForbiddenError("Insufficient permissions")
+
+    async def _uploaded_by_user_id(
+        self,
+        project_id: str,
+        authorization: str | None,
+        *,
+        uploaded_by_user_id: str | None,
+        trusted_upload: bool,
+    ) -> str | None:
+        if trusted_upload:
+            if uploaded_by_user_id is None:
+                return None
+            uploaded_by = uploaded_by_user_id.strip()
+            return uploaded_by or None
+
+        if uploaded_by_user_id is not None:
+            uploaded_by = uploaded_by_user_id.strip()
+            if not uploaded_by:
+                raise UnauthorizedError("Invalid uploader identity")
+            return uploaded_by
+
+        return await self.require_access(project_id, authorization)
 
     def _user_id_from_authorization(self, authorization: str | None) -> str:
         token = _extract_bearer_token(authorization)
@@ -105,6 +137,8 @@ class KnowledgeService:
         knowledge_upload_task_type: str,
         upload_request: KnowledgeUploadRequestDto | None = None,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None = None,
+        uploaded_by_user_id: str | None = None,
+        trusted_upload: bool = False,
     ) -> KnowledgeUploadResultDto:
         try:
             mode = (
@@ -118,7 +152,12 @@ class KnowledgeService:
                 "Knowledge preprocessing adapter is required for non-plain upload modes"
             )
 
-        uploaded_by = await self.require_access(project_id, authorization)
+        uploaded_by = await self._uploaded_by_user_id(
+            project_id,
+            authorization,
+            uploaded_by_user_id=uploaded_by_user_id,
+            trusted_upload=trusted_upload,
+        )
         normalized_file_name = file_name or UPLOAD_FALLBACK_NAME
         logger.info(
             f"Knowledge upload requested for project {project_id}, file: {normalized_file_name}"
@@ -132,6 +171,7 @@ class KnowledgeService:
             chunker_factory=chunker_factory,
             logger=logger,
         )
+        _log_chunk_audit(logger, chunks, context="upload_normalized")
         if not chunks:
             logger.warning("No text extracted from file")
             return KnowledgeUploadResultDto.create(
@@ -250,10 +290,10 @@ class KnowledgeService:
             raise NotFoundError("Project not found")
 
         monthly_budget_tokens = max(
-            int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET),
-            int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            self.config.model_usage_monthly_token_budget,
+            self.config.voyage_free_monthly_tokens,
         )
-        if not settings.MODEL_USAGE_COUNTER_ENABLED:
+        if not self.config.model_usage_counter_enabled:
             return ModelUsageSummaryDto.disabled(
                 monthly_budget_tokens=monthly_budget_tokens
             )
@@ -331,6 +371,75 @@ def _normalize_chunks(raw_chunks: Sequence[object]) -> list[JsonObject]:
     return chunks
 
 
+_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
+    "content",
+    "entry_type",
+    "title",
+    "source_excerpt",
+    "questions",
+    "synonyms",
+    "tags",
+    "embedding_text",
+)
+
+
+def _is_present_chunk_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _chunk_field_counts(chunks: Sequence[JsonObject]) -> dict[str, int]:
+    return {
+        field: sum(1 for chunk in chunks if _is_present_chunk_value(chunk.get(field)))
+        for field in _CHUNK_AUDIT_FIELDS
+    }
+
+
+def _chunk_unknown_field_counts(chunks: Sequence[JsonObject]) -> dict[str, int]:
+    known = set(_CHUNK_AUDIT_FIELDS)
+    counts: dict[str, int] = {}
+    for chunk in chunks:
+        for key, value in chunk.items():
+            if key in known or not _is_present_chunk_value(value):
+                continue
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _chunk_content_length_stats(chunks: Sequence[JsonObject]) -> JsonObject:
+    lengths = [len(str(chunk.get("content") or "").strip()) for chunk in chunks]
+    if not lengths:
+        return {"min": 0, "max": 0, "avg": 0}
+    return {
+        "min": min(lengths),
+        "max": max(lengths),
+        "avg": round(sum(lengths) / len(lengths), 2),
+    }
+
+
+def _log_chunk_audit(
+    logger: LoggerPort,
+    chunks: Sequence[JsonObject],
+    *,
+    context: str,
+) -> None:
+    logger.info(
+        "Knowledge upload chunk audit",
+        extra={
+            "context": context,
+            "chunk_count": len(chunks),
+            "field_counts": _chunk_field_counts(chunks),
+            "unknown_field_counts": _chunk_unknown_field_counts(chunks),
+            "content_length": _chunk_content_length_stats(chunks),
+        },
+    )
+
+
 def _normalize_chunk(chunk: object) -> JsonObject | None:
     if isinstance(chunk, str):
         return _chunk_from_text(chunk)
@@ -351,4 +460,8 @@ def _chunk_from_mapping(value: Mapping[object, object]) -> JsonObject | None:
     if not content:
         return None
 
-    return {str(key): json_value_from_unknown(item) for key, item in value.items()}
+    normalized = {
+        str(key): json_value_from_unknown(item) for key, item in value.items()
+    }
+    normalized["content"] = content
+    return normalized
