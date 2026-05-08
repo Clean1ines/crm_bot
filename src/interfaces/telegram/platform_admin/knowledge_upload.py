@@ -3,12 +3,15 @@ Platform admin bot handler for uploading knowledge base files.
 """
 
 import aiohttp
+import asyncpg
 from telegram import InlineKeyboardMarkup
 
+from src.application.dto.knowledge_dto import KnowledgeUploadResultDto
 from src.infrastructure.config.settings import settings
-from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
-from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.logging.logger import get_logger
+from src.interfaces.composition.knowledge_upload import (
+    upload_platform_admin_knowledge_file,
+)
 from src.interfaces.telegram.platform_admin.handlers import (
     _clear_state,
     _get_data,
@@ -104,23 +107,24 @@ def _document_metadata(document: DocumentPayload) -> tuple[str, str]:
     return str(document["file_id"]), str(document.get("file_name") or "unknown")
 
 
-async def _chunk_document(file_id: str, filename: str) -> list[str]:
+async def _download_document(file_id: str) -> bytes:
     file_path = await _get_file_path(file_id)
-    file_bytes = await _download_file(file_path)
-    chunker = ChunkerService()
-    return await chunker.process_file(file_bytes, filename)
+    return await _download_file(file_path)
 
 
-async def _store_knowledge(
+async def _queue_knowledge_upload(
     *,
-    pool: object,
+    pool: asyncpg.Pool,
     project_id: str,
-    chunks: list[str],
-) -> None:
-    repo = KnowledgeRepository(pool)
-    await repo.add_knowledge_batch(
-        project_id,
-        [{"content": chunk} for chunk in chunks],
+    filename: str,
+    file_content: bytes,
+) -> KnowledgeUploadResultDto:
+    return await upload_platform_admin_knowledge_file(
+        pool=pool,
+        project_id=project_id,
+        file_name=filename,
+        file_content=file_content,
+        logger=logger,
     )
 
 
@@ -154,7 +158,7 @@ async def _failure_response(
 async def handle_knowledge_upload(
     chat_id: str,
     message: dict[str, object],
-    pool: object,
+    pool: asyncpg.Pool,
 ) -> UploadResult:
     project_id = await _project_id_for_upload(chat_id)
 
@@ -190,26 +194,30 @@ async def handle_knowledge_upload(
     )
 
     try:
-        chunks = await _chunk_document(file_id, filename)
-        if not chunks:
+        file_content = await _download_document(file_id)
+        result = await _queue_knowledge_upload(
+            pool=pool,
+            project_id=project_id,
+            filename=filename,
+            file_content=file_content,
+        )
+        if result.chunks <= 0:
             logger.warning("No chunks generated", extra={"filename": filename})
             return _no_chunks_response()
 
-        await _store_knowledge(
-            pool=pool,
-            project_id=project_id,
-            chunks=chunks,
-        )
-
         logger.info(
-            "Knowledge base updated",
-            extra={"project_id": project_id, "chunks": len(chunks)},
+            "Knowledge upload queued",
+            extra={
+                "project_id": project_id,
+                "document_id": result.document_id,
+                "chunks": result.chunks,
+            },
         )
         return await _success_response(
             chat_id=chat_id,
             project_id=project_id,
             pool=pool,
-            chunks_count=len(chunks),
+            chunks_count=result.chunks,
         )
     except Exception as exc:
         logger.exception(

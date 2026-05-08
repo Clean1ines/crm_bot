@@ -29,7 +29,10 @@ from src.application.ports.knowledge_port import (
     KnowledgeRepositoryPort,
     ModelUsageRepositoryPort,
 )
-from src.application.services.knowledge_service import KnowledgeService
+from src.application.services.knowledge_service import (
+    KnowledgeService,
+    KnowledgeServiceConfig,
+)
 from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
@@ -122,7 +125,18 @@ async def list_knowledge_documents(
     Lists uploaded knowledge documents for a project.
     """
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
     )
     await service.require_access(project_id, authorization)
 
@@ -146,7 +160,18 @@ async def preview_knowledge(
     calling LLM generation.
     """
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
     )
     result = await service.preview_query(
         project_id,
@@ -167,7 +192,18 @@ async def knowledge_usage(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
     )
     result = await service.usage(
         project_id,
@@ -199,7 +235,18 @@ async def upload_knowledge(
     - instruction: policy/procedure normalization
     """
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
     )
     try:
         file_content = await _read_upload_bytes(file)
@@ -237,7 +284,18 @@ async def clear_knowledge(
 ):
     """Deletes all knowledge documents and chunks for a project."""
     service = KnowledgeService(
-        project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
     )
     await service.clear_project_knowledge(
         project_id,

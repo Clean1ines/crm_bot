@@ -94,6 +94,7 @@ class KnowledgeUploadJobPayloadDto:
             content = str(chunk.get("content") or "").strip()
             if not content:
                 raise ValueError("knowledge upload payload chunk missing content")
+            chunk["content"] = content
             chunks.append(chunk)
 
         return cls(

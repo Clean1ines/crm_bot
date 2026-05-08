@@ -24,6 +24,59 @@ from src.domain.project_plane.knowledge_preprocessing import (
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 
+_PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
+    "content",
+    "entry_type",
+    "title",
+    "source_excerpt",
+    "questions",
+    "synonyms",
+    "tags",
+    "embedding_text",
+)
+
+
+def _present_plain_chunk_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _plain_chunk_field_counts(chunks: list[JsonObject]) -> dict[str, int]:
+    return {
+        field: sum(
+            1 for chunk in chunks if _present_plain_chunk_value(chunk.get(field))
+        )
+        for field in _PLAIN_CHUNK_AUDIT_FIELDS
+    }
+
+
+def _log_plain_chunk_audit(
+    logger: LoggerPort,
+    *,
+    project_id: str,
+    document_id: str,
+    chunks: list[JsonObject],
+    context: str,
+) -> None:
+    logger.info(
+        "Knowledge plain chunk persistence audit",
+        extra={
+            "project_id": project_id,
+            "document_id": document_id,
+            "context": context,
+            "chunk_count": len(chunks),
+            "field_counts": _plain_chunk_field_counts(chunks),
+            "embedding_input": "embedding_text_or_content",
+            "metadata_preserved": True,
+        },
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeDocumentProcessingResult:
     document_id: str
@@ -107,6 +160,13 @@ class KnowledgeIngestionService:
         logger: LoggerPort,
         context: str,
     ) -> None:
+        _log_plain_chunk_audit(
+            logger,
+            project_id=project_id,
+            document_id=document_id,
+            chunks=chunks,
+            context=context,
+        )
         try:
             await repo.add_knowledge_batch(project_id, chunks, document_id=document_id)
         except EmbeddingProviderError as exc:

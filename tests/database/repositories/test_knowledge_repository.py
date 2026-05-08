@@ -404,3 +404,44 @@ async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete()
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
         "DELETE FROM knowledge_base WHERE project_id = $1"
     )
+
+
+@patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
+async def test_add_knowledge_batch_preserves_plain_chunk_metadata(
+    mock_embed_batch,
+    knowledge_repo,
+    mock_pool,
+):
+    mock_embed_batch.return_value = EmbeddingBatchResult(embeddings=[[0.1, 0.2]])
+    transaction = AsyncMock()
+    transaction.__aenter__.return_value = mock_pool.mock_conn
+    transaction.__aexit__.return_value = None
+    mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
+    mock_pool.mock_conn.execute = AsyncMock()
+
+    result = await knowledge_repo.add_knowledge_batch(
+        str(uuid4()),
+        [
+            {
+                "content": "answer",
+                "entry_type": "plain_enriched",
+                "title": "Title",
+                "source_excerpt": "source",
+                "questions": ["Question?"],
+                "synonyms": ["alias"],
+                "tags": ["tag"],
+                "embedding_text": "Rich embedding",
+            }
+        ],
+        str(uuid4()),
+    )
+
+    assert result == 1
+    mock_embed_batch.assert_awaited_once_with(["Rich embedding"])
+    executed_args = mock_pool.mock_conn.execute.await_args.args
+    assert "embedding_text" in executed_args[0]
+    assert executed_args[3] == "answer"
+    assert executed_args[5] == "plain_enriched"
+    assert executed_args[6] == "Title"
+    assert executed_args[7] == "source"
+    assert executed_args[11] == "Rich embedding"

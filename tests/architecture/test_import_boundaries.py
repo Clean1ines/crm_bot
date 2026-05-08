@@ -181,3 +181,20 @@ def test_only_interfaces_composition_imports_agent_runtime_for_wiring():
                             violations.append(f"{path}:{node.lineno} imports {name}")
 
     assert violations == []
+
+
+def test_telegram_knowledge_upload_uses_application_upload_boundary() -> None:
+    source = Path(
+        "src/interfaces/telegram/platform_admin/knowledge_upload.py"
+    ).read_text(encoding="utf-8")
+
+    forbidden = [
+        "ChunkerService(",
+        "KnowledgeRepository(",
+        ".add_knowledge_batch(",
+        "add_knowledge_batch(",
+    ]
+    violations = [marker for marker in forbidden if marker in source]
+
+    assert violations == []
+    assert "upload_platform_admin_knowledge_file" in source
