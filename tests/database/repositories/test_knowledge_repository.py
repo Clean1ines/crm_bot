@@ -1,5 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -298,7 +298,6 @@ async def test_add_structured_knowledge_batch_success(
 @pytest.mark.asyncio
 async def test_clear_project_knowledge_success(knowledge_repo, mock_pool):
     project_id = str(uuid4())
-    mock_pool.mock_conn.execute = AsyncMock()
     transaction = AsyncMock()
     transaction.__aenter__.return_value = mock_pool.mock_conn
     transaction.__aexit__.return_value = None
@@ -306,8 +305,102 @@ async def test_clear_project_knowledge_success(knowledge_repo, mock_pool):
 
     await knowledge_repo.clear_project_knowledge(project_id)
 
-    calls = [
-        call("DELETE FROM knowledge_base WHERE project_id = $1", UUID(project_id)),
-        call("DELETE FROM knowledge_documents WHERE project_id = $1", UUID(project_id)),
-    ]
-    mock_pool.mock_conn.execute.assert_has_calls(calls, any_order=False)
+    executed_sql = "\n".join(
+        str(call_item.args[0])
+        for call_item in mock_pool.mock_conn.execute.await_args_list
+    )
+
+    assert "UPDATE execution_queue" in executed_sql
+    assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
+    assert "DELETE FROM knowledge_base WHERE project_id = $1" in executed_sql
+    assert "DELETE FROM knowledge_documents WHERE project_id = $1" in executed_sql
+    assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
+        "DELETE FROM knowledge_base WHERE project_id = $1"
+    )
+
+
+class _RecordingTransaction:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object | None,
+    ) -> bool:
+        return False
+
+
+class RecordingConnection:
+    def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    async def execute(self, query: str, *args: object) -> str:
+        self.execute_calls.append((query, args))
+        return "UPDATE 1"
+
+    def transaction(self) -> _RecordingTransaction:
+        return _RecordingTransaction()
+
+
+class _RecordingAcquire:
+    def __init__(self, conn: RecordingConnection) -> None:
+        self._conn = conn
+
+    async def __aenter__(self) -> RecordingConnection:
+        return self._conn
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object | None,
+    ) -> bool:
+        return False
+
+
+class RecordingPool:
+    def __init__(self, conn: RecordingConnection) -> None:
+        self._conn = conn
+
+    def acquire(self) -> _RecordingAcquire:
+        return _RecordingAcquire(self._conn)
+
+
+async def test_delete_document_cancels_related_queue_jobs_before_hard_delete() -> None:
+    document_id = str(uuid4())
+    conn = RecordingConnection()
+    repo = KnowledgeRepository(RecordingPool(conn))
+
+    await repo.delete_document(document_id)
+
+    executed_sql = "\n".join(call[0] for call in conn.execute_calls)
+
+    assert "UPDATE execution_queue" in executed_sql
+    assert "payload::jsonb ->> 'document_id' = $3" in executed_sql
+    assert "process_knowledge_upload" in repr(conn.execute_calls)
+    assert "run_full_rag_eval" in repr(conn.execute_calls)
+    assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
+        "DELETE FROM knowledge_base WHERE document_id = $1"
+    )
+
+
+async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete() -> (
+    None
+):
+    project_id = str(uuid4())
+    conn = RecordingConnection()
+    repo = KnowledgeRepository(RecordingPool(conn))
+
+    await repo.clear_project_knowledge(project_id)
+
+    executed_sql = "\n".join(call[0] for call in conn.execute_calls)
+
+    assert "UPDATE execution_queue" in executed_sql
+    assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
+    assert "process_knowledge_upload" in repr(conn.execute_calls)
+    assert "run_full_rag_eval" in repr(conn.execute_calls)
+    assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
+        "DELETE FROM knowledge_base WHERE project_id = $1"
+    )
