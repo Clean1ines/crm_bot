@@ -68,6 +68,29 @@ def _indexable_chunks(chunks: list[JsonObject]) -> list[JsonObject]:
     ]
 
 
+def _raw_chunks_for_structured_persistence(
+    chunks: list[JsonObject],
+) -> list[JsonObject]:
+    """Preserve source chunks when LLM preprocessing enriches a document.
+
+    LLM preprocessing may add normalized FAQ/price/instruction entries, but it
+    must never be the only persisted representation of the uploaded document.
+    """
+    raw_chunks: list[JsonObject] = []
+    for chunk in chunks:
+        content = _chunk_content(chunk)
+        if not content:
+            continue
+        raw_chunks.append(
+            {
+                "content": content,
+                "entry_type": "chunk",
+                "embedding_text": content,
+            }
+        )
+    return raw_chunks
+
+
 class KnowledgeIngestionService:
     def __init__(self, pool: KnowledgeDbPoolPort) -> None:
         self.pool = pool
@@ -205,9 +228,19 @@ class KnowledgeIngestionService:
                     "Knowledge preprocessing produced no indexable structured chunks"
                 )
 
+            raw_chunks = _raw_chunks_for_structured_persistence(indexable_chunks)
+            chunks_to_persist = [*structured_chunks, *raw_chunks]
+            preprocessing_metrics: JsonObject = {
+                **result.metrics,
+                "structured_entries": len(structured_chunks),
+                "raw_chunks_preserved": len(raw_chunks),
+                "persisted_chunks": len(chunks_to_persist),
+                "lossless_preprocessing": True,
+            }
+
             await repo.add_structured_knowledge_batch(
                 project_id,
-                structured_chunks,
+                chunks_to_persist,
                 document_id=document_id,
             )
             await repo.update_document_preprocessing_status(
@@ -216,7 +249,7 @@ class KnowledgeIngestionService:
                 status=PREPROCESSING_STATUS_COMPLETED,
                 model=result.model,
                 prompt_version=result.prompt_version,
-                metrics=result.metrics,
+                metrics=preprocessing_metrics,
             )
             await repo.update_document_status(document_id, "processed")
             return KnowledgeDocumentProcessingResult(
