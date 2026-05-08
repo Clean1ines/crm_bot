@@ -32,6 +32,18 @@ from src.utils.uuid_utils import ensure_uuid
 
 logger = get_logger(__name__)
 
+CANCELLABLE_KNOWLEDGE_JOB_TYPES = (
+    "process_knowledge_upload",
+    "run_full_rag_eval",
+)
+TERMINAL_QUEUE_STATUSES = (
+    "completed",
+    "failed",
+    "cancelled",
+    "succeeded",
+    "done",
+)
+
 
 class _RowLookup(Protocol):
     def __getitem__(self, key: str) -> object: ...
@@ -970,6 +982,52 @@ class KnowledgeRepository:
                 ensure_uuid(document_id),
             )
 
+    async def _cancel_document_jobs(
+        self,
+        conn: asyncpg.Connection,
+        document_id: str,
+    ) -> None:
+        await conn.execute(
+            """
+            UPDATE execution_queue
+            SET status = 'cancelled',
+                error = COALESCE(
+                    error,
+                    'Cancelled because source knowledge document was deleted'
+                ),
+                updated_at = NOW()
+            WHERE task_type = ANY($1::text[])
+              AND COALESCE(status, '') <> ALL($2::text[])
+              AND payload::jsonb ->> 'document_id' = $3
+            """,
+            list(CANCELLABLE_KNOWLEDGE_JOB_TYPES),
+            list(TERMINAL_QUEUE_STATUSES),
+            document_id,
+        )
+
+    async def _cancel_project_knowledge_jobs(
+        self,
+        conn: asyncpg.Connection,
+        project_id: str,
+    ) -> None:
+        await conn.execute(
+            """
+            UPDATE execution_queue
+            SET status = 'cancelled',
+                error = COALESCE(
+                    error,
+                    'Cancelled because project knowledge base was cleared'
+                ),
+                updated_at = NOW()
+            WHERE task_type = ANY($1::text[])
+              AND COALESCE(status, '') <> ALL($2::text[])
+              AND payload::jsonb ->> 'project_id' = $3
+            """,
+            list(CANCELLABLE_KNOWLEDGE_JOB_TYPES),
+            list(TERMINAL_QUEUE_STATUSES),
+            project_id,
+        )
+
     async def delete_document_chunks(self, document_id: str) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -981,6 +1039,7 @@ class KnowledgeRepository:
         logger.info("Deleting knowledge document", extra={"document_id": document_id})
 
         async with self.pool.acquire() as conn:
+            await self._cancel_document_jobs(conn, document_id)
             await conn.execute(
                 "DELETE FROM knowledge_base WHERE document_id = $1",
                 ensure_uuid(document_id),
@@ -997,6 +1056,7 @@ class KnowledgeRepository:
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                await self._cancel_project_knowledge_jobs(conn, project_id)
                 await conn.execute(
                     "DELETE FROM knowledge_base WHERE project_id = $1",
                     ensure_uuid(project_id),

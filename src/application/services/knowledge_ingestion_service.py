@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass
 
+import asyncpg
+
 from src.application.errors import EmbeddingProviderError, ValidationError
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
@@ -137,6 +139,19 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", exc.detail)
             raise
+        except asyncpg.ForeignKeyViolationError as exc:
+            logger.warning(
+                "Knowledge document disappeared before plain chunks were persisted",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "context": context,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise ValidationError(
+                "Knowledge document was deleted before chunk persistence completed"
+            ) from exc
         except Exception as exc:
             logger.exception(
                 "Knowledge plain chunk persistence failed",
@@ -285,6 +300,19 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", exc.detail)
             raise
+        except asyncpg.ForeignKeyViolationError as exc:
+            logger.warning(
+                "Knowledge document disappeared during structured indexing",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "mode": mode,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise ValidationError(
+                "Knowledge document was deleted before structured indexing completed"
+            ) from exc
         except Exception as exc:
             logger.warning(
                 "Knowledge preprocessing failed; original chunks remain usable",
