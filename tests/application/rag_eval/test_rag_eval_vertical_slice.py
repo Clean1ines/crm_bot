@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+import json
+
 import pytest
 
 from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
@@ -175,3 +177,56 @@ async def test_runner_combines_retrieval_metrics_and_llm_judge() -> None:
     assert unknown_result.answer_supported is False
     assert unknown_result.hallucination_risk == "high"
     assert unknown_result.score < 0.5
+
+
+@pytest.mark.asyncio
+async def test_llm_dataset_generator_falls_back_when_question_json_is_malformed() -> (
+    None
+):
+    class BrokenJsonLlm:
+        async def complete_json(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            schema_name: str,
+        ) -> Mapping[str, object]:
+            raise json.JSONDecodeError(
+                "Expecting ',' delimiter",
+                '{"questions":[{"question":"broken"}',
+                31,
+            )
+
+    generator = LlmRagEvalDatasetGenerator(llm=BrokenJsonLlm())
+
+    dataset = await generator.generate_dataset(
+        project_id="00000000-0000-0000-0000-000000000001",
+        document_id="00000000-0000-0000-0000-000000000002",
+        chunks=[
+            RagEvalChunk(
+                id="chunk_1",
+                content=(
+                    "Ассистент должен передать диалог менеджеру, "
+                    "если вопрос связан с оплатой, возвратом или договором."
+                ),
+                metadata={
+                    "title": "Передача менеджеру",
+                    "source_excerpt": (
+                        "Вопросы про оплату, возврат или договор нужно передать менеджеру."
+                    ),
+                },
+            )
+        ],
+    )
+
+    assert dataset.status == "ready"
+    assert dataset.total_questions == 1
+    question = dataset.questions[0]
+    assert question.question_type == "direct"
+    assert question.expected_chunk_ids == ["chunk_1"]
+    assert question.should_answer is True
+    assert "Передача менеджеру" in question.question
+    assert "оплату, возврат или договор" in question.expected_answer_summary
+    assert question.metadata["variant_style"] == (
+        "deterministic_fallback_after_invalid_llm_json"
+    )
