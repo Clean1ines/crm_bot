@@ -130,19 +130,49 @@ def _raw_chunks_for_structured_persistence(
 
     LLM preprocessing may add normalized FAQ/price/instruction entries, but it
     must never be the only persisted representation of the uploaded document.
+
+    Important: source chunks may already be enriched by the deterministic
+    chunker. Do not collapse them back to legacy ``entry_type="chunk"`` rows,
+    otherwise markdown titles, source excerpts, tags and embedding_text are
+    lost in FAQ/structured preprocessing modes.
     """
     raw_chunks: list[JsonObject] = []
+    metadata_fields = (
+        "entry_type",
+        "title",
+        "source_excerpt",
+        "questions",
+        "synonyms",
+        "tags",
+        "embedding_text",
+    )
+
     for chunk in chunks:
         content = _chunk_content(chunk)
         if not content:
             continue
-        raw_chunks.append(
-            {
-                "content": content,
-                "entry_type": "chunk",
-                "embedding_text": content,
-            }
-        )
+
+        preserved: JsonObject = {"content": content}
+        for field in metadata_fields:
+            if field not in chunk:
+                continue
+
+            value = chunk[field]
+            if field in {"questions", "synonyms", "tags"}:
+                preserved[field] = value
+                continue
+
+            if _present_plain_chunk_value(value):
+                preserved[field] = value
+
+        if not _present_plain_chunk_value(preserved.get("entry_type")):
+            preserved["entry_type"] = "chunk"
+
+        if not _present_plain_chunk_value(preserved.get("embedding_text")):
+            preserved["embedding_text"] = content
+
+        raw_chunks.append(preserved)
+
     return raw_chunks
 
 

@@ -217,3 +217,67 @@ async def test_process_document_records_preprocessing_usage():
     assert recorded_event.provider == "groq"
     assert recorded_event.model == "llama-test"
     assert recorded_event.tokens_total == 180
+
+
+def test_raw_chunks_for_structured_persistence_preserves_enriched_metadata():
+    from src.application.services.knowledge_ingestion_service import (
+        _raw_chunks_for_structured_persistence,
+    )
+
+    raw = _raw_chunks_for_structured_persistence(
+        [
+            {
+                "content": "## 10. Передача менеджеру\n\nАссистент передаёт диалог менеджеру при вопросах про оплату.",
+                "entry_type": "plain_enriched",
+                "title": "10. Передача менеджеру",
+                "source_excerpt": "Ассистент передаёт диалог менеджеру при вопросах про оплату.",
+                "questions": [],
+                "synonyms": [],
+                "tags": ["передача", "менеджеру"],
+                "embedding_text": (
+                    "Title: 10. Передача менеджеру\n"
+                    "Source excerpt: Ассистент передаёт диалог менеджеру при вопросах про оплату.\n"
+                    "Content: ## 10. Передача менеджеру"
+                ),
+            }
+        ]
+    )
+
+    assert raw == [
+        {
+            "content": "## 10. Передача менеджеру\n\nАссистент передаёт диалог менеджеру при вопросах про оплату.",
+            "entry_type": "plain_enriched",
+            "title": "10. Передача менеджеру",
+            "source_excerpt": "Ассистент передаёт диалог менеджеру при вопросах про оплату.",
+            "questions": [],
+            "synonyms": [],
+            "tags": ["передача", "менеджеру"],
+            "embedding_text": (
+                "Title: 10. Передача менеджеру\n"
+                "Source excerpt: Ассистент передаёт диалог менеджеру при вопросах про оплату.\n"
+                "Content: ## 10. Передача менеджеру"
+            ),
+        }
+    ]
+
+
+def test_raw_chunks_for_structured_persistence_defaults_legacy_chunks_safely():
+    from src.application.services.knowledge_ingestion_service import (
+        _raw_chunks_for_structured_persistence,
+    )
+
+    raw = _raw_chunks_for_structured_persistence(
+        [
+            {
+                "content": "Обычный текстовый chunk без metadata.",
+            }
+        ]
+    )
+
+    assert raw == [
+        {
+            "content": "Обычный текстовый chunk без metadata.",
+            "entry_type": "chunk",
+            "embedding_text": "Обычный текстовый chunk без metadata.",
+        }
+    ]

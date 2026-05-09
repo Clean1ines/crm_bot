@@ -96,16 +96,12 @@ class LlmRagEvalDatasetGenerator:
                     batch_index - 1,
                 )
 
-            response = await self._llm.complete_json(
-                system_prompt=self._system_prompt(),
-                user_prompt=self._user_prompt(
-                    project_id=project_id,
-                    document_id=document_id,
-                    chunks=batch,
-                    batch_index=batch_index,
-                    total_batches=total_batches,
-                ),
-                schema_name="rag_eval_questions_v2",
+            response = await self._complete_questions_json(
+                project_id=project_id,
+                document_id=document_id,
+                batch=batch,
+                batch_index=batch_index,
+                total_batches=total_batches,
             )
 
             raw_questions = response.get("questions")
@@ -160,6 +156,87 @@ class LlmRagEvalDatasetGenerator:
             )
 
         return dataset
+
+    async def _complete_questions_json(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batch: list[RagEvalChunk],
+        batch_index: int,
+        total_batches: int,
+    ) -> Mapping[str, object]:
+        try:
+            return await self._llm.complete_json(
+                system_prompt=self._system_prompt(),
+                user_prompt=self._user_prompt(
+                    project_id=project_id,
+                    document_id=document_id,
+                    chunks=batch,
+                    batch_index=batch_index,
+                    total_batches=total_batches,
+                ),
+                schema_name="rag_eval_questions_v2",
+            )
+        except ValueError as exc:
+            # Production LLMs can return truncated or malformed JSON.
+            # A single bad batch must not kill the whole full-document eval.
+            return {
+                "questions": [
+                    self._fallback_question_payload(chunk, error=exc)
+                    for chunk in batch
+                    if chunk.id
+                ],
+                "_fallback_reason": self._safe_error_text(exc),
+            }
+
+    def _fallback_question_payload(
+        self,
+        chunk: RagEvalChunk,
+        *,
+        error: ValueError,
+    ) -> dict[str, object]:
+        expected_answer_summary = self._fallback_expected_answer_summary(chunk)
+        source_chunk_ids = [chunk.id] if chunk.id else []
+        return {
+            "question": self._fallback_question_text(chunk),
+            "question_type": "direct",
+            "expected_chunk_ids": source_chunk_ids,
+            "expected_answer_summary": expected_answer_summary,
+            "should_answer": bool(source_chunk_ids),
+            "should_escalate": False,
+            "difficulty": 2,
+            "severity": "medium",
+            "metadata": {
+                "fact_id": self._fallback_fact_id(expected_answer_summary or chunk.id),
+                "fact_summary": expected_answer_summary,
+                "variant_style": "deterministic_fallback_after_invalid_llm_json",
+                "source_chunk_ids": source_chunk_ids,
+                "fallback_reason": self._safe_error_text(error),
+            },
+        }
+
+    def _fallback_question_text(self, chunk: RagEvalChunk) -> str:
+        title = str(chunk.metadata.get("title") or "").strip()
+        if title:
+            return f"Что сказано в разделе «{title}»?"
+
+        preview = " ".join(chunk.content.split())[:90].rstrip(" .,:;")
+        if preview:
+            return f"Что говорится в фрагменте: {preview}?"
+
+        return "Какую информацию содержит этот раздел базы знаний?"
+
+    def _fallback_expected_answer_summary(self, chunk: RagEvalChunk) -> str:
+        source_excerpt = str(chunk.metadata.get("source_excerpt") or "").strip()
+        source_text = source_excerpt or chunk.content
+        return self._clip(source_text)
+
+    def _safe_error_text(self, exc: BaseException, *, max_chars: int = 500) -> str:
+        text = str(exc).strip()
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars].rstrip() + "..."
 
     def _system_prompt(self) -> str:
         question_types = ",".join(sorted(ALLOWED_QUESTION_TYPES))
