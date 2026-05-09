@@ -24,12 +24,19 @@ async def test_markdown_file_is_supported():
     chunker = ChunkerService(chunk_size=800, overlap=100)
 
     chunks = await chunker.process_file(
-        b"# Test\\n\\nMarkdown knowledge text about Telegram bot.",
+        b"# Test\n\nMarkdown knowledge text about Telegram bot.",
         "knowledge_fixture.md",
     )
 
     assert chunks
-    assert "Markdown knowledge text" in chunks[0]
+    first = chunks[0]
+    assert isinstance(first, dict)
+    assert first["entry_type"] == "plain_enriched"
+    assert first["title"] == "Test"
+    assert "Markdown knowledge text" in str(first["content"])
+    assert "Markdown knowledge text" in str(first["source_excerpt"])
+    assert "Title: Test" in str(first["embedding_text"])
+    assert str(first["embedding_text"]) != str(first["content"])
 
 
 async def test_json_intent_knowledge_file_is_supported():
@@ -57,3 +64,41 @@ async def test_json_intent_knowledge_file_is_supported():
     assert "value_proposition" in chunks[0]
     assert "Чтобы не терять клиентов" in chunks[0]
     assert "чем это полезно" in chunks[0]
+
+
+async def test_markdown_file_returns_enriched_chunks_for_sections():
+    chunker = ChunkerService(chunk_size=260, overlap=40)
+
+    chunks = await chunker.process_file(
+        (
+            "# База знаний\n\n"
+            "## 1. Оплата\n\n"
+            "Клиент может спросить о способах оплаты и сроках оплаты.\n\n"
+            "## 2. Возврат\n\n"
+            "Если клиент спрашивает про возврат, ассистент передает диалог менеджеру."
+        ).encode("utf-8"),
+        "knowledge_fixture.md",
+    )
+
+    assert chunks
+    assert all(isinstance(chunk, dict) for chunk in chunks)
+    assert all(
+        chunk["entry_type"] == "plain_enriched"
+        for chunk in chunks
+        if isinstance(chunk, dict)
+    )
+    assert any(
+        "Оплата" in str(chunk.get("title", ""))
+        for chunk in chunks
+        if isinstance(chunk, dict)
+    )
+    assert any(
+        "Возврат" in str(chunk.get("title", ""))
+        for chunk in chunks
+        if isinstance(chunk, dict)
+    )
+    assert all(
+        str(chunk.get("embedding_text", "")) != str(chunk.get("content", ""))
+        for chunk in chunks
+        if isinstance(chunk, dict)
+    )
