@@ -202,10 +202,13 @@ class ProjectCommandService:
         await self.access_service.require_project_role(
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
-        if role not in ALLOWED_PROJECT_ROLES:
+        normalized_role = str(role).strip().lower()
+        if normalized_role not in ALLOWED_PROJECT_ROLES:
             raise ValidationError("Invalid project role")
-        await self.repo.add_project_member(project_id, user_id, role)
-        return ProjectMutationResultDto.create(status="ok", user_id=user_id, role=role)
+        await self.repo.add_project_member(project_id, user_id, normalized_role)
+        return ProjectMutationResultDto.create(
+            status="ok", user_id=user_id, role=normalized_role
+        )
 
     async def delete_project_member(
         self, project_id: str, current_user_id: str, member_user_id: str

@@ -11,7 +11,7 @@ import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
 
-const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
+const ROLE_OPTIONS = ['manager', 'admin'] as const;
 
 export const ManagersPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -22,6 +22,11 @@ export const ManagersPage: React.FC = () => {
   const [selectedManager, setSelectedManager] = useState<ProjectMember | null>(null);
   const [newMemberUserId, setNewMemberUserId] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<(typeof ROLE_OPTIONS)[number]>('manager');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
+  const [inviteRole, setInviteRole] = useState<(typeof ROLE_OPTIONS)[number]>('manager');
+  const [lastInviteLink, setLastInviteLink] = useState('');
 
   const { data: managers = [], isLoading, isError, error } = useProjectManagers(projectId);
   const safeManagers = Array.isArray(managers) ? managers : [];
@@ -64,6 +69,52 @@ export const ManagersPage: React.FC = () => {
       setNewMemberUserId('');
       setNewMemberRole('manager');
       toast.success(newMemberRole === 'manager' ? 'Менеджер добавлен' : 'Участник проекта сохранён');
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error));
+    },
+  });
+
+  const inviteMemberMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId) {
+        throw new Error('Project is not selected');
+      }
+
+      const normalizedEmail = inviteEmail.trim();
+      if (!normalizedEmail) {
+        throw new Error('Укажите email менеджера');
+      }
+
+      const result = await membersApi.createInvitation(projectId, {
+        email: normalizedEmail,
+        first_name: inviteFirstName.trim() || undefined,
+        last_name: inviteLastName.trim() || undefined,
+        role: inviteRole,
+      });
+
+      if (result.error) {
+        throw new Error(getErrorMessage(result.error));
+      }
+
+      if (!result.data) {
+        throw new Error('Не удалось создать приглашение');
+      }
+
+      return result.data;
+    },
+    onSuccess: async (result) => {
+      await invalidateMembers();
+      setInviteEmail('');
+      setInviteFirstName('');
+      setInviteLastName('');
+      setInviteRole('manager');
+      setLastInviteLink(result.invite_link ?? '');
+      toast.success(
+        result.invite_link
+          ? 'Приглашение создано. Ссылка доступна ниже.'
+          : 'Приглашение отправлено на email.',
+      );
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
@@ -170,6 +221,65 @@ export const ManagersPage: React.FC = () => {
             Добавить
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-2xl bg-[var(--surface-card)] p-4 shadow-sm sm:p-5">
+        <div className="mb-4">
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">Пригласить менеджера по email</h2>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
+            Создаёт ссылку приглашения и отправляет письмо, если SMTP включён. Добавление по Telegram chat_id остаётся выше.
+          </p>
+        </div>
+        <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap">
+          <input
+            type="email"
+            placeholder="manager@example.com"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
+          />
+          <input
+            type="text"
+            placeholder="Имя"
+            value={inviteFirstName}
+            onChange={(e) => setInviteFirstName(e.target.value)}
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-40"
+          />
+          <input
+            type="text"
+            placeholder="Фамилия"
+            value={inviteLastName}
+            onChange={(e) => setInviteLastName(e.target.value)}
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-40"
+          />
+          <select
+            value={inviteRole}
+            onChange={(e) => setInviteRole(e.target.value as (typeof ROLE_OPTIONS)[number])}
+            className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-auto"
+          >
+            {ROLE_OPTIONS.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="primary"
+            className="flex w-full items-center gap-2 lg:w-auto"
+            onClick={() => inviteMemberMutation.mutate()}
+            disabled={inviteMemberMutation.isPending}
+          >
+            <Shield className="h-4 w-4" />
+            Пригласить
+          </Button>
+        </div>
+        {lastInviteLink ? (
+          <input
+            readOnly
+            value={lastInviteLink}
+            className="mt-3 min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-xs text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
+          />
+        ) : null}
       </div>
 
       <div className="overflow-hidden rounded-2xl bg-[var(--surface-card)] shadow-sm">

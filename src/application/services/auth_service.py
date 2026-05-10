@@ -23,6 +23,8 @@ from src.application.ports.google_identity_port import (
     GoogleIdentityVerifier,
 )
 from src.application.ports.user_port import UserRepositoryPort
+from src.application.ports.email_port import EmailSenderPort
+from src.infrastructure.logging.logger import get_logger
 from src.domain.identity.auth_providers import (
     ALLOWED_AUTH_PROVIDERS,
     AUTH_DELIVERY_MANUAL_LINK,
@@ -33,9 +35,13 @@ from src.domain.identity.auth_providers import (
     AUTH_STATUS_VERIFICATION_REQUESTED,
     EMAIL_VERIFICATION_QUERY_KEY,
     PASSWORD_RESET_QUERY_KEY,
+    AUTH_DELIVERY_EMAIL,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.identity.user_views import AuthMethodsView, UserProfileView
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +66,12 @@ class AuthService:
         *,
         config: AuthConfig,
         google_verifier: GoogleIdentityVerifier | None = None,
+        email_sender: EmailSenderPort | None = None,
     ) -> None:
         self.user_repo = user_repo
         self.config = config
         self.google_verifier = google_verifier
+        self.email_sender = email_sender
 
     def issue_access_token(self, user_id: str, username: str | None = None) -> str:
         now = datetime.now(timezone.utc)
@@ -186,6 +194,44 @@ class AuthService:
         )
         return await self.get_auth_methods(current_user_id)
 
+    async def _send_auth_action_email(
+        self,
+        *,
+        to_email: str,
+        subject: str,
+        url: str | None,
+        action_label: str,
+    ) -> str:
+        if not url:
+            return AUTH_DELIVERY_MANUAL_LINK
+
+        if self.email_sender is None or not self.email_sender.enabled:
+            return AUTH_DELIVERY_MANUAL_LINK
+
+        try:
+            await self.email_sender.send_email(
+                to_email=to_email,
+                subject=subject,
+                text=(
+                    f"{action_label}\n\n"
+                    f"Open this link to continue:\n{url}\n\n"
+                    "If you did not request this action, ignore this email."
+                ),
+                html=(
+                    f"<p>{action_label}</p>"
+                    f'<p><a href="{url}">Open link</a></p>'
+                    "<p>If you did not request this action, ignore this email.</p>"
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Auth email delivery failed; falling back to manual link",
+                extra={"to_email": to_email, "error_type": type(exc).__name__},
+            )
+            return AUTH_DELIVERY_MANUAL_LINK
+
+        return AUTH_DELIVERY_EMAIL
+
     async def request_email_verification(self, current_user_id: str) -> AuthActionDto:
         user = await self._load_user_profile_view(current_user_id)
         if not user or not user.email:
@@ -206,12 +252,19 @@ class AuthService:
             ),
         )
         token = str(token_data["token"])
+        url = self.build_frontend_auth_url(EMAIL_VERIFICATION_QUERY_KEY, token)
+        delivery = await self._send_auth_action_email(
+            to_email=user.email,
+            subject="Confirm your email",
+            url=url,
+            action_label="Confirm your email address",
+        )
         return AuthActionDto.create(
             status=AUTH_STATUS_VERIFICATION_REQUESTED,
-            delivery=AUTH_DELIVERY_MANUAL_LINK,
+            delivery=delivery,
             expires_at=str(token_data["expires_at"]),
-            token=token,
-            url=self.build_frontend_auth_url(EMAIL_VERIFICATION_QUERY_KEY, token),
+            token=token if delivery == AUTH_DELIVERY_MANUAL_LINK else None,
+            url=url if delivery == AUTH_DELIVERY_MANUAL_LINK else None,
         )
 
     async def confirm_email_verification(self, token: str) -> AuthMethodsDto:
@@ -397,12 +450,19 @@ class AuthService:
             JsonObject, await self.user_repo.create_password_reset_token(user.id)
         )
         token = str(token_data["token"])
+        url = self.build_frontend_auth_url(PASSWORD_RESET_QUERY_KEY, token)
+        delivery = await self._send_auth_action_email(
+            to_email=normalized_email,
+            subject="Reset your password",
+            url=url,
+            action_label="Reset your password",
+        )
         return AuthActionDto.create(
             status=response.status,
-            delivery=response.delivery,
+            delivery=delivery,
             expires_at=str(token_data["expires_at"]),
-            token=token,
-            url=self.build_frontend_auth_url(PASSWORD_RESET_QUERY_KEY, token),
+            token=token if delivery == AUTH_DELIVERY_MANUAL_LINK else None,
+            url=url if delivery == AUTH_DELIVERY_MANUAL_LINK else None,
         )
 
     async def confirm_password_reset(

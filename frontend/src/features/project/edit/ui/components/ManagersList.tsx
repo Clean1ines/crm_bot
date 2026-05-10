@@ -9,13 +9,18 @@ import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
 
-const ROLE_OPTIONS = ['manager', 'admin', 'owner'] as const;
+const ROLE_OPTIONS = ['manager', 'admin'] as const;
 
 export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => {
   const queryClient = useQueryClient();
   const { showNotification } = useNotification();
   const [newMemberUserId, setNewMemberUserId] = useState('');
   const [newMemberRole, setNewMemberRole] = useState<(typeof ROLE_OPTIONS)[number]>('manager');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
+  const [inviteRole, setInviteRole] = useState<(typeof ROLE_OPTIONS)[number]>('manager');
+  const [lastInviteLink, setLastInviteLink] = useState('');
 
   const { data: managers = [], isLoading } = useProjectManagers(projectId);
 
@@ -53,6 +58,47 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
       setNewMemberUserId('');
       setNewMemberRole('manager');
       showNotification(newMemberRole === 'manager' ? 'Менеджер добавлен' : 'Участник проекта сохранён', 'success');
+    },
+    onError: (error) => showNotification(getErrorMessage(error), 'error'),
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: async () => {
+      const normalizedEmail = inviteEmail.trim();
+      if (!normalizedEmail) {
+        throw new Error('Введите email менеджера');
+      }
+
+      const result = await membersApi.createInvitation(projectId, {
+        email: normalizedEmail,
+        first_name: inviteFirstName.trim() || undefined,
+        last_name: inviteLastName.trim() || undefined,
+        role: inviteRole,
+      });
+
+      if (result.error) {
+        throw new Error(getErrorMessage(result.error));
+      }
+
+      if (!result.data) {
+        throw new Error('Не удалось создать приглашение');
+      }
+
+      return result.data;
+    },
+    onSuccess: async (result) => {
+      await invalidateManagers();
+      setInviteEmail('');
+      setInviteFirstName('');
+      setInviteLastName('');
+      setInviteRole('manager');
+      setLastInviteLink(result.invite_link ?? '');
+      showNotification(
+        result.invite_link
+          ? 'Приглашение создано. Ссылка доступна ниже.'
+          : 'Приглашение отправлено на email.',
+        'success',
+      );
     },
     onError: (error) => showNotification(getErrorMessage(error), 'error'),
   });
@@ -119,6 +165,62 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
         >
           Добавить
         </Button>
+      </div>
+      <div className="rounded-2xl bg-[var(--surface-secondary)] p-4">
+        <div className="mb-3">
+          <h4 className="text-sm font-semibold text-[var(--text-primary)]">Email-приглашение</h4>
+          <p className="text-xs text-[var(--text-muted)]">
+            Создаёт ссылку приглашения и отправляет письмо, если SMTP включён. Добавление по Telegram chat_id остаётся выше.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="manager@example.com"
+            className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          />
+          <input
+            type="text"
+            value={inviteFirstName}
+            onChange={(e) => setInviteFirstName(e.target.value)}
+            placeholder="Имя"
+            className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          />
+          <input
+            type="text"
+            value={inviteLastName}
+            onChange={(e) => setInviteLastName(e.target.value)}
+            placeholder="Фамилия"
+            className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          />
+          <select
+            value={inviteRole}
+            onChange={(e) => setInviteRole(e.target.value as (typeof ROLE_OPTIONS)[number])}
+            className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          >
+            {ROLE_OPTIONS.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="primary"
+            onClick={() => inviteMutation.mutate()}
+            disabled={inviteMutation.isPending}
+          >
+            Пригласить по email
+          </Button>
+        </div>
+        {lastInviteLink ? (
+          <input
+            readOnly
+            value={lastInviteLink}
+            className="mt-3 min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-xs text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
+          />
+        ) : null}
       </div>
     </div>
   );

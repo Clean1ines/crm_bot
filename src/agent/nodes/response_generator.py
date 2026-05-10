@@ -17,7 +17,7 @@ from src.domain.runtime.response_generation import (
 )
 from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 from src.infrastructure.config.settings import settings
-from src.infrastructure.llm.groq_keyring import current_groq_api_key
+from src.infrastructure.llm.groq_keyring import ainvoke_chat_with_rotation
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -223,13 +223,6 @@ def create_response_generator_node(
     """
 
     base_model = model_name or settings.GROQ_MODEL
-    if llm is None:
-        llm = _chat_groq_class()(
-            model=base_model,
-            temperature=0.3,
-            max_tokens=500,
-            api_key=current_groq_api_key(),
-        )
 
     async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
         context = ResponseGenerationContext.from_state(cast(RuntimeStateInput, state))
@@ -267,16 +260,25 @@ def create_response_generator_node(
 
         try:
             selected_model = _resolve_response_model_name(state, base_model)
-            llm_for_request = llm
-            if selected_model != base_model:
-                llm_for_request = _chat_groq_class()(
-                    model=selected_model,
-                    temperature=0.3,
-                    max_tokens=500,
-                    api_key=current_groq_api_key(),
-                )
+            messages = [("human", prompt)]
 
-            response = await llm_for_request.ainvoke([("human", prompt)])
+            if llm is not None and selected_model == base_model:
+                response = await llm.ainvoke(messages)
+            else:
+
+                def _make_client(*, api_key: str) -> ChatGroqClient:
+                    return _chat_groq_class()(
+                        model=selected_model,
+                        temperature=0.3,
+                        max_tokens=500,
+                        api_key=api_key,
+                    )
+
+                response = await ainvoke_chat_with_rotation(
+                    make_client=_make_client,
+                    messages=messages,
+                    operation_name="response_generator.ainvoke",
+                )
             response_text = (response.content or "").strip()
 
             metadata: dict[str, object] = {}

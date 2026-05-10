@@ -5,6 +5,31 @@ export type ProjectMemberUpsertRequest = {
   role: string;
 };
 
+export type ProjectInvitationCreateRequest = {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  role: 'admin' | 'manager';
+};
+
+export type ProjectInvitationResponse = {
+  status: string;
+  project_id: string;
+  email: string;
+  role: string;
+  expires_at: string;
+  delivery: string;
+  invite_link?: string | null;
+};
+
+export type ProjectInvitationAcceptResponse = {
+  status: string;
+  project_id: string;
+  user_id: string;
+  email: string;
+  role: string;
+};
+
 export const membersApi = {
   list: (projectId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/members`, {
@@ -19,6 +44,24 @@ export const membersApi = {
 
   remove: (projectId: string, memberUserId: string) =>
     authedDeleteRequest(`/api/projects/${projectId}/members/${memberUserId}`),
+
+  createInvitation: (projectId: string, body: ProjectInvitationCreateRequest) =>
+    authedJsonRequest<ProjectInvitationResponse, ProjectInvitationCreateRequest>(
+      `/api/projects/${projectId}/members/invitations`,
+      {
+        method: 'POST',
+        body,
+      },
+    ),
+
+  acceptInvitation: (token: string) =>
+    authedJsonRequest<ProjectInvitationAcceptResponse, { token: string }>(
+      '/api/projects/invitations/accept',
+      {
+        method: 'POST',
+        body: { token },
+      },
+    ),
 
   getReplyHistory: (
     projectId: string,

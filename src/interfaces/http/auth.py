@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.domain.display_names import join_name_parts
 from src.infrastructure.config.settings import settings
+from src.infrastructure.email.sender import build_email_sender
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.interfaces.http.dependencies import get_user_repository, get_current_user_id
@@ -30,6 +31,7 @@ def build_auth_service(user_repo: UserRepository) -> AuthService:
         google_verifier=HttpGoogleIdentityVerifier(
             google_client_id=settings.GOOGLE_CLIENT_ID
         ),
+        email_sender=build_email_sender(settings),
     )
 
 
