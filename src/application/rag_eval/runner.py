@@ -107,6 +107,44 @@ class RagEvalRunner:
             judge_json=judge.to_json(),
         )
 
+    def failed_result(
+        self,
+        *,
+        run_id: str,
+        question: RagEvalQuestion,
+        error: BaseException,
+        stage: str = "question_execution",
+    ) -> RagEvalResult:
+        error_type = type(error).__name__
+        error_message = str(error).strip()[:700]
+        notes = f"{stage} failed with {error_type}: {error_message}"
+
+        return RagEvalResult(
+            id=new_eval_id("result"),
+            run_id=run_id,
+            question_id=question.id,
+            question=question,
+            retrieved_chunks=[],
+            answer_text="",
+            top1_hit=False,
+            top3_hit=False,
+            top5_hit=False,
+            expected_chunk_found=False,
+            wrong_chunk_top1=bool(question.expected_chunk_ids),
+            answer_supported=False,
+            hallucination_risk="high",
+            should_answer_passed=not question.should_answer,
+            score=0.0,
+            notes=notes[:1000],
+            latency_ms=0,
+            judge_json={
+                "error": error_message,
+                "error_type": error_type,
+                "stage": stage,
+                "recovered": True,
+            },
+        )
+
     def _deterministic_score(
         self,
         *,

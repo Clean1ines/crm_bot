@@ -81,11 +81,20 @@ class RagEvalService:
                 if control_callback is not None:
                     await control_callback()
 
-                result = await self._runner.run_question(
-                    run_id=run.id,
-                    project_id=project_id,
-                    question=question,
-                )
+                try:
+                    result = await self._runner.run_question(
+                        run_id=run.id,
+                        project_id=project_id,
+                        question=question,
+                    )
+                except Exception as exc:
+                    result = self._runner.failed_result(
+                        run_id=run.id,
+                        question=question,
+                        error=exc,
+                        stage="rag_eval_question",
+                    )
+
                 run.results.append(result)
 
                 if self._store is not None:
