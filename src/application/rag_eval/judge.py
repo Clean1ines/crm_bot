@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from typing import Literal, TypeAlias, cast
 
@@ -61,20 +62,32 @@ Do not include hidden chain-of-thought.
         retrieved_chunks: list[RagEvalChunk],
         answer_text: str,
     ) -> str:
+        question_json = json.dumps(
+            question.to_json(),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        evidence_json = json.dumps(
+            [chunk.to_json() for chunk in retrieved_chunks[:8]],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        answer_json = json.dumps(answer_text, ensure_ascii=False)
+
         return f"""
-Question object:
-{question.to_json()}
+Question JSON:
+{question_json}
 
-Retrieved evidence:
-{[chunk.to_json() for chunk in retrieved_chunks[:8]]}
+Retrieved evidence JSON:
+{evidence_json}
 
-Final answer:
-{answer_text}
+Final answer JSON string:
+{answer_json}
 
-Strict JSON shape:
+Return one strict JSON object with exactly these fields:
 {{
   "answer_supported": true,
-  "hallucination_risk": "low | medium | high",
+  "hallucination_risk": "low",
   "missing_important_info": false,
   "client_friendly": true,
   "should_answer_passed": true,

@@ -219,13 +219,13 @@ class LlmRagEvalDatasetGenerator:
     def _fallback_question_text(self, chunk: RagEvalChunk) -> str:
         title = str(chunk.metadata.get("title") or "").strip()
         if title:
-            return f"Что сказано в разделе «{title}»?"
+            return f"Какой практический факт нужно знать по теме «{title}»?"
 
         preview = " ".join(chunk.content.split())[:90].rstrip(" .,:;")
         if preview:
-            return f"Что говорится в фрагменте: {preview}?"
+            return "Какой практический вывод следует из этой информации?"
 
-        return "Какую информацию содержит этот раздел базы знаний?"
+        return "Какой практический факт содержит эта база знаний?"
 
     def _fallback_expected_answer_summary(self, chunk: RagEvalChunk) -> str:
         source_excerpt = str(chunk.metadata.get("source_excerpt") or "").strip()
@@ -320,7 +320,9 @@ class LlmRagEvalDatasetGenerator:
             "- Same fact => same metadata.fact_id and metadata.fact_summary.",
             "- Answerable => should_answer=true and expected_chunk_ids uses only input ids.",
             "- Unsupported adjacent trap => should_answer=false and expected_chunk_ids=[].",
-            "- expected_answer_summary = compact expected answer/no-answer behavior.",
+            "- expected_answer_summary = compact user-facing business/product fact, not document-structure prose.",
+            "- Do not generate questions about section numbers, headings, markdown structure, or whether the document contains a section.",
+            "- Reject meta-document facts like 'Document contains a section titled ...' as eval targets.",
             "- Do not invent ids. No reasoning.",
             f"chunks={chunks_json}",
         ]
@@ -429,6 +431,17 @@ class LlmRagEvalDatasetGenerator:
         if not str(metadata.get("variant_style") or "").strip():
             metadata["variant_style"] = question_type
 
+        expected_answer_summary = str(
+            payload.get("expected_answer_summary") or ""
+        ).strip()[:1200]
+
+        if self._is_low_quality_question(
+            question=question,
+            expected_answer_summary=expected_answer_summary,
+            metadata=metadata,
+        ):
+            return None
+
         return RagEvalQuestion(
             id=new_eval_id("question"),
             dataset_id=dataset_id,
@@ -437,15 +450,77 @@ class LlmRagEvalDatasetGenerator:
             question=question[:1000],
             question_type=cast(RagEvalQuestionType, question_type),
             expected_chunk_ids=expected_chunk_ids,
-            expected_answer_summary=str(
-                payload.get("expected_answer_summary") or ""
-            ).strip()[:1200],
+            expected_answer_summary=expected_answer_summary,
             should_answer=bool(should_answer),
             should_escalate=bool(payload.get("should_escalate")),
             difficulty=self._difficulty(payload.get("difficulty")),
             severity=cast(RagEvalSeverity, severity),
             metadata=metadata,
         )
+
+    def _is_low_quality_question(
+        self,
+        *,
+        question: str,
+        expected_answer_summary: str,
+        metadata: Mapping[str, object],
+    ) -> bool:
+        """Reject eval items that test document scaffolding instead of KB facts."""
+
+        normalized_question = self._normalized_for_quality(question)
+        normalized_summary = self._normalized_for_quality(expected_answer_summary)
+        normalized_fact_summary = self._normalized_for_quality(
+            str(metadata.get("fact_summary") or "")
+        )
+
+        combined_summary = f"{normalized_summary} {normalized_fact_summary}".strip()
+
+        if not normalized_question:
+            return True
+
+        meta_summary_markers = (
+            "document contains a section",
+            "section titled",
+            "contains section titled",
+            "документ содержит раздел",
+            "раздел с названием",
+            "section ",
+        )
+        if any(marker in combined_summary for marker in meta_summary_markers):
+            return True
+
+        structure_question_patterns = (
+            r"\bесть\s+ли\s+в\s+документе\s+(раздел|пункт|секция)",
+            r"\bесть\s+ли\s+.*\bраздел\s+с\s+номером\b",
+            r"\bчто\s+(сказано|написано|говорится)\s+в\s+(разделе|пункте|фрагменте)\b",
+            r"\bкакую\s+информацию\s+содержит\s+.*\bраздел\s+базы\s+знаний\b",
+            r"\bраздел\s+номер\s+\d+\b",
+            r"\bsection\s+(number\s+)?\d+\b",
+            r"\bdoes\s+the\s+document\s+contain\s+a\s+section\b",
+            r"\bwhat\s+is\s+written\s+in\s+section\b",
+        )
+        if any(
+            re.search(pattern, normalized_question)
+            for pattern in structure_question_patterns
+        ):
+            return True
+
+        if (
+            "документ" in normalized_question
+            and "раздел" in normalized_question
+            and any(
+                token in normalized_question
+                for token in ("номер", "назван", "называет")
+            )
+        ):
+            return True
+
+        return False
+
+    def _normalized_for_quality(self, value: str) -> str:
+        normalized = " ".join(value.lower().strip().split())
+        normalized = normalized.replace("ё", "е")
+        return normalized
 
     def _metadata(self, value: object) -> dict[str, object]:
         if not isinstance(value, Mapping):
