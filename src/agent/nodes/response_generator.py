@@ -17,6 +17,7 @@ from src.domain.runtime.response_generation import (
 )
 from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_keyring import current_groq_api_key
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -227,7 +228,7 @@ def create_response_generator_node(
             model=base_model,
             temperature=0.3,
             max_tokens=500,
-            api_key=settings.GROQ_API_KEY,
+            api_key=current_groq_api_key(),
         )
 
     async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
@@ -272,7 +273,7 @@ def create_response_generator_node(
                     model=selected_model,
                     temperature=0.3,
                     max_tokens=500,
-                    api_key=settings.GROQ_API_KEY,
+                    api_key=current_groq_api_key(),
                 )
 
             response = await llm_for_request.ainvoke([("human", prompt)])

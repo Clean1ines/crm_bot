@@ -7,12 +7,12 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from src.domain.project_plane.json_types import JsonValue
-from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.project import ProjectRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.queue.job_types import TASK_RUN_FULL_RAG_EVAL
+from src.infrastructure.llm.groq_keyring import has_configured_groq_api_key
 from src.interfaces.http.dependencies import (
     get_current_user_id,
     get_pool,
@@ -51,10 +51,10 @@ class DocumentHealth(TypedDict):
 
 
 def _require_groq_key() -> None:
-    if not settings.GROQ_API_KEY:
+    if not has_configured_groq_api_key():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="GROQ_API_KEY is not configured",
+            detail="No Groq API keys are configured",
         )
 
 

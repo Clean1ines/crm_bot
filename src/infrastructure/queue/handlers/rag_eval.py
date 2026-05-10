@@ -19,13 +19,14 @@ from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.reporter import RagQualityReporter
 from src.application.rag_eval.runner import RagEvalRunner
 from src.application.rag_eval.service import RagEvalService
-from src.infrastructure.config.settings import settings
+from src.application.rag_eval.schemas import RagEvalRun, RagQualityReport, new_eval_id
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
 from src.infrastructure.llm.query_expander import GroqQueryExpander
 from src.infrastructure.llm.rag_contract import KnowledgeSearchRepository
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.llm.groq_keyring import has_configured_groq_api_key
 from src.infrastructure.rag_eval.adapters import (
     GroqRagEvalJsonLlmAdapter,
     RagServiceRagEvalRetriever,
@@ -309,8 +310,8 @@ async def handle_run_full_rag_eval(
     if not isinstance(payload, Mapping):
         raise PermanentJobError("run_full_rag_eval payload must be an object")
 
-    if not settings.GROQ_API_KEY:
-        raise PermanentJobError("GROQ_API_KEY is not configured")
+    if not has_configured_groq_api_key():
+        raise PermanentJobError("No Groq API keys are configured")
 
     try:
         await _run_full_document_rag_eval(
@@ -341,6 +342,92 @@ async def handle_run_full_rag_eval(
             )
             raise _transient_from_provider_error(exc) from exc
         raise PermanentJobError(str(exc)[:700]) from exc
+
+
+async def _resume_existing_rag_eval_dataset(
+    *,
+    rag_eval_repo: RagEvalRepository,
+    runner: RagEvalRunner,
+    reporter: RagQualityReporter,
+    project_id: str,
+    document_id: str,
+    generator_model: str,
+    control_callback,
+    run_progress_callback,
+) -> tuple[RagEvalRun, RagQualityReport] | None:
+    dataset = await rag_eval_repo.get_latest_ready_dataset_with_questions(
+        project_id=project_id,
+        document_id=document_id,
+    )
+    if dataset is None or not dataset.questions:
+        return None
+
+    run = await rag_eval_repo.get_latest_resumable_run(
+        project_id=project_id,
+        document_id=document_id,
+        dataset_id=dataset.id,
+    )
+
+    if run is None:
+        run = RagEvalRun(
+            id=new_eval_id("run"),
+            dataset_id=dataset.id,
+            project_id=project_id,
+            document_id=document_id,
+            status="running",
+            generator_model=generator_model,
+        )
+    else:
+        run.status = "running"
+        run.finished_at = None
+        if not run.generator_model:
+            run.generator_model = generator_model
+        run.results = await rag_eval_repo.load_run_results(run_id=run.id)
+
+    await rag_eval_repo.create_run(run=run)
+
+    completed_question_ids = {result.question_id for result in run.results}
+    total_questions = len(dataset.questions)
+
+    if run_progress_callback is not None:
+        await run_progress_callback(len(completed_question_ids), total_questions)
+
+    try:
+        for index, question in enumerate(dataset.questions, start=1):
+            if question.id in completed_question_ids:
+                continue
+
+            if control_callback is not None:
+                await control_callback()
+
+            result = await runner.run_question(
+                run_id=run.id,
+                project_id=project_id,
+                question=question,
+            )
+            run.results.append(result)
+            completed_question_ids.add(question.id)
+
+            await rag_eval_repo.save_result(result=result)
+
+            if run_progress_callback is not None:
+                await run_progress_callback(
+                    len(completed_question_ids), total_questions
+                )
+    except Exception:
+        run.status = "failed"
+        run.finished_at = datetime.now(UTC)
+        await rag_eval_repo.finish_run(run=run)
+        raise
+
+    run.status = "completed"
+    run.finished_at = datetime.now(UTC)
+
+    report = reporter.build_report(run=run)
+    await rag_eval_repo.finish_run(run=run)
+    await rag_eval_repo.save_report(report=report)
+
+    return run, report
 
 
 async def _run_full_document_rag_eval(
@@ -527,12 +614,27 @@ async def _run_full_document_rag_eval(
     )
 
     try:
-        run, report = await service.generate_dataset_and_run(
+        resumed = await _resume_existing_rag_eval_dataset(
+            rag_eval_repo=rag_eval_repo,
+            runner=runner,
+            reporter=service._reporter,
             project_id=project_id,
             document_id=document_id,
-            progress_callback=_on_dataset_progress,
+            generator_model=RAG_EVAL_QUESTION_MODEL,
             control_callback=_control_callback,
+            run_progress_callback=_on_run_progress,
         )
+
+        if resumed is None:
+            run, report = await service.generate_dataset_and_run(
+                project_id=project_id,
+                document_id=document_id,
+                progress_callback=_on_dataset_progress,
+                control_callback=_control_callback,
+                run_progress_callback=_on_run_progress,
+            )
+        else:
+            run, report = resumed
     except Exception as exc:
         await _write_rag_eval_progress(
             db_pool=db_pool,

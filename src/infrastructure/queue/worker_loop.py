@@ -15,6 +15,7 @@ from src.infrastructure.queue.handlers.knowledge_upload import (
 )
 from src.infrastructure.queue.retry_policy import build_retry_decision
 from src.infrastructure.queue.stale_recovery import recover_stale_jobs
+from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
 
 logger = get_logger(__name__)
 
@@ -31,7 +32,19 @@ async def run_worker_loop(
 ) -> None:
     """Continuously claim and process queue jobs."""
     resolved_worker_id = worker_id or f"worker-{uuid.uuid4()}"
-    logger.info("Worker started", extra={"worker_id": resolved_worker_id})
+    groq_keys = configured_groq_api_keys()
+    logger.info(
+        "Worker started",
+        extra={
+            "worker_id": resolved_worker_id,
+            "groq_key_count": len(groq_keys),
+            "groq_key_slots": {
+                "GROQ_API_KEY": bool(groq_keys[0:1]),
+                "GROQ_API_KEY2_OR_LATER": len(groq_keys) >= 2,
+                "GROQ_API_KEY3_OR_LATER": len(groq_keys) >= 3,
+            },
+        },
+    )
 
     while not shutdown_event.is_set():
         try:
