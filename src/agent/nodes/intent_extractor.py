@@ -14,7 +14,7 @@ from src.domain.runtime.intent_extraction import (
     IntentExtractionResult,
 )
 from src.domain.runtime.state_contracts import RuntimeStateInput
-from src.infrastructure.llm.groq_keyring import current_groq_api_key
+from src.infrastructure.llm.groq_keyring import ainvoke_chat_with_rotation
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -141,13 +141,7 @@ def create_intent_extractor_node(
     Create the intent-extractor node with an optional lightweight LLM client.
     """
 
-    if llm is None:
-        llm = _chat_groq_class()(
-            model=model_name,
-            temperature=0.0,
-            max_tokens=220,
-            api_key=current_groq_api_key(),
-        )
+    base_model = model_name
 
     async def _intent_extractor_node_impl(state: AgentState) -> dict[str, object]:
         context = IntentExtractionContext.from_state(cast(RuntimeStateInput, state))
@@ -163,7 +157,24 @@ def create_intent_extractor_node(
         )
 
         try:
-            response = await llm.ainvoke([("human", prompt)])
+            messages = [("human", prompt)]
+            if llm is not None:
+                response = await llm.ainvoke(messages)
+            else:
+
+                def _make_client(*, api_key: str) -> ChatGroqClient:
+                    return _chat_groq_class()(
+                        model=base_model,
+                        temperature=0.0,
+                        max_tokens=220,
+                        api_key=api_key,
+                    )
+
+                response = await ainvoke_chat_with_rotation(
+                    make_client=_make_client,
+                    messages=messages,
+                    operation_name="intent_extractor.ainvoke",
+                )
             payload = json.loads(_unwrap_json_block(str(response.content or "")))
             result = IntentExtractionResult.from_llm_payload(
                 payload

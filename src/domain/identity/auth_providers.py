@@ -11,6 +11,7 @@ ALLOWED_AUTH_PROVIDERS = {
 }
 
 AUTH_DELIVERY_MANUAL_LINK = "manual_link"
+AUTH_DELIVERY_EMAIL = "email"
 
 AUTH_STATUS_VERIFICATION_REQUESTED = "verification_requested"
 AUTH_STATUS_PASSWORD_RESET_REQUESTED = "password_reset_requested"  # nosec B105 - auth status label

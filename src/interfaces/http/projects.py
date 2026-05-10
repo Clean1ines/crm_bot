@@ -6,10 +6,16 @@ from src.interfaces.http.dependencies import (
     get_project_command_service,
     get_project_query_service,
     get_current_user_id,
+    get_project_repo,
+    get_project_service,
+    get_user_repository,
 )
 from src.infrastructure.logging.logger import get_logger
 from src.application.services.project_command_service import ProjectCommandService
 from src.application.services.project_query_service import ProjectQueryService
+from src.application.services.project_invitation_service import ProjectInvitationService
+from src.infrastructure.config.settings import settings
+from src.infrastructure.email.sender import build_email_sender
 
 logger = get_logger(__name__)
 
@@ -32,6 +38,30 @@ class ManagerReplyHistoryResponse(BaseModel):
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+def _frontend_invite_base_url() -> str:
+    return (
+        settings.FRONTEND_URL
+        or settings.VITE_API_URL
+        or settings.PUBLIC_URL
+        or settings.RENDER_EXTERNAL_URL
+        or ""
+    )
+
+
+def build_project_invitation_service(
+    project_repo=Depends(get_project_repo),
+    access_service=Depends(get_project_service),
+    user_repo=Depends(get_user_repository),
+) -> ProjectInvitationService:
+    return ProjectInvitationService(
+        project_repo=project_repo,
+        access_service=access_service,
+        user_repo=user_repo,
+        email_sender=build_email_sender(settings),
+        frontend_url=_frontend_invite_base_url(),
+    )
 
 
 class ProjectCreate(BaseModel):
@@ -67,6 +97,35 @@ class BotConnectRequest(BaseModel):
 
 class ProjectMemberUpsertRequest(BaseModel):
     user_id: str
+    role: str
+
+
+class ProjectInvitationCreateRequest(BaseModel):
+    email: str
+    first_name: str | None = None
+    last_name: str | None = None
+    role: str = "manager"
+
+
+class ProjectInvitationAcceptRequest(BaseModel):
+    token: str
+
+
+class ProjectInvitationResponse(BaseModel):
+    status: str
+    project_id: str
+    email: str
+    role: str
+    expires_at: str
+    delivery: str
+    invite_link: str | None = None
+
+
+class ProjectInvitationAcceptResponse(BaseModel):
+    status: str
+    project_id: str
+    user_id: str
+    email: str
     role: str
 
 
@@ -282,6 +341,46 @@ async def connect_bot(
             project_id, current_user_id, data.token, data.type
         )
     ).to_dict()
+
+
+@router.post(
+    "/{project_id}/members/invitations",
+    response_model=ProjectInvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def invite_project_member(
+    project_id: str,
+    data: ProjectInvitationCreateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    invitation_service: ProjectInvitationService = Depends(
+        build_project_invitation_service
+    ),
+):
+    return await invitation_service.invite_project_member(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        email=data.email,
+        first_name=data.first_name,
+        last_name=data.last_name,
+        role=data.role,
+    )
+
+
+@router.post(
+    "/invitations/accept",
+    response_model=ProjectInvitationAcceptResponse,
+)
+async def accept_project_invitation(
+    data: ProjectInvitationAcceptRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    invitation_service: ProjectInvitationService = Depends(
+        build_project_invitation_service
+    ),
+):
+    return await invitation_service.accept_project_invitation(
+        token=data.token,
+        current_user_id=current_user_id,
+    )
 
 
 @router.get("/{project_id}/members")

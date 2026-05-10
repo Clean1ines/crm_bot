@@ -164,6 +164,129 @@ class ProjectMemberRepository(ProjectRepositoryBase):
 
         return str(user_id) if user_id else None
 
+    async def create_project_invitation(
+        self,
+        *,
+        project_id: ProjectId,
+        email: str,
+        first_name: str | None,
+        last_name: str | None,
+        role: str,
+        invited_by_user_id: ProjectId,
+        token_hash: str,
+        expires_at,
+    ) -> dict[str, object]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO project_invitations (
+                    project_id,
+                    email,
+                    first_name,
+                    last_name,
+                    role,
+                    invited_by_user_id,
+                    token_hash,
+                    expires_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, project_id, email, first_name, last_name, role,
+                          invited_by_user_id, expires_at, created_at
+            """,
+                ensure_uuid(project_id),
+                email,
+                first_name,
+                last_name,
+                role,
+                ensure_uuid(invited_by_user_id),
+                token_hash,
+                expires_at,
+            )
+
+        if not row:
+            raise RuntimeError("Project invitation was not created")
+
+        result = dict(row)
+        result["id"] = str(result["id"])
+        result["project_id"] = str(result["project_id"])
+        result["invited_by_user_id"] = str(result["invited_by_user_id"])
+        return result
+
+    async def get_project_invitation_by_token_hash(
+        self,
+        token_hash: str,
+    ) -> dict[str, object] | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, project_id, email, first_name, last_name, role,
+                       invited_by_user_id, expires_at, created_at
+                FROM project_invitations
+                WHERE token_hash = $1
+                  AND accepted_at IS NULL
+                  AND revoked_at IS NULL
+                  AND expires_at > NOW()
+            """,
+                token_hash,
+            )
+
+        if not row:
+            return None
+
+        result = dict(row)
+        result["id"] = str(result["id"])
+        result["project_id"] = str(result["project_id"])
+        result["invited_by_user_id"] = str(result["invited_by_user_id"])
+        return result
+
+    async def accept_project_invitation(
+        self,
+        *,
+        token_hash: str,
+        accepted_by_user_id: ProjectId,
+    ) -> dict[str, object] | None:
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    UPDATE project_invitations
+                    SET accepted_at = NOW(),
+                        accepted_by_user_id = $2
+                    WHERE token_hash = $1
+                      AND accepted_at IS NULL
+                      AND revoked_at IS NULL
+                      AND expires_at > NOW()
+                    RETURNING id, project_id, email, role, accepted_by_user_id
+                """,
+                    token_hash,
+                    ensure_uuid(accepted_by_user_id),
+                )
+                if not row:
+                    return None
+
+                await conn.execute(
+                    """
+                    INSERT INTO project_members (project_id, user_id, role)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (project_id, user_id)
+                    DO UPDATE SET role = CASE
+                        WHEN project_members.role = 'owner' THEN project_members.role
+                        ELSE EXCLUDED.role
+                    END
+                """,
+                    row["project_id"],
+                    ensure_uuid(accepted_by_user_id),
+                    row["role"],
+                )
+
+        self._invalidate_project_runtime_cache(str(row["project_id"]))
+
+        result = dict(row)
+        result["id"] = str(result["id"])
+        result["project_id"] = str(result["project_id"])
+        result["accepted_by_user_id"] = str(result["accepted_by_user_id"])
+        return result
+
     async def get_user_display_name(self, user_id: ProjectId) -> str | None:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(

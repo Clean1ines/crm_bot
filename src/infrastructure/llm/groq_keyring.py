@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 from groq import AsyncGroq
 
@@ -13,6 +13,25 @@ from src.infrastructure.logging.logger import get_logger
 logger = get_logger(__name__)
 
 ResultT = TypeVar("ResultT")
+
+
+class GroqChatMessageResponse(Protocol):
+    content: str | None
+
+
+class GroqChatAinvokeClient(Protocol):
+    async def ainvoke(
+        self,
+        messages: list[tuple[str, str]],
+    ) -> GroqChatMessageResponse: ...
+
+
+class GroqChatAinvokeFactory(Protocol):
+    def __call__(
+        self,
+        *,
+        api_key: str,
+    ) -> GroqChatAinvokeClient: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +273,62 @@ class RotatingAsyncGroq:
     def __init__(self) -> None:
         self._rotator = GroqClientRotator()
         self.chat = _RotatingChatProxy(self._rotator)
+
+
+async def ainvoke_chat_with_rotation(
+    *,
+    make_client: GroqChatAinvokeFactory,
+    messages: list[tuple[str, str]],
+    operation_name: str,
+) -> GroqChatMessageResponse:
+    """Run a LangChain-style ChatGroq ainvoke call with Groq key rotation.
+
+    LangChain ChatGroq binds api_key at client construction time. Passing
+    current_groq_api_key() once is not enough: after a 429 the already-created
+    client keeps using the exhausted key. This helper recreates the client for
+    every rotated key and retries only provider rate-limit/quota failures.
+    """
+
+    selection = _GLOBAL_GROQ_KEYRING.current()
+    attempted_indices: set[int] = set()
+
+    while True:
+        attempted_indices.add(selection.index)
+        client = make_client(api_key=selection.key)
+
+        try:
+            return await client.ainvoke(messages)
+        except Exception as exc:
+            if not is_groq_rate_limit_error(exc):
+                raise
+
+            next_selection = await _GLOBAL_GROQ_KEYRING.rotate_after_rate_limit(
+                failed_index=selection.index,
+                attempted_indices=attempted_indices,
+            )
+            if next_selection is None:
+                logger.warning(
+                    "Groq API key rotation exhausted",
+                    extra={
+                        "operation": operation_name,
+                        "key_count": len(configured_groq_api_keys()),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:300],
+                    },
+                )
+                raise
+
+            logger.warning(
+                "Groq API key rate-limited; rotating to next key",
+                extra={
+                    "operation": operation_name,
+                    "from_key_index": selection.index + 1,
+                    "to_key_index": next_selection.index + 1,
+                    "key_count": next_selection.key_count,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            selection = next_selection
 
 
 def reset_groq_keyring_for_tests() -> None:

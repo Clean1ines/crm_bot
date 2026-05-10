@@ -126,6 +126,25 @@ class Settings(BaseSettings):
     VITE_API_URL: str | None = Field(None, description="Frontend API URL (for CORS)")
     FRONTEND_URL: str | None = Field(None, description="Frontend URL (for autologin)")
 
+    # Outbound email delivery. Disabled by default; dev/demo APIs keep returning
+    # manual links unless EMAIL_DELIVERY_MODE=smtp and SMTP settings are present.
+    EMAIL_DELIVERY_MODE: Literal["disabled", "smtp"] = Field(
+        "disabled",
+        description="Outbound email mode. Use smtp for real email delivery.",
+    )
+    EMAIL_FROM: str = Field("", description="Default From address for outbound email")
+    SMTP_HOST: str = Field("", description="SMTP host for outbound email")
+    SMTP_PORT: int = Field(587, ge=1, le=65535, description="SMTP port")
+    SMTP_USERNAME: str = Field("", description="SMTP username")
+    SMTP_PASSWORD: str = Field("", description="SMTP password")
+    SMTP_USE_TLS: bool = Field(True, description="Use STARTTLS for SMTP")
+    SMTP_TIMEOUT_SECONDS: float = Field(
+        10.0,
+        gt=0.0,
+        le=120.0,
+        description="SMTP network timeout in seconds",
+    )
+
     HF_MODEL_URL: str = "https://huggingface.co/intfloat/multilingual-e5-large"
     HF_TOKEN: str = ""
     KNOWLEDGE_UPLOAD_MAX_BYTES: int = Field(
