@@ -14,7 +14,7 @@ from src.domain.runtime.intent_extraction import (
     IntentExtractionResult,
 )
 from src.domain.runtime.state_contracts import RuntimeStateInput
-from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_keyring import current_groq_api_key
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -146,7 +146,7 @@ def create_intent_extractor_node(
             model=model_name,
             temperature=0.0,
             max_tokens=220,
-            api_key=settings.GROQ_API_KEY,
+            api_key=current_groq_api_key(),
         )
 
     async def _intent_extractor_node_impl(state: AgentState) -> dict[str, object]:

@@ -60,7 +60,7 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
 ) -> None:
     from src.interfaces.http import rag_eval
 
-    monkeypatch.setattr(rag_eval.settings, "GROQ_API_KEY", "test-groq-key")
+    monkeypatch.setattr(rag_eval, "has_configured_groq_api_key", lambda: True)
 
     queue_repo = _QueueRepo()
 
