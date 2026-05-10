@@ -93,10 +93,6 @@ export const ManagersPage: React.FC = () => {
         role: inviteRole,
       });
 
-      if (result.error) {
-        throw new Error(getErrorMessage(result.error));
-      }
-
       if (!result.data) {
         throw new Error('Не удалось создать приглашение');
       }
