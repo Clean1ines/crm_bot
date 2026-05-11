@@ -2,7 +2,7 @@ import io
 import json
 import re
 
-from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -186,19 +186,15 @@ class ChunkerService:
 
         if filename_lower.endswith(".md"):
             text = file_bytes.decode("utf-8", errors="ignore")
-            structured_output = True
 
         elif filename_lower.endswith(".txt"):
             text = file_bytes.decode("utf-8", errors="ignore")
-            structured_output = False
 
         elif filename_lower.endswith(".json"):
             text = self.extract_text_from_json(file_bytes)
-            structured_output = False
 
         elif filename_lower.endswith(".pdf"):
             text = self.extract_text_from_pdf(file_bytes)
-            structured_output = False
 
         else:
             raise ValueError(f"Unsupported file type: {filename}")
@@ -208,43 +204,8 @@ class ChunkerService:
             return []
 
         chunks: list[str | JsonObject] = []
-        if structured_output:
-            chunks.extend(self.chunk_markdown_enriched(text))
-            return chunks
-
         chunks.extend(self.chunk_text(text))
         return chunks
-
-    def chunk_markdown_enriched(self, text: str) -> list[JsonObject]:
-        enriched_chunks: list[JsonObject] = []
-
-        for chunk in self.chunk_text(text):
-            title = _first_markdown_title(chunk)
-            source_excerpt = _source_excerpt_from_chunk(chunk)
-            embedding_text = _markdown_embedding_text(
-                title=title,
-                source_excerpt=source_excerpt,
-                content=chunk,
-            )
-            tags = _tags_from_title(title)
-
-            enriched_chunk: JsonObject = {
-                "content": chunk,
-                "entry_type": "plain_enriched",
-                "embedding_text": embedding_text,
-                "questions": [],
-                "synonyms": [],
-            }
-            if title:
-                enriched_chunk["title"] = title
-            if source_excerpt:
-                enriched_chunk["source_excerpt"] = source_excerpt
-            if tags:
-                enriched_chunk["tags"] = json_value_from_unknown(tags)
-
-            enriched_chunks.append(enriched_chunk)
-
-        return enriched_chunks
 
     def _intent_sections_from_json(self, payload: object) -> list[str]:
         if not isinstance(payload, dict):
@@ -408,87 +369,6 @@ class _SectionChunkBuilder:
             start = next_start
 
         return chunks
-
-
-def _markdown_logical_text(text: str) -> str:
-    """Normalize real and escaped newlines before Markdown metadata parsing."""
-    return (
-        text.replace("\\r\\n", "\n")
-        .replace("\\n", "\n")
-        .replace("\r\n", "\n")
-        .replace("\r", "\n")
-    )
-
-
-def _first_markdown_title(chunk: str) -> str:
-    for line in _markdown_logical_text(chunk).splitlines():
-        stripped = line.strip()
-        if _is_markdown_header(stripped):
-            return _header_text(stripped)
-    return ""
-
-
-def _source_excerpt_from_chunk(chunk: str, *, max_chars: int = 420) -> str:
-    logical_text = _markdown_logical_text(chunk)
-
-    body_lines: list[str] = []
-    for line in logical_text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if _is_markdown_header(stripped):
-            continue
-
-        stripped = stripped.lstrip("-•* ").strip()
-        if stripped:
-            body_lines.append(stripped)
-
-    excerpt = " ".join(body_lines)
-    if not excerpt:
-        excerpt = _first_markdown_title(chunk) or " ".join(logical_text.split())
-
-    excerpt = " ".join(excerpt.split())
-    if len(excerpt) <= max_chars:
-        return excerpt
-    return excerpt[:max_chars].rstrip() + "..."
-
-
-def _markdown_embedding_text(*, title: str, source_excerpt: str, content: str) -> str:
-    parts: list[str] = []
-    if title:
-        parts.append(f"Title: {title}")
-    if source_excerpt:
-        parts.append(f"Source excerpt: {source_excerpt}")
-    parts.append(f"Content: {content}")
-    return "\n".join(parts)
-
-
-def _tags_from_title(title: str, *, max_tags: int = 8) -> list[str]:
-    if not title:
-        return []
-
-    stop_words = {
-        "база",
-        "знаний",
-        "раздел",
-        "продукта",
-        "продукт",
-        "для",
-        "или",
-        "как",
-        "что",
-        "это",
-    }
-    tags: list[str] = []
-    for token in re.findall(r"[0-9A-Za-zА-Яа-яЁё_-]+", title.lower()):
-        token = token.strip("_-.")
-        if len(token) < 4 or token in stop_words or token.isdigit():
-            continue
-        if token not in tags:
-            tags.append(token)
-        if len(tags) >= max_tags:
-            break
-    return tags
 
 
 def _is_markdown_header(text: str) -> bool:

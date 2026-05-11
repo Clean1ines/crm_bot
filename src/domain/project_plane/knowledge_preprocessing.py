@@ -7,6 +7,9 @@ from typing import Literal, Mapping, Sequence, TypeAlias, cast
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
+from src.domain.project_plane.knowledge_semantic_markers import (
+    BROAD_NOISY_PRICE_SYNONYMS,
+)
 
 KnowledgePreprocessingMode: TypeAlias = Literal[
     "plain", "faq", "price_list", "instruction"
@@ -296,22 +299,13 @@ def _compact_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _reject_price_list_noisy_synonyms(synonyms: tuple[str, ...], *, index: int) -> None:
-    noisy = {
-        "че по цене",
-        "что по цене",
-        "price pls",
-        "price please",
-        "скока",
-        "сколько стоит",
-        "how much this",
-        "how much",
-        "cost",
-        "price",
-        "pricing",
-    }
+def _reject_price_list_noisy_synonyms(
+    synonyms: tuple[str, ...],
+    *,
+    index: int,
+) -> None:
     normalized = {_compact_text(item.lower()) for item in synonyms}
-    forbidden = sorted(normalized & noisy)
+    forbidden = sorted(BROAD_NOISY_PRICE_SYNONYMS & normalized)
     if forbidden:
         raise KnowledgePreprocessingValidationError(
             f"Price list entry {index} contains broad noisy synonyms: {', '.join(forbidden)}"

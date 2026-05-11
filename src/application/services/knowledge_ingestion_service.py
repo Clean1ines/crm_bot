@@ -22,8 +22,12 @@ from src.domain.project_plane.knowledge_chunks import (
     KnowledgeSectionPath,
 )
 from src.domain.project_plane.knowledge_document_structure import (
+    KnowledgeDocumentBlock,
     KnowledgeDocumentSource,
     ParsedKnowledgeDocument,
+)
+from src.domain.project_plane.knowledge_semantic_builder import (
+    build_knowledge_chunk_drafts,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
@@ -39,6 +43,15 @@ from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 _PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
     "content",
     "entry_type",
+    "title",
+    "source_excerpt",
+    "questions",
+    "synonyms",
+    "tags",
+    "embedding_text",
+)
+
+SEMANTIC_CHUNK_METADATA_FIELDS = (
     "title",
     "source_excerpt",
     "questions",
@@ -159,6 +172,25 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _has_semantic_chunk_metadata(chunk: JsonObject) -> bool:
+    entry_type = _clean_optional_text(chunk.get("entry_type"))
+    if entry_type and entry_type != "chunk":
+        return True
+
+    content = _chunk_content(chunk)
+    for field in SEMANTIC_CHUNK_METADATA_FIELDS:
+        value = chunk.get(field)
+        if field == "embedding_text":
+            embedding_text = _clean_optional_text(value)
+            if embedding_text and embedding_text != content:
+                return True
+            continue
+        if _present_plain_chunk_value(value):
+            return True
+
+    return False
+
+
 def _role_from_entry_type(value: object) -> KnowledgeChunkRole:
     text = _clean_optional_text(value)
     if not text:
@@ -203,15 +235,33 @@ def _document_from_json_chunks(
     chunks: list[JsonObject],
 ) -> ParsedKnowledgeDocument:
     drafts: list[KnowledgeChunkDraft] = []
+    blocks: list[KnowledgeDocumentBlock] = []
+
     for chunk in chunks:
-        draft = _draft_from_json_chunk(chunk, file_name=file_name)
-        if draft is not None:
-            drafts.append(draft)
+        if _has_semantic_chunk_metadata(chunk):
+            draft = _draft_from_json_chunk(chunk, file_name=file_name)
+            if draft is not None:
+                drafts.append(draft)
+            continue
+
+        content = _chunk_content(chunk)
+        if not content:
+            continue
+
+        block = KnowledgeDocumentBlock(content=content)
+        blocks.append(block)
+        drafts.extend(
+            build_knowledge_chunk_drafts(
+                document_title=file_name,
+                blocks=(block,),
+            )
+        )
 
     return ParsedKnowledgeDocument(
         source=KnowledgeDocumentSource(filename=file_name),
         title=file_name,
         chunks=tuple(drafts),
+        blocks=tuple(blocks),
     )
 
 

@@ -3,6 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.domain.project_plane.knowledge_chunks import KnowledgeChunkRole
+from src.domain.project_plane.knowledge_semantic_markers import (
+    FAQ_ANSWER_MARKERS,
+    FAQ_TITLE_MARKERS,
+    INSTRUCTION_STEP_MARKERS,
+    INSTRUCTION_TITLE_MARKERS,
+    INTERNAL_EVAL_TEST_MARKERS,
+    NEGATIVE_TEST_MARKERS,
+    PRICE_BODY_MARKERS,
+    PRICE_TITLE_MARKERS,
+    RETRIEVAL_GUIDELINE_MARKERS,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,184 +74,30 @@ def _contains_any(value: str, markers: tuple[str, ...]) -> bool:
 
 
 def _looks_like_internal_eval_test(value: str) -> bool:
-    return _contains_any(
-        value,
-        (
-            "expected answer",
-            "expected topic",
-            "expected result",
-            "expected chunk",
-            "test question",
-            "test questions",
-            "evaluation question",
-            "eval question",
-            "regression case",
-            "regression test",
-            "ожидаемый ответ",
-            "ожидаемая тема",
-            "ожидаемый результат",
-            "тестовый вопрос",
-            "тестовые вопросы",
-            "проверка базы знаний",
-            "регрессионный тест",
-        ),
-    )
+    return _contains_any(value, INTERNAL_EVAL_TEST_MARKERS)
 
 
 def _looks_like_negative_test(value: str) -> bool:
-    return _contains_any(
-        value,
-        (
-            "negative test",
-            "negative case",
-            "must not answer",
-            "should not answer",
-            "unsupported question",
-            "outside knowledge base",
-            "do not hallucinate",
-            "hallucination trap",
-            "негативный тест",
-            "негативные тесты",
-            "не должен отвечать",
-            "не должна отвечать",
-            "вне базы знаний",
-            "не выдумывать",
-            "ловушка галлюцинации",
-        ),
-    )
+    return _contains_any(value, NEGATIVE_TEST_MARKERS)
 
 
 def _looks_like_retrieval_guideline(value: str) -> bool:
-    return _contains_any(
-        value,
-        (
-            "retrieval guideline",
-            "retrieval rule",
-            "rag guideline",
-            "rag rule",
-            "rag search rule",
-            "chunking guideline",
-            "embedding guideline",
-            "reranking guideline",
-            "правило rag",
-            "правило для rag",
-            "правило поиска",
-            "правило для поиска",
-            "правило чанкинга",
-            "правило разбиения",
-            "правило эмбеддинга",
-            "не смешивать темы",
-        ),
-    )
+    return _contains_any(value, RETRIEVAL_GUIDELINE_MARKERS)
 
 
 def _looks_like_price_list(title_text: str, body_text: str) -> bool:
-    price_title = _contains_any(
-        title_text,
-        (
-            "price",
-            "pricing",
-            "tariff",
-            "tariffs",
-            "cost",
-            "fee",
-            "fees",
-            "цена",
-            "цены",
-            "стоимость",
-            "тариф",
-            "тарифы",
-            "прайс",
-            "оплата",
-        ),
-    )
-    price_body = _contains_any(
-        body_text,
-        (
-            "$",
-            "€",
-            "₽",
-            "usd",
-            "eur",
-            "rub",
-            "per month",
-            "per year",
-            "monthly",
-            "yearly",
-            "в месяц",
-            "в год",
-            "руб",
-            "руб.",
-        ),
-    )
+    price_title = _contains_any(title_text, PRICE_TITLE_MARKERS)
+    price_body = _contains_any(body_text, PRICE_BODY_MARKERS)
     return price_title and price_body
 
 
 def _looks_like_instruction(title_text: str, body_text: str) -> bool:
-    instruction_title = _contains_any(
-        title_text,
-        (
-            "instruction",
-            "instructions",
-            "how to",
-            "setup",
-            "onboarding",
-            "guide",
-            "manual",
-            "procedure",
-            "runbook",
-            "инструкция",
-            "инструкции",
-            "как настроить",
-            "как подключить",
-            "руководство",
-            "регламент",
-            "процедура",
-            "онбординг",
-        ),
-    )
-    step_body = _contains_any(
-        body_text,
-        (
-            "step 1",
-            "step one",
-            "first,",
-            "then,",
-            "finally,",
-            "1.",
-            "2.",
-            "3.",
-            "шаг 1",
-            "сначала",
-            "затем",
-            "после этого",
-        ),
-    )
+    instruction_title = _contains_any(title_text, INSTRUCTION_TITLE_MARKERS)
+    step_body = _contains_any(body_text, INSTRUCTION_STEP_MARKERS)
     return instruction_title and step_body
 
 
 def _looks_like_faq(title_text: str, body_text: str) -> bool:
-    faq_title = _contains_any(
-        title_text,
-        (
-            "faq",
-            "frequently asked",
-            "questions and answers",
-            "q&a",
-            "частые вопросы",
-            "вопросы и ответы",
-            "чаво",
-        ),
-    )
-    answer_marker = _contains_any(
-        body_text,
-        (
-            "answer:",
-            "question:",
-            "q:",
-            "a:",
-            "ответ:",
-            "вопрос:",
-        ),
-    )
+    faq_title = _contains_any(title_text, FAQ_TITLE_MARKERS)
+    answer_marker = _contains_any(body_text, FAQ_ANSWER_MARKERS)
     return faq_title or answer_marker
