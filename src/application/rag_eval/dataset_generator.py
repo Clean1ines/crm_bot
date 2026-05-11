@@ -24,6 +24,24 @@ RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 MAX_CHUNKS_PER_LLM_BATCH = 1
 MAX_CHUNK_CHARS = 700
 MIN_VARIANTS_PER_FACT = 5
+MIN_EVAL_SOURCE_CONTENT_CHARS = 16
+MIN_CONTAINED_EVAL_SOURCE_CHARS = 24
+
+EVAL_QUESTION_SOURCE_ENTRY_TYPES = frozenset(
+    {
+        "answer_knowledge",
+        "faq",
+        "instruction",
+        "price_list",
+    }
+)
+EXCLUDED_EVAL_SOURCE_ENTRY_TYPES = frozenset(
+    {
+        "internal_eval_test",
+        "retrieval_guideline",
+        "negative_test",
+    }
+)
 
 
 DOCUMENT_STRUCTURE_QUESTION_MARKERS = (
@@ -141,7 +159,8 @@ class LlmRagEvalDatasetGenerator:
             model_used=self._model_name,
         )
 
-        batches = self._batches(chunks)
+        eval_chunks = self._eval_source_chunks(chunks)
+        batches = self._batches(eval_chunks)
         total_batches = len(batches)
 
         if not batches:
@@ -154,6 +173,7 @@ class LlmRagEvalDatasetGenerator:
 
         questions: list[RagEvalQuestion] = []
         valid_chunk_ids = {chunk.id for chunk in chunks if chunk.id}
+        related_chunk_ids_by_id = self._canonical_related_chunk_ids(eval_chunks)
 
         if progress_callback is not None:
             await progress_callback(0, total_batches, 0)
@@ -203,6 +223,7 @@ class LlmRagEvalDatasetGenerator:
                     document_id=document_id,
                     payload=item,
                     valid_chunk_ids=valid_chunk_ids,
+                    related_chunk_ids_by_id=related_chunk_ids_by_id,
                 )
                 if question is None:
                     continue
@@ -223,6 +244,7 @@ class LlmRagEvalDatasetGenerator:
         dataset.metadata = {
             "generation_strategy": "llm_fact_variant_coverage_batches",
             "source_chunk_count": len(chunks),
+            "canonical_eval_unit_count": len(eval_chunks),
             "useful_chunk_count": sum(len(batch) for batch in batches),
             "llm_batches": total_batches,
             "min_variants_per_fact": MIN_VARIANTS_PER_FACT,
@@ -277,7 +299,7 @@ class LlmRagEvalDatasetGenerator:
         error: ValueError,
     ) -> dict[str, object]:
         expected_answer_summary = self._fallback_expected_answer_summary(chunk)
-        source_chunk_ids = [chunk.id] if chunk.id else []
+        source_chunk_ids = self._chunk_related_ids(chunk)
         return {
             "question": self._fallback_question_text(chunk),
             "question_type": "direct",
@@ -456,6 +478,7 @@ class LlmRagEvalDatasetGenerator:
         document_id: str,
         payload: Mapping[str, object],
         valid_chunk_ids: set[str],
+        related_chunk_ids_by_id: Mapping[str, list[str]],
     ) -> RagEvalQuestion | None:
         question = str(payload.get("question") or "").strip()
         question_type = str(payload.get("question_type") or "").strip()
@@ -470,11 +493,11 @@ class LlmRagEvalDatasetGenerator:
         if severity not in ALLOWED_SEVERITIES:
             severity = "medium"
 
-        expected_chunk_ids = [
-            chunk_id
-            for chunk_id in self._string_list(payload.get("expected_chunk_ids"))
-            if chunk_id in valid_chunk_ids
-        ]
+        expected_chunk_ids = self._expand_related_chunk_ids(
+            self._string_list(payload.get("expected_chunk_ids")),
+            valid_chunk_ids=valid_chunk_ids,
+            related_chunk_ids_by_id=related_chunk_ids_by_id,
+        )
 
         raw_should_answer = payload.get("should_answer")
         should_answer = (
@@ -487,11 +510,11 @@ class LlmRagEvalDatasetGenerator:
             return None
 
         metadata = self._metadata(payload.get("metadata"))
-        source_chunk_ids = [
-            chunk_id
-            for chunk_id in self._string_list(metadata.get("source_chunk_ids"))
-            if chunk_id in valid_chunk_ids
-        ]
+        source_chunk_ids = self._expand_related_chunk_ids(
+            self._string_list(metadata.get("source_chunk_ids")),
+            valid_chunk_ids=valid_chunk_ids,
+            related_chunk_ids_by_id=related_chunk_ids_by_id,
+        )
         if not source_chunk_ids and expected_chunk_ids:
             source_chunk_ids = list(expected_chunk_ids)
 
@@ -663,7 +686,150 @@ class LlmRagEvalDatasetGenerator:
         normalized = re.sub(r"_+", "_", normalized).strip("_")
         return (normalized or "fact")[:80]
 
+    def _chunk_related_ids(self, chunk: RagEvalChunk) -> list[str]:
+        related_ids = self._string_list(chunk.metadata.get("related_chunk_ids"))
+        if chunk.id and chunk.id not in related_ids:
+            related_ids.insert(0, chunk.id)
+
+        result: list[str] = []
+        for chunk_id in related_ids:
+            if chunk_id and chunk_id not in result:
+                result.append(chunk_id)
+
+        return result[:50]
+
+    def _canonical_related_chunk_ids(
+        self,
+        chunks: list[RagEvalChunk],
+    ) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        for chunk in chunks:
+            if chunk.id:
+                result[chunk.id] = self._chunk_related_ids(chunk)
+        return result
+
+    def _expand_related_chunk_ids(
+        self,
+        chunk_ids: list[str],
+        *,
+        valid_chunk_ids: set[str],
+        related_chunk_ids_by_id: Mapping[str, list[str]],
+    ) -> list[str]:
+        result: list[str] = []
+
+        for chunk_id in chunk_ids:
+            if chunk_id not in valid_chunk_ids:
+                continue
+
+            related_ids = related_chunk_ids_by_id.get(chunk_id, [chunk_id])
+            for related_id in related_ids:
+                if related_id in valid_chunk_ids and related_id not in result:
+                    result.append(related_id)
+
+        return result[:50]
+
+    def _eval_source_chunks(self, chunks: list[RagEvalChunk]) -> list[RagEvalChunk]:
+        groups_by_key: dict[tuple[str, str], list[RagEvalChunk]] = {}
+        ordered_keys: list[tuple[str, str]] = []
+
+        for chunk in chunks:
+            if not self._is_useful_chunk(chunk):
+                continue
+
+            group_key = self._eval_group_key(chunk)
+            if group_key not in groups_by_key:
+                groups_by_key[group_key] = []
+                ordered_keys.append(group_key)
+            groups_by_key[group_key].append(chunk)
+
+        return [
+            self._canonical_eval_chunk(groups_by_key[group_key])
+            for group_key in ordered_keys
+        ]
+
+    def _eval_group_key(self, chunk: RagEvalChunk) -> tuple[str, str]:
+        entry_type = self._metadata_text(chunk.metadata, "entry_type") or "legacy"
+        normalized_title = self._normalized_title(chunk.metadata.get("title"))
+        if normalized_title:
+            return (entry_type, normalized_title)
+        return (entry_type, f"chunk:{chunk.id}")
+
+    def _canonical_eval_chunk(self, chunks: list[RagEvalChunk]) -> RagEvalChunk:
+        primary = chunks[0]
+        related_ids = [chunk.id for chunk in chunks if chunk.id]
+
+        content_parts = [
+            self._content_without_markdown_scaffold(
+                chunk.content,
+                chunk.metadata.get("title"),
+            )
+            for chunk in chunks
+        ]
+        compacted_content_parts = self._compact_overlapping_content_parts(content_parts)
+        content = "\n\n".join(part for part in compacted_content_parts if part).strip()
+        if not content:
+            content = primary.content
+
+        metadata = dict(primary.metadata)
+        metadata["canonical_chunk_id"] = primary.id
+        metadata["related_chunk_ids"] = related_ids
+        metadata["merged_chunk_count"] = len(chunks)
+        metadata["compacted_source_part_count"] = len(compacted_content_parts)
+
+        return RagEvalChunk(
+            id=primary.id,
+            content=content,
+            document_id=primary.document_id,
+            source=primary.source,
+            score=primary.score,
+            metadata=metadata,
+        )
+
+    def _compact_overlapping_content_parts(
+        self,
+        content_parts: list[str],
+    ) -> list[str]:
+        normalized_parts = [
+            (part, self._normalized_content_for_containment(part))
+            for part in content_parts
+            if part
+        ]
+        result: list[str] = []
+
+        for index, (part, normalized) in enumerate(normalized_parts):
+            if not normalized:
+                continue
+
+            is_contained_in_richer_part = False
+            for other_index, (_, other_normalized) in enumerate(normalized_parts):
+                if other_index == index or not other_normalized:
+                    continue
+                if len(other_normalized) <= len(normalized):
+                    continue
+                if len(normalized) < MIN_CONTAINED_EVAL_SOURCE_CHARS:
+                    continue
+                if normalized in other_normalized:
+                    is_contained_in_richer_part = True
+                    break
+
+            if not is_contained_in_richer_part and part not in result:
+                result.append(part)
+
+        return result
+
+    def _normalized_content_for_containment(self, value: str) -> str:
+        normalized = self._normalized_for_quality(value)
+        normalized = re.sub(r"[^0-9a-zа-яё]+", " ", normalized)
+        return " ".join(normalized.split())
+
     def _is_useful_chunk(self, chunk: RagEvalChunk) -> bool:
+        if not chunk.id.strip():
+            return False
+
+        entry_type = self._metadata_text(chunk.metadata, "entry_type")
+        if entry_type and entry_type not in EVAL_QUESTION_SOURCE_ENTRY_TYPES:
+            return False
+
         content = " ".join(chunk.content.split())
         if not content:
             return False
@@ -674,7 +840,79 @@ class LlmRagEvalDatasetGenerator:
         if content[0] in {",", ";", ":", ".", ")", "]"}:
             return False
 
-        return True
+        stripped_scaffold = self._content_without_markdown_scaffold(
+            chunk.content,
+            chunk.metadata.get("title"),
+        )
+        if len(stripped_scaffold) < MIN_EVAL_SOURCE_CONTENT_CHARS:
+            return False
+
+        return bool(re.search(r"[0-9A-Za-zА-Яа-яЁё]", stripped_scaffold))
+
+    def _content_without_markdown_scaffold(
+        self,
+        value: str,
+        title: object | None = None,
+    ) -> str:
+        lines: list[str] = []
+        for line in value.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+
+            if re.match(r"^#{1,6}\s+", stripped):
+                stripped = re.sub(r"^#{1,6}\s+", "", stripped).strip()
+
+            stripped = re.sub(r"\s+[-*_]{3,}\s*$", "", stripped).strip()
+            stripped = self._strip_leading_title_from_content(stripped, title)
+            if not stripped:
+                continue
+            if re.fullmatch(r"[-*_]{3,}", stripped):
+                continue
+
+            lines.append(stripped)
+
+        return " ".join(" ".join(lines).split())
+
+    def _strip_leading_title_from_content(
+        self,
+        content: str,
+        title: object | None,
+    ) -> str:
+        stripped = content.strip()
+        if not stripped:
+            return ""
+
+        for variant in self._title_prefix_variants(title):
+            if stripped.casefold().startswith(variant.casefold()):
+                return stripped[len(variant) :].lstrip(" .:-—–")
+
+        return stripped
+
+    def _title_prefix_variants(self, title: object | None) -> list[str]:
+        raw_title = str(title or "").strip()
+        if not raw_title:
+            return []
+
+        without_markdown = re.sub(r"^#+\s*", "", raw_title).strip()
+        without_number = re.sub(r"^\d+[.)\-:]*\s*", "", without_markdown).strip()
+
+        result: list[str] = []
+        for candidate in (raw_title, without_markdown, without_number):
+            normalized = " ".join(candidate.split())
+            if normalized and normalized not in result:
+                result.append(normalized)
+
+        return sorted(result, key=len, reverse=True)
+
+    def _metadata_text(self, metadata: Mapping[str, object], key: str) -> str:
+        return str(metadata.get(key) or "").strip()
+
+    def _normalized_title(self, value: object) -> str:
+        normalized = " ".join(str(value or "").casefold().replace("ё", "е").split())
+        normalized = re.sub(r"^#+\s*", "", normalized)
+        normalized = re.sub(r"^\d+[.)\-:]*\s*", "", normalized)
+        return normalized.strip()
 
     def _batches(self, chunks: list[RagEvalChunk]) -> list[list[RagEvalChunk]]:
         useful_chunks = [chunk for chunk in chunks if self._is_useful_chunk(chunk)]

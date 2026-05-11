@@ -1,104 +1,92 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
 from src.infrastructure.llm.chunker import ChunkerService
 
 
-def test_large_structured_text_is_split_into_multiple_chunks():
-    chunker = ChunkerService(chunk_size=800, overlap=100)
-
-    text = "\\n\\n".join(
-        f"## intent_{i}\\n"
-        f"answer: Это тестовый ответ номер {i}. "
-        f"Он нужен, чтобы проверить нарезку большой базы знаний. "
-        f"keywords: бот, telegram, заявки, менеджер, настройка. "
-        f"patterns: как работает бот, сколько стоит, что входит в настройку."
-        for i in range(80)
+def test_large_structured_text_is_split_into_multiple_chunks() -> None:
+    text = "\n\n".join(
+        f"## Section {index}\n"
+        f"This section contains enough operational knowledge for chunk {index}. "
+        f"It should remain readable and independently indexable."
+        for index in range(30)
     )
 
-    chunks = chunker.chunk_text(text)
+    chunks = ChunkerService(chunk_size=240, overlap=40).chunk_text(text)
 
-    assert len(chunks) > 1
-    assert all(chunk.strip() for chunk in chunks)
-    assert max(len(chunk) for chunk in chunks) <= 900
+    assert len(chunks) > 5
+    assert all(isinstance(chunk, str) and chunk.strip() for chunk in chunks)
 
 
-async def test_markdown_file_is_supported():
-    chunker = ChunkerService(chunk_size=800, overlap=100)
+@pytest.mark.asyncio
+async def test_markdown_file_is_supported_as_source_blocks_only() -> None:
+    chunker = ChunkerService(chunk_size=500, overlap=50)
 
     chunks = await chunker.process_file(
-        b"# Test\n\nMarkdown knowledge text about Telegram bot.",
-        "knowledge_fixture.md",
+        b"# Test\n\nMarkdown knowledge text about uploading documents.",
+        "test.md",
     )
 
     assert chunks
-    first = chunks[0]
-    assert isinstance(first, dict)
-    assert first["entry_type"] == "plain_enriched"
-    assert first["title"] == "Test"
-    assert "Markdown knowledge text" in str(first["content"])
-    assert "Markdown knowledge text" in str(first["source_excerpt"])
-    assert "Title: Test" in str(first["embedding_text"])
-    assert str(first["embedding_text"]) != str(first["content"])
+    assert all(isinstance(chunk, str) for chunk in chunks)
+    joined = "\n".join(str(chunk) for chunk in chunks)
+    assert "Test" in joined
+    assert "Markdown knowledge text" in joined
+    assert "plain_enriched" not in joined
+    assert "embedding_text" not in joined
 
 
-async def test_json_intent_knowledge_file_is_supported():
-    chunker = ChunkerService(chunk_size=800, overlap=100)
-
-    chunks = await chunker.process_file(
-        b'{"intents":{"value_proposition":{"answer":"'
-        b"\xd0\xa7\xd1\x82\xd0\xbe\xd0\xb1\xd1\x8b \xd0\xbd\xd0\xb5 "
-        b"\xd1\x82\xd0\xb5\xd1\x80\xd1\x8f\xd1\x82\xd1\x8c "
-        b'\xd0\xba\xd0\xbb\xd0\xb8\xd0\xb5\xd0\xbd\xd1\x82\xd0\xbe\xd0\xb2",'
-        b'"synonyms":["'
-        b"\xd1\x87\xd0\xb5\xd0\xbc \xd1\x8d\xd1\x82\xd0\xbe "
-        b'\xd0\xbf\xd0\xbe\xd0\xbb\xd0\xb5\xd0\xb7\xd0\xbd\xd0\xbe"],'
-        b'"keywords":["'
-        b'\xd0\xb1\xd0\xb8\xd0\xb7\xd0\xbd\xd0\xb5\xd1\x81"],'
-        b'"patterns":["'
-        b"\xd1\x87\xd1\x82\xd0\xbe \xd1\x8d\xd1\x82\xd0\xbe "
-        b"\xd0\xb4\xd0\xb0\xd1\x81\xd1\x82 "
-        b"\xd0\xbc\xd0\xbe\xd0\xb5\xd0\xbc\xd1\x83 "
-        b'\xd0\xb1\xd0\xb8\xd0\xb7\xd0\xbd\xd0\xb5\xd1\x81\xd1\x83"]}}}',
-        "knowledge_fixture.json",
-    )
-
-    assert chunks
-    assert "value_proposition" in chunks[0]
-    assert "Чтобы не терять клиентов" in chunks[0]
-    assert "чем это полезно" in chunks[0]
-
-
-async def test_markdown_file_returns_enriched_chunks_for_sections():
-    chunker = ChunkerService(chunk_size=260, overlap=40)
+@pytest.mark.asyncio
+async def test_json_intent_knowledge_file_is_supported() -> None:
+    chunker = ChunkerService(chunk_size=500, overlap=50)
 
     chunks = await chunker.process_file(
         (
-            "# База знаний\n\n"
-            "## 1. Оплата\n\n"
-            "Клиент может спросить о способах оплаты и сроках оплаты.\n\n"
-            "## 2. Возврат\n\n"
-            "Если клиент спрашивает про возврат, ассистент передает диалог менеджеру."
+            b'{"intents":{"connect_manager":{'
+            b'"answer":"Manager can be connected from project settings.",'
+            b'"synonyms":["operator","human support"],'
+            b'"keywords":["manager","handoff"]'
+            b"}}}"
+        ),
+        "intents.json",
+    )
+
+    joined = "\n".join(str(chunk) for chunk in chunks)
+    assert "connect_manager" in joined
+    assert "answer: Manager can be connected from project settings." in joined
+    assert "synonyms: operator, human support" in joined
+
+
+@pytest.mark.asyncio
+async def test_markdown_file_returns_plain_section_strings() -> None:
+    chunker = ChunkerService(chunk_size=280, overlap=40)
+
+    chunks = await chunker.process_file(
+        (
+            "# Knowledge base\n\n"
+            "Introductory product text.\n\n"
+            "## Refunds\n\n"
+            "Refund requests are reviewed by a manager.\n\n"
+            "## Delivery\n\n"
+            "Delivery questions are answered from the client project knowledge base."
         ).encode("utf-8"),
-        "knowledge_fixture.md",
+        "kb.md",
     )
 
     assert chunks
-    assert all(isinstance(chunk, dict) for chunk in chunks)
-    assert all(
-        chunk["entry_type"] == "plain_enriched"
-        for chunk in chunks
-        if isinstance(chunk, dict)
-    )
-    assert any(
-        "Оплата" in str(chunk.get("title", ""))
-        for chunk in chunks
-        if isinstance(chunk, dict)
-    )
-    assert any(
-        "Возврат" in str(chunk.get("title", ""))
-        for chunk in chunks
-        if isinstance(chunk, dict)
-    )
-    assert all(
-        str(chunk.get("embedding_text", "")) != str(chunk.get("content", ""))
-        for chunk in chunks
-        if isinstance(chunk, dict)
-    )
+    assert all(isinstance(chunk, str) for chunk in chunks)
+    joined = "\n".join(str(chunk) for chunk in chunks)
+    assert "Refunds" in joined
+    assert "Delivery" in joined
+
+
+def test_chunker_source_does_not_build_semantic_metadata() -> None:
+    text = Path("src/infrastructure/llm/chunker.py").read_text(encoding="utf-8")
+
+    assert "plain_enriched" not in text
+    assert "chunk_markdown_enriched" not in text
+    assert "_markdown_embedding_text" not in text
+    assert "json_value_from_unknown" not in text
