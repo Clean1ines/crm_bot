@@ -11,20 +11,27 @@ Return ONLY valid JSON with this exact shape:
       "title": "short business title",
       "answer": "canonical answer grounded only in source text",
       "source_excerpt": "verbatim excerpt from the provided source text",
-      "questions": ["natural customer questions"],
-      "synonyms": ["entity-specific paraphrases and short variants"],
-      "tags": ["small lowercase tags"],
-      "embedding_text": "dense searchable text combining title, answer, questions, synonyms and tags"
+      "questions": ["3-8 realistic customer questions this entry can answer"],
+      "synonyms": ["5-12 grounded intent phrases, colloquial variants and short search phrases"],
+      "tags": ["2-8 compact topical tags"],
+      "embedding_text": "dense searchable text combining title, answer, source_excerpt, questions, synonyms and tags"
     }
   ]
 }
 
 Rules:
 - Russian, English and mixed-language variants are allowed.
-- Create synonyms only for the same grounded business intent.
+- Create questions/synonyms only for the same grounded business intent.
 - Do not invent facts, prices, dates, guarantees, policies or terms.
 - Every entry MUST have a source_excerpt copied from the source.
 - Every answer MUST be supported by source_excerpt.
+- Every entry MUST have at least 3 questions.
+- Every entry MUST have at least 5 synonyms.
+- Every entry MUST have at least 2 tags.
+- questions must include realistic ways a customer might ask the same thing.
+- synonyms must include short search phrases, wording variants and colloquial intent phrases grounded in the source.
+- tags must be compact topic labels, not generic filler.
+- embedding_text MUST include title, answer, source_excerpt, questions, synonyms and tags.
 - If a chunk is not useful, skip it.
 - Keep entries compact.
 - Do not output markdown.

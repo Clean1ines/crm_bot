@@ -26,9 +26,9 @@ PREPROCESSING_STATUS_PROCESSING = "processing"
 PREPROCESSING_STATUS_COMPLETED = "completed"
 PREPROCESSING_STATUS_FAILED = "failed"
 
-PROMPT_VERSION_FAQ = "knowledge_preprocess_faq_v1"
-PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v1"
-PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v1"
+PROMPT_VERSION_FAQ = "knowledge_preprocess_faq_v2"
+PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
+PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
 
 
 class KnowledgePreprocessingValidationError(ValueError):
@@ -205,6 +205,7 @@ def _parse_entry(
         tags=tags,
         embedding_text=embedding_text,
     )
+    _validate_query_surface(entry, mode=mode, index=index)
 
     if not entry.embedding_text:
         return KnowledgePreprocessingEntry(
@@ -218,6 +219,43 @@ def _parse_entry(
         )
 
     return entry
+
+
+def _validate_query_surface(
+    entry: KnowledgePreprocessingEntry,
+    *,
+    mode: KnowledgePreprocessingMode,
+    index: int,
+) -> None:
+    """Require dense query surface from LLM preprocessing.
+
+    This is intentionally enforced at the domain boundary because weak LLM
+    output silently degrades retrieval quality for arbitrary customer phrasing.
+    The generated phrases may paraphrase user intent, but must remain grounded
+    in the source-backed entry.
+    """
+
+    min_questions = 3
+    min_synonyms = 5
+    min_tags = 2
+
+    if len(entry.questions) < min_questions:
+        raise KnowledgePreprocessingValidationError(
+            f"Entry {index} in mode={mode} must contain at least "
+            f"{min_questions} grounded questions"
+        )
+
+    if len(entry.synonyms) < min_synonyms:
+        raise KnowledgePreprocessingValidationError(
+            f"Entry {index} in mode={mode} must contain at least "
+            f"{min_synonyms} grounded synonyms"
+        )
+
+    if len(entry.tags) < min_tags:
+        raise KnowledgePreprocessingValidationError(
+            f"Entry {index} in mode={mode} must contain at least "
+            f"{min_tags} topical tags"
+        )
 
 
 def _required_text(

@@ -204,17 +204,25 @@ async def test_rag_pipeline_accepts_typed_knowledge_views_from_repository():
         query="pricing",
     )
 
-    assert result == [
-        {
-            "id": "chunk-1",
-            "content": "Pricing and packages overview",
-            "score": pytest.approx(1.02),
-            "method": "hybrid",
-            "source": "pricing.md",
-            "title": None,
-            "chunk_index": None,
-        }
-    ]
+    assert len(result) == 1
+
+    item = result[0]
+    assert item["id"] == "chunk-1"
+    assert item["content"] == "Pricing and packages overview"
+    assert item["score"] == pytest.approx(1.02)
+    assert item["method"] == "hybrid"
+    assert item["source"] == "pricing.md"
+    assert item["title"] is None
+    assert item["chunk_index"] is None
+
+    assert item["document_id"] == "doc-1"
+    assert item["document_status"] == "ready"
+    assert item["entry_type"] is None
+    assert item["source_excerpt"] is None
+    assert item["embedding_text"] is None
+    assert item["questions"] is None
+    assert item["synonyms"] is None
+    assert item["tags"] is None
 
 
 def test_safe_json_extract_rejects_non_integer_indexes():
@@ -223,3 +231,48 @@ def test_safe_json_extract_rejects_non_integer_indexes():
     assert service._safe_json_extract("answer: [1, 2, 3]") == [1, 2, 3]
     assert service._safe_json_extract("answer: [1, 2.5, 3]") == []
     assert service._safe_json_extract("[true, 2]") == []
+
+
+def test_rag_candidate_preserves_knowledge_view_metadata() -> None:
+    from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+    from src.infrastructure.llm.rag_contract import RAGCandidate
+
+    view = KnowledgeSearchResultView(
+        id="chunk-1",
+        content="Answer content",
+        score=0.91,
+        method="hybrid",
+        document_id="document-1",
+        source="source.md",
+        document_status="processed",
+        entry_type="answer_knowledge",
+        title="Refund policy",
+        source_excerpt="Refund policy excerpt",
+        embedding_text="refund payment return policy",
+        questions=["Can I get a refund?"],
+        synonyms=["return payment"],
+        tags=["refund", "billing"],
+    )
+
+    candidate = RAGCandidate.from_knowledge_view(view)
+    payload = candidate.to_tool_payload()
+
+    assert candidate.title == "Refund policy"
+    assert candidate.metadata["document_id"] == "document-1"
+    assert candidate.metadata["document_status"] == "processed"
+    assert candidate.metadata["entry_type"] == "answer_knowledge"
+    assert candidate.metadata["source_excerpt"] == "Refund policy excerpt"
+    assert candidate.metadata["embedding_text"] == "refund payment return policy"
+    assert candidate.metadata["questions"] == ["Can I get a refund?"]
+    assert candidate.metadata["synonyms"] == ["return payment"]
+    assert candidate.metadata["tags"] == ["refund", "billing"]
+
+    assert payload["title"] == "Refund policy"
+    assert payload["document_id"] == "document-1"
+    assert payload["document_status"] == "processed"
+    assert payload["entry_type"] == "answer_knowledge"
+    assert payload["source_excerpt"] == "Refund policy excerpt"
+    assert payload["embedding_text"] == "refund payment return policy"
+    assert payload["questions"] == ["Can I get a refund?"]
+    assert payload["synonyms"] == ["return payment"]
+    assert payload["tags"] == ["refund", "billing"]

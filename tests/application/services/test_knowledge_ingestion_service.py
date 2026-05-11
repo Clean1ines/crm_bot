@@ -191,7 +191,7 @@ async def test_process_document_records_preprocessing_usage():
     )
     preprocessing_result = KnowledgePreprocessingResult(
         mode="faq",
-        prompt_version="knowledge_preprocess_faq_v1",
+        prompt_version="knowledge_preprocess_faq_v2",
         model="llama-test",
         entries=(),
         metrics={},
