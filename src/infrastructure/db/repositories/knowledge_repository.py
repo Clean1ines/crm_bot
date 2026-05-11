@@ -20,7 +20,10 @@ from src.domain.project_plane.knowledge_views import (
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
+from src.domain.project_plane.knowledge_chunks import (
+    ANSWERABLE_KNOWLEDGE_ROLES,
+    KnowledgeChunk,
+)
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
@@ -43,6 +46,9 @@ TERMINAL_QUEUE_STATUSES = (
     "cancelled",
     "succeeded",
     "done",
+)
+ANSWERABLE_KNOWLEDGE_ENTRY_TYPES = tuple(
+    sorted(role.value for role in ANSWERABLE_KNOWLEDGE_ROLES)
 )
 
 
@@ -171,6 +177,7 @@ class KnowledgeRepository:
                     LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                     WHERE kb.project_id = $2
                       AND kb.embedding IS NOT NULL
+                      AND kb.entry_type = ANY($4::text[])
                       AND (d.status = 'processed' OR d.status IS NULL)
                     ORDER BY kb.embedding <=> $1::vector
                     LIMIT $3
@@ -178,6 +185,7 @@ class KnowledgeRepository:
                     query_embedding_str,
                     project_uuid,
                     limit,
+                    list(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES),
                 )
             else:
                 rows = await conn.fetch(
@@ -232,6 +240,7 @@ class KnowledgeRepository:
                         LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                         WHERE kb.project_id = $3
                           AND kb.embedding IS NOT NULL
+                          AND kb.entry_type = ANY($6::text[])
                           AND (d.status = 'processed' OR d.status IS NULL)
                     ),
                     vector_candidates AS (
@@ -347,6 +356,7 @@ class KnowledgeRepository:
                     project_uuid,
                     candidate_limit,
                     candidate_limit,
+                    list(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES),
                 )
 
         results: list[KnowledgeSearchResultView] = []
@@ -509,6 +519,7 @@ class KnowledgeRepository:
                     JOIN knowledge_base AS kb ON kb.document_id = d.id
                     WHERE d.project_id = $2
                       AND d.status = 'processed'
+                      AND kb.entry_type = ANY($4::text[])
                 ),
                 scored AS (
                     SELECT
@@ -576,6 +587,7 @@ class KnowledgeRepository:
                 normalized_query,
                 ensure_uuid(project_id),
                 candidate_limit,
+                list(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES),
             )
 
         results = [
