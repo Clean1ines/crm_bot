@@ -90,3 +90,23 @@ def test_chunker_source_does_not_build_semantic_metadata() -> None:
     assert "chunk_markdown_enriched" not in text
     assert "_markdown_embedding_text" not in text
     assert "json_value_from_unknown" not in text
+
+
+def test_chunker_splits_without_overlap_word_fragments() -> None:
+    service = ChunkerService(chunk_size=180, overlap=100)
+    text = (
+        "## Product\n\n"
+        "Alpha paragraph describes a coherent product capability with enough "
+        "words to force a natural split. "
+        "Beta paragraph describes another coherent capability with enough "
+        "words to force another natural split. "
+        "Gamma paragraph describes final behavior without requiring overlap."
+    )
+
+    chunks = service.chunk_text(text)
+
+    assert len(chunks) >= 2
+    assert not any(
+        chunk.startswith(("lpha", "eta", "amma", "raph")) for chunk in chunks
+    )
+    assert not any(chunk.strip() == "---" for chunk in chunks)

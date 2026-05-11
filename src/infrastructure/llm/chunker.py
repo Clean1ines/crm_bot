@@ -10,13 +10,15 @@ logger = get_logger(__name__)
 
 class ChunkerService:
     """
-    FIXED version:
-    - structure-aware chunking (headers first)
-    - sentence-safe splitting
-    - preserves meaning blocks
+    Extractor-level chunker.
+
+    It does not build business semantic metadata. Its job is only:
+    - extract source text;
+    - preserve structure when source has headings/lists;
+    - split large text on natural boundaries without overlap fragments.
     """
 
-    def __init__(self, chunk_size: int = 800, overlap: int = 100):
+    def __init__(self, chunk_size: int = 2400, overlap: int = 0):
         self.chunk_size = chunk_size
         self.overlap = overlap
 
@@ -51,33 +53,13 @@ class ChunkerService:
         return self._clean_text(generic_text)
 
     def _clean_text(self, text: str) -> str:
-        """
-        Clean unstructured text such as PDF/plain text extraction.
-
-        This method intentionally folds single newlines because PDF extraction
-        often breaks one paragraph into many physical lines. Do not use it for
-        Markdown-like structured text: it destroys heading boundaries.
-        """
         text = text.replace("\r", "\n")
-
-        # склеиваем сломанные переносы строк
         text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
-
-        # нормализуем пробелы
         text = re.sub(r"[ \t]+", " ", text)
-
-        # восстанавливаем абзацы
         text = re.sub(r"\n{3,}", "\n\n", text)
-
         return text.strip()
 
     def _clean_structured_text(self, text: str) -> str:
-        """
-        Clean Markdown / structured text without collapsing heading boundaries.
-
-        Knowledge-base Markdown must keep newlines before headings and lists,
-        otherwise section-aware chunking cannot split by semantic sections.
-        """
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         lines = [re.sub(r"[ \t]+", " ", line).rstrip() for line in text.split("\n")]
         text = "\n".join(lines)
@@ -85,26 +67,18 @@ class ChunkerService:
         return text.strip()
 
     def chunk_text(self, text: str) -> list[str]:
-        """
-        Split extracted text into stable RAG chunks.
-
-        Runtime guarantee:
-        - large text must never collapse into one giant chunk;
-        - Markdown headers are preserved as useful context when possible;
-        - if structure detection fails, fallback still splits by size.
-        """
         clean_text = self._normalized_input(text)
         if not clean_text:
             return []
 
-        if self._should_split_directly(clean_text):
-            return self._non_empty_chunks(self._split_buffer(clean_text))
+        if re.search(r"(?m)^#{1,6}\s+\S", clean_text):
+            chunks = self._chunk_markdown_sections(clean_text)
+            if chunks:
+                return self._non_empty_chunks(chunks)
 
-        chunks = self._chunk_markdown_sections(clean_text)
-        if chunks:
-            return self._non_empty_chunks(chunks)
-
-        return self._non_empty_chunks(self._split_buffer(clean_text))
+        return self._non_empty_chunks(
+            self._split_text_by_budget(clean_text, budget=self.chunk_size)
+        )
 
     def _normalized_input(self, text: str) -> str:
         if not text:
@@ -115,69 +89,126 @@ class ChunkerService:
 
         return self._clean_text(text)
 
-    def _should_split_directly(self, text: str) -> bool:
-        # Fast and safe path: if text is already one big cleaned block,
-        # split it directly. This protects runtime uploads from becoming
-        # a single huge knowledge chunk.
-        return len(text) >= self.chunk_size and "\n#" not in text
-
     def _chunk_markdown_sections(self, text: str) -> list[str]:
-        sections = re.split(r"(?:^|\n)(#{1,3}\s[^\n]+)", text)
+        sections = [
+            section.strip()
+            for section in re.split(r"(?m)(?=^#{1,6}\s+\S)", text)
+            if section.strip()
+        ]
 
-        builder = _SectionChunkBuilder(chunker=self)
-        for part in sections:
-            builder.add(part)
+        chunks: list[str] = []
+        for section in sections:
+            chunks.extend(self._split_markdown_section(section))
+        return chunks
 
-        return builder.finish()
+    def _split_markdown_section(self, section: str) -> list[str]:
+        if len(section) <= self.chunk_size:
+            return [section]
 
-    def _split_buffer(self, text: str) -> list[str]:
-        """
-        sentence-aware splitting
-        """
-        if len(text) <= self.chunk_size:
+        lines = section.splitlines()
+        if not lines or not _is_markdown_header(lines[0]):
+            return self._split_text_by_budget(section, budget=self.chunk_size)
+
+        header = lines[0].strip()
+        body = "\n".join(lines[1:]).strip()
+        if not body:
+            return [header]
+
+        prefix = f"{header}\n\n"
+        budget = self.chunk_size - len(prefix)
+        if budget < 400:
+            return self._split_text_by_budget(section, budget=self.chunk_size)
+
+        return [
+            f"{prefix}{chunk}".strip()
+            for chunk in self._split_text_by_budget(body, budget=budget)
+            if chunk.strip()
+        ]
+
+    def _split_text_by_budget(self, text: str, *, budget: int) -> list[str]:
+        if len(text) <= budget:
             return [text]
 
-        chunks = []
-        start = 0
+        paragraphs = [
+            part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()
+        ]
+        if not paragraphs:
+            return self._split_long_plain_text(text, budget=budget)
 
-        while start < len(text):
-            end = min(start + self.chunk_size, len(text))
+        chunks: list[str] = []
+        current = ""
 
-            # режем по предложениям
-            cut = max(
-                text.rfind(". ", start, end),
-                text.rfind("! ", start, end),
-                text.rfind("? ", start, end),
-                text.rfind("\n", start, end),
-            )
+        for paragraph in paragraphs:
+            candidate = f"{current}\n\n{paragraph}".strip() if current else paragraph
+            if len(candidate) <= budget:
+                current = candidate
+                continue
 
-            if cut > start:
-                end = cut + 1
+            if current:
+                chunks.append(current)
+                current = ""
 
-            chunk = text[start:end].strip()
+            if len(paragraph) <= budget:
+                current = paragraph
+                continue
 
-            if chunk:
-                chunks.append(chunk)
+            chunks.extend(self._split_long_plain_text(paragraph, budget=budget))
 
-            # Если дошли до конца текста — завершаем цикл.
-            # Иначе overlap вернёт start назад и можно бесконечно
-            # повторять последний хвост документа.
-            if end >= len(text):
-                break
-
-            next_start = max(end - self.overlap, 0)
-
-            # Защита от не-прогресса: при странных cut/overlap
-            # следующий start обязан двигаться вправо.
-            if next_start <= start:
-                next_start = end
-
-            start = next_start
+        if current:
+            chunks.append(current)
 
         return chunks
 
+    def _split_long_plain_text(self, text: str, *, budget: int) -> list[str]:
+        chunks: list[str] = []
+        start = 0
+
+        while start < len(text):
+            end = min(start + budget, len(text))
+            if end >= len(text):
+                chunk = text[start:].strip()
+                if chunk:
+                    chunks.append(chunk)
+                break
+
+            cut = self._best_boundary_cut(text, start=start, end=end)
+            if cut <= start:
+                cut = end
+
+            chunk = text[start:cut].strip()
+            if chunk:
+                chunks.append(chunk)
+
+            start = self._skip_separators(text, cut)
+
+        return chunks
+
+    def _best_boundary_cut(self, text: str, *, start: int, end: int) -> int:
+        lower_bound = start + max(120, (end - start) // 2)
+        candidates = (
+            text.rfind("\n\n", lower_bound, end),
+            text.rfind("\n- ", lower_bound, end),
+            text.rfind("\n* ", lower_bound, end),
+            text.rfind(". ", lower_bound, end),
+            text.rfind("! ", lower_bound, end),
+            text.rfind("? ", lower_bound, end),
+            text.rfind("; ", lower_bound, end),
+            text.rfind(", ", lower_bound, end),
+            text.rfind(" ", lower_bound, end),
+        )
+        return max(candidates)
+
+    def _skip_separators(self, text: str, index: int) -> int:
+        while index < len(text) and text[index].isspace():
+            index += 1
+        return index
+
     def _non_empty_chunks(self, chunks: list[str]) -> list[str]:
-        return [chunk.strip() for chunk in chunks if chunk.strip()]
+        return [
+            chunk.strip()
+            for chunk in chunks
+            if chunk.strip() and not re.fullmatch(r"[-*_—–]{3,}", chunk.strip())
+        ]
 
     async def process_file(
         self, file_bytes: bytes | bytearray, filename: str
@@ -277,103 +308,5 @@ class ChunkerService:
         return result
 
 
-class _SectionChunkBuilder:
-    def __init__(self, *, chunker: ChunkerService) -> None:
-        self._chunker = chunker
-        self._chunks: list[str] = []
-        self._current_header = ""
-        self._buffer = ""
-
-    def add(self, part: str) -> None:
-        part = part.strip()
-        if not part:
-            return
-
-        if _is_markdown_header(part):
-            self._flush()
-            self._current_header = part
-            self._buffer = ""
-            return
-
-        if self._buffer:
-            self._buffer = f"{self._buffer}\n\n{part}"
-        else:
-            self._buffer = part
-
-    def finish(self) -> list[str]:
-        self._flush()
-        return self._chunks
-
-    def _flush(self) -> None:
-        body = self._buffer.strip()
-
-        if not self._current_header and not body:
-            return
-
-        if not self._current_header:
-            self._chunks.extend(self._chunker._split_buffer(body))
-            self._buffer = ""
-            return
-
-        if not body:
-            self._chunks.append(self._current_header)
-            self._current_header = ""
-            self._buffer = ""
-            return
-
-        self._chunks.extend(self._split_section_with_header(self._current_header, body))
-        self._current_header = ""
-        self._buffer = ""
-
-    def _split_section_with_header(self, header: str, body: str) -> list[str]:
-        prefix = f"{header}\n\n"
-        budget = self._chunker.chunk_size - len(prefix)
-
-        if budget < 200:
-            return self._chunker._split_buffer(f"{prefix}{body}".strip())
-
-        body_chunks = self._split_body(body, budget=budget)
-        return [f"{prefix}{chunk}".strip() for chunk in body_chunks if chunk.strip()]
-
-    def _split_body(self, text: str, *, budget: int) -> list[str]:
-        if len(text) <= budget:
-            return [text]
-
-        chunks: list[str] = []
-        start = 0
-        overlap = min(self._chunker.overlap, max(0, budget // 4))
-
-        while start < len(text):
-            end = min(start + budget, len(text))
-            cut = max(
-                text.rfind(". ", start, end),
-                text.rfind("! ", start, end),
-                text.rfind("? ", start, end),
-                text.rfind("\n", start, end),
-            )
-
-            if cut > start:
-                end = cut + 1
-
-            chunk = text[start:end].strip()
-            if chunk:
-                chunks.append(chunk)
-
-            if end >= len(text):
-                break
-
-            next_start = max(end - overlap, 0)
-            if next_start <= start:
-                next_start = end
-
-            start = next_start
-
-        return chunks
-
-
 def _is_markdown_header(text: str) -> bool:
-    return re.match(r"^#{1,3}\s", text) is not None
-
-
-def _header_text(text: str) -> str:
-    return text.replace("#", "").strip()
+    return re.match(r"^#{1,6}\s+\S", text.strip()) is not None

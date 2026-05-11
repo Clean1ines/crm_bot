@@ -28,6 +28,7 @@ from src.domain.project_plane.knowledge_document_structure import (
 )
 from src.domain.project_plane.knowledge_semantic_builder import (
     build_knowledge_chunk_drafts,
+    canonicalize_knowledge_chunk_drafts,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
@@ -213,6 +214,21 @@ def _draft_from_json_chunk(
 
     title = _clean_optional_text(chunk.get("title"))
     headings = (title,) if title else ()
+    metadata: dict[str, object] = {}
+    metadata_fields = {
+        "content",
+        "entry_type",
+        "title",
+        "source_excerpt",
+        "questions",
+        "synonyms",
+        "tags",
+        "embedding_text",
+    }
+    for key, value in chunk.items():
+        if key not in metadata_fields:
+            metadata[key] = value
+
     return KnowledgeChunkDraft(
         content=content,
         role=_role_from_entry_type(chunk.get("entry_type")),
@@ -226,6 +242,7 @@ def _draft_from_json_chunk(
         synonyms=_text_tuple(chunk.get("synonyms")),
         tags=_text_tuple(chunk.get("tags")),
         embedding_text=_clean_optional_text(chunk.get("embedding_text")),
+        metadata=metadata,
     )
 
 
@@ -257,10 +274,15 @@ def _document_from_json_chunks(
             )
         )
 
+    canonical_drafts = canonicalize_knowledge_chunk_drafts(
+        document_title=file_name,
+        drafts=tuple(drafts),
+    )
+
     return ParsedKnowledgeDocument(
         source=KnowledgeDocumentSource(filename=file_name),
         title=file_name,
-        chunks=tuple(drafts),
+        chunks=canonical_drafts,
         blocks=tuple(blocks),
     )
 
@@ -316,6 +338,19 @@ def _raw_chunks_for_structured_persistence(
         raw_chunks.append(preserved)
 
     return raw_chunks
+
+
+def _combined_chunks_for_canonical_persistence(
+    *,
+    raw_chunks: list[JsonObject],
+    structured_chunks: list[JsonObject],
+) -> list[JsonObject]:
+    """Combine raw and structured chunks; semantic merging belongs to domain builder."""
+
+    combined: list[JsonObject] = []
+    combined.extend(_raw_chunks_for_structured_persistence(raw_chunks))
+    combined.extend(structured_chunks)
+    return combined
 
 
 class KnowledgeIngestionService:
@@ -492,37 +527,37 @@ class KnowledgeIngestionService:
                     "Knowledge preprocessing produced no indexable structured chunks"
                 )
 
-            raw_chunks = _raw_chunks_for_structured_persistence(indexable_chunks)
-            chunks_to_persist = [*structured_chunks, *raw_chunks]
-            preprocessing_metrics: JsonObject = {
-                **result.metrics,
-                "structured_entries": len(structured_chunks),
-                "raw_chunks_preserved": len(raw_chunks),
-                "persisted_chunks": len(chunks_to_persist),
-                "lossless_preprocessing": True,
-            }
-
+            canonical_chunks = _combined_chunks_for_canonical_persistence(
+                raw_chunks=indexable_chunks,
+                structured_chunks=structured_chunks,
+            )
             document = _document_from_json_chunks(
                 file_name=file_name,
-                chunks=chunks_to_persist,
+                chunks=canonical_chunks,
             )
             normalized = KnowledgeNormalizationService().normalize_document(
                 document,
                 project_id=project_id,
                 document_id=document_id,
             )
-            if not normalized.chunks:
-                raise ValidationError(
-                    "Knowledge preprocessing produced no normalized chunks"
-                )
-
-            preprocessing_metrics["persisted_chunks"] = normalized.total_chunks
-
+            _log_plain_chunk_audit(
+                logger,
+                project_id=project_id,
+                document_id=document_id,
+                chunks=canonical_chunks,
+                context=f"{mode}_canonical_upload",
+            )
             await repo.add_knowledge_chunks(
                 project_id=project_id,
                 document_id=document_id,
                 chunks=normalized.chunks,
             )
+
+            preprocessing_metrics: JsonObject = dict(result.metrics)
+            preprocessing_metrics["raw_chunk_count"] = len(indexable_chunks)
+            preprocessing_metrics["structured_chunk_count"] = len(structured_chunks)
+            preprocessing_metrics["canonical_chunk_count"] = len(normalized.chunks)
+
             await repo.update_document_preprocessing_status(
                 document_id,
                 mode=mode,
