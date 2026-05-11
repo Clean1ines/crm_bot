@@ -65,6 +65,13 @@ def _optional_row_text(row: _RowLookup, key: str) -> str | None:
     return str(value) if value is not None else None
 
 
+def _optional_row_value(row: _RowLookup, key: str) -> object:
+    try:
+        return row[key]
+    except KeyError:
+        return None
+
+
 def _normalize_timestamp(value: object) -> str | None:
     """
     Keep test strings unchanged and serialize real datetime-like values only
@@ -168,6 +175,13 @@ class KnowledgeRepository:
                         kb.document_id,
                         d.file_name AS source,
                         d.status AS document_status,
+                        kb.entry_type,
+                        kb.title,
+                        kb.source_excerpt,
+                        kb.embedding_text,
+                        kb.questions,
+                        kb.synonyms,
+                        kb.tags,
                         COALESCE(kb.embedding_text, kb.content, '') AS search_text,
                         (1 - (kb.embedding <=> $1::vector)) AS vector_score,
                         0.0::double precision AS lexical_score,
@@ -203,6 +217,13 @@ class KnowledgeRepository:
                             kb.document_id,
                             d.file_name AS source,
                             d.status AS document_status,
+                            kb.entry_type,
+                            kb.title,
+                            kb.source_excerpt,
+                            kb.embedding_text,
+                            kb.questions,
+                            kb.synonyms,
+                            kb.tags,
                             trim(concat_ws(
                                 E'\n',
                                 kb.title,
@@ -277,6 +298,13 @@ class KnowledgeRepository:
                             document_id,
                             source,
                             document_status,
+                            entry_type,
+                            title,
+                            source_excerpt,
+                            embedding_text,
+                            questions,
+                            synonyms,
+                            tags,
                             search_text,
                             vector_score,
                             0.0::double precision AS lexical_score,
@@ -292,6 +320,13 @@ class KnowledgeRepository:
                             document_id,
                             source,
                             document_status,
+                            entry_type,
+                            title,
+                            source_excerpt,
+                            embedding_text,
+                            questions,
+                            synonyms,
+                            tags,
                             search_text,
                             0.0::double precision AS vector_score,
                             lexical_score,
@@ -306,6 +341,13 @@ class KnowledgeRepository:
                             max(document_id::text)::uuid AS document_id,
                             max(source) AS source,
                             max(document_status) AS document_status,
+                            max(entry_type) AS entry_type,
+                            max(title) AS title,
+                            max(source_excerpt) AS source_excerpt,
+                            max(embedding_text) AS embedding_text,
+                            (jsonb_agg(questions)->0) AS questions,
+                            (jsonb_agg(synonyms)->0) AS synonyms,
+                            (jsonb_agg(tags)->0) AS tags,
                             max(search_text) AS search_text,
                             max(vector_score) AS vector_score,
                             max(lexical_score) AS lexical_score,
@@ -320,6 +362,13 @@ class KnowledgeRepository:
                         document_id,
                         source,
                         document_status,
+                        entry_type,
+                        title,
+                        source_excerpt,
+                        embedding_text,
+                        questions,
+                        synonyms,
+                        tags,
                         search_text,
                         vector_score,
                         lexical_score,
@@ -439,6 +488,13 @@ class KnowledgeRepository:
                     document_id=_optional_row_text(row, "document_id"),
                     source=_optional_row_text(row, "source"),
                     document_status=_optional_row_text(row, "document_status"),
+                    entry_type=_optional_row_text(row, "entry_type"),
+                    title=_optional_row_text(row, "title"),
+                    source_excerpt=_optional_row_text(row, "source_excerpt"),
+                    embedding_text=_optional_row_text(row, "embedding_text"),
+                    questions=_optional_row_value(row, "questions"),
+                    synonyms=_optional_row_value(row, "synonyms"),
+                    tags=_optional_row_value(row, "tags"),
                 )
             )
 
@@ -610,9 +666,9 @@ class KnowledgeRepository:
                 title=_optional_row_text(row, "title"),
                 source_excerpt=_optional_row_text(row, "source_excerpt"),
                 embedding_text=_optional_row_text(row, "embedding_text"),
-                questions=row["questions"],
-                synonyms=row["synonyms"],
-                tags=row["tags"],
+                questions=_optional_row_value(row, "questions"),
+                synonyms=_optional_row_value(row, "synonyms"),
+                tags=_optional_row_value(row, "tags"),
             )
             for row in rows
         ]
