@@ -316,3 +316,106 @@ async def test_service_records_failed_question_and_continues_run() -> None:
     assert run.results[0].judge_json["recovered"] is True
     assert run.results[1].score == 1.0
     assert report.metrics["total"] == 2
+
+
+class _RetrieverForTechnicalAnswer:
+    async def retrieve(
+        self,
+        *,
+        project_id: str,
+        question: str,
+        limit: int,
+    ) -> list[RagEvalChunk]:
+        return [RagEvalChunk(id="chunk-1", content="Продукт классифицирует намерение.")]
+
+
+class _TechnicalAnswerer:
+    async def answer(
+        self,
+        *,
+        project_id: str,
+        question: str,
+        evidence: list[RagEvalChunk],
+    ) -> str:
+        return (
+            "Не получилось сгенерировать ответ из-за технической ошибки. "
+            "Можете повторить запрос, а если вопрос срочный — я передам диалог менеджеру."
+        )
+
+
+class _JudgeMustNotRun:
+    async def judge_answer(
+        self,
+        *,
+        question: RagEvalQuestion,
+        retrieved_chunks: list[RagEvalChunk],
+        answer_text: str,
+    ):
+        raise AssertionError("judge must not run for technical fallback answers")
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_technical_answer_fallback_before_judge() -> None:
+    from src.application.rag_eval.runner import (
+        RagEvalRunner,
+        RagEvalTechnicalAnswerError,
+    )
+
+    runner = RagEvalRunner(
+        retriever=_RetrieverForTechnicalAnswer(),
+        answerer=_TechnicalAnswerer(),
+        answer_judge=_JudgeMustNotRun(),
+    )
+
+    with pytest.raises(RagEvalTechnicalAnswerError):
+        await runner.run_question(
+            run_id="run-1",
+            project_id="project-1",
+            question=RagEvalQuestion(
+                id="question-technical",
+                dataset_id="dataset-1",
+                project_id="project-1",
+                document_id="document-1",
+                question="Что делает продукт?",
+                question_type="direct",
+                expected_chunk_ids=["chunk-1"],
+                expected_answer_summary="Продукт классифицирует намерение.",
+                should_answer=True,
+            ),
+        )
+
+
+def test_document_structure_question_guard_rejects_real_bad_shapes() -> None:
+    from src.application.rag_eval.dataset_generator import (
+        is_document_structure_eval_question,
+    )
+
+    bad_questions = [
+        "Что сказано в разделе «1. Назначение продукта»?",
+        "Есть ли в документе раздел с номером 1?",
+        "О чём речь в первой части?",
+        "В каком разделе указано, кто является целевой аудиторией продукта?",
+        "Где указано, что продукт подходит агентствам?",
+        "Что написано в разделе «30. Правила ответа ассистента»?",
+    ]
+
+    for question in bad_questions:
+        assert is_document_structure_eval_question(question), question
+
+
+def test_document_structure_question_guard_allows_real_client_questions() -> None:
+    from src.application.rag_eval.dataset_generator import (
+        is_document_structure_eval_question,
+    )
+
+    good_questions = [
+        "Что делает AI-ассистент с клиентскими обращениями?",
+        "Можно ли передать диалог менеджеру?",
+        "Сохраняется ли история переписки?",
+        "Если вопрос связан с возвратом денег, что должен сделать ассистент?",
+        "Можно ли использовать продукт для нескольких проектов?",
+        "Сколько стоит внедрение ассистента?",
+    ]
+
+    for question in good_questions:
+        assert not is_document_structure_eval_question(question), question
