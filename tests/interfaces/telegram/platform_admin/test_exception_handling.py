@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.interfaces.telegram.platform_admin.handlers import (
+from src.interfaces.telegram.platform_admin.handlers import _process_admin_step
+from src.interfaces.telegram.platform_admin.state import (
     STATE_AWAIT_ADD_MANAGER,
     STATE_DELETE_AWAIT_CONFIRM,
-    _process_admin_step,
 )
 from src.interfaces.telegram.platform_admin.knowledge_upload import (
     handle_knowledge_upload,
@@ -16,11 +16,12 @@ from src.interfaces.telegram.platform_admin.knowledge_upload import (
 async def test_add_manager_failure_returns_safe_message_without_raw_exception():
     with (
         patch(
-            "src.interfaces.telegram.platform_admin.handlers._get_data",
+            "src.interfaces.telegram.platform_admin.handlers.get_admin_data",
             AsyncMock(return_value={"project_id": "project-1"}),
         ),
         patch(
-            "src.interfaces.telegram.platform_admin.handlers._clear_state", AsyncMock()
+            "src.interfaces.telegram.platform_admin.handlers.clear_admin_state",
+            AsyncMock(),
         ),
         patch(
             "src.interfaces.telegram.platform_admin.handlers._get_project_menu_keyboard",
@@ -61,7 +62,7 @@ async def test_delete_project_failure_returns_safe_message_without_raw_exception
 
     with (
         patch(
-            "src.interfaces.telegram.platform_admin.handlers._get_data",
+            "src.interfaces.telegram.platform_admin.handlers.get_admin_data",
             AsyncMock(
                 return_value={
                     "project_id": "11111111-1111-1111-1111-111111111111",
@@ -70,7 +71,8 @@ async def test_delete_project_failure_returns_safe_message_without_raw_exception
             ),
         ),
         patch(
-            "src.interfaces.telegram.platform_admin.handlers._clear_state", AsyncMock()
+            "src.interfaces.telegram.platform_admin.handlers.clear_admin_state",
+            AsyncMock(),
         ),
         patch("src.interfaces.telegram.platform_admin.handlers.logger") as logger,
     ):
@@ -93,7 +95,7 @@ async def test_delete_project_failure_returns_safe_message_without_raw_exception
 async def test_knowledge_upload_failure_returns_safe_fallback_and_logs_context():
     with (
         patch(
-            "src.interfaces.telegram.platform_admin.knowledge_upload._get_data",
+            "src.interfaces.telegram.platform_admin.knowledge_upload.get_admin_data",
             AsyncMock(return_value={"project_id": "project-1"}),
         ),
         patch(
@@ -101,7 +103,7 @@ async def test_knowledge_upload_failure_returns_safe_fallback_and_logs_context()
             AsyncMock(side_effect=RuntimeError("telegram token internals")),
         ),
         patch(
-            "src.interfaces.telegram.platform_admin.knowledge_upload._clear_state",
+            "src.interfaces.telegram.platform_admin.knowledge_upload.clear_admin_state",
             AsyncMock(),
         ),
         patch(

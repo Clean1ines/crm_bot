@@ -11,19 +11,20 @@ import json
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.telegram.platform_admin.handlers import (
     AdminResponse,
-    _get_state,
     handle_admin_callback,
     handle_admin_command,
     handle_admin_step,
 )
 from src.interfaces.telegram.platform_admin.keyboards import make_main_menu_keyboard
+from src.interfaces.telegram.platform_admin.state import (
+    STATE_AWAIT_KNOWLEDGE_FILE,
+    get_admin_state,
+)
 from src.interfaces.telegram.platform_admin.knowledge_upload import (
     handle_knowledge_upload,
 )
 
 logger = get_logger(__name__)
-
-STATE_AWAIT_KNOWLEDGE_FILE = "await_knowledge_file"
 
 TelegramPayload = dict[str, object]
 AdminUpdateResult = dict[str, bool]
@@ -93,7 +94,7 @@ async def _handle_document_message(
     message: dict[str, object],
     pool: asyncpg.Pool,
 ) -> tuple[str, TelegramPayload | None]:
-    state = await _get_state(str(chat_id))
+    state = await get_admin_state(str(chat_id))
     if state == STATE_AWAIT_KNOWLEDGE_FILE:
         response = await handle_knowledge_upload(str(chat_id), message, pool)
         return _keyboard_to_dict(response, source="Knowledge upload")

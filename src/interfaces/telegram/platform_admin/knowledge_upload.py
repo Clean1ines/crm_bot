@@ -16,10 +16,10 @@ from src.infrastructure.logging.logger import get_logger
 from src.interfaces.composition.knowledge_upload import (
     upload_platform_admin_knowledge_file,
 )
-from src.interfaces.telegram.platform_admin.handlers import (
-    _clear_state,
-    _get_data,
-    _get_project_menu_keyboard,
+from src.interfaces.telegram.platform_admin.handlers import _get_project_menu_keyboard
+from src.interfaces.telegram.platform_admin.state import (
+    clear_admin_state,
+    get_admin_data,
 )
 
 logger = get_logger(__name__)
@@ -50,7 +50,7 @@ async def _get_file_path(file_id: str) -> str:
 
 
 async def _upload_context_for_upload(chat_id: str) -> tuple[str | None, str]:
-    data = await _get_data(chat_id)
+    data = await get_admin_data(chat_id)
     project_id = data.get("project_id")
     try:
         preprocessing_mode = normalize_preprocessing_mode(
@@ -148,7 +148,7 @@ async def _success_response(
     pool: object,
     chunks_count: int,
 ) -> UploadResult:
-    await _clear_state(chat_id)
+    await clear_admin_state(chat_id)
     return (
         f"Загружено {chunks_count} чанков.\nБаза знаний обновлена.",
         await _get_project_menu_keyboard(project_id, pool),
@@ -161,7 +161,7 @@ async def _failure_response(
     project_id: str,
     pool: object,
 ) -> UploadResult:
-    await _clear_state(chat_id)
+    await clear_admin_state(chat_id)
     return (
         "Ошибка при обработке файла. Попробуйте другой файл или проверьте формат.",
         await _get_project_menu_keyboard(project_id, pool),
@@ -177,7 +177,7 @@ async def handle_knowledge_upload(
 
     if not project_id:
         logger.error("Project ID missing in state", extra={"chat_id": chat_id})
-        await _clear_state(chat_id)
+        await clear_admin_state(chat_id)
         return _missing_project_response()
 
     document, error_response = await _validate_document(
