@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
@@ -318,3 +319,25 @@ async def test_add_knowledge_chunks_persists_typed_chunks(
     assert executed_args[9] == '["upload docs"]'
     assert executed_args[10] == '["docs"]'
     assert executed_args[11] == "FAQ upload documents typed embedding text"
+
+
+def test_search_filters_non_answer_knowledge_roles() -> None:
+    source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "ANSWERABLE_KNOWLEDGE_ENTRY_TYPES" in source
+    assert "AND kb.entry_type = ANY($4::text[])" in source
+    assert "AND kb.entry_type = ANY($6::text[])" in source
+    assert '"internal_eval_test"' not in source
+    assert '"negative_test"' not in source
+    assert '"retrieval_guideline"' not in source
+
+
+def test_answerable_search_filter_uses_domain_role_contract() -> None:
+    source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "ANSWERABLE_KNOWLEDGE_ROLES" in source
+    assert "sorted(role.value for role in ANSWERABLE_KNOWLEDGE_ROLES)" in source
