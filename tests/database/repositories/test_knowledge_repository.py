@@ -341,3 +341,36 @@ def test_answerable_search_filter_uses_domain_role_contract() -> None:
 
     assert "ANSWERABLE_KNOWLEDGE_ROLES" in source
     assert "sorted(role.value for role in ANSWERABLE_KNOWLEDGE_ROLES)" in source
+
+
+def test_search_returns_metadata_observability_fields() -> None:
+    source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+    search_source = source[
+        source.index("    async def search(") : source.index(
+            "    async def preview_search("
+        )
+    ]
+
+    assert "kb.entry_type," in search_source
+    assert "kb.title," in search_source
+    assert "kb.source_excerpt," in search_source
+    assert "kb.embedding_text," in search_source
+    assert "kb.questions," in search_source
+    assert "kb.synonyms," in search_source
+    assert "kb.tags," in search_source
+    assert "max(entry_type) AS entry_type" in search_source
+    assert "(jsonb_agg(questions)->0) AS questions" in search_source
+    assert "(jsonb_agg(synonyms)->0) AS synonyms" in search_source
+    assert "(jsonb_agg(tags)->0) AS tags" in search_source
+    assert "max(questions) AS questions" not in search_source
+    assert "max(synonyms) AS synonyms" not in search_source
+    assert "max(tags) AS tags" not in search_source
+    assert 'entry_type=_optional_row_text(row, "entry_type"),' in search_source
+    assert 'title=_optional_row_text(row, "title"),' in search_source
+    assert 'source_excerpt=_optional_row_text(row, "source_excerpt"),' in search_source
+    assert 'embedding_text=_optional_row_text(row, "embedding_text"),' in search_source
+    assert 'questions=_optional_row_value(row, "questions"),' in search_source
+    assert 'synonyms=_optional_row_value(row, "synonyms"),' in search_source
+    assert 'tags=_optional_row_value(row, "tags"),' in search_source
