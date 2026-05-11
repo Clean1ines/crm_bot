@@ -7,6 +7,10 @@ import asyncpg
 from telegram import InlineKeyboardMarkup
 
 from src.application.dto.knowledge_dto import KnowledgeUploadResultDto
+from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgePreprocessingValidationError,
+    normalize_preprocessing_mode,
+)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.composition.knowledge_upload import (
@@ -45,12 +49,19 @@ async def _get_file_path(file_id: str) -> str:
             return data["result"]["file_path"]
 
 
-async def _project_id_for_upload(chat_id: str) -> str | None:
+async def _upload_context_for_upload(chat_id: str) -> tuple[str | None, str]:
     data = await _get_data(chat_id)
     project_id = data.get("project_id")
+    try:
+        preprocessing_mode = normalize_preprocessing_mode(
+            data.get("preprocessing_mode")
+        )
+    except KnowledgePreprocessingValidationError:
+        preprocessing_mode = "plain"
+
     if project_id is None:
-        return None
-    return str(project_id)
+        return None, preprocessing_mode
+    return str(project_id), preprocessing_mode
 
 
 def _missing_project_response() -> UploadResult:
@@ -118,12 +129,14 @@ async def _queue_knowledge_upload(
     project_id: str,
     filename: str,
     file_content: bytes,
+    preprocessing_mode: str,
 ) -> KnowledgeUploadResultDto:
     return await upload_platform_admin_knowledge_file(
         pool=pool,
         project_id=project_id,
         file_name=filename,
         file_content=file_content,
+        preprocessing_mode=preprocessing_mode,
         logger=logger,
     )
 
@@ -160,7 +173,7 @@ async def handle_knowledge_upload(
     message: dict[str, object],
     pool: asyncpg.Pool,
 ) -> UploadResult:
-    project_id = await _project_id_for_upload(chat_id)
+    project_id, preprocessing_mode = await _upload_context_for_upload(chat_id)
 
     if not project_id:
         logger.error("Project ID missing in state", extra={"chat_id": chat_id})
@@ -190,7 +203,11 @@ async def handle_knowledge_upload(
 
     logger.info(
         "Starting knowledge upload",
-        extra={"project_id": project_id, "filename": filename},
+        extra={
+            "project_id": project_id,
+            "filename": filename,
+            "preprocessing_mode": preprocessing_mode,
+        },
     )
 
     try:
@@ -200,6 +217,7 @@ async def handle_knowledge_upload(
             project_id=project_id,
             filename=filename,
             file_content=file_content,
+            preprocessing_mode=preprocessing_mode,
         )
         if result.chunks <= 0:
             logger.warning("No chunks generated", extra={"filename": filename})
@@ -211,6 +229,8 @@ async def handle_knowledge_upload(
                 "project_id": project_id,
                 "document_id": result.document_id,
                 "chunks": result.chunks,
+                "preprocessing_mode": result.preprocessing_mode,
+                "preprocessing_status": result.preprocessing_status,
             },
         )
         return await _success_response(

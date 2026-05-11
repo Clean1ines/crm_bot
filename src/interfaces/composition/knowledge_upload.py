@@ -116,6 +116,7 @@ async def upload_platform_admin_knowledge_file(
     project_id: str,
     file_name: str | None,
     file_content: bytes | bytearray,
+    preprocessing_mode: str,
     logger: LoggerPort,
 ) -> KnowledgeUploadResultDto:
     return await upload_knowledge_file(
@@ -129,6 +130,6 @@ async def upload_platform_admin_knowledge_file(
         authorization=None,
         uploaded_by_user_id=None,
         trusted_upload=True,
-        preprocessing_mode="plain",
+        preprocessing_mode=preprocessing_mode,
         logger=logger,
     )

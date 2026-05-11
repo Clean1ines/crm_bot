@@ -19,6 +19,7 @@ from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.redis.client import get_redis_client
 from src.interfaces.telegram.platform_admin.keyboards import (
     make_back_keyboard,
+    make_knowledge_preprocessing_mode_keyboard,
     make_main_menu_keyboard,
     make_project_dynamic_keyboard,
     make_projects_list_keyboard,
@@ -392,12 +393,49 @@ async def _handle_create_manager_bot_callback(
 async def _handle_knowledge_callback(
     callback_data: str, chat_id: str, pool
 ) -> AdminResponse:
+    del pool
+
     project_id = _callback_project_id(callback_data)
-    await _set_data(chat_id, {"project_id": project_id})
+    await _clear_state(chat_id)
+    return (
+        "Выберите режим обработки файла для базы знаний.\n\n"
+        "Без предобработки — быстрее, но хуже для сложных документов.\n"
+        "FAQ, прайс и инструкция — LLM-нормализация перед индексацией.",
+        make_knowledge_preprocessing_mode_keyboard(project_id),
+    )
+
+
+def _parse_knowledge_mode_callback(callback_data: str) -> tuple[str, str] | None:
+    parts = callback_data.split(":", 2)
+    if len(parts) != 3:
+        return None
+
+    _, project_id, preprocessing_mode = parts
+    if preprocessing_mode not in {"plain", "faq", "price_list", "instruction"}:
+        return None
+
+    return project_id, preprocessing_mode
+
+
+async def _handle_knowledge_mode_callback(
+    callback_data: str, chat_id: str, pool
+) -> AdminResponse:
+    del pool
+
+    parsed = _parse_knowledge_mode_callback(callback_data)
+    if parsed is None:
+        await _clear_state(chat_id)
+        return "Некорректный режим загрузки. Начните заново через /start.", None
+
+    project_id, preprocessing_mode = parsed
+    await _set_data(
+        chat_id,
+        {"project_id": project_id, "preprocessing_mode": preprocessing_mode},
+    )
     await _set_state(chat_id, STATE_AWAIT_KNOWLEDGE_FILE)
     return (
-        "Отправьте файл с документами (PDF, DOCX, TXT).\n"
-        "Я обработаю его и добавлю в базу знаний проекта.",
+        "Отправьте файл с документами (.pdf, .txt, .md или .json).\n"
+        f"Режим обработки: {preprocessing_mode}.",
         make_back_keyboard(f"project:{project_id}"),
     )
 
@@ -538,6 +576,7 @@ PREFIX_CALLBACK_HANDLERS = (
     ("project:", _handle_project_callback),
     ("create_client_bot:", _handle_create_client_bot_callback),
     ("create_manager_bot:", _handle_create_manager_bot_callback),
+    ("knowledge_mode:", _handle_knowledge_mode_callback),
     ("knowledge:", _handle_knowledge_callback),
     ("managers:", _handle_managers_callback),
     ("detach_bot:", _handle_detach_bot_callback),
