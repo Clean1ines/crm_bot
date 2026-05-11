@@ -117,6 +117,42 @@ def make_back_keyboard(target_callback: str = "back_to_main") -> InlineKeyboardM
     )
 
 
+def make_knowledge_preprocessing_mode_keyboard(project_id: str) -> InlineKeyboardMarkup:
+    logger.debug(
+        "Building knowledge preprocessing mode keyboard",
+        extra={"project_id": project_id},
+    )
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Без предобработки",
+                    callback_data=f"knowledge_mode:{project_id}:plain",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "FAQ / вопросы-ответы",
+                    callback_data=f"knowledge_mode:{project_id}:faq",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Прайс / каталог",
+                    callback_data=f"knowledge_mode:{project_id}:price_list",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Инструкция / регламент",
+                    callback_data=f"knowledge_mode:{project_id}:instruction",
+                )
+            ],
+            [InlineKeyboardButton("Назад", callback_data=f"project:{project_id}")],
+        ]
+    )
+
+
 def make_detach_choice_keyboard(project_id: str) -> InlineKeyboardMarkup:
     logger.debug("Building detach choice keyboard", extra={"project_id": project_id})
     return InlineKeyboardMarkup(
