@@ -11,7 +11,7 @@ from src.interfaces.telegram.platform_admin.knowledge_upload import (
 @pytest.mark.asyncio
 async def test_knowledge_callback_asks_for_preprocessing_mode(monkeypatch) -> None:
     clear_state = AsyncMock()
-    monkeypatch.setattr(handlers, "_clear_state", clear_state)
+    monkeypatch.setattr(handlers, "clear_admin_state", clear_state)
 
     text, keyboard = await handlers.handle_admin_callback(
         "knowledge:project-1",
@@ -40,8 +40,8 @@ async def test_knowledge_mode_callback_stores_mode_and_awaits_file(
 ) -> None:
     set_data = AsyncMock()
     set_state = AsyncMock()
-    monkeypatch.setattr(handlers, "_set_data", set_data)
-    monkeypatch.setattr(handlers, "_set_state", set_state)
+    monkeypatch.setattr(handlers, "set_admin_data", set_data)
+    monkeypatch.setattr(handlers, "set_admin_state", set_state)
 
     text, keyboard = await handlers.handle_admin_callback(
         "knowledge_mode:project-1:faq",
@@ -63,7 +63,7 @@ async def test_knowledge_mode_callback_stores_mode_and_awaits_file(
 @pytest.mark.asyncio
 async def test_knowledge_mode_callback_rejects_unknown_mode(monkeypatch) -> None:
     clear_state = AsyncMock()
-    monkeypatch.setattr(handlers, "_clear_state", clear_state)
+    monkeypatch.setattr(handlers, "clear_admin_state", clear_state)
 
     text, keyboard = await handlers.handle_admin_callback(
         "knowledge_mode:project-1:weird",
