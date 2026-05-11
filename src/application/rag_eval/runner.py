@@ -14,6 +14,31 @@ from src.application.rag_eval.schemas import (
 )
 
 
+TECHNICAL_ANSWER_MARKERS = (
+    "Не получилось сгенерировать ответ из-за технической ошибки",
+    "Техническая ошибка повторилась",
+    "Не получилось обработать запрос из-за технической ошибки",
+)
+
+
+class RagEvalTechnicalAnswerError(RuntimeError):
+    """Raised when production answer generation returned a technical fallback.
+
+    This is not a RAG quality failure. It means the provider/runtime failed
+    before a real answer could be evaluated, so the full-document eval should
+    pause/retry instead of polluting the quality report with artificial zeroes.
+    """
+
+    def __init__(self, answer_text: str) -> None:
+        super().__init__(answer_text[:500])
+        self.answer_text = answer_text
+
+
+def is_rag_eval_technical_answer(answer_text: str) -> bool:
+    normalized = " ".join(answer_text.split())
+    return any(marker in normalized for marker in TECHNICAL_ANSWER_MARKERS)
+
+
 class RagEvalRunner:
     def __init__(
         self,
@@ -48,6 +73,9 @@ class RagEvalRunner:
             question=question.question,
             evidence=retrieved_chunks,
         )
+
+        if is_rag_eval_technical_answer(answer_text):
+            raise RagEvalTechnicalAnswerError(answer_text)
 
         judge = await self._answer_judge.judge_answer(
             question=question,

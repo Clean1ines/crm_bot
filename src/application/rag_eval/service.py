@@ -12,7 +12,7 @@ from src.application.rag_eval.ports import (
     RagEvalStorePort,
 )
 from src.application.rag_eval.reporter import RagQualityReporter
-from src.application.rag_eval.runner import RagEvalRunner
+from src.application.rag_eval.runner import RagEvalRunner, RagEvalTechnicalAnswerError
 from src.application.rag_eval.schemas import (
     RagEvalRun,
     RagQualityReport,
@@ -87,6 +87,8 @@ class RagEvalService:
                         project_id=project_id,
                         question=question,
                     )
+                except RagEvalTechnicalAnswerError:
+                    raise
                 except Exception as exc:
                     result = self._runner.failed_result(
                         run_id=run.id,

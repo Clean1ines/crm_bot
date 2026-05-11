@@ -26,6 +26,83 @@ MAX_CHUNK_CHARS = 700
 MIN_VARIANTS_PER_FACT = 5
 
 
+DOCUMENT_STRUCTURE_QUESTION_MARKERS = (
+    "что сказано в разделе",
+    "что написано в разделе",
+    "есть ли в документе раздел",
+    "раздел с номером",
+    "номер раздела",
+    "в каком разделе",
+    "о чём речь в первой части",
+    "о чем речь в первой части",
+    "первая часть",
+    "этот фрагмент",
+    "данный фрагмент",
+    "в этом фрагменте",
+    "фрагмент документа",
+    "заголовок раздела",
+    "где указано",
+    "где написано",
+    "о чём речь",
+    "о чем речь",
+)
+
+
+def is_document_structure_eval_question(question: str) -> bool:
+    normalized = " ".join(question.casefold().split())
+
+    if any(marker in normalized for marker in DOCUMENT_STRUCTURE_QUESTION_MARKERS):
+        return True
+
+    if "раздел" in normalized and (
+        "что сказано" in normalized
+        or "что написано" in normalized
+        or "есть ли" in normalized
+        or "номер" in normalized
+    ):
+        return True
+
+    if normalized.startswith("где ") and (
+        "указано" in normalized
+        or "написано" in normalized
+        or "найти информацию" in normalized
+    ):
+        return True
+
+    return False
+
+
+RAG_EVAL_QUESTION_QUALITY_RULES = """
+Generate real client/user questions about the product facts, not questions about
+the source document structure.
+
+Strictly forbidden:
+- questions about section numbers, headings, fragments, paragraphs, first part,
+  "what is written in section X", "is there section X";
+- questions whose answer is merely that a section exists;
+- questions asking where information is located in the document;
+- questions copied from built-in test sections;
+- near-duplicate questions that test the same fact many times.
+
+Forbidden Russian shapes:
+- "что сказано в разделе ..."
+- "есть ли в документе раздел ..."
+- "о чём речь в первой части ..."
+- "в каком разделе указано ..."
+- "где указано ..."
+- "этот фрагмент ..."
+
+If the chunk contains test questions, negative tests, preview checks, expected
+topics, or RAG-search rules, do not treat that text as product facts for new
+questions. Use it only as guidance for boundaries.
+
+For one source fact generate at most:
+- one direct question;
+- one natural paraphrase;
+- one risky/boundary question when useful.
+"""
+
+
 class LlmRagEvalDatasetGenerator:
     """Generates a universal fact/variant RAG eval dataset from document chunks.
 
@@ -130,7 +207,8 @@ class LlmRagEvalDatasetGenerator:
                 if question is None:
                     continue
 
-                questions.append(question)
+                if not is_document_structure_eval_question(question.question):
+                    questions.append(question)
 
             if progress_callback is not None:
                 await progress_callback(
@@ -168,7 +246,9 @@ class LlmRagEvalDatasetGenerator:
     ) -> Mapping[str, object]:
         try:
             return await self._llm.complete_json(
-                system_prompt=self._system_prompt(),
+                system_prompt=RAG_EVAL_QUESTION_QUALITY_RULES
+                + "\n\n"
+                + self._system_prompt(),
                 user_prompt=self._user_prompt(
                     project_id=project_id,
                     document_id=document_id,

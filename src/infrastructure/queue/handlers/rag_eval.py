@@ -17,7 +17,7 @@ from src.application.rag_eval.dataset_generator import (
 )
 from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.reporter import RagQualityReporter
-from src.application.rag_eval.runner import RagEvalRunner
+from src.application.rag_eval.runner import RagEvalRunner, RagEvalTechnicalAnswerError
 from src.application.rag_eval.service import RagEvalService
 from src.application.rag_eval.schemas import RagEvalRun, RagQualityReport, new_eval_id
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
@@ -644,6 +644,20 @@ async def _run_full_document_rag_eval(
             )
         else:
             run, report = resumed
+    except RagEvalTechnicalAnswerError as exc:
+        await _write_rag_eval_progress(
+            db_pool=db_pool,
+            job_id=job_id,
+            progress={
+                **base_progress,
+                "stage": "paused_provider_limit",
+                "status": "paused",
+                "message": "RAG eval paused: provider returned a technical answer fallback, likely Groq quota/rate limit exhaustion",
+                "percent": current_control_progress.get("percent", 0.0),
+                "updated_at": _utc_now_iso(),
+            },
+        )
+        raise _transient_from_provider_error(exc) from exc
     except Exception as exc:
         await _write_rag_eval_progress(
             db_pool=db_pool,
