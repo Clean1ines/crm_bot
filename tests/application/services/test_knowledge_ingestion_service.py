@@ -26,10 +26,9 @@ def _usage_repo() -> Mock:
 async def test_process_document_marks_plain_upload_processed():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_batch = AsyncMock(return_value=2)
+    repo.add_knowledge_chunks = AsyncMock(return_value=2)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
-    repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
     usage_repo = _usage_repo()
 
     service = KnowledgeIngestionService(object())
@@ -38,7 +37,10 @@ async def test_process_document_marks_plain_upload_processed():
         project_id="project-1",
         document_id="doc-1",
         file_name="test.txt",
-        chunks=[{"content": "one"}, {"content": "two"}],
+        chunks=[
+            {"content": "First useful knowledge paragraph with enough content."},
+            {"content": "Second useful knowledge paragraph with enough content."},
+        ],
         mode="plain",
         knowledge_repo_factory=Mock(return_value=repo),
         model_usage_repo_factory=Mock(return_value=usage_repo),
@@ -50,10 +52,18 @@ async def test_process_document_marks_plain_upload_processed():
     assert result.preprocessing_status == "not_requested"
     assert result.structured_entries == 0
     repo.delete_document_chunks.assert_awaited_once_with("doc-1")
-    repo.add_knowledge_batch.assert_awaited_once_with(
-        "project-1",
-        [{"content": "one"}, {"content": "two"}],
-        document_id="doc-1",
+    repo.add_knowledge_chunks.assert_awaited_once()
+    typed_call = repo.add_knowledge_chunks.await_args.kwargs
+    assert typed_call["project_id"] == "project-1"
+    assert typed_call["document_id"] == "doc-1"
+    assert len(typed_call["chunks"]) == 2
+    assert (
+        typed_call["chunks"][0].content
+        == "First useful knowledge paragraph with enough content."
+    )
+    assert (
+        typed_call["chunks"][1].content
+        == "Second useful knowledge paragraph with enough content."
     )
     repo.update_document_preprocessing_status.assert_awaited_once_with(
         "doc-1",
@@ -68,7 +78,7 @@ async def test_process_document_marks_plain_upload_processed():
 async def test_process_document_marks_document_error_on_embedding_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_batch = AsyncMock(side_effect=RuntimeError("embed failed"))
+    repo.add_knowledge_chunks = AsyncMock(side_effect=RuntimeError("embed failed"))
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
 
@@ -79,7 +89,7 @@ async def test_process_document_marks_document_error_on_embedding_failure():
             project_id="project-1",
             document_id="doc-err",
             file_name="test.txt",
-            chunks=[{"content": "one"}],
+            chunks=[{"content": "Useful knowledge paragraph with enough content."}],
             mode="plain",
             knowledge_repo_factory=Mock(return_value=repo),
             model_usage_repo_factory=Mock(return_value=_usage_repo()),
@@ -96,7 +106,7 @@ async def test_process_document_marks_document_error_on_embedding_failure():
 async def test_process_document_retries_transient_embedding_provider_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_batch = AsyncMock(
+    repo.add_knowledge_chunks = AsyncMock(
         side_effect=TransientEmbeddingProviderError(
             "Embedding provider temporary failure",
             provider="voyage",
@@ -115,7 +125,7 @@ async def test_process_document_retries_transient_embedding_provider_failure():
             project_id="project-1",
             document_id="doc-retry",
             file_name="test.txt",
-            chunks=[{"content": "one"}],
+            chunks=[{"content": "Useful knowledge paragraph with enough content."}],
             mode="plain",
             knowledge_repo_factory=Mock(return_value=repo),
             model_usage_repo_factory=Mock(return_value=_usage_repo()),
@@ -130,7 +140,7 @@ async def test_process_document_retries_transient_embedding_provider_failure():
 async def test_process_document_marks_document_error_on_permanent_provider_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_batch = AsyncMock(
+    repo.add_knowledge_chunks = AsyncMock(
         side_effect=PermanentEmbeddingProviderError(
             "Embedding provider access denied",
             provider="voyage",
@@ -148,7 +158,7 @@ async def test_process_document_marks_document_error_on_permanent_provider_failu
             project_id="project-1",
             document_id="doc-perm",
             file_name="test.txt",
-            chunks=[{"content": "one"}],
+            chunks=[{"content": "Useful knowledge paragraph with enough content."}],
             mode="plain",
             knowledge_repo_factory=Mock(return_value=repo),
             model_usage_repo_factory=Mock(return_value=_usage_repo()),
@@ -165,8 +175,7 @@ async def test_process_document_marks_document_error_on_permanent_provider_failu
 async def test_process_document_records_preprocessing_usage():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_batch = AsyncMock(return_value=1)
-    repo.add_structured_knowledge_batch = AsyncMock(return_value=1)
+    repo.add_knowledge_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
     usage_repo = _usage_repo()
@@ -201,7 +210,7 @@ async def test_process_document_records_preprocessing_usage():
         project_id="project-1",
         document_id="doc-usage",
         file_name="faq.txt",
-        chunks=[{"content": "one"}],
+        chunks=[{"content": "Useful knowledge paragraph with enough content."}],
         mode="faq",
         knowledge_repo_factory=Mock(return_value=repo),
         model_usage_repo_factory=Mock(return_value=usage_repo),

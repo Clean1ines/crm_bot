@@ -74,22 +74,6 @@ class FakeKnowledgeRepo:
     ) -> str:
         return "doc-1"
 
-    async def add_knowledge_batch(
-        self,
-        project_id: str,
-        chunks: list[dict[str, object]],
-        document_id: str | None = None,
-    ) -> int:
-        return len(chunks)
-
-    async def add_structured_knowledge_batch(
-        self,
-        project_id: str,
-        chunks: list[dict[str, object]],
-        document_id: str | None = None,
-    ) -> int:
-        return len(chunks)
-
     async def update_document_status(
         self,
         document_id: str,

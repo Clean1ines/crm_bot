@@ -99,8 +99,6 @@ class TestKnowledgeUpload:
                 MockRepo.return_value = mock_repo
                 mock_repo.create_document = AsyncMock(return_value="doc-1")
                 mock_repo.update_document_preprocessing_status = AsyncMock()
-                mock_repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
-                mock_repo.add_knowledge_batch = AsyncMock(return_value=2)
 
                 with patch(
                     "src.interfaces.http.knowledge.jwt.decode",
@@ -157,8 +155,6 @@ class TestKnowledgeUpload:
                 MockRepo.return_value = mock_repo
                 mock_repo.create_document = AsyncMock(return_value="doc-1")
                 mock_repo.update_document_preprocessing_status = AsyncMock()
-                mock_repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
-                mock_repo.add_knowledge_batch = AsyncMock(return_value=1)
 
                 with patch(
                     "src.interfaces.http.knowledge.jwt.decode",
@@ -194,8 +190,6 @@ class TestKnowledgeUpload:
                 MockRepo.return_value = mock_repo
                 mock_repo.create_document = AsyncMock(return_value="doc-1")
                 mock_repo.update_document_preprocessing_status = AsyncMock()
-                mock_repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
-                mock_repo.add_knowledge_batch = AsyncMock(return_value=1)
 
                 with patch(
                     "src.interfaces.http.knowledge.jwt.decode",
@@ -485,8 +479,6 @@ class TestKnowledgeUpload:
                     MockRepo.return_value = mock_repo
                     mock_repo.create_document = AsyncMock(return_value="doc-1")
                     mock_repo.update_document_preprocessing_status = AsyncMock()
-                    mock_repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
-                    mock_repo.add_knowledge_batch = AsyncMock(return_value=1)
 
                     response = client.post(
                         f"/api/projects/{project_id}/knowledge",
@@ -534,8 +526,6 @@ class TestKnowledgeUpload:
                     MockRepo.return_value = mock_repo
                     mock_repo.create_document = AsyncMock(return_value="doc-1")
                     mock_repo.update_document_preprocessing_status = AsyncMock()
-                    mock_repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
-                    mock_repo.add_knowledge_batch = AsyncMock(return_value=1)
 
                     response = client.post(
                         f"/api/projects/{project_id}/knowledge",
