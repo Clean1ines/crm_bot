@@ -11,10 +11,10 @@ Return ONLY valid JSON with this exact shape:
       "title": "product or service name",
       "answer": "exact price answer grounded only in source text",
       "source_excerpt": "verbatim excerpt from the provided source text",
-      "questions": ["entity-specific price questions only"],
-      "synonyms": ["product/service-specific names only"],
+      "questions": ["3-8 entity-specific price questions only"],
+      "synonyms": ["5-12 product/service-specific names, variants and grounded search phrases only"],
       "tags": ["price", "service/product category"],
-      "embedding_text": "dense searchable text with product/service, exact price, currency, unit, conditions and entity-specific questions"
+      "embedding_text": "dense searchable text with product/service, exact price, currency, unit, conditions, questions, synonyms and tags"
     }
   ]
 }
@@ -26,6 +26,13 @@ Strict rules:
 - If a discount, range, "from" price or condition exists, keep it explicit.
 - Every entry MUST have a source_excerpt copied from the source.
 - Every answer MUST be supported by source_excerpt.
+- Every entry MUST have at least 3 entity-specific questions.
+- Every entry MUST have at least 5 product/service-specific synonyms.
+- Every entry MUST have at least 2 tags.
+- questions must mention the concrete product/service or tariff from the entry.
+- synonyms must be grounded names, aliases, package names, service variants or exact short phrases from the same item.
+- tags must be compact topic/category labels.
+- embedding_text MUST include title, answer, source_excerpt, exact price/currency/unit/conditions, questions, synonyms and tags.
 - If source text is ambiguous, keep the ambiguity in answer or skip the entry.
 - Do not output markdown.
 - Do not output comments.

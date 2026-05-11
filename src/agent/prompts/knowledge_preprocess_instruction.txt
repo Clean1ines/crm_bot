@@ -11,10 +11,10 @@ Return ONLY valid JSON with this exact shape:
       "title": "short rule/procedure title",
       "answer": "canonical operational answer grounded only in source text",
       "source_excerpt": "verbatim excerpt from the provided source text",
-      "questions": ["customer or operator questions this rule answers"],
-      "synonyms": ["specific paraphrases for this rule/procedure"],
-      "tags": ["policy/procedure category"],
-      "embedding_text": "dense searchable text combining rule, answer, conditions, exceptions, questions and tags"
+      "questions": ["3-8 customer or operator questions this rule answers"],
+      "synonyms": ["5-12 specific paraphrases, intent phrases and short variants for this rule/procedure"],
+      "tags": ["2-8 policy/procedure category tags"],
+      "embedding_text": "dense searchable text combining rule, answer, conditions, exceptions, source_excerpt, questions, synonyms and tags"
     }
   ]
 }
@@ -25,5 +25,12 @@ Rules:
 - Do not invent missing steps.
 - Every entry MUST have a source_excerpt copied from the source.
 - Every answer MUST be supported by source_excerpt.
+- Every entry MUST have at least 3 questions.
+- Every entry MUST have at least 5 synonyms.
+- Every entry MUST have at least 2 tags.
+- questions must include realistic customer/operator formulations of the same rule.
+- synonyms must include grounded wording variants, intent phrases, short phrases and domain terms from the rule/procedure.
+- tags must be compact policy/procedure labels.
+- embedding_text MUST include title, answer, source_excerpt, conditions, exceptions, questions, synonyms and tags.
 - Do not output markdown.
 - Do not output comments.

@@ -86,14 +86,21 @@ class RAGCandidate:
             score=payload.score,
             method=payload.method,
             source=payload.source,
+            title=payload.title,
             metadata={
                 "document_id": payload.document_id,
                 "document_status": payload.document_status,
+                "entry_type": payload.entry_type,
+                "source_excerpt": payload.source_excerpt,
+                "embedding_text": payload.embedding_text,
+                "questions": payload.questions,
+                "synonyms": payload.synonyms,
+                "tags": payload.tags,
             },
         )
 
     def to_tool_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "content": self.content,
             "score": self.score,
@@ -102,6 +109,21 @@ class RAGCandidate:
             "title": self.title,
             "chunk_index": self.chunk_index,
         }
+
+        for metadata_key in (
+            "document_id",
+            "document_status",
+            "entry_type",
+            "source_excerpt",
+            "embedding_text",
+            "questions",
+            "synonyms",
+            "tags",
+        ):
+            if metadata_key in self.metadata:
+                payload[metadata_key] = self.metadata[metadata_key]
+
+        return payload
 
 
 def _to_text(value: object, *, default: str) -> str:
