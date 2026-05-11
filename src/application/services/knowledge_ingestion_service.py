@@ -12,7 +12,19 @@ from src.application.ports.knowledge_port import (
     KnowledgeRepositoryPort,
 )
 from src.application.ports.logger_port import LoggerPort
+from src.application.services.knowledge_normalization_service import (
+    KnowledgeNormalizationService,
+)
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_chunks import (
+    KnowledgeChunkDraft,
+    KnowledgeChunkRole,
+    KnowledgeSectionPath,
+)
+from src.domain.project_plane.knowledge_document_structure import (
+    KnowledgeDocumentSource,
+    ParsedKnowledgeDocument,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     PREPROCESSING_STATUS_COMPLETED,
@@ -123,6 +135,86 @@ def _indexable_chunks(chunks: list[JsonObject]) -> list[JsonObject]:
     ]
 
 
+def _clean_optional_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.strip().split())
+
+
+def _text_tuple(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        candidates: tuple[object, ...] = (value,)
+    elif isinstance(value, tuple):
+        candidates = value
+    elif isinstance(value, list):
+        candidates = tuple(value)
+    else:
+        return ()
+
+    result: list[str] = []
+    for item in candidates:
+        cleaned = _clean_optional_text(item)
+        if cleaned and cleaned not in result:
+            result.append(cleaned)
+    return tuple(result)
+
+
+def _role_from_entry_type(value: object) -> KnowledgeChunkRole:
+    text = _clean_optional_text(value)
+    if not text:
+        return KnowledgeChunkRole.ANSWER_KNOWLEDGE
+
+    try:
+        return KnowledgeChunkRole(text)
+    except ValueError:
+        return KnowledgeChunkRole.ANSWER_KNOWLEDGE
+
+
+def _draft_from_json_chunk(
+    chunk: JsonObject,
+    *,
+    file_name: str,
+) -> KnowledgeChunkDraft | None:
+    content = _chunk_content(chunk)
+    if not content:
+        return None
+
+    title = _clean_optional_text(chunk.get("title"))
+    headings = (title,) if title else ()
+    return KnowledgeChunkDraft(
+        content=content,
+        role=_role_from_entry_type(chunk.get("entry_type")),
+        title=title,
+        source_excerpt=_clean_optional_text(chunk.get("source_excerpt")),
+        section_path=KnowledgeSectionPath(
+            document_title=file_name,
+            headings=headings,
+        ),
+        questions=_text_tuple(chunk.get("questions")),
+        synonyms=_text_tuple(chunk.get("synonyms")),
+        tags=_text_tuple(chunk.get("tags")),
+        embedding_text=_clean_optional_text(chunk.get("embedding_text")),
+    )
+
+
+def _document_from_json_chunks(
+    *,
+    file_name: str,
+    chunks: list[JsonObject],
+) -> ParsedKnowledgeDocument:
+    drafts: list[KnowledgeChunkDraft] = []
+    for chunk in chunks:
+        draft = _draft_from_json_chunk(chunk, file_name=file_name)
+        if draft is not None:
+            drafts.append(draft)
+
+    return ParsedKnowledgeDocument(
+        source=KnowledgeDocumentSource(filename=file_name),
+        title=file_name,
+        chunks=tuple(drafts),
+    )
+
+
 def _raw_chunks_for_structured_persistence(
     chunks: list[JsonObject],
 ) -> list[JsonObject]:
@@ -186,6 +278,7 @@ class KnowledgeIngestionService:
         repo: KnowledgeRepositoryPort,
         project_id: str,
         document_id: str,
+        file_name: str,
         chunks: list[JsonObject],
         logger: LoggerPort,
         context: str,
@@ -197,8 +290,23 @@ class KnowledgeIngestionService:
             chunks=chunks,
             context=context,
         )
+        document = _document_from_json_chunks(file_name=file_name, chunks=chunks)
+        normalized = KnowledgeNormalizationService().normalize_document(
+            document,
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not normalized.chunks:
+            message = "No normalized knowledge chunks after filtering"
+            await repo.update_document_status(document_id, "error", message)
+            raise ValidationError(message)
+
         try:
-            await repo.add_knowledge_batch(project_id, chunks, document_id=document_id)
+            await repo.add_knowledge_chunks(
+                project_id=project_id,
+                document_id=document_id,
+                chunks=normalized.chunks,
+            )
         except EmbeddingProviderError as exc:
             if exc.retryable:
                 logger.warning(
@@ -283,6 +391,7 @@ class KnowledgeIngestionService:
                 repo=repo,
                 project_id=project_id,
                 document_id=document_id,
+                file_name=file_name,
                 chunks=indexable_chunks,
                 logger=logger,
                 context="plain_upload",
@@ -343,10 +452,26 @@ class KnowledgeIngestionService:
                 "lossless_preprocessing": True,
             }
 
-            await repo.add_structured_knowledge_batch(
-                project_id,
-                chunks_to_persist,
+            document = _document_from_json_chunks(
+                file_name=file_name,
+                chunks=chunks_to_persist,
+            )
+            normalized = KnowledgeNormalizationService().normalize_document(
+                document,
+                project_id=project_id,
                 document_id=document_id,
+            )
+            if not normalized.chunks:
+                raise ValidationError(
+                    "Knowledge preprocessing produced no normalized chunks"
+                )
+
+            preprocessing_metrics["persisted_chunks"] = normalized.total_chunks
+
+            await repo.add_knowledge_chunks(
+                project_id=project_id,
+                document_id=document_id,
+                chunks=normalized.chunks,
             )
             await repo.update_document_preprocessing_status(
                 document_id,
@@ -417,6 +542,7 @@ class KnowledgeIngestionService:
                 repo=repo,
                 project_id=project_id,
                 document_id=document_id,
+                file_name=file_name,
                 chunks=indexable_chunks,
                 logger=logger,
                 context="preprocessing_fallback",

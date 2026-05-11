@@ -36,10 +36,8 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
 
     repo = Mock()
     repo.create_document = AsyncMock(return_value="doc-1")
-    repo.add_knowledge_batch = AsyncMock(return_value=2)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
-    repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
     repo.clear_project_knowledge = AsyncMock()
     queue_repo = Mock()
     queue_repo.enqueue = AsyncMock(return_value="job-1")
@@ -78,7 +76,6 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
         uploaded_by="user-1",
     )
     repo.update_document_status.assert_awaited_once_with("doc-1", "processing")
-    repo.add_knowledge_batch.assert_not_called()
     repo.update_document_preprocessing_status.assert_not_called()
     queue_repo.enqueue.assert_awaited_once_with(
         TASK_PROCESS_KNOWLEDGE_UPLOAD,
@@ -108,10 +105,8 @@ async def test_upload_marks_document_error_when_enqueue_fails():
 
     repo = Mock()
     repo.create_document = AsyncMock(return_value="doc-err")
-    repo.add_knowledge_batch = AsyncMock(side_effect=RuntimeError("embed failed"))
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
-    repo.add_structured_knowledge_batch = AsyncMock(return_value=0)
     repo.clear_project_knowledge = AsyncMock()
     queue_repo = Mock()
     queue_repo.enqueue = AsyncMock(side_effect=RuntimeError("queue down"))

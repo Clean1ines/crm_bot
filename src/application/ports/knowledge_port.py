@@ -5,6 +5,7 @@ from typing import Protocol
 
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
@@ -58,18 +59,12 @@ class KnowledgeRepositoryPort(Protocol):
         uploaded_by: str | None = None,
     ) -> str: ...
 
-    async def add_knowledge_batch(
+    async def add_knowledge_chunks(
         self,
+        *,
         project_id: str,
-        chunks: list[JsonObject],
-        document_id: str | None = None,
-    ) -> int: ...
-
-    async def add_structured_knowledge_batch(
-        self,
-        project_id: str,
-        chunks: list[JsonObject],
-        document_id: str | None = None,
+        document_id: str,
+        chunks: Sequence[KnowledgeChunk],
     ) -> int: ...
 
     async def delete_document_chunks(self, document_id: str) -> None: ...

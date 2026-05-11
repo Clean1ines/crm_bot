@@ -8,7 +8,7 @@ Clean Architecture contract:
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Protocol
 
 import asyncpg
@@ -20,6 +20,7 @@ from src.domain.project_plane.knowledge_views import (
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
@@ -73,18 +74,18 @@ def _normalize_timestamp(value: object) -> str | None:
 
 
 def _jsonb_array(value: object) -> str:
-    if not isinstance(value, list):
+    if not isinstance(value, (list, tuple)):
         value = []
-    return json.dumps(value, ensure_ascii=False)
+    return json.dumps(list(value), ensure_ascii=False)
 
 
 def _pg_vector_text(embedding: list[float]) -> str:
     return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
-def _batched_chunks(
-    chunks: list[JsonObject], batch_size: int
-) -> Iterator[list[JsonObject]]:
+def _batched_knowledge_chunks(
+    chunks: Sequence[KnowledgeChunk], batch_size: int
+) -> Iterator[Sequence[KnowledgeChunk]]:
     for start in range(0, len(chunks), batch_size):
         yield chunks[start : start + batch_size]
 
@@ -606,33 +607,21 @@ class KnowledgeRepository:
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:limit]
 
-    async def add_knowledge_batch(
+    async def add_knowledge_chunks(
         self,
+        *,
         project_id: str,
-        chunks: list[JsonObject],
-        document_id: str | None = None,
+        document_id: str,
+        chunks: Sequence[KnowledgeChunk],
     ) -> int:
-        """Persist plain chunks while preserving optional chunk metadata."""
-        return await self.add_structured_knowledge_batch(
-            project_id,
-            chunks,
-            document_id=document_id,
-        )
-
-    async def add_structured_knowledge_batch(
-        self,
-        project_id: str,
-        chunks: list[JsonObject],
-        document_id: str | None = None,
-    ) -> int:
-        """Persist LLM-normalized structured knowledge entries."""
+        """Persist typed normalized knowledge chunks."""
         if not chunks:
             return 0
 
-        for batch in _batched_chunks(chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE):
-            texts = [
-                str(chunk.get("embedding_text") or chunk["content"]) for chunk in batch
-            ]
+        for batch in _batched_knowledge_chunks(
+            chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE
+        ):
+            texts = [chunk.embedding_text or chunk.content for chunk in batch]
             embedding_result = await embed_batch(texts)
             embeddings = embedding_result.embeddings
             if embedding_result.usage is not None:
@@ -644,6 +633,7 @@ class KnowledgeRepository:
                         document_id=document_id,
                     )
                 )
+
             async with self.pool.acquire() as conn:
                 async with conn.transaction():
                     for index, chunk in enumerate(batch):
@@ -665,22 +655,16 @@ class KnowledgeRepository:
                             VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
                             """,
                             ensure_uuid(project_id),
-                            ensure_uuid(document_id) if document_id else None,
-                            str(chunk["content"]),
+                            ensure_uuid(document_id),
+                            chunk.content,
                             _pg_vector_text(embeddings[index]),
-                            str(chunk.get("entry_type") or "chunk"),
-                            str(chunk["title"])
-                            if chunk.get("title") is not None
-                            else None,
-                            str(chunk["source_excerpt"])
-                            if chunk.get("source_excerpt") is not None
-                            else None,
-                            _jsonb_array(chunk.get("questions")),
-                            _jsonb_array(chunk.get("synonyms")),
-                            _jsonb_array(chunk.get("tags")),
-                            str(chunk["embedding_text"])
-                            if chunk.get("embedding_text") is not None
-                            else None,
+                            chunk.role.value,
+                            chunk.title or None,
+                            chunk.source_excerpt or None,
+                            _jsonb_array(chunk.questions),
+                            _jsonb_array(chunk.synonyms),
+                            _jsonb_array(chunk.tags),
+                            chunk.embedding_text or None,
                         )
 
         return len(chunks)

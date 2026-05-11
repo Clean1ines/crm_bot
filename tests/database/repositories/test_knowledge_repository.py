@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock, Mock, call, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -147,155 +147,6 @@ async def test_preview_search_does_not_request_embeddings(
 
 
 @pytest.mark.asyncio
-@patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-async def test_add_knowledge_batch_success(
-    mock_embed_batch,
-    knowledge_repo,
-    mock_pool,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    project_id = str(uuid4())
-    document_id = str(uuid4())
-    usage_repo = Mock()
-    usage_repo.record_event = AsyncMock()
-    monkeypatch.setattr(knowledge_repo, "_usage_repo", usage_repo)
-    mock_embed_batch.return_value = EmbeddingBatchResult(
-        embeddings=[[0.1, 0.2], [0.3, 0.4]],
-    )
-    transaction = AsyncMock()
-    transaction.__aenter__.return_value = mock_pool.mock_conn
-    transaction.__aexit__.return_value = None
-    mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
-    mock_pool.mock_conn.execute = AsyncMock()
-
-    result = await knowledge_repo.add_knowledge_batch(
-        project_id,
-        [{"content": "chunk1"}, {"content": "chunk2"}],
-        document_id,
-    )
-
-    assert result == 2
-    assert mock_embed_batch.await_args_list == [
-        call(["chunk1"]),
-        call(["chunk2"]),
-    ]
-    assert mock_pool.mock_conn.transaction.call_count == 2
-    assert mock_pool.mock_conn.execute.await_count == 2
-    usage_repo.record_event.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-async def test_add_knowledge_batch_gets_embeddings_before_opening_transaction(
-    mock_embed_batch,
-    knowledge_repo,
-    mock_pool,
-):
-    order: list[str] = []
-
-    async def fake_embed_batch(texts: list[str]) -> EmbeddingBatchResult:
-        order.append("embed_batch")
-        return EmbeddingBatchResult(embeddings=[[0.1, 0.2]])
-
-    def fake_transaction():
-        order.append("transaction")
-        transaction = AsyncMock()
-        transaction.__aenter__.return_value = mock_pool.mock_conn
-        transaction.__aexit__.return_value = None
-        return transaction
-
-    mock_embed_batch.side_effect = fake_embed_batch
-    mock_pool.mock_conn.transaction = fake_transaction
-    mock_pool.mock_conn.execute = AsyncMock()
-
-    await knowledge_repo.add_knowledge_batch(str(uuid4()), [{"content": "chunk"}])
-
-    assert order == ["embed_batch", "transaction"]
-
-
-@pytest.mark.asyncio
-@patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-async def test_add_knowledge_batch_records_usage_for_document_embeddings(
-    mock_embed_batch,
-    knowledge_repo,
-    mock_pool,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    document_id = str(uuid4())
-    usage = ModelUsageMeasurement(
-        provider="voyage",
-        model="voyage-4-lite",
-        usage_type="embedding",
-        tokens_input=12,
-        tokens_output=None,
-        tokens_total=12,
-        estimated_cost_usd=None,
-        metadata={"is_estimated": False},
-    )
-    usage_repo = Mock()
-    usage_repo.record_event = AsyncMock()
-    monkeypatch.setattr(knowledge_repo, "_usage_repo", usage_repo)
-    mock_embed_batch.return_value = EmbeddingBatchResult(
-        embeddings=[[0.1, 0.2]],
-        usage=usage,
-    )
-    transaction = AsyncMock()
-    transaction.__aenter__.return_value = mock_pool.mock_conn
-    transaction.__aexit__.return_value = None
-    mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
-    mock_pool.mock_conn.execute = AsyncMock()
-
-    await knowledge_repo.add_knowledge_batch(
-        str(uuid4()),
-        [{"content": "chunk"}],
-        document_id=document_id,
-    )
-
-    usage_repo.record_event.assert_awaited_once()
-    recorded_event = usage_repo.record_event.await_args.args[0]
-    assert recorded_event.source == "knowledge_upload"
-    assert recorded_event.document_id == document_id
-    assert recorded_event.tokens_total == 12
-
-
-@pytest.mark.asyncio
-@patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-async def test_add_structured_knowledge_batch_success(
-    mock_embed_batch,
-    knowledge_repo,
-    mock_pool,
-):
-    mock_embed_batch.return_value = EmbeddingBatchResult(embeddings=[[0.1, 0.2]])
-    transaction = AsyncMock()
-    transaction.__aenter__.return_value = mock_pool.mock_conn
-    transaction.__aexit__.return_value = None
-    mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
-    mock_pool.mock_conn.execute = AsyncMock()
-
-    result = await knowledge_repo.add_structured_knowledge_batch(
-        str(uuid4()),
-        [
-            {
-                "content": "answer",
-                "entry_type": "faq",
-                "title": "Title",
-                "source_excerpt": "source",
-                "questions": ["question"],
-                "synonyms": ["synonym"],
-                "tags": ["tag"],
-                "embedding_text": "Title answer question",
-            }
-        ],
-        str(uuid4()),
-    )
-
-    assert result == 1
-    mock_embed_batch.assert_awaited_once_with(["Title answer question"])
-    executed_sql = mock_pool.mock_conn.execute.await_args.args[0]
-    assert "embedding_text" in executed_sql
-
-
-@pytest.mark.asyncio
 async def test_clear_project_knowledge_success(knowledge_repo, mock_pool):
     project_id = str(uuid4())
     transaction = AsyncMock()
@@ -375,7 +226,7 @@ async def test_delete_document_cancels_related_queue_jobs_before_hard_delete() -
 
     await repo.delete_document(document_id)
 
-    executed_sql = "\n".join(call[0] for call in conn.execute_calls)
+    executed_sql = "\n".join(execute_call[0] for execute_call in conn.execute_calls)
 
     assert "UPDATE execution_queue" in executed_sql
     assert "payload::jsonb ->> 'document_id' = $3" in executed_sql
@@ -395,7 +246,7 @@ async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete()
 
     await repo.clear_project_knowledge(project_id)
 
-    executed_sql = "\n".join(call[0] for call in conn.execute_calls)
+    executed_sql = "\n".join(execute_call[0] for execute_call in conn.execute_calls)
 
     assert "UPDATE execution_queue" in executed_sql
     assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
@@ -407,11 +258,20 @@ async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete()
 
 
 @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-async def test_add_knowledge_batch_preserves_plain_chunk_metadata(
+async def test_add_knowledge_chunks_persists_typed_chunks(
     mock_embed_batch,
     knowledge_repo,
     mock_pool,
 ):
+    from src.domain.project_plane.knowledge_chunks import (
+        KnowledgeChunk,
+        KnowledgeChunkDraft,
+        KnowledgeChunkRole,
+        KnowledgeSectionPath,
+    )
+
+    project_id = str(uuid4())
+    document_id = str(uuid4())
     mock_embed_batch.return_value = EmbeddingBatchResult(embeddings=[[0.1, 0.2]])
     transaction = AsyncMock()
     transaction.__aenter__.return_value = mock_pool.mock_conn
@@ -419,29 +279,42 @@ async def test_add_knowledge_batch_preserves_plain_chunk_metadata(
     mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
     mock_pool.mock_conn.execute = AsyncMock()
 
-    result = await knowledge_repo.add_knowledge_batch(
-        str(uuid4()),
-        [
-            {
-                "content": "answer",
-                "entry_type": "plain_enriched",
-                "title": "Title",
-                "source_excerpt": "source",
-                "questions": ["Question?"],
-                "synonyms": ["alias"],
-                "tags": ["tag"],
-                "embedding_text": "Rich embedding",
-            }
-        ],
-        str(uuid4()),
+    chunk = KnowledgeChunk.from_draft(
+        project_id=project_id,
+        document_id=document_id,
+        draft=KnowledgeChunkDraft(
+            content="Typed answer content with enough useful words.",
+            role=KnowledgeChunkRole.FAQ,
+            title="FAQ",
+            source_excerpt="Typed answer content",
+            section_path=KnowledgeSectionPath(
+                document_title="knowledge.md",
+                headings=("FAQ",),
+            ),
+            questions=("Can I upload documents?",),
+            synonyms=("upload docs",),
+            tags=("docs",),
+            embedding_text="FAQ upload documents typed embedding text",
+        ),
+    )
+
+    result = await knowledge_repo.add_knowledge_chunks(
+        project_id=project_id,
+        document_id=document_id,
+        chunks=(chunk,),
     )
 
     assert result == 1
-    mock_embed_batch.assert_awaited_once_with(["Rich embedding"])
+    mock_embed_batch.assert_awaited_once_with(
+        ["FAQ upload documents typed embedding text"]
+    )
     executed_args = mock_pool.mock_conn.execute.await_args.args
     assert "embedding_text" in executed_args[0]
-    assert executed_args[3] == "answer"
-    assert executed_args[5] == "plain_enriched"
-    assert executed_args[6] == "Title"
-    assert executed_args[7] == "source"
-    assert executed_args[11] == "Rich embedding"
+    assert executed_args[3] == "Typed answer content with enough useful words."
+    assert executed_args[5] == "faq"
+    assert executed_args[6] == "FAQ"
+    assert executed_args[7] == "Typed answer content"
+    assert executed_args[8] == '["Can I upload documents?"]'
+    assert executed_args[9] == '["upload docs"]'
+    assert executed_args[10] == '["docs"]'
+    assert executed_args[11] == "FAQ upload documents typed embedding text"
