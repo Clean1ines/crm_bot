@@ -1656,6 +1656,626 @@ class KnowledgeRepository:
             project_id,
         )
 
+    @staticmethod
+    def _stage_h_json_object(value: object) -> dict[str, object]:
+        if isinstance(value, dict):
+            return {str(key): item for key, item in value.items()}
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(parsed, dict):
+                return {str(key): item for key, item in parsed.items()}
+        return {}
+
+    @staticmethod
+    def _stage_h_text_list(value: object) -> list[str]:
+        if isinstance(value, str):
+            text = " ".join(value.strip().split())
+            return [text] if text else []
+        if not isinstance(value, list):
+            return []
+
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            text = " ".join(str(item or "").strip().split())
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return result
+
+    @classmethod
+    def _stage_h_entry_snapshot(cls, row: asyncpg.Record) -> dict[str, object]:
+        return {
+            "id": str(row["id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]) if row["document_id"] else None,
+            "compiler_run_id": str(row["compiler_run_id"] or ""),
+            "stable_key": str(row["stable_key"]),
+            "entry_kind": str(row["entry_kind"]),
+            "title": str(row["title"]),
+            "answer": str(row["answer"]),
+            "status": str(row["status"]),
+            "visibility": str(row["visibility"]),
+            "version": int(row["version"]),
+            "compiler_version": str(row["compiler_version"] or ""),
+            "embedding_text": str(row["embedding_text"] or ""),
+            "embedding_text_version": str(row["embedding_text_version"] or ""),
+            "enrichment": cls._stage_h_json_object(row["enrichment"]),
+            "metadata": cls._stage_h_json_object(row["metadata"]),
+        }
+
+    @classmethod
+    def _stage_h_attached_questions(
+        cls,
+        *,
+        enrichment: dict[str, object],
+        metadata: dict[str, object],
+    ) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+
+        for key in ("questions", "positive_questions", "synonyms", "tags"):
+            for value in cls._stage_h_text_list(enrichment.get(key)):
+                if value not in seen:
+                    seen.add(value)
+                    result.append(value)
+
+        stage_h = cls._stage_h_json_object(metadata.get("stage_h"))
+        raw_attached = stage_h.get("attached_questions")
+        if isinstance(raw_attached, list):
+            for item in raw_attached:
+                if not isinstance(item, dict):
+                    continue
+                question = " ".join(str(item.get("question") or "").strip().split())
+                if question and question not in seen:
+                    seen.add(question)
+                    result.append(question)
+
+        return result
+
+    @classmethod
+    def _stage_h_embedding_text(cls, row: asyncpg.Record) -> str:
+        enrichment = cls._stage_h_json_object(row["enrichment"])
+        metadata = cls._stage_h_json_object(row["metadata"])
+        parts = [
+            str(row["title"] or "").strip(),
+            str(row["answer"] or "").strip(),
+            str(row["embedding_text"] or "").strip(),
+            *cls._stage_h_attached_questions(enrichment=enrichment, metadata=metadata),
+        ]
+
+        result: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            text = " ".join(part.split())
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+
+        return "\n".join(result)
+
+    @staticmethod
+    def _stage_h_search_text(
+        *,
+        title: str,
+        answer: str,
+        embedding_text: str,
+    ) -> str:
+        parts = (title, answer, embedding_text)
+        result: list[str] = []
+        seen: set[str] = set()
+        for part in parts:
+            text = " ".join(part.strip().split())
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+        return "\n".join(result)
+
+    async def create_or_get_knowledge_edit_action(
+        self,
+        *,
+        action_id: str,
+        project_id: str,
+        document_id: str,
+        source_result_id: str,
+        source_run_id: str,
+        source_question_id: str,
+        action_index: int,
+        actor_user_id: str,
+        action_type: str,
+        target_entry_id: str | None,
+        reason: str,
+        payload: JsonObject,
+    ) -> JsonObject:
+        async with self.pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                """
+                SELECT id, status
+                FROM knowledge_edit_actions
+                WHERE source_result_id = $1
+                  AND action_index = $2
+                """,
+                source_result_id,
+                action_index,
+            )
+            if existing is not None:
+                return {"id": str(existing["id"]), "status": str(existing["status"])}
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO knowledge_edit_actions (
+                    id,
+                    project_id,
+                    document_id,
+                    source_result_id,
+                    source_run_id,
+                    source_question_id,
+                    action_index,
+                    actor_user_id,
+                    action_type,
+                    target_entry_id,
+                    reason,
+                    payload
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12::jsonb
+                )
+                RETURNING id, status
+                """,
+                action_id,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+                source_result_id,
+                source_run_id,
+                source_question_id,
+                action_index,
+                actor_user_id,
+                action_type,
+                ensure_uuid(target_entry_id) if target_entry_id else None,
+                reason,
+                json.dumps(payload, ensure_ascii=False),
+            )
+
+        if row is None:
+            raise RuntimeError("Failed to create knowledge edit action")
+
+        return {"id": str(row["id"]), "status": str(row["status"])}
+
+    async def mark_knowledge_edit_action_applied(
+        self,
+        action_id: str,
+        *,
+        result_payload: JsonObject | None = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_edit_actions
+                SET status = 'applied',
+                    error = '',
+                    result_payload = $2::jsonb,
+                    applied_at = COALESCE(applied_at, now()),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                action_id,
+                json.dumps(result_payload or {}, ensure_ascii=False),
+            )
+
+    async def mark_knowledge_edit_action_rejected(
+        self,
+        action_id: str,
+        *,
+        error: str,
+        result_payload: JsonObject | None = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_edit_actions
+                SET status = 'rejected',
+                    error = $2,
+                    result_payload = $3::jsonb,
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                action_id,
+                error,
+                json.dumps(result_payload or {}, ensure_ascii=False),
+            )
+
+    async def mark_knowledge_edit_action_failed(
+        self,
+        action_id: str,
+        *,
+        error: str,
+        result_payload: JsonObject | None = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_edit_actions
+                SET status = 'failed',
+                    error = $2,
+                    result_payload = $3::jsonb,
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                action_id,
+                error,
+                json.dumps(result_payload or {}, ensure_ascii=False),
+            )
+
+    async def attach_question_to_entry(
+        self,
+        *,
+        action_id: str,
+        project_id: str,
+        document_id: str,
+        target_entry_id: str,
+        question: str,
+        reason: str,
+        actor_user_id: str,
+    ) -> None:
+        question_text = " ".join(question.strip().split())
+        if not question_text:
+            raise ValueError("attach_question_to_entry requires non-empty question")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                before = await conn.fetchrow(
+                    """
+                    SELECT
+                        id,
+                        project_id,
+                        document_id,
+                        compiler_run_id,
+                        stable_key,
+                        entry_kind,
+                        title,
+                        answer,
+                        status,
+                        visibility,
+                        version,
+                        compiler_version,
+                        embedding_text,
+                        embedding_text_version,
+                        enrichment,
+                        metadata
+                    FROM knowledge_entries
+                    WHERE id = $1
+                      AND project_id = $2
+                      AND document_id = $3
+                    FOR UPDATE
+                    """,
+                    ensure_uuid(target_entry_id),
+                    ensure_uuid(project_id),
+                    ensure_uuid(document_id),
+                )
+                if before is None:
+                    raise ValueError("target knowledge entry not found")
+
+                previous_snapshot = self._stage_h_entry_snapshot(before)
+                previous_version = int(before["version"])
+
+                metadata = self._stage_h_json_object(before["metadata"])
+                enrichment = self._stage_h_json_object(before["enrichment"])
+
+                stage_h = self._stage_h_json_object(metadata.get("stage_h"))
+                raw_attached = stage_h.get("attached_questions")
+                attached: list[dict[str, object]] = []
+                if isinstance(raw_attached, list):
+                    attached = [
+                        {str(key): value for key, value in item.items()}
+                        for item in raw_attached
+                        if isinstance(item, dict)
+                    ]
+
+                if not any(item.get("question") == question_text for item in attached):
+                    attached.append(
+                        {
+                            "question": question_text,
+                            "action_id": action_id,
+                            "reason": reason,
+                            "actor_user_id": actor_user_id,
+                        }
+                    )
+
+                stage_h["attached_questions"] = attached
+                metadata["stage_h"] = stage_h
+
+                for key in ("questions", "positive_questions"):
+                    values = self._stage_h_text_list(enrichment.get(key))
+                    if question_text not in values:
+                        values.append(question_text)
+                    enrichment[key] = values
+
+                next_version = previous_version + 1
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET enrichment = $2::jsonb,
+                        metadata = $3::jsonb,
+                        version = $4,
+                        updated_at = now()
+                    WHERE id = $1
+                    """,
+                    ensure_uuid(target_entry_id),
+                    json.dumps(enrichment, ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                    next_version,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_retrieval_surface
+                    SET enrichment = $2::jsonb,
+                        metadata = $3::jsonb,
+                        updated_at = now()
+                    WHERE entry_id = $1
+                    """,
+                    ensure_uuid(target_entry_id),
+                    json.dumps(enrichment, ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                )
+
+                after = await conn.fetchrow(
+                    """
+                    SELECT
+                        id,
+                        project_id,
+                        document_id,
+                        compiler_run_id,
+                        stable_key,
+                        entry_kind,
+                        title,
+                        answer,
+                        status,
+                        visibility,
+                        version,
+                        compiler_version,
+                        embedding_text,
+                        embedding_text_version,
+                        enrichment,
+                        metadata
+                    FROM knowledge_entries
+                    WHERE id = $1
+                    """,
+                    ensure_uuid(target_entry_id),
+                )
+                if after is None:
+                    raise RuntimeError(
+                        "target knowledge entry disappeared after update"
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO knowledge_entry_versions (
+                        entry_id,
+                        project_id,
+                        document_id,
+                        action_id,
+                        from_version,
+                        to_version,
+                        previous_snapshot,
+                        new_snapshot
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+                    """,
+                    ensure_uuid(target_entry_id),
+                    ensure_uuid(project_id),
+                    ensure_uuid(document_id),
+                    action_id,
+                    previous_version,
+                    next_version,
+                    json.dumps(previous_snapshot, ensure_ascii=False),
+                    json.dumps(self._stage_h_entry_snapshot(after), ensure_ascii=False),
+                )
+
+    async def rebuild_entry_embedding(
+        self,
+        *,
+        action_id: str,
+        project_id: str,
+        document_id: str,
+        target_entry_id: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    document_id,
+                    compiler_run_id,
+                    stable_key,
+                    entry_kind,
+                    title,
+                    answer,
+                    status,
+                    visibility,
+                    version,
+                    compiler_version,
+                    embedding_text,
+                    embedding_text_version,
+                    enrichment,
+                    metadata
+                FROM knowledge_entries
+                WHERE id = $1
+                  AND project_id = $2
+                  AND document_id = $3
+                """,
+                ensure_uuid(target_entry_id),
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        if row is None:
+            raise ValueError("target knowledge entry not found")
+
+        embedding_text = self._stage_h_embedding_text(row)
+        if not embedding_text.strip():
+            raise ValueError("cannot rebuild embedding from empty entry text")
+
+        embedding_result = await embed_batch([embedding_text])
+        if not embedding_result.embeddings:
+            raise RuntimeError("embedding provider returned no vectors")
+
+        if embedding_result.usage is not None:
+            await self._usage_repo.record_event(
+                ModelUsageEventCreate.from_measurement(
+                    project_id=project_id,
+                    source="knowledge_edit_action",
+                    measurement=embedding_result.usage,
+                    document_id=document_id,
+                )
+            )
+
+        embedding_text_version = "entry_embedding_text_v2_stage_h"
+        search_text = self._stage_h_search_text(
+            title=str(row["title"]),
+            answer=str(row["answer"]),
+            embedding_text=embedding_text,
+        )
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                before = await conn.fetchrow(
+                    """
+                    SELECT
+                        id,
+                        project_id,
+                        document_id,
+                        compiler_run_id,
+                        stable_key,
+                        entry_kind,
+                        title,
+                        answer,
+                        status,
+                        visibility,
+                        version,
+                        compiler_version,
+                        embedding_text,
+                        embedding_text_version,
+                        enrichment,
+                        metadata
+                    FROM knowledge_entries
+                    WHERE id = $1
+                      AND project_id = $2
+                      AND document_id = $3
+                    FOR UPDATE
+                    """,
+                    ensure_uuid(target_entry_id),
+                    ensure_uuid(project_id),
+                    ensure_uuid(document_id),
+                )
+                if before is None:
+                    raise ValueError("target knowledge entry not found")
+
+                previous_snapshot = self._stage_h_entry_snapshot(before)
+                entry_version = int(before["version"])
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_entries
+                    SET embedding_text = $2,
+                        embedding_text_version = $3,
+                        updated_at = now()
+                    WHERE id = $1
+                    """,
+                    ensure_uuid(target_entry_id),
+                    embedding_text,
+                    embedding_text_version,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_retrieval_surface
+                    SET embedding_text = $2,
+                        embedding_text_version = $3,
+                        embedding = $4::vector,
+                        search_text = $5,
+                        updated_at = now()
+                    WHERE entry_id = $1
+                    """,
+                    ensure_uuid(target_entry_id),
+                    embedding_text,
+                    embedding_text_version,
+                    _pg_vector_text(embedding_result.embeddings[0]),
+                    search_text,
+                )
+
+                after = await conn.fetchrow(
+                    """
+                    SELECT
+                        id,
+                        project_id,
+                        document_id,
+                        compiler_run_id,
+                        stable_key,
+                        entry_kind,
+                        title,
+                        answer,
+                        status,
+                        visibility,
+                        version,
+                        compiler_version,
+                        embedding_text,
+                        embedding_text_version,
+                        enrichment,
+                        metadata
+                    FROM knowledge_entries
+                    WHERE id = $1
+                    """,
+                    ensure_uuid(target_entry_id),
+                )
+                if after is None:
+                    raise RuntimeError(
+                        "target knowledge entry disappeared after embedding rebuild"
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO knowledge_entry_versions (
+                        entry_id,
+                        project_id,
+                        document_id,
+                        action_id,
+                        from_version,
+                        to_version,
+                        previous_snapshot,
+                        new_snapshot
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb)
+                    """,
+                    ensure_uuid(target_entry_id),
+                    ensure_uuid(project_id),
+                    ensure_uuid(document_id),
+                    action_id,
+                    entry_version,
+                    entry_version,
+                    json.dumps(previous_snapshot, ensure_ascii=False),
+                    json.dumps(self._stage_h_entry_snapshot(after), ensure_ascii=False),
+                )
+
     async def delete_document_chunks(self, document_id: str) -> None:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
