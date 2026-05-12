@@ -177,7 +177,6 @@ class KnowledgePreviewResultDto:
     title: str | None = None
     source_excerpt: str | None = None
     source_refs: tuple[SourceRefDto, ...] = ()
-    embedding_text: str | None = None
     questions: object | None = None
     synonyms: object | None = None
     tags: object | None = None
@@ -201,7 +200,6 @@ class KnowledgePreviewResultDto:
             source_refs=tuple(
                 SourceRefDto.from_view(ref) for ref in result.source_refs
             ),
-            embedding_text=result.embedding_text,
             questions=result.questions,
             synonyms=result.synonyms,
             tags=result.tags,
@@ -228,7 +226,6 @@ class KnowledgePreviewResultDto:
             "entry_kind": self.entry_kind,
             "title": self.title,
             "source_excerpt": self.source_excerpt,
-            "embedding_text": self.embedding_text,
             "questions": self.questions,
             "synonyms": self.synonyms,
             "tags": self.tags,

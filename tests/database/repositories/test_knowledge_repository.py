@@ -10,6 +10,11 @@ from src.infrastructure.llm.embedding_service import (
     EmbeddingBatchResult,
     EmbeddingTextResult,
 )
+from src.domain.project_plane.embedding_text import (
+    CANONICAL_EMBEDDING_TEXT_VERSION,
+    build_canonical_entry_embedding_text,
+    build_retrieval_surface_search_text,
+)
 from src.domain.project_plane.knowledge_compilation import (
     CanonicalKnowledgeEntry,
     EmbeddingText,
@@ -312,13 +317,13 @@ async def test_add_canonical_entries_persists_entries_refs_and_retrieval_surface
         ),
         embedding_text=EmbeddingText(
             value="FAQ upload documents typed embedding text",
-            version="entry_embedding_text_v1",
+            version="ignored_legacy_input",
         ),
         status=KnowledgeEntryStatus.PUBLISHED,
         visibility=KnowledgeEntryVisibility.RUNTIME,
         version=1,
         compiler_version="kcd_v1_stage_cd",
-        embedding_text_version="entry_embedding_text_v1",
+        embedding_text_version="ignored_legacy_input",
         metadata={"source": "test"},
     )
 
@@ -329,9 +334,8 @@ async def test_add_canonical_entries_persists_entries_refs_and_retrieval_surface
     )
 
     assert result == 1
-    mock_embed_batch.assert_awaited_once_with(
-        ["FAQ upload documents typed embedding text"]
-    )
+    expected_embedding_text = build_canonical_entry_embedding_text(entry).value
+    mock_embed_batch.assert_awaited_once_with([expected_embedding_text])
 
     executed_sql = "\n".join(
         str(call_item.args[0])
@@ -350,7 +354,9 @@ async def test_add_canonical_entries_persists_entries_refs_and_retrieval_surface
     assert first_insert_args[8] == "Typed answer content with enough useful words."
     assert first_insert_args[9] == "published"
     assert first_insert_args[10] == "runtime"
-    assert first_insert_args[13] == "FAQ upload documents typed embedding text"
+    assert first_insert_args[12] == "kcd_v1_stage_cd"
+    assert first_insert_args[13] == expected_embedding_text
+    assert first_insert_args[14] == CANONICAL_EMBEDDING_TEXT_VERSION
 
     source_ref_insert_args = mock_pool.mock_conn.execute.await_args_list[2].args
     assert "INSERT INTO knowledge_entry_source_refs" in source_ref_insert_args[0]
@@ -364,7 +370,9 @@ async def test_add_canonical_entries_persists_entries_refs_and_retrieval_surface
     assert surface_insert_args[5] == "answer"
     assert surface_insert_args[6] == "FAQ"
     assert surface_insert_args[7] == "Typed answer content with enough useful words."
-    assert surface_insert_args[8] == "FAQ upload documents typed embedding text"
+    assert surface_insert_args[8] == expected_embedding_text
+    assert surface_insert_args[9] == CANONICAL_EMBEDDING_TEXT_VERSION
+    assert surface_insert_args[11] == build_retrieval_surface_search_text(entry)
 
 
 def test_search_filters_non_answer_knowledge_roles() -> None:

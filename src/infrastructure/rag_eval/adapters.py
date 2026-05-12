@@ -237,7 +237,6 @@ def _chunk_from_mapping(
             "entry_kind": row.get("entry_kind"),
             "source_excerpt": row.get("source_excerpt"),
             "source_refs": [source_ref.to_dict() for source_ref in source_refs],
-            "embedding_text": row.get("embedding_text"),
             "questions": row.get("questions"),
             "synonyms": row.get("synonyms"),
             "tags": row.get("tags"),

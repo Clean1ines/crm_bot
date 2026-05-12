@@ -13,9 +13,6 @@ from src.domain.project_plane.knowledge_chunks import (
 from src.domain.project_plane.knowledge_document_structure import (
     ParsedKnowledgeDocument,
 )
-from src.domain.project_plane.knowledge_embedding_text import (
-    build_knowledge_embedding_text,
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,12 +77,11 @@ class KnowledgeNormalizationService:
         )
 
         classified_draft = draft.with_role(role)
-        embedding_text = build_knowledge_embedding_text(classified_draft)
 
         return KnowledgeChunk.from_draft(
             project_id=project_id,
             document_id=document_id,
-            draft=classified_draft.with_embedding_text(embedding_text),
+            draft=classified_draft,
         )
 
 

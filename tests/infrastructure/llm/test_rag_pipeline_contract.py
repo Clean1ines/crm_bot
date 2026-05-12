@@ -219,7 +219,6 @@ async def test_rag_pipeline_accepts_typed_knowledge_views_from_repository():
     assert item["document_status"] == "ready"
     assert item["entry_kind"] is None
     assert item["source_excerpt"] is None
-    assert item["embedding_text"] is None
     assert item["questions"] is None
     assert item["synonyms"] is None
     assert item["tags"] is None
@@ -262,7 +261,6 @@ def test_rag_candidate_preserves_knowledge_view_metadata() -> None:
     assert candidate.metadata["document_status"] == "processed"
     assert candidate.metadata["entry_kind"] == "answer"
     assert candidate.metadata["source_excerpt"] == "Refund policy excerpt"
-    assert candidate.metadata["embedding_text"] == "refund payment return policy"
     assert candidate.metadata["questions"] == ["Can I get a refund?"]
     assert candidate.metadata["synonyms"] == ["return payment"]
     assert candidate.metadata["tags"] == ["refund", "billing"]
@@ -272,7 +270,6 @@ def test_rag_candidate_preserves_knowledge_view_metadata() -> None:
     assert payload["document_status"] == "processed"
     assert payload["entry_kind"] == "answer"
     assert payload["source_excerpt"] == "Refund policy excerpt"
-    assert payload["embedding_text"] == "refund payment return policy"
     assert payload["questions"] == ["Can I get a refund?"]
     assert payload["synonyms"] == ["return payment"]
     assert payload["tags"] == ["refund", "billing"]

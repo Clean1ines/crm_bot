@@ -19,6 +19,7 @@ from src.application.services.knowledge_normalization_service import (
     KnowledgeNormalizationService,
 )
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.embedding_text import CANONICAL_EMBEDDING_TEXT_VERSION
 from src.domain.project_plane.knowledge_chunks import (
     KnowledgeChunk,
     KnowledgeChunkDraft,
@@ -52,7 +53,6 @@ from src.domain.project_plane.knowledge_compilation import (
     AnswerCandidateStatus,
     AnswerCandidate,
     CanonicalKnowledgeEntry,
-    EmbeddingText,
     KnowledgeEnrichment,
     KnowledgeEntryKind,
     KnowledgeEntryStatus,
@@ -444,7 +444,6 @@ def _source_chunks_from_json_chunks(
 
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
 KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
-KCD_STAGE_CD_EMBEDDING_TEXT_VERSION = "entry_embedding_text_v1"
 
 
 def _entry_kind_from_chunk_role(role: KnowledgeChunkRole) -> KnowledgeEntryKind:
@@ -505,24 +504,6 @@ def _canonical_source_ref(
     )
 
 
-def _canonical_embedding_text(chunk: KnowledgeChunk) -> EmbeddingText:
-    text = _clean_optional_text(chunk.embedding_text)
-    if not text:
-        parts = [
-            chunk.title,
-            chunk.source_excerpt,
-            chunk.content,
-            " ".join(chunk.questions),
-            " ".join(chunk.synonyms),
-            " ".join(chunk.tags),
-        ]
-        text = "\n".join(_clean_optional_text(part) for part in parts if part)
-    return EmbeddingText(
-        value=text,
-        version=KCD_STAGE_CD_EMBEDDING_TEXT_VERSION,
-    )
-
-
 def _canonical_entries_from_knowledge_chunks(
     *,
     project_id: str,
@@ -567,12 +548,12 @@ def _canonical_entries_from_knowledge_chunks(
                     synonyms=chunk.synonyms,
                     tags=chunk.tags,
                 ),
-                embedding_text=_canonical_embedding_text(chunk),
+                embedding_text=None,
                 status=KnowledgeEntryStatus.PUBLISHED,
                 visibility=KnowledgeEntryVisibility.RUNTIME,
                 version=1,
                 compiler_version=KCD_STAGE_E_COMPILER_VERSION,
-                embedding_text_version=KCD_STAGE_CD_EMBEDDING_TEXT_VERSION,
+                embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
                 metadata=dict(chunk.metadata),
             )
         )
@@ -690,7 +671,7 @@ def _stage_e_compilation_metrics(
         if candidate.status == AnswerCandidateStatus.REJECTED
     )
     published_entries = sum(1 for entry in entries if entry.is_published_runtime_entry)
-    embedded_entries = sum(1 for entry in entries if entry.embedding_text is not None)
+    embedded_entries = len(entries)
     entries_without_source_refs = sum(
         1 for entry in entries if not entry.has_source_refs
     )

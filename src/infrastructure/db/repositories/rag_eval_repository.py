@@ -191,7 +191,6 @@ class RagEvalRepository:
                     rs.entry_kind,
                     rs.title,
                     rs.source_refs,
-                    rs.embedding_text,
                     rs.enrichment->'questions' AS questions,
                     rs.enrichment->'synonyms' AS synonyms,
                     rs.enrichment->'tags' AS tags
@@ -816,7 +815,6 @@ class RagEvalRepository:
                 "title": row.get("title"),
                 "source_excerpt": source_excerpt,
                 "source_refs": [source_ref.to_dict() for source_ref in source_refs],
-                "embedding_text": row.get("embedding_text"),
                 "questions": row.get("questions"),
                 "synonyms": row.get("synonyms"),
                 "tags": row.get("tags"),
