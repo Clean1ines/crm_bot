@@ -7,6 +7,9 @@ from typing import Literal, cast
 
 import asyncpg
 
+from src.domain.project_plane.knowledge_retrieval_surface import (
+    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+)
 from src.application.rag_eval.schemas import (
     JsonObject,
     RagEvalChunk,
@@ -125,6 +128,9 @@ def _row_optional_datetime_value(
     raise ValueError(f"Expected optional datetime field {key}")
 
 
+RAG_EVAL_SOURCE_ENTRY_TYPES = tuple(sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES))
+
+
 class RagEvalRepository:
     """Postgres adapter for automatic RAG quality evaluation artifacts.
 
@@ -161,11 +167,17 @@ class RagEvalRepository:
                 JOIN knowledge_documents AS d ON d.id = kb.document_id
                 WHERE kb.project_id = $1::uuid
                   AND kb.document_id = $2::uuid
+                  AND kb.entry_type = ANY($3::text[])
+                  AND (
+                      kb.document_id IS NOT NULL
+                      OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
+                  )
                   AND d.status = 'processed'
                 ORDER BY kb.created_at ASC NULLS LAST, kb.id ASC
                 """,
                 project_id,
                 document_id,
+                list(RAG_EVAL_SOURCE_ENTRY_TYPES),
             )
 
         return [self._chunk_from_row(row) for row in rows]
