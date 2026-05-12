@@ -3,6 +3,37 @@ from datetime import datetime
 
 
 @dataclass(frozen=True, slots=True)
+class SourceRefView:
+    source_index: int | None = None
+    quote: str = ""
+    source_chunk_id: str | None = None
+    start_offset: int | None = None
+    end_offset: int | None = None
+    confidence: float | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {"quote": self.quote}
+        if self.source_index is not None:
+            payload["source_index"] = self.source_index
+        if self.source_chunk_id is not None:
+            payload["source_chunk_id"] = self.source_chunk_id
+        if self.start_offset is not None:
+            payload["start_offset"] = self.start_offset
+        if self.end_offset is not None:
+            payload["end_offset"] = self.end_offset
+        if self.confidence is not None:
+            payload["confidence"] = self.confidence
+        return payload
+
+
+def source_refs_from_excerpt(source_excerpt: str | None) -> tuple[SourceRefView, ...]:
+    quote = " ".join(str(source_excerpt or "").strip().split())
+    if not quote:
+        return ()
+    return (SourceRefView(source_index=0, quote=quote),)
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeSearchResultView:
     id: str
     content: str
@@ -14,6 +45,7 @@ class KnowledgeSearchResultView:
     entry_kind: str | None = None
     title: str | None = None
     source_excerpt: str | None = None
+    source_refs: tuple[SourceRefView, ...] = ()
     embedding_text: str | None = None
     questions: object | None = None
     synonyms: object | None = None

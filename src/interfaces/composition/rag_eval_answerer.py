@@ -53,5 +53,6 @@ def _prompt_chunk(chunk: RagEvalChunk) -> dict[str, object]:
         "source": chunk.source,
         "document_id": chunk.document_id,
         "score": chunk.metadata.get("score"),
+        "source_refs": [source_ref.to_dict() for source_ref in chunk.source_refs],
         "metadata": chunk.metadata,
     }

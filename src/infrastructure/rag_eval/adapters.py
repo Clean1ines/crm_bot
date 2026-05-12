@@ -17,6 +17,10 @@ from groq import (
 )
 
 from src.application.rag_eval.schemas import JsonObject, RagEvalChunk
+from src.domain.project_plane.knowledge_views import (
+    SourceRefView,
+    source_refs_from_excerpt,
+)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.llm.groq_keyring import RotatingAsyncGroq
 from src.infrastructure.logging.logger import get_logger
@@ -217,11 +221,13 @@ def _chunk_from_mapping(
         return None
 
     chunk_id = str(row.get("id") or row.get("chunk_id") or fallback_id)
+    source_refs = _source_refs_from_mapping(row)
     return RagEvalChunk(
         id=chunk_id,
         content=content,
         document_id=_optional_text(row.get("document_id")),
         source=_optional_text(row.get("source")),
+        source_refs=source_refs,
         metadata={
             "score": row.get("score"),
             "method": row.get("method"),
@@ -230,12 +236,22 @@ def _chunk_from_mapping(
             "document_status": row.get("document_status"),
             "entry_kind": row.get("entry_kind"),
             "source_excerpt": row.get("source_excerpt"),
+            "source_refs": [source_ref.to_dict() for source_ref in source_refs],
             "embedding_text": row.get("embedding_text"),
             "questions": row.get("questions"),
             "synonyms": row.get("synonyms"),
             "tags": row.get("tags"),
         },
     )
+
+
+def _source_refs_from_mapping(row: Mapping[str, object]) -> tuple[SourceRefView, ...]:
+    raw_source_refs = row.get("source_refs")
+    if isinstance(raw_source_refs, tuple) and all(
+        isinstance(item, SourceRefView) for item in raw_source_refs
+    ):
+        return raw_source_refs
+    return source_refs_from_excerpt(_optional_text(row.get("source_excerpt")))
 
 
 def _optional_text(value: object) -> str | None:
@@ -254,5 +270,6 @@ def _prompt_chunk(chunk: RagEvalChunk) -> dict[str, object]:
         "source": chunk.source,
         "document_id": chunk.document_id,
         "score": chunk.metadata.get("score"),
+        "source_refs": [source_ref.to_dict() for source_ref in chunk.source_refs],
         "metadata": chunk.metadata,
     }

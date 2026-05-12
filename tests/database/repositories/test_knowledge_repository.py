@@ -10,6 +10,7 @@ from src.infrastructure.llm.embedding_service import (
     EmbeddingBatchResult,
     EmbeddingTextResult,
 )
+from src.domain.project_plane.knowledge_compilation import SourceChunk
 
 
 @pytest.fixture
@@ -371,7 +372,57 @@ def test_search_returns_metadata_observability_fields() -> None:
     assert 'entry_kind=_optional_row_text(row, "entry_kind"),' in search_source
     assert 'title=_optional_row_text(row, "title"),' in search_source
     assert 'source_excerpt=_optional_row_text(row, "source_excerpt"),' in search_source
+    assert "source_refs=source_refs_from_excerpt(" in search_source
     assert 'embedding_text=_optional_row_text(row, "embedding_text"),' in search_source
     assert 'questions=_optional_row_value(row, "questions"),' in search_source
     assert 'synonyms=_optional_row_value(row, "synonyms"),' in search_source
     assert 'tags=_optional_row_value(row, "tags"),' in search_source
+
+
+@pytest.mark.asyncio
+async def test_add_source_chunks_persists_raw_source_chunks(
+    knowledge_repo,
+    mock_pool,
+):
+    project_id = "00000000-0000-0000-0000-000000000001"
+    document_id = "00000000-0000-0000-0000-000000000002"
+    chunk = SourceChunk(
+        id=f"{document_id}:0",
+        project_id=project_id,
+        document_id=document_id,
+        source_index=0,
+        content="Raw source evidence text.",
+        page=2,
+        section_title="Evidence",
+        checksum="checksum-1",
+        metadata={"upload_chunk_index": 0},
+    )
+
+    class _FakeTransaction:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    mock_pool.mock_conn.transaction = Mock(return_value=_FakeTransaction())
+
+    result = await knowledge_repo.add_source_chunks(
+        project_id=project_id,
+        document_id=document_id,
+        chunks=(chunk,),
+    )
+
+    assert result == 1
+    calls = mock_pool.mock_conn.execute.await_args_list
+    assert "DELETE FROM knowledge_source_chunks" in calls[-2].args[0]
+
+    insert_args = calls[-1].args
+    assert "INSERT INTO knowledge_source_chunks" in insert_args[0]
+    assert insert_args[1] == f"{document_id}:0"
+    assert insert_args[4] == 0
+    assert insert_args[5] == "Raw source evidence text."
+    assert insert_args[6] == 2
+    assert insert_args[7] == "Evidence"
+    assert insert_args[10] == "checksum-1"
+    assert '"upload_chunk_index": 0' in insert_args[11]

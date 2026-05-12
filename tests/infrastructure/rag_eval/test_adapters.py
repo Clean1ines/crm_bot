@@ -8,6 +8,7 @@ from collections.abc import Mapping
 import pytest
 
 from src.application.rag_eval.schemas import RagEvalChunk
+from src.domain.project_plane.knowledge_views import SourceRefView
 from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswerer
 from src.infrastructure.rag_eval.adapters import (
     LocalRagEvalReportSink,
@@ -67,6 +68,10 @@ async def test_rag_service_retriever_maps_production_rag_results() -> None:
     assert chunks[0].metadata["method"] == "hybrid"
     assert chunks[0].metadata["entry_kind"] == "answer"
     assert chunks[0].metadata["source_excerpt"] == "Evidence excerpt"
+    assert chunks[0].source_refs[0].quote == "Evidence excerpt"
+    assert chunks[0].metadata["source_refs"] == [
+        {"quote": "Evidence excerpt", "source_index": 0}
+    ]
     assert chunks[0].metadata["embedding_text"] == "evidence semantic surface"
     assert chunks[0].metadata["questions"] == ["What is the evidence?"]
     assert chunks[0].metadata["synonyms"] == ["proof"]
@@ -95,6 +100,7 @@ async def test_production_answerer_uses_response_generator_state_contract() -> N
                 content="Evidence text",
                 document_id="doc_1",
                 source="kb.md",
+                source_refs=(SourceRefView(source_index=2, quote="Evidence excerpt"),),
                 metadata={"score": 0.9},
             )
         ],
@@ -107,6 +113,9 @@ async def test_production_answerer_uses_response_generator_state_contract() -> N
     assert isinstance(prompt_chunks, list)
     assert prompt_chunks[0]["id"] == "chunk_1"
     assert prompt_chunks[0]["content"] == "Evidence text"
+    assert prompt_chunks[0]["source_refs"] == [
+        {"quote": "Evidence excerpt", "source_index": 2}
+    ]
 
 
 @pytest.mark.asyncio
@@ -128,3 +137,15 @@ def test_extract_json_object_accepts_plain_and_fenced_json() -> None:
     assert _extract_json_object('{"ok": true}')["ok"] is True
     assert _extract_json_object('```json\n{"ok": true}\n```')["ok"] is True
     assert _extract_json_object('prefix {"ok": true} suffix')["ok"] is True
+
+
+def test_rag_eval_chunk_json_exposes_source_refs() -> None:
+    chunk = RagEvalChunk(
+        id="chunk_1",
+        content="Evidence text",
+        source_refs=(SourceRefView(source_index=7, quote="Exact evidence."),),
+    )
+
+    payload = chunk.to_json()
+
+    assert payload["source_refs"] == [{"quote": "Exact evidence.", "source_index": 7}]

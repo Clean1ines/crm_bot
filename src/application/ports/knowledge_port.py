@@ -5,6 +5,7 @@ from typing import Protocol
 
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_compilation import SourceChunk
 from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
@@ -65,6 +66,14 @@ class KnowledgeRepositoryPort(Protocol):
         project_id: str,
         document_id: str,
         chunks: Sequence[KnowledgeChunk],
+    ) -> int: ...
+
+    async def add_source_chunks(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        chunks: Sequence[SourceChunk],
     ) -> int: ...
 
     async def delete_document_chunks(self, document_id: str) -> None: ...

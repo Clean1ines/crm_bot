@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from typing import Literal, Mapping, TypeAlias
 from uuid import uuid4
 
+from src.domain.project_plane.knowledge_views import SourceRefView
+
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 )
@@ -65,6 +67,7 @@ class RagEvalChunk:
     document_id: str | None = None
     source: str | None = None
     score: float = 0.0
+    source_refs: tuple[SourceRefView, ...] = ()
     metadata: Mapping[str, object] = field(default_factory=dict)
 
     def to_json(self) -> JsonObject:
@@ -74,6 +77,9 @@ class RagEvalChunk:
             "document_id": self.document_id,
             "source": self.source,
             "score": self.score,
+            "source_refs": [
+                json_value(source_ref.to_dict()) for source_ref in self.source_refs
+            ],
             "metadata": json_value(dict(self.metadata)),
         }
 

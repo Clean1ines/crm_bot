@@ -2,7 +2,10 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
-from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+from src.domain.project_plane.knowledge_views import (
+    KnowledgeSearchResultView,
+    SourceRefView,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
     normalize_preprocessing_mode,
@@ -127,6 +130,41 @@ class KnowledgePreviewRequestDto:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceRefDto:
+    quote: str
+    source_index: int | None = None
+    source_chunk_id: str | None = None
+    start_offset: int | None = None
+    end_offset: int | None = None
+    confidence: float | None = None
+
+    @classmethod
+    def from_view(cls, source_ref: SourceRefView) -> "SourceRefDto":
+        return cls(
+            quote=source_ref.quote,
+            source_index=source_ref.source_index,
+            source_chunk_id=source_ref.source_chunk_id,
+            start_offset=source_ref.start_offset,
+            end_offset=source_ref.end_offset,
+            confidence=source_ref.confidence,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {"quote": self.quote}
+        if self.source_index is not None:
+            payload["source_index"] = self.source_index
+        if self.source_chunk_id is not None:
+            payload["source_chunk_id"] = self.source_chunk_id
+        if self.start_offset is not None:
+            payload["start_offset"] = self.start_offset
+        if self.end_offset is not None:
+            payload["end_offset"] = self.end_offset
+        if self.confidence is not None:
+            payload["confidence"] = self.confidence
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgePreviewResultDto:
     id: str
     content: str
@@ -138,6 +176,7 @@ class KnowledgePreviewResultDto:
     entry_kind: str | None = None
     title: str | None = None
     source_excerpt: str | None = None
+    source_refs: tuple[SourceRefDto, ...] = ()
     embedding_text: str | None = None
     questions: object | None = None
     synonyms: object | None = None
@@ -159,6 +198,9 @@ class KnowledgePreviewResultDto:
             entry_kind=result.entry_kind,
             title=result.title,
             source_excerpt=result.source_excerpt,
+            source_refs=tuple(
+                SourceRefDto.from_view(ref) for ref in result.source_refs
+            ),
             embedding_text=result.embedding_text,
             questions=result.questions,
             synonyms=result.synonyms,
@@ -176,6 +218,11 @@ class KnowledgePreviewResultDto:
             "document_id": self.document_id,
             "document_status": self.document_status,
         }
+
+        if self.source_refs:
+            payload["source_refs"] = [
+                source_ref.to_dict() for source_ref in self.source_refs
+            ]
 
         optional_fields = {
             "entry_kind": self.entry_kind,
