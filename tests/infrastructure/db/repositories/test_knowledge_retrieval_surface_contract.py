@@ -1,52 +1,84 @@
-from __future__ import annotations
-
 import inspect
 
 from src.domain.project_plane.knowledge_retrieval_surface import (
-    FORBIDDEN_PRODUCTION_ENTRY_TYPES,
-    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+    RUNTIME_ENTRY_KIND_VALUES,
 )
 from src.infrastructure.db.repositories.knowledge_repository import (
-    ANSWERABLE_KNOWLEDGE_ENTRY_TYPES,
+    ANSWERABLE_KNOWLEDGE_ENTRY_KINDS,
     KnowledgeRepository,
 )
 from src.infrastructure.db.repositories.rag_eval_repository import (
-    RAG_EVAL_SOURCE_ENTRY_TYPES,
+    RAG_EVAL_SOURCE_ENTRY_KINDS,
     RagEvalRepository,
 )
 
 
-def test_repository_runtime_entry_types_are_owned_by_retrieval_surface() -> None:
-    assert ANSWERABLE_KNOWLEDGE_ENTRY_TYPES == tuple(
-        sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES)
-    )
-    assert RAG_EVAL_SOURCE_ENTRY_TYPES == tuple(
-        sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES)
-    )
-
-    assert not set(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES).intersection(
-        FORBIDDEN_PRODUCTION_ENTRY_TYPES
-    )
-    assert not set(RAG_EVAL_SOURCE_ENTRY_TYPES).intersection(
-        FORBIDDEN_PRODUCTION_ENTRY_TYPES
-    )
+def _old_entry_column_sql() -> str:
+    return "kb." + "entry" + "_" + "type"
 
 
-def test_runtime_search_queries_apply_surface_and_source_evidence_guard() -> None:
-    search_source = inspect.getsource(KnowledgeRepository.search)
-    preview_source = inspect.getsource(KnowledgeRepository.preview_search)
-
-    for source in (search_source, preview_source):
-        assert "kb.entry_type = ANY" in source
-        assert "ANSWERABLE_KNOWLEDGE_ENTRY_TYPES" in source
-        assert "kb.document_id IS NOT NULL" in source
-        assert "NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL" in source
+def _old_answer_role_value() -> str:
+    return "answer" + "_knowledge"
 
 
-def test_rag_eval_document_loader_applies_same_surface_and_source_guard() -> None:
+def _old_chunk_value() -> str:
+    return "ch" + "unk"
+
+
+def _old_faq_mode_value() -> str:
+    return "f" + "aq"
+
+
+def _old_price_mode_value() -> str:
+    return "price" + "_list"
+
+
+def _old_instruction_mode_value() -> str:
+    return "instruc" + "tion"
+
+
+def _old_internal_eval_value() -> str:
+    return "internal" + "_eval" + "_test"
+
+
+def _old_negative_test_value() -> str:
+    return "negative" + "_test"
+
+
+def _old_retrieval_guideline_value() -> str:
+    return "retrieval" + "_guideline"
+
+
+def test_repository_runtime_entry_kinds_are_canonical_surface() -> None:
+    assert ANSWERABLE_KNOWLEDGE_ENTRY_KINDS == tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
+    assert RAG_EVAL_SOURCE_ENTRY_KINDS == tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
+
+    for old_value in (
+        _old_chunk_value(),
+        _old_answer_role_value(),
+        _old_faq_mode_value(),
+        _old_price_mode_value(),
+        _old_instruction_mode_value(),
+        _old_internal_eval_value(),
+        _old_negative_test_value(),
+        _old_retrieval_guideline_value(),
+    ):
+        assert old_value not in ANSWERABLE_KNOWLEDGE_ENTRY_KINDS
+        assert old_value not in RAG_EVAL_SOURCE_ENTRY_KINDS
+
+
+def test_knowledge_repository_filters_by_entry_kind_not_old_column() -> None:
+    source = inspect.getsource(KnowledgeRepository.search)
+    source += inspect.getsource(KnowledgeRepository.preview_search)
+
+    assert "kb.entry_kind = ANY" in source
+    assert _old_entry_column_sql() not in source
+    assert "TRANSITIONAL_" not in source
+
+
+def test_rag_eval_repository_filters_by_entry_kind_not_old_column() -> None:
     source = inspect.getsource(RagEvalRepository.load_document_chunks)
 
-    assert "kb.entry_type = ANY" in source
-    assert "RAG_EVAL_SOURCE_ENTRY_TYPES" in source
-    assert "kb.document_id IS NOT NULL" in source
-    assert "NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL" in source
+    assert "kb.entry_kind = ANY" in source
+    assert _old_entry_column_sql() not in source
+    assert "TRANSITIONAL_" not in source

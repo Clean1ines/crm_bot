@@ -23,7 +23,7 @@ from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.domain.project_plane.knowledge_retrieval_surface import (
-    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+    RUNTIME_ENTRY_KIND_VALUES,
 )
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
@@ -47,7 +47,7 @@ TERMINAL_QUEUE_STATUSES = (
     "succeeded",
     "done",
 )
-ANSWERABLE_KNOWLEDGE_ENTRY_TYPES = tuple(sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES))
+ANSWERABLE_KNOWLEDGE_ENTRY_KINDS = tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
 
 
 class _RowLookup(Protocol):
@@ -173,7 +173,7 @@ class KnowledgeRepository:
                         kb.document_id,
                         d.file_name AS source,
                         d.status AS document_status,
-                        kb.entry_type,
+                        kb.entry_kind,
                         kb.title,
                         kb.source_excerpt,
                         kb.embedding_text,
@@ -189,7 +189,7 @@ class KnowledgeRepository:
                     LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                     WHERE kb.project_id = $2
                       AND kb.embedding IS NOT NULL
-                      AND kb.entry_type = ANY($4::text[])
+                      AND kb.entry_kind = ANY($4::text[])
                       AND (
                           kb.document_id IS NOT NULL
                           OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
@@ -201,7 +201,7 @@ class KnowledgeRepository:
                     query_embedding_str,
                     project_uuid,
                     limit,
-                    list(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES),
+                    list(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS),
                 )
             else:
                 rows = await conn.fetch(
@@ -219,7 +219,7 @@ class KnowledgeRepository:
                             kb.document_id,
                             d.file_name AS source,
                             d.status AS document_status,
-                            kb.entry_type,
+                            kb.entry_kind,
                             kb.title,
                             kb.source_excerpt,
                             kb.embedding_text,
@@ -229,7 +229,7 @@ class KnowledgeRepository:
                             trim(concat_ws(
                                 E'\n',
                                 kb.title,
-                                kb.entry_type,
+                                kb.entry_kind,
                                 kb.embedding_text,
                                 kb.source_excerpt,
                                 kb.content,
@@ -263,7 +263,7 @@ class KnowledgeRepository:
                         LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
                         WHERE kb.project_id = $3
                           AND kb.embedding IS NOT NULL
-                          AND kb.entry_type = ANY($6::text[])
+                          AND kb.entry_kind = ANY($6::text[])
                           AND (
                               kb.document_id IS NOT NULL
                               OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
@@ -304,7 +304,7 @@ class KnowledgeRepository:
                             document_id,
                             source,
                             document_status,
-                            entry_type,
+                            entry_kind,
                             title,
                             source_excerpt,
                             embedding_text,
@@ -326,7 +326,7 @@ class KnowledgeRepository:
                             document_id,
                             source,
                             document_status,
-                            entry_type,
+                            entry_kind,
                             title,
                             source_excerpt,
                             embedding_text,
@@ -347,7 +347,7 @@ class KnowledgeRepository:
                             max(document_id::text)::uuid AS document_id,
                             max(source) AS source,
                             max(document_status) AS document_status,
-                            max(entry_type) AS entry_type,
+                            max(entry_kind) AS entry_kind,
                             max(title) AS title,
                             max(source_excerpt) AS source_excerpt,
                             max(embedding_text) AS embedding_text,
@@ -368,7 +368,7 @@ class KnowledgeRepository:
                         document_id,
                         source,
                         document_status,
-                        entry_type,
+                        entry_kind,
                         title,
                         source_excerpt,
                         embedding_text,
@@ -411,7 +411,7 @@ class KnowledgeRepository:
                     project_uuid,
                     candidate_limit,
                     candidate_limit,
-                    list(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES),
+                    list(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS),
                 )
 
         results: list[KnowledgeSearchResultView] = []
@@ -494,7 +494,7 @@ class KnowledgeRepository:
                     document_id=_optional_row_text(row, "document_id"),
                     source=_optional_row_text(row, "source"),
                     document_status=_optional_row_text(row, "document_status"),
-                    entry_type=_optional_row_text(row, "entry_type"),
+                    entry_kind=_optional_row_text(row, "entry_kind"),
                     title=_optional_row_text(row, "title"),
                     source_excerpt=_optional_row_text(row, "source_excerpt"),
                     embedding_text=_optional_row_text(row, "embedding_text"),
@@ -538,7 +538,7 @@ class KnowledgeRepository:
                         kb.document_id,
                         d.file_name AS source,
                         d.status AS document_status,
-                        kb.entry_type,
+                        kb.entry_kind,
                         kb.title,
                         kb.source_excerpt,
                         kb.embedding_text,
@@ -548,7 +548,7 @@ class KnowledgeRepository:
                         trim(concat_ws(
                             E'\n',
                             kb.title,
-                            kb.entry_type,
+                            kb.entry_kind,
                             kb.embedding_text,
                             kb.source_excerpt,
                             kb.content,
@@ -581,7 +581,7 @@ class KnowledgeRepository:
                     JOIN knowledge_base AS kb ON kb.document_id = d.id
                     WHERE d.project_id = $2
                       AND d.status = 'processed'
-                      AND kb.entry_type = ANY($4::text[])
+                      AND kb.entry_kind = ANY($4::text[])
                       AND (
                           kb.document_id IS NOT NULL
                           OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
@@ -607,11 +607,11 @@ class KnowledgeRepository:
                               AND lower(base.search_text) LIKE '%' || token || '%'
                         ) AS token_overlap,
                         CASE
-                            WHEN COALESCE(base.entry_type, '') <> ''
-                             AND base.entry_type <> 'chunk'
+                            WHEN COALESCE(base.entry_kind, '') <> ''
+                             AND base.entry_kind <> 'answer'
                             THEN 0.45::double precision
                             ELSE 0.0::double precision
-                        END AS structured_boost,
+                        END AS canonical_kind_boost,
                         CASE
                             WHEN lower(base.content) LIKE '%ожидаемая тема:%'
                             THEN 0.25::double precision
@@ -630,7 +630,7 @@ class KnowledgeRepository:
                     document_id,
                     source,
                     document_status,
-                    entry_type,
+                    entry_kind,
                     title,
                     source_excerpt,
                     embedding_text,
@@ -640,7 +640,7 @@ class KnowledgeRepository:
                     (
                         lexical_score
                         + (token_overlap * 0.06)
-                        + structured_boost
+                        + canonical_kind_boost
                         + title_boost
                         - legacy_penalty
                     ) AS score
@@ -653,7 +653,7 @@ class KnowledgeRepository:
                 normalized_query,
                 ensure_uuid(project_id),
                 candidate_limit,
-                list(ANSWERABLE_KNOWLEDGE_ENTRY_TYPES),
+                list(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS),
             )
 
         results = [
@@ -667,12 +667,12 @@ class KnowledgeRepository:
                     * 0.05,
                 ),
                 method="structured_lexical"
-                if _optional_row_text(row, "entry_type") not in {None, "", "chunk"}
+                if _optional_row_text(row, "entry_kind") not in {None, "", "answer"}
                 else "fts",
                 document_id=_optional_row_text(row, "document_id"),
                 source=_optional_row_text(row, "source"),
                 document_status=_optional_row_text(row, "document_status"),
-                entry_type=_optional_row_text(row, "entry_type"),
+                entry_kind=_optional_row_text(row, "entry_kind"),
                 title=_optional_row_text(row, "title"),
                 source_excerpt=_optional_row_text(row, "source_excerpt"),
                 embedding_text=_optional_row_text(row, "embedding_text"),
@@ -722,7 +722,7 @@ class KnowledgeRepository:
                                 document_id,
                                 content,
                                 embedding,
-                                entry_type,
+                                entry_kind,
                                 title,
                                 source_excerpt,
                                 questions,
@@ -807,8 +807,8 @@ class KnowledgeRepository:
                     d.preprocessing_metrics,
                     COUNT(kb.id)::int AS chunk_count,
                     COUNT(kb.id) FILTER (
-                        WHERE COALESCE(kb.entry_type, '') <> ''
-                          AND kb.entry_type <> 'chunk'
+                        WHERE COALESCE(kb.entry_kind, '') <> ''
+                          AND kb.entry_kind <> 'answer'
                     )::int AS structured_chunk_count
                 FROM knowledge_documents AS d
                 LEFT JOIN knowledge_base AS kb ON kb.document_id = d.id
@@ -914,8 +914,8 @@ class KnowledgeRepository:
                 SELECT
                     COUNT(id)::int AS chunk_count,
                     COUNT(id) FILTER (
-                        WHERE COALESCE(entry_type, '') <> ''
-                          AND entry_type <> 'chunk'
+                        WHERE COALESCE(entry_kind, '') <> ''
+                          AND entry_kind <> 'answer'
                     )::int AS structured_chunk_count
                 FROM knowledge_base
                 WHERE document_id = $1

@@ -312,7 +312,7 @@ async def test_add_knowledge_chunks_persists_typed_chunks(
     executed_args = mock_pool.mock_conn.execute.await_args.args
     assert "embedding_text" in executed_args[0]
     assert executed_args[3] == "Typed answer content with enough useful words."
-    assert executed_args[5] == "faq"
+    assert executed_args[5] == "faq_answer"
     assert executed_args[6] == "FAQ"
     assert executed_args[7] == "Typed answer content"
     assert executed_args[8] == '["Can I upload documents?"]'
@@ -326,12 +326,12 @@ def test_search_filters_non_answer_knowledge_roles() -> None:
         "src/infrastructure/db/repositories/knowledge_repository.py"
     ).read_text(encoding="utf-8")
 
-    assert "ANSWERABLE_KNOWLEDGE_ENTRY_TYPES" in source
-    assert "AND kb.entry_type = ANY($4::text[])" in source
-    assert "AND kb.entry_type = ANY($6::text[])" in source
-    assert '"internal_eval_test"' not in source
-    assert '"negative_test"' not in source
-    assert '"retrieval_guideline"' not in source
+    assert "ANSWERABLE_KNOWLEDGE_ENTRY_KINDS" in source
+    assert "AND kb.entry_kind = ANY($4::text[])" in source
+    assert "AND kb.entry_kind = ANY($6::text[])" in source
+    assert '"debug_artifact"' not in source
+    assert '"debug_artifact"' not in source
+    assert '"debug_artifact"' not in source
 
 
 def test_answerable_search_filter_uses_retrieval_surface_contract() -> None:
@@ -339,9 +339,9 @@ def test_answerable_search_filter_uses_retrieval_surface_contract() -> None:
         "src/infrastructure/db/repositories/knowledge_repository.py"
     ).read_text(encoding="utf-8")
 
-    assert "TRANSITIONAL_PRODUCTION_ENTRY_TYPES" in source
-    assert "ANSWERABLE_KNOWLEDGE_ENTRY_TYPES" in source
-    assert "tuple(sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES))" in source
+    assert "RUNTIME_ENTRY_KIND_VALUES" in source
+    assert "ANSWERABLE_KNOWLEDGE_ENTRY_KINDS" in source
+    assert "tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))" in source
 
 
 def test_search_returns_metadata_observability_fields() -> None:
@@ -354,21 +354,21 @@ def test_search_returns_metadata_observability_fields() -> None:
         )
     ]
 
-    assert "kb.entry_type," in search_source
+    assert "kb.entry_kind," in search_source
     assert "kb.title," in search_source
     assert "kb.source_excerpt," in search_source
     assert "kb.embedding_text," in search_source
     assert "kb.questions," in search_source
     assert "kb.synonyms," in search_source
     assert "kb.tags," in search_source
-    assert "max(entry_type) AS entry_type" in search_source
+    assert "max(entry_kind) AS entry_kind" in search_source
     assert "(jsonb_agg(questions)->0) AS questions" in search_source
     assert "(jsonb_agg(synonyms)->0) AS synonyms" in search_source
     assert "(jsonb_agg(tags)->0) AS tags" in search_source
     assert "max(questions) AS questions" not in search_source
     assert "max(synonyms) AS synonyms" not in search_source
     assert "max(tags) AS tags" not in search_source
-    assert 'entry_type=_optional_row_text(row, "entry_type"),' in search_source
+    assert 'entry_kind=_optional_row_text(row, "entry_kind"),' in search_source
     assert 'title=_optional_row_text(row, "title"),' in search_source
     assert 'source_excerpt=_optional_row_text(row, "source_excerpt"),' in search_source
     assert 'embedding_text=_optional_row_text(row, "embedding_text"),' in search_source

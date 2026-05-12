@@ -69,7 +69,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="chunk-a",
                 content="## 1. Назначение продукта CRM Bot принимает обращения клиентов.",
                 metadata={
-                    "entry_type": "answer_knowledge",
+                    "entry_kind": "answer",
                     "title": "1. Назначение продукта",
                 },
             ),
@@ -80,7 +80,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "намерение клиента перед ответом."
                 ),
                 metadata={
-                    "entry_type": "answer_knowledge",
+                    "entry_kind": "answer",
                     "title": "1. Назначение продукта",
                 },
             ),
@@ -88,7 +88,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="faq-1",
                 content="Клиент может спросить о сроках подключения продукта.",
                 metadata={
-                    "entry_type": "faq",
+                    "entry_kind": "faq_answer",
                     "title": "Сроки подключения",
                 },
             ),
@@ -96,7 +96,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="price-1",
                 content="Стоимость внедрения зависит от количества проектов.",
                 metadata={
-                    "entry_type": "price_list",
+                    "entry_kind": "price_answer",
                     "title": "Стоимость",
                 },
             ),
@@ -104,7 +104,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="eval-test-1",
                 content="НЕ ДОЛЖНО ПОПАСТЬ В PROMPT: встроенный тест.",
                 metadata={
-                    "entry_type": "internal_eval_test",
+                    "entry_kind": "debug_artifact",
                     "title": "Тесты",
                 },
             ),
@@ -112,7 +112,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="guideline-1",
                 content="НЕ ДОЛЖНО ПОПАСТЬ В PROMPT: правило поиска.",
                 metadata={
-                    "entry_type": "retrieval_guideline",
+                    "entry_kind": "debug_artifact",
                     "title": "Правила поиска",
                 },
             ),
@@ -120,7 +120,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="negative-1",
                 content="НЕ ДОЛЖНО ПОПАСТЬ В PROMPT: негативная проверка.",
                 metadata={
-                    "entry_type": "negative_test",
+                    "entry_kind": "debug_artifact",
                     "title": "Негативные тесты",
                 },
             ),
@@ -128,7 +128,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="empty-section",
                 content="## 9. Пустой раздел\n\n---",
                 metadata={
-                    "entry_type": "answer_knowledge",
+                    "entry_kind": "answer",
                     "title": "9. Пустой раздел",
                 },
             ),
@@ -136,7 +136,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                 id="",
                 content="У этого chunk нет id, его нельзя использовать как source.",
                 metadata={
-                    "entry_type": "answer_knowledge",
+                    "entry_kind": "answer",
                     "title": "Без id",
                 },
             ),
@@ -190,7 +190,7 @@ async def test_dataset_generator_fallback_expands_expected_ids_for_same_title_fr
                 id="chunk-a",
                 content="CRM Bot принимает обращения клиентов.",
                 metadata={
-                    "entry_type": "answer_knowledge",
+                    "entry_kind": "answer",
                     "title": "1. Назначение продукта",
                 },
             ),
@@ -198,7 +198,7 @@ async def test_dataset_generator_fallback_expands_expected_ids_for_same_title_fr
                 id="chunk-b",
                 content="CRM Bot классифицирует намерение клиента.",
                 metadata={
-                    "entry_type": "answer_knowledge",
+                    "entry_kind": "answer",
                     "title": "1. Назначение продукта",
                 },
             ),

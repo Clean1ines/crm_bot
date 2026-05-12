@@ -124,7 +124,7 @@ def test_new_domain_contract_does_not_contain_legacy_chunk_api() -> None:
         "to_legacy_json",
         "from_legacy",
         "from_mapping",
-        "entry_type",
+        "entry_kind",
         "plain_enriched",
         '"chunk"',
         "'chunk'",

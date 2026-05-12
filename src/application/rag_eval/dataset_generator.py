@@ -7,8 +7,7 @@ from typing import cast, get_args
 
 from src.application.rag_eval.ports import RagEvalJsonLlmPort
 from src.domain.project_plane.knowledge_retrieval_surface import (
-    FORBIDDEN_PRODUCTION_ENTRY_TYPES,
-    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+    RUNTIME_ENTRY_KIND_VALUES,
 )
 from src.application.rag_eval.schemas import (
     RagEvalChunk,
@@ -31,8 +30,8 @@ MIN_VARIANTS_PER_FACT = 5
 MIN_EVAL_SOURCE_CONTENT_CHARS = 16
 MIN_CONTAINED_EVAL_SOURCE_CHARS = 24
 
-EVAL_QUESTION_SOURCE_ENTRY_TYPES = TRANSITIONAL_PRODUCTION_ENTRY_TYPES
-EXCLUDED_EVAL_SOURCE_ENTRY_TYPES = FORBIDDEN_PRODUCTION_ENTRY_TYPES
+EVAL_QUESTION_SOURCE_ENTRY_KINDS = RUNTIME_ENTRY_KIND_VALUES
+EXCLUDED_EVAL_SOURCE_ENTRY_KINDS: frozenset[str] = frozenset()
 
 
 DOCUMENT_STRUCTURE_QUESTION_MARKERS = (
@@ -424,7 +423,7 @@ class LlmRagEvalDatasetGenerator:
     def _prompt_metadata(self, metadata: Mapping[str, object]) -> dict[str, object]:
         keep = {
             "title": "t",
-            "entry_type": "type",
+            "entry_kind": "type",
             "source_excerpt": "ex",
             "questions": "q",
             "synonyms": "syn",
@@ -739,11 +738,11 @@ class LlmRagEvalDatasetGenerator:
         ]
 
     def _eval_group_key(self, chunk: RagEvalChunk) -> tuple[str, str]:
-        entry_type = self._metadata_text(chunk.metadata, "entry_type") or "legacy"
+        entry_kind = self._metadata_text(chunk.metadata, "entry_kind") or "legacy"
         normalized_title = self._normalized_title(chunk.metadata.get("title"))
         if normalized_title:
-            return (entry_type, normalized_title)
-        return (entry_type, f"chunk:{chunk.id}")
+            return (entry_kind, normalized_title)
+        return (entry_kind, f"chunk:{chunk.id}")
 
     def _canonical_eval_chunk(self, chunks: list[RagEvalChunk]) -> RagEvalChunk:
         primary = chunks[0]
@@ -817,8 +816,8 @@ class LlmRagEvalDatasetGenerator:
         if not chunk.id.strip():
             return False
 
-        entry_type = self._metadata_text(chunk.metadata, "entry_type")
-        if entry_type and entry_type not in EVAL_QUESTION_SOURCE_ENTRY_TYPES:
+        entry_kind = self._metadata_text(chunk.metadata, "entry_kind")
+        if entry_kind and entry_kind not in EVAL_QUESTION_SOURCE_ENTRY_KINDS:
             return False
 
         content = " ".join(chunk.content.split())

@@ -373,7 +373,7 @@ def _normalize_chunks(raw_chunks: Sequence[object]) -> list[JsonObject]:
 
 _CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
     "content",
-    "entry_type",
+    "entry_kind",
     "title",
     "source_excerpt",
     "questions",

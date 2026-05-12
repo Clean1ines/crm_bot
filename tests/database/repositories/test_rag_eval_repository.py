@@ -70,7 +70,7 @@ async def test_load_document_chunks_maps_knowledge_base_rows() -> None:
             "content": "Подключение занимает 1 день.",
             "document_id": DOCUMENT_ID,
             "source": "kb.md",
-            "entry_type": "faq",
+            "entry_kind": "faq_answer",
             "title": "Подключение",
             "source_excerpt": "excerpt",
             "embedding_text": "Подключение срок",

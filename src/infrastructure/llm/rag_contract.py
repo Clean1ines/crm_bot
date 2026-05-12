@@ -90,7 +90,7 @@ class RAGCandidate:
             metadata={
                 "document_id": payload.document_id,
                 "document_status": payload.document_status,
-                "entry_type": payload.entry_type,
+                "entry_kind": payload.entry_kind,
                 "source_excerpt": payload.source_excerpt,
                 "embedding_text": payload.embedding_text,
                 "questions": payload.questions,
@@ -113,7 +113,7 @@ class RAGCandidate:
         for metadata_key in (
             "document_id",
             "document_status",
-            "entry_type",
+            "entry_kind",
             "source_excerpt",
             "embedding_text",
             "questions",

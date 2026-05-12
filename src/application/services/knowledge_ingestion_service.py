@@ -43,7 +43,7 @@ from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 _PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
     "content",
-    "entry_type",
+    "entry_kind",
     "title",
     "source_excerpt",
     "questions",
@@ -174,8 +174,8 @@ def _text_tuple(value: object) -> tuple[str, ...]:
 
 
 def _has_semantic_chunk_metadata(chunk: JsonObject) -> bool:
-    entry_type = _clean_optional_text(chunk.get("entry_type"))
-    if entry_type and entry_type != "chunk":
+    entry_kind = _clean_optional_text(chunk.get("entry_kind"))
+    if entry_kind:
         return True
 
     content = _chunk_content(chunk)
@@ -192,7 +192,7 @@ def _has_semantic_chunk_metadata(chunk: JsonObject) -> bool:
     return False
 
 
-def _role_from_entry_type(value: object) -> KnowledgeChunkRole:
+def _role_from_entry_kind(value: object) -> KnowledgeChunkRole:
     text = _clean_optional_text(value)
     if not text:
         return KnowledgeChunkRole.ANSWER_KNOWLEDGE
@@ -217,7 +217,7 @@ def _draft_from_json_chunk(
     metadata: dict[str, object] = {}
     metadata_fields = {
         "content",
-        "entry_type",
+        "entry_kind",
         "title",
         "source_excerpt",
         "questions",
@@ -231,7 +231,7 @@ def _draft_from_json_chunk(
 
     return KnowledgeChunkDraft(
         content=content,
-        role=_role_from_entry_type(chunk.get("entry_type")),
+        role=_role_from_entry_kind(chunk.get("entry_kind")),
         title=title,
         source_excerpt=_clean_optional_text(chunk.get("source_excerpt")),
         section_path=KnowledgeSectionPath(
@@ -296,13 +296,13 @@ def _raw_chunks_for_structured_persistence(
     must never be the only persisted representation of the uploaded document.
 
     Important: source chunks may already be enriched by the deterministic
-    chunker. Do not collapse them back to legacy ``entry_type="chunk"`` rows,
+    chunker. Do not collapse them back to legacy raw chunk rows,
     otherwise markdown titles, source excerpts, tags and embedding_text are
     lost in FAQ/structured preprocessing modes.
     """
     raw_chunks: list[JsonObject] = []
     metadata_fields = (
-        "entry_type",
+        "entry_kind",
         "title",
         "source_excerpt",
         "questions",
@@ -329,8 +329,8 @@ def _raw_chunks_for_structured_persistence(
             if _present_plain_chunk_value(value):
                 preserved[field] = value
 
-        if not _present_plain_chunk_value(preserved.get("entry_type")):
-            preserved["entry_type"] = "chunk"
+        if not _present_plain_chunk_value(preserved.get("entry_kind")):
+            preserved["entry_kind"] = "answer"
 
         if not _present_plain_chunk_value(preserved.get("embedding_text")):
             preserved["embedding_text"] = content
