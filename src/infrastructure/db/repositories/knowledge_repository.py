@@ -33,6 +33,10 @@ from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
 from src.domain.project_plane.knowledge_compilation import (
+    CompilerRun,
+    CompilationMetrics,
+    CandidateCluster,
+    AnswerCandidate,
     CanonicalKnowledgeEntry,
     SourceChunk,
     SourceRef,
@@ -229,6 +233,45 @@ def _first_source_excerpt(source_refs: tuple[SourceRefView, ...]) -> str | None:
         if source_ref.quote:
             return source_ref.quote
     return None
+
+
+def _stage_e_metrics_payload(metrics: CompilationMetrics) -> dict[str, object]:
+    return {
+        "source_chunk_count": metrics.source_chunk_count,
+        "answer_candidate_count": metrics.answer_candidate_count,
+        "grounded_candidate_count": metrics.grounded_candidate_count,
+        "rejected_candidate_count": metrics.rejected_candidate_count,
+        "candidate_cluster_count": metrics.candidate_cluster_count,
+        "canonical_entry_count": metrics.canonical_entry_count,
+        "enriched_entry_count": metrics.enriched_entry_count,
+        "embedded_entry_count": metrics.embedded_entry_count,
+        "published_entry_count": metrics.published_entry_count,
+        "fallback_row_count": metrics.fallback_row_count,
+        "dropped_forbidden_count": metrics.dropped_forbidden_count,
+        "entries_without_source_refs_count": metrics.entries_without_source_refs_count,
+    }
+
+
+def _stage_e_jsonb_array(values: Sequence[Mapping[str, object]]) -> str:
+    return json.dumps(list(values), ensure_ascii=False)
+
+
+def _stage_e_candidate_source_refs_payload(
+    candidate: AnswerCandidate,
+) -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
+    for source_ref in candidate.source_refs:
+        payload.append(
+            {
+                "source_index": source_ref.source_index,
+                "quote": source_ref.quote,
+                "source_chunk_id": source_ref.source_chunk_id,
+                "start_offset": source_ref.start_offset,
+                "end_offset": source_ref.end_offset,
+                "confidence": source_ref.confidence,
+            }
+        )
+    return payload
 
 
 class KnowledgeRepository:
@@ -691,6 +734,342 @@ class KnowledgeRepository:
 
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:limit]
+
+    async def create_compiler_run(self, run: CompilerRun) -> None:
+        metrics_payload = _stage_e_metrics_payload(run.metrics)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO knowledge_compiler_runs (
+                        id,
+                        project_id,
+                        document_id,
+                        mode,
+                        compiler_version,
+                        prompt_version,
+                        model,
+                        status,
+                        error,
+                        started_at,
+                        finished_at,
+                        created_by
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (id)
+                    DO UPDATE SET
+                        mode = EXCLUDED.mode,
+                        compiler_version = EXCLUDED.compiler_version,
+                        prompt_version = EXCLUDED.prompt_version,
+                        model = EXCLUDED.model,
+                        status = EXCLUDED.status,
+                        error = EXCLUDED.error,
+                        started_at = EXCLUDED.started_at,
+                        finished_at = EXCLUDED.finished_at,
+                        created_by = EXCLUDED.created_by,
+                        updated_at = now()
+                    """,
+                    run.id,
+                    ensure_uuid(run.project_id),
+                    ensure_uuid(run.document_id),
+                    run.mode,
+                    run.compiler_version,
+                    run.prompt_version,
+                    run.model,
+                    run.status.value,
+                    run.error,
+                    run.started_at,
+                    run.finished_at,
+                    run.created_by,
+                )
+                await self._upsert_compilation_metrics(
+                    conn=conn,
+                    compiler_run_id=run.id,
+                    metrics=run.metrics,
+                    metrics_payload=metrics_payload,
+                )
+
+    async def complete_compiler_run(
+        self,
+        compiler_run_id: str,
+        metrics: CompilationMetrics,
+    ) -> None:
+        metrics_payload = _stage_e_metrics_payload(metrics)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    UPDATE knowledge_compiler_runs
+                    SET status = 'completed',
+                        error = '',
+                        finished_at = now(),
+                        updated_at = now()
+                    WHERE id = $1
+                    """,
+                    compiler_run_id,
+                )
+                await self._upsert_compilation_metrics(
+                    conn=conn,
+                    compiler_run_id=compiler_run_id,
+                    metrics=metrics,
+                    metrics_payload=metrics_payload,
+                )
+
+    async def fail_compiler_run(
+        self,
+        compiler_run_id: str,
+        error: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_runs
+                SET status = 'failed',
+                    error = $2,
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                compiler_run_id,
+                error,
+            )
+
+    async def _upsert_compilation_metrics(
+        self,
+        *,
+        conn: asyncpg.Connection,
+        compiler_run_id: str,
+        metrics: CompilationMetrics,
+        metrics_payload: Mapping[str, object],
+    ) -> None:
+        await conn.execute(
+            """
+            INSERT INTO knowledge_compilation_metrics (
+                compiler_run_id,
+                source_chunk_count,
+                answer_candidate_count,
+                grounded_candidate_count,
+                rejected_candidate_count,
+                candidate_cluster_count,
+                canonical_entry_count,
+                enriched_entry_count,
+                embedded_entry_count,
+                published_entry_count,
+                fallback_row_count,
+                dropped_forbidden_count,
+                entries_without_source_refs_count,
+                metrics
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                $7,
+                $8,
+                $9,
+                $10,
+                $11,
+                $12,
+                $13,
+                $14::jsonb
+            )
+            ON CONFLICT (compiler_run_id)
+            DO UPDATE SET
+                source_chunk_count = EXCLUDED.source_chunk_count,
+                answer_candidate_count = EXCLUDED.answer_candidate_count,
+                grounded_candidate_count = EXCLUDED.grounded_candidate_count,
+                rejected_candidate_count = EXCLUDED.rejected_candidate_count,
+                candidate_cluster_count = EXCLUDED.candidate_cluster_count,
+                canonical_entry_count = EXCLUDED.canonical_entry_count,
+                enriched_entry_count = EXCLUDED.enriched_entry_count,
+                embedded_entry_count = EXCLUDED.embedded_entry_count,
+                published_entry_count = EXCLUDED.published_entry_count,
+                fallback_row_count = EXCLUDED.fallback_row_count,
+                dropped_forbidden_count = EXCLUDED.dropped_forbidden_count,
+                entries_without_source_refs_count = EXCLUDED.entries_without_source_refs_count,
+                metrics = EXCLUDED.metrics,
+                updated_at = now()
+            """,
+            compiler_run_id,
+            metrics.source_chunk_count,
+            metrics.answer_candidate_count,
+            metrics.grounded_candidate_count,
+            metrics.rejected_candidate_count,
+            metrics.candidate_cluster_count,
+            metrics.canonical_entry_count,
+            metrics.enriched_entry_count,
+            metrics.embedded_entry_count,
+            metrics.published_entry_count,
+            metrics.fallback_row_count,
+            metrics.dropped_forbidden_count,
+            metrics.entries_without_source_refs_count,
+            _jsonb_object(metrics_payload),
+        )
+
+    async def add_answer_candidates(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        candidates: Sequence[AnswerCandidate],
+    ) -> int:
+        if not candidates:
+            return 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for candidate in candidates:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_answer_candidates (
+                            id,
+                            project_id,
+                            document_id,
+                            compiler_run_id,
+                            topic_key,
+                            title,
+                            candidate_answer,
+                            source_refs,
+                            confidence,
+                            status,
+                            rejection_reason,
+                            metadata
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            $6,
+                            $7,
+                            $8::jsonb,
+                            $9,
+                            $10,
+                            $11,
+                            $12::jsonb
+                        )
+                        ON CONFLICT (id)
+                        DO UPDATE SET
+                            topic_key = EXCLUDED.topic_key,
+                            title = EXCLUDED.title,
+                            candidate_answer = EXCLUDED.candidate_answer,
+                            source_refs = EXCLUDED.source_refs,
+                            confidence = EXCLUDED.confidence,
+                            status = EXCLUDED.status,
+                            rejection_reason = EXCLUDED.rejection_reason,
+                            metadata = EXCLUDED.metadata
+                        """,
+                        candidate.id,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        candidate.compiler_run_id,
+                        candidate.topic_key,
+                        candidate.title,
+                        candidate.candidate_answer,
+                        _stage_e_jsonb_array(
+                            _stage_e_candidate_source_refs_payload(candidate)
+                        ),
+                        candidate.confidence,
+                        candidate.status.value,
+                        candidate.rejection_reason,
+                        _jsonb_object(candidate.metadata),
+                    )
+
+        return len(candidates)
+
+    async def add_candidate_clusters(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        clusters: Sequence[CandidateCluster],
+    ) -> int:
+        if not clusters:
+            return 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for cluster in clusters:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_candidate_clusters (
+                            id,
+                            project_id,
+                            document_id,
+                            compiler_run_id,
+                            cluster_key,
+                            topic,
+                            status,
+                            merge_strategy,
+                            merge_reason,
+                            metadata
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            $6,
+                            $7,
+                            $8,
+                            $9,
+                            $10::jsonb
+                        )
+                        ON CONFLICT (id)
+                        DO UPDATE SET
+                            cluster_key = EXCLUDED.cluster_key,
+                            topic = EXCLUDED.topic,
+                            status = EXCLUDED.status,
+                            merge_strategy = EXCLUDED.merge_strategy,
+                            merge_reason = EXCLUDED.merge_reason,
+                            metadata = EXCLUDED.metadata
+                        """,
+                        cluster.id,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        cluster.compiler_run_id,
+                        cluster.cluster_key,
+                        cluster.topic,
+                        cluster.status.value,
+                        cluster.merge_strategy,
+                        cluster.merge_reason,
+                        _jsonb_object(cluster.metadata),
+                    )
+
+                    await conn.execute(
+                        """
+                        DELETE FROM knowledge_candidate_cluster_members
+                        WHERE cluster_id = $1
+                        """,
+                        cluster.id,
+                    )
+
+                    for candidate_index, candidate_id in enumerate(
+                        cluster.candidate_ids
+                    ):
+                        await conn.execute(
+                            """
+                            INSERT INTO knowledge_candidate_cluster_members (
+                                cluster_id,
+                                candidate_id,
+                                candidate_index
+                            )
+                            VALUES ($1, $2, $3)
+                            ON CONFLICT (cluster_id, candidate_id)
+                            DO UPDATE SET
+                                candidate_index = EXCLUDED.candidate_index
+                            """,
+                            cluster.id,
+                            candidate_id,
+                            candidate_index,
+                        )
+
+        return len(clusters)
 
     async def add_canonical_entries(
         self,
@@ -1304,6 +1683,10 @@ class KnowledgeRepository:
                 )
                 await conn.execute(
                     "DELETE FROM knowledge_entries WHERE document_id = $1",
+                    ensure_uuid(document_id),
+                )
+                await conn.execute(
+                    "DELETE FROM knowledge_compiler_runs WHERE document_id = $1",
                     ensure_uuid(document_id),
                 )
                 await conn.execute(

@@ -44,6 +44,13 @@ from src.domain.project_plane.knowledge_preprocessing import (
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.knowledge_compilation import (
+    CompilerRunStatus,
+    CompilerRun,
+    CompilationMetrics,
+    CandidateClusterStatus,
+    CandidateCluster,
+    AnswerCandidateStatus,
+    AnswerCandidate,
     CanonicalKnowledgeEntry,
     EmbeddingText,
     KnowledgeEnrichment,
@@ -436,6 +443,7 @@ def _source_chunks_from_json_chunks(
 
 
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
+KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
 KCD_STAGE_CD_EMBEDDING_TEXT_VERSION = "entry_embedding_text_v1"
 
 
@@ -519,6 +527,7 @@ def _canonical_entries_from_knowledge_chunks(
     *,
     project_id: str,
     document_id: str,
+    compiler_run_id: str,
     chunks: Sequence[KnowledgeChunk],
     source_chunks: Sequence[SourceChunk],
 ) -> tuple[CanonicalKnowledgeEntry, ...]:
@@ -545,7 +554,7 @@ def _canonical_entries_from_knowledge_chunks(
                 id=entry_id,
                 project_id=project_id,
                 document_id=document_id,
-                compiler_run_id="",
+                compiler_run_id=compiler_run_id,
                 stable_key=stable_key,
                 entry_kind=_entry_kind_from_chunk_role(chunk.role),
                 title=title,
@@ -562,13 +571,192 @@ def _canonical_entries_from_knowledge_chunks(
                 status=KnowledgeEntryStatus.PUBLISHED,
                 visibility=KnowledgeEntryVisibility.RUNTIME,
                 version=1,
-                compiler_version=KCD_STAGE_CD_COMPILER_VERSION,
+                compiler_version=KCD_STAGE_E_COMPILER_VERSION,
                 embedding_text_version=KCD_STAGE_CD_EMBEDDING_TEXT_VERSION,
                 metadata=dict(chunk.metadata),
             )
         )
 
     return tuple(entries)
+
+
+def _stage_e_compiler_run_id(
+    *,
+    document_id: str,
+    mode: KnowledgePreprocessingMode,
+) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"kcd_v1_stage_e:{document_id}:{mode}",
+        )
+    )
+
+
+def _stage_e_compiler_run(
+    *,
+    project_id: str,
+    document_id: str,
+    mode: KnowledgePreprocessingMode,
+    source_chunk_count: int,
+) -> CompilerRun:
+    return CompilerRun(
+        id=_stage_e_compiler_run_id(document_id=document_id, mode=mode),
+        project_id=project_id,
+        document_id=document_id,
+        mode=str(mode),
+        compiler_version=KCD_STAGE_E_COMPILER_VERSION,
+        status=CompilerRunStatus.RUNNING,
+        metrics=CompilationMetrics(source_chunk_count=source_chunk_count),
+    )
+
+
+def _stage_e_answer_candidates_from_entries(
+    entries: Sequence[CanonicalKnowledgeEntry],
+) -> tuple[AnswerCandidate, ...]:
+    candidates: list[AnswerCandidate] = []
+
+    for entry in entries:
+        candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{entry.id}:candidate"))
+        candidates.append(
+            AnswerCandidate(
+                id=candidate_id,
+                document_id=entry.document_id,
+                project_id=entry.project_id,
+                compiler_run_id=entry.compiler_run_id,
+                topic_key=entry.stable_key,
+                title=entry.title,
+                candidate_answer=entry.answer,
+                source_refs=entry.source_refs,
+                confidence=1.0 if entry.has_source_refs else None,
+                status=AnswerCandidateStatus.MERGED,
+                metadata={
+                    "entry_id": entry.id,
+                    "stable_key": entry.stable_key,
+                    "entry_kind": entry.entry_kind.value,
+                    "stage": "stage_e_one_to_one_trace",
+                },
+            )
+        )
+
+    return tuple(candidates)
+
+
+def _stage_e_candidate_clusters_from_entries(
+    *,
+    entries: Sequence[CanonicalKnowledgeEntry],
+    candidates: Sequence[AnswerCandidate],
+) -> tuple[CandidateCluster, ...]:
+    clusters: list[CandidateCluster] = []
+
+    for entry, candidate in zip(entries, candidates, strict=True):
+        clusters.append(
+            CandidateCluster(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{entry.id}:cluster")),
+                document_id=entry.document_id,
+                project_id=entry.project_id,
+                compiler_run_id=entry.compiler_run_id,
+                cluster_key=entry.stable_key,
+                topic=entry.title,
+                candidate_ids=(candidate.id,),
+                status=CandidateClusterStatus.CANONICAL_ENTRY_CREATED,
+                merge_strategy="stage_e_one_to_one",
+                merge_reason=(
+                    "Initial Stage E trace keeps one candidate per canonical entry "
+                    "until real clustering is introduced."
+                ),
+                metadata={
+                    "entry_id": entry.id,
+                    "stable_key": entry.stable_key,
+                    "entry_kind": entry.entry_kind.value,
+                },
+            )
+        )
+
+    return tuple(clusters)
+
+
+def _stage_e_compilation_metrics(
+    *,
+    source_chunks: Sequence[SourceChunk],
+    entries: Sequence[CanonicalKnowledgeEntry],
+    candidates: Sequence[AnswerCandidate],
+    clusters: Sequence[CandidateCluster],
+) -> CompilationMetrics:
+    grounded_candidates = sum(1 for candidate in candidates if candidate.has_grounding)
+    rejected_candidates = sum(
+        1
+        for candidate in candidates
+        if candidate.status == AnswerCandidateStatus.REJECTED
+    )
+    published_entries = sum(1 for entry in entries if entry.is_published_runtime_entry)
+    embedded_entries = sum(1 for entry in entries if entry.embedding_text is not None)
+    entries_without_source_refs = sum(
+        1 for entry in entries if not entry.has_source_refs
+    )
+
+    return CompilationMetrics(
+        source_chunk_count=len(source_chunks),
+        answer_candidate_count=len(candidates),
+        grounded_candidate_count=grounded_candidates,
+        rejected_candidate_count=rejected_candidates,
+        candidate_cluster_count=len(clusters),
+        canonical_entry_count=len(entries),
+        enriched_entry_count=len(entries),
+        embedded_entry_count=embedded_entries,
+        published_entry_count=published_entries,
+        fallback_row_count=sum(
+            1
+            for entry in entries
+            if entry.entry_kind == KnowledgeEntryKind.FALLBACK_CHUNK
+        ),
+        entries_without_source_refs_count=entries_without_source_refs,
+    )
+
+
+async def _persist_stage_e_compiler_outputs(
+    *,
+    repo: KnowledgeRepositoryPort,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    source_chunks: Sequence[SourceChunk],
+    entries: Sequence[CanonicalKnowledgeEntry],
+) -> None:
+    candidates = _stage_e_answer_candidates_from_entries(entries)
+    clusters = _stage_e_candidate_clusters_from_entries(
+        entries=entries,
+        candidates=candidates,
+    )
+
+    try:
+        await repo.add_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+            candidates=candidates,
+        )
+        await repo.add_canonical_entries(
+            project_id=project_id,
+            document_id=document_id,
+            entries=entries,
+        )
+        await repo.add_candidate_clusters(
+            project_id=project_id,
+            document_id=document_id,
+            clusters=clusters,
+        )
+        await repo.complete_compiler_run(
+            compiler_run_id,
+            _stage_e_compilation_metrics(
+                source_chunks=source_chunks,
+                entries=entries,
+                candidates=candidates,
+                clusters=clusters,
+            ),
+        )
+    except Exception as exc:
+        await repo.fail_compiler_run(compiler_run_id, str(exc))
+        raise
 
 
 class KnowledgeIngestionService:
@@ -584,6 +772,7 @@ class KnowledgeIngestionService:
         file_name: str,
         chunks: list[JsonObject],
         source_chunks: Sequence[SourceChunk],
+        compiler_run_id: str,
         logger: LoggerPort,
         context: str,
     ) -> None:
@@ -609,12 +798,16 @@ class KnowledgeIngestionService:
             canonical_entries = _canonical_entries_from_knowledge_chunks(
                 project_id=project_id,
                 document_id=document_id,
+                compiler_run_id=compiler_run_id,
                 chunks=normalized.chunks,
                 source_chunks=source_chunks,
             )
-            await repo.add_canonical_entries(
+            await _persist_stage_e_compiler_outputs(
+                repo=repo,
                 project_id=project_id,
                 document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                source_chunks=source_chunks,
                 entries=canonical_entries,
             )
         except EmbeddingProviderError as exc:
@@ -701,6 +894,15 @@ class KnowledgeIngestionService:
             document_id=document_id,
             chunks=indexable_chunks,
         )
+        compiler_run_id = _stage_e_compiler_run_id(document_id=document_id, mode=mode)
+        await repo.create_compiler_run(
+            _stage_e_compiler_run(
+                project_id=project_id,
+                document_id=document_id,
+                mode=mode,
+                source_chunk_count=len(source_chunks),
+            )
+        )
 
         if mode == MODE_PLAIN:
             await repo.add_source_chunks(
@@ -715,6 +917,7 @@ class KnowledgeIngestionService:
                 file_name=file_name,
                 chunks=indexable_chunks,
                 source_chunks=source_chunks,
+                compiler_run_id=compiler_run_id,
                 logger=logger,
                 context="plain_upload",
             )
@@ -793,12 +996,16 @@ class KnowledgeIngestionService:
             canonical_entries = _canonical_entries_from_knowledge_chunks(
                 project_id=project_id,
                 document_id=document_id,
+                compiler_run_id=compiler_run_id,
                 chunks=normalized.chunks,
                 source_chunks=source_chunks,
             )
-            await repo.add_canonical_entries(
+            await _persist_stage_e_compiler_outputs(
+                repo=repo,
                 project_id=project_id,
                 document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                source_chunks=source_chunks,
                 entries=canonical_entries,
             )
 
@@ -879,6 +1086,7 @@ class KnowledgeIngestionService:
                 file_name=file_name,
                 chunks=indexable_chunks,
                 source_chunks=source_chunks,
+                compiler_run_id=compiler_run_id,
                 logger=logger,
                 context="preprocessing_fallback",
             )
