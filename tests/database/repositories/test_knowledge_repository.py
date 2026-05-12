@@ -334,13 +334,14 @@ def test_search_filters_non_answer_knowledge_roles() -> None:
     assert '"retrieval_guideline"' not in source
 
 
-def test_answerable_search_filter_uses_domain_role_contract() -> None:
+def test_answerable_search_filter_uses_retrieval_surface_contract() -> None:
     source = Path(
         "src/infrastructure/db/repositories/knowledge_repository.py"
     ).read_text(encoding="utf-8")
 
-    assert "ANSWERABLE_KNOWLEDGE_ROLES" in source
-    assert "sorted(role.value for role in ANSWERABLE_KNOWLEDGE_ROLES)" in source
+    assert "TRANSITIONAL_PRODUCTION_ENTRY_TYPES" in source
+    assert "ANSWERABLE_KNOWLEDGE_ENTRY_TYPES" in source
+    assert "tuple(sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES))" in source
 
 
 def test_search_returns_metadata_observability_fields() -> None:

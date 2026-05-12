@@ -20,11 +20,11 @@ from src.domain.project_plane.knowledge_views import (
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_chunks import (
-    ANSWERABLE_KNOWLEDGE_ROLES,
-    KnowledgeChunk,
-)
+from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
+from src.domain.project_plane.knowledge_retrieval_surface import (
+    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+)
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
 )
@@ -47,9 +47,7 @@ TERMINAL_QUEUE_STATUSES = (
     "succeeded",
     "done",
 )
-ANSWERABLE_KNOWLEDGE_ENTRY_TYPES = tuple(
-    sorted(role.value for role in ANSWERABLE_KNOWLEDGE_ROLES)
-)
+ANSWERABLE_KNOWLEDGE_ENTRY_TYPES = tuple(sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES))
 
 
 class _RowLookup(Protocol):
@@ -192,6 +190,10 @@ class KnowledgeRepository:
                     WHERE kb.project_id = $2
                       AND kb.embedding IS NOT NULL
                       AND kb.entry_type = ANY($4::text[])
+                      AND (
+                          kb.document_id IS NOT NULL
+                          OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
+                      )
                       AND (d.status = 'processed' OR d.status IS NULL)
                     ORDER BY kb.embedding <=> $1::vector
                     LIMIT $3
@@ -262,6 +264,10 @@ class KnowledgeRepository:
                         WHERE kb.project_id = $3
                           AND kb.embedding IS NOT NULL
                           AND kb.entry_type = ANY($6::text[])
+                          AND (
+                              kb.document_id IS NOT NULL
+                              OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
+                          )
                           AND (d.status = 'processed' OR d.status IS NULL)
                     ),
                     vector_candidates AS (
@@ -576,6 +582,10 @@ class KnowledgeRepository:
                     WHERE d.project_id = $2
                       AND d.status = 'processed'
                       AND kb.entry_type = ANY($4::text[])
+                      AND (
+                          kb.document_id IS NOT NULL
+                          OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
+                      )
                 ),
                 scored AS (
                     SELECT

@@ -228,6 +228,12 @@ def _chunk_from_mapping(
             "title": row.get("title"),
             "chunk_index": row.get("chunk_index"),
             "document_status": row.get("document_status"),
+            "entry_type": row.get("entry_type"),
+            "source_excerpt": row.get("source_excerpt"),
+            "embedding_text": row.get("embedding_text"),
+            "questions": row.get("questions"),
+            "synonyms": row.get("synonyms"),
+            "tags": row.get("tags"),
         },
     )
 

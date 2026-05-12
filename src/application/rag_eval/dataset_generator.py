@@ -6,6 +6,10 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import cast, get_args
 
 from src.application.rag_eval.ports import RagEvalJsonLlmPort
+from src.domain.project_plane.knowledge_retrieval_surface import (
+    FORBIDDEN_PRODUCTION_ENTRY_TYPES,
+    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+)
 from src.application.rag_eval.schemas import (
     RagEvalChunk,
     RagEvalDataset,
@@ -27,21 +31,8 @@ MIN_VARIANTS_PER_FACT = 5
 MIN_EVAL_SOURCE_CONTENT_CHARS = 16
 MIN_CONTAINED_EVAL_SOURCE_CHARS = 24
 
-EVAL_QUESTION_SOURCE_ENTRY_TYPES = frozenset(
-    {
-        "answer_knowledge",
-        "faq",
-        "instruction",
-        "price_list",
-    }
-)
-EXCLUDED_EVAL_SOURCE_ENTRY_TYPES = frozenset(
-    {
-        "internal_eval_test",
-        "retrieval_guideline",
-        "negative_test",
-    }
-)
+EVAL_QUESTION_SOURCE_ENTRY_TYPES = TRANSITIONAL_PRODUCTION_ENTRY_TYPES
+EXCLUDED_EVAL_SOURCE_ENTRY_TYPES = FORBIDDEN_PRODUCTION_ENTRY_TYPES
 
 
 DOCUMENT_STRUCTURE_QUESTION_MARKERS = (
