@@ -6,7 +6,11 @@ from typing import Protocol
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import (
+    AnswerCandidate,
+    CandidateCluster,
     CanonicalKnowledgeEntry,
+    CompilationMetrics,
+    CompilerRun,
     SourceChunk,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -76,6 +80,36 @@ class KnowledgeRepositoryPort(Protocol):
         project_id: str,
         document_id: str,
         entries: Sequence[CanonicalKnowledgeEntry],
+    ) -> int: ...
+
+    async def create_compiler_run(self, run: CompilerRun) -> None: ...
+
+    async def complete_compiler_run(
+        self,
+        compiler_run_id: str,
+        metrics: CompilationMetrics,
+    ) -> None: ...
+
+    async def fail_compiler_run(
+        self,
+        compiler_run_id: str,
+        error: str,
+    ) -> None: ...
+
+    async def add_answer_candidates(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        candidates: Sequence[AnswerCandidate],
+    ) -> int: ...
+
+    async def add_candidate_clusters(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        clusters: Sequence[CandidateCluster],
     ) -> int: ...
 
     async def delete_document_chunks(self, document_id: str) -> None: ...
