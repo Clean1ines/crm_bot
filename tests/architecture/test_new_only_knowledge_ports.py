@@ -12,7 +12,7 @@ def test_new_only_knowledge_ports_do_not_expose_old_chunk_contract() -> None:
     forbidden_markers = (
         "JsonObject",
         "json_value_from_unknown",
-        "entry_type",
+        "entry_kind",
         "plain_enriched",
         "list[str |",
         "to_legacy",

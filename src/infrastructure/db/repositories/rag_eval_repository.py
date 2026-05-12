@@ -8,7 +8,7 @@ from typing import Literal, cast
 import asyncpg
 
 from src.domain.project_plane.knowledge_retrieval_surface import (
-    TRANSITIONAL_PRODUCTION_ENTRY_TYPES,
+    RUNTIME_ENTRY_KIND_VALUES,
 )
 from src.application.rag_eval.schemas import (
     JsonObject,
@@ -128,7 +128,7 @@ def _row_optional_datetime_value(
     raise ValueError(f"Expected optional datetime field {key}")
 
 
-RAG_EVAL_SOURCE_ENTRY_TYPES = tuple(sorted(TRANSITIONAL_PRODUCTION_ENTRY_TYPES))
+RAG_EVAL_SOURCE_ENTRY_KINDS = tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
 
 
 class RagEvalRepository:
@@ -156,7 +156,7 @@ class RagEvalRepository:
                     kb.content,
                     kb.document_id,
                     d.file_name AS source,
-                    kb.entry_type,
+                    kb.entry_kind,
                     kb.title,
                     kb.source_excerpt,
                     kb.embedding_text,
@@ -167,7 +167,7 @@ class RagEvalRepository:
                 JOIN knowledge_documents AS d ON d.id = kb.document_id
                 WHERE kb.project_id = $1::uuid
                   AND kb.document_id = $2::uuid
-                  AND kb.entry_type = ANY($3::text[])
+                  AND kb.entry_kind = ANY($3::text[])
                   AND (
                       kb.document_id IS NOT NULL
                       OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
@@ -177,7 +177,7 @@ class RagEvalRepository:
                 """,
                 project_id,
                 document_id,
-                list(RAG_EVAL_SOURCE_ENTRY_TYPES),
+                list(RAG_EVAL_SOURCE_ENTRY_KINDS),
             )
 
         return [self._chunk_from_row(row) for row in rows]
@@ -779,7 +779,7 @@ class RagEvalRepository:
             document_id=_optional_text(row, "document_id"),
             source=_optional_text(row, "source"),
             metadata={
-                "entry_type": row.get("entry_type"),
+                "entry_kind": row.get("entry_kind"),
                 "title": row.get("title"),
                 "source_excerpt": row.get("source_excerpt"),
                 "embedding_text": row.get("embedding_text"),

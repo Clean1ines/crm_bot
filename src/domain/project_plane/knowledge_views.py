@@ -11,7 +11,7 @@ class KnowledgeSearchResultView:
     document_id: str | None = None
     source: str | None = None
     document_status: str | None = None
-    entry_type: str | None = None
+    entry_kind: str | None = None
     title: str | None = None
     source_excerpt: str | None = None
     embedding_text: str | None = None

@@ -135,7 +135,7 @@ class KnowledgePreviewResultDto:
     source: str | None
     document_id: str | None
     document_status: str | None
-    entry_type: str | None = None
+    entry_kind: str | None = None
     title: str | None = None
     source_excerpt: str | None = None
     embedding_text: str | None = None
@@ -156,7 +156,7 @@ class KnowledgePreviewResultDto:
             source=result.source,
             document_id=result.document_id,
             document_status=result.document_status,
-            entry_type=result.entry_type,
+            entry_kind=result.entry_kind,
             title=result.title,
             source_excerpt=result.source_excerpt,
             embedding_text=result.embedding_text,
@@ -178,7 +178,7 @@ class KnowledgePreviewResultDto:
         }
 
         optional_fields = {
-            "entry_type": self.entry_type,
+            "entry_kind": self.entry_kind,
             "title": self.title,
             "source_excerpt": self.source_excerpt,
             "embedding_text": self.embedding_text,

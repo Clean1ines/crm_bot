@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping, Sequence, TypeAlias, cast
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.knowledge_compilation import KnowledgeEntryKind
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 from src.domain.project_plane.knowledge_semantic_markers import (
     BROAD_NOISY_PRICE_SYNONYMS,
@@ -48,10 +49,10 @@ class KnowledgePreprocessingEntry:
     tags: tuple[str, ...] = field(default_factory=tuple)
     embedding_text: str = ""
 
-    def to_chunk(self, *, entry_type: str) -> JsonObject:
+    def to_chunk(self, *, entry_kind: KnowledgeEntryKind) -> JsonObject:
         return {
             "content": self.answer,
-            "entry_type": entry_type,
+            "entry_kind": entry_kind.value,
             "title": self.title,
             "source_excerpt": self.source_excerpt,
             "questions": list(self.questions),
@@ -70,13 +71,26 @@ class KnowledgePreprocessingResult:
     metrics: JsonObject = field(default_factory=dict)
 
     def to_chunks(self) -> list[JsonObject]:
-        return [entry.to_chunk(entry_type=self.mode) for entry in self.entries]
+        entry_kind = entry_kind_for_preprocessing_mode(self.mode)
+        return [entry.to_chunk(entry_kind=entry_kind) for entry in self.entries]
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgePreprocessingExecutionResult:
     result: KnowledgePreprocessingResult
     usage: ModelUsageMeasurement | None = None
+
+
+def entry_kind_for_preprocessing_mode(
+    mode: KnowledgePreprocessingMode,
+) -> KnowledgeEntryKind:
+    if mode == MODE_FAQ:
+        return KnowledgeEntryKind.FAQ_ANSWER
+    if mode == MODE_PRICE_LIST:
+        return KnowledgeEntryKind.PRICE_ANSWER
+    if mode == MODE_INSTRUCTION:
+        return KnowledgeEntryKind.PROCEDURE
+    return KnowledgeEntryKind.ANSWER
 
 
 def normalize_preprocessing_mode(value: object) -> KnowledgePreprocessingMode:

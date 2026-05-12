@@ -35,7 +35,7 @@ class FakeRagService:
                 "method": "hybrid",
                 "source": "kb.md",
                 "document_id": "doc_1",
-                "entry_type": "answer_knowledge",
+                "entry_kind": "answer",
                 "source_excerpt": "Evidence excerpt",
                 "embedding_text": "evidence semantic surface",
                 "questions": ["What is the evidence?"],
@@ -65,7 +65,7 @@ async def test_rag_service_retriever_maps_production_rag_results() -> None:
     assert chunks[0].source == "kb.md"
     assert chunks[0].metadata["score"] == 0.91
     assert chunks[0].metadata["method"] == "hybrid"
-    assert chunks[0].metadata["entry_type"] == "answer_knowledge"
+    assert chunks[0].metadata["entry_kind"] == "answer"
     assert chunks[0].metadata["source_excerpt"] == "Evidence excerpt"
     assert chunks[0].metadata["embedding_text"] == "evidence semantic surface"
     assert chunks[0].metadata["questions"] == ["What is the evidence?"]

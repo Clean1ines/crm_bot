@@ -237,7 +237,7 @@ def test_raw_chunks_for_structured_persistence_preserves_enriched_metadata():
         [
             {
                 "content": "## 10. Передача менеджеру\n\nАссистент передаёт диалог менеджеру при вопросах про оплату.",
-                "entry_type": "plain_enriched",
+                "entry_kind": "answer",
                 "title": "10. Передача менеджеру",
                 "source_excerpt": "Ассистент передаёт диалог менеджеру при вопросах про оплату.",
                 "questions": [],
@@ -255,7 +255,7 @@ def test_raw_chunks_for_structured_persistence_preserves_enriched_metadata():
     assert raw == [
         {
             "content": "## 10. Передача менеджеру\n\nАссистент передаёт диалог менеджеру при вопросах про оплату.",
-            "entry_type": "plain_enriched",
+            "entry_kind": "answer",
             "title": "10. Передача менеджеру",
             "source_excerpt": "Ассистент передаёт диалог менеджеру при вопросах про оплату.",
             "questions": [],
@@ -286,7 +286,7 @@ def test_raw_chunks_for_structured_persistence_defaults_legacy_chunks_safely():
     assert raw == [
         {
             "content": "Обычный текстовый chunk без metadata.",
-            "entry_type": "chunk",
+            "entry_kind": "answer",
             "embedding_text": "Обычный текстовый chunk без metadata.",
         }
     ]

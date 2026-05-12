@@ -7,10 +7,10 @@ from typing import Mapping
 
 
 class KnowledgeChunkRole(StrEnum):
-    ANSWER_KNOWLEDGE = "answer_knowledge"
-    FAQ = "faq"
-    INSTRUCTION = "instruction"
-    PRICE_LIST = "price_list"
+    ANSWER_KNOWLEDGE = "answer"
+    FAQ = "faq_answer"
+    INSTRUCTION = "procedure"
+    PRICE_LIST = "price_answer"
     RETRIEVAL_GUIDELINE = "retrieval_guideline"
     INTERNAL_EVAL_TEST = "internal_eval_test"
     NEGATIVE_TEST = "negative_test"

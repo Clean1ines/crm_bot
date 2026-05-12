@@ -106,7 +106,7 @@ def test_normalization_service_source_does_not_use_legacy_chunk_contract() -> No
 
     forbidden = (
         "JsonObject",
-        "entry_type",
+        "entry_kind",
         "plain_enriched",
         "add_knowledge_batch",
         "add_structured_knowledge_batch",

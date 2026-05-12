@@ -34,7 +34,7 @@ def test_document_from_structured_chunks_preserves_llm_metadata() -> None:
         chunks=[
             {
                 "content": "Assistant transfers complex questions to a human manager.",
-                "entry_type": "faq",
+                "entry_kind": "faq_answer",
                 "title": "Manager handoff",
                 "source_excerpt": "Assistant transfers complex questions.",
                 "questions": ["Can I talk to a manager?"],

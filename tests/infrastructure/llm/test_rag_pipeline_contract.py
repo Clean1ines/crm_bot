@@ -217,7 +217,7 @@ async def test_rag_pipeline_accepts_typed_knowledge_views_from_repository():
 
     assert item["document_id"] == "doc-1"
     assert item["document_status"] == "ready"
-    assert item["entry_type"] is None
+    assert item["entry_kind"] is None
     assert item["source_excerpt"] is None
     assert item["embedding_text"] is None
     assert item["questions"] is None
@@ -245,7 +245,7 @@ def test_rag_candidate_preserves_knowledge_view_metadata() -> None:
         document_id="document-1",
         source="source.md",
         document_status="processed",
-        entry_type="answer_knowledge",
+        entry_kind="answer",
         title="Refund policy",
         source_excerpt="Refund policy excerpt",
         embedding_text="refund payment return policy",
@@ -260,7 +260,7 @@ def test_rag_candidate_preserves_knowledge_view_metadata() -> None:
     assert candidate.title == "Refund policy"
     assert candidate.metadata["document_id"] == "document-1"
     assert candidate.metadata["document_status"] == "processed"
-    assert candidate.metadata["entry_type"] == "answer_knowledge"
+    assert candidate.metadata["entry_kind"] == "answer"
     assert candidate.metadata["source_excerpt"] == "Refund policy excerpt"
     assert candidate.metadata["embedding_text"] == "refund payment return policy"
     assert candidate.metadata["questions"] == ["Can I get a refund?"]
@@ -270,7 +270,7 @@ def test_rag_candidate_preserves_knowledge_view_metadata() -> None:
     assert payload["title"] == "Refund policy"
     assert payload["document_id"] == "document-1"
     assert payload["document_status"] == "processed"
-    assert payload["entry_type"] == "answer_knowledge"
+    assert payload["entry_kind"] == "answer"
     assert payload["source_excerpt"] == "Refund policy excerpt"
     assert payload["embedding_text"] == "refund payment return policy"
     assert payload["questions"] == ["Can I get a refund?"]
