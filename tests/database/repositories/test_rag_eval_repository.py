@@ -90,6 +90,11 @@ async def test_load_document_chunks_maps_knowledge_base_rows() -> None:
     assert chunks[0].id == "chunk_1"
     assert chunks[0].content == "Подключение занимает 1 день."
     assert chunks[0].metadata["title"] == "Подключение"
+    assert chunks[0].source_refs[0].quote == "excerpt"
+    assert chunks[0].source_refs[0].source_index == 0
+    assert chunks[0].metadata["source_refs"] == [
+        {"quote": "excerpt", "source_index": 0}
+    ]
     assert "FROM knowledge_base AS kb" in conn.execute_calls[0][0]
 
 

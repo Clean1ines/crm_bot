@@ -10,6 +10,7 @@ import asyncpg
 from src.domain.project_plane.knowledge_retrieval_surface import (
     RUNTIME_ENTRY_KIND_VALUES,
 )
+from src.domain.project_plane.knowledge_views import source_refs_from_excerpt
 from src.application.rag_eval.schemas import (
     JsonObject,
     RagEvalChunk,
@@ -773,15 +774,18 @@ class RagEvalRepository:
         }
 
     def _chunk_from_row(self, row: Mapping[str, object]) -> RagEvalChunk:
+        source_refs = source_refs_from_excerpt(_optional_text(row, "source_excerpt"))
         return RagEvalChunk(
             id=str(row["id"]),
             content=str(row["content"] or ""),
             document_id=_optional_text(row, "document_id"),
             source=_optional_text(row, "source"),
+            source_refs=source_refs,
             metadata={
                 "entry_kind": row.get("entry_kind"),
                 "title": row.get("title"),
                 "source_excerpt": row.get("source_excerpt"),
+                "source_refs": [source_ref.to_dict() for source_ref in source_refs],
                 "embedding_text": row.get("embedding_text"),
                 "questions": row.get("questions"),
                 "synonyms": row.get("synonyms"),

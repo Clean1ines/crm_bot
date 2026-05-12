@@ -8,7 +8,7 @@ Clean Architecture contract:
 
 import json
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Protocol
 
 import asyncpg
@@ -17,6 +17,7 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentDetailView,
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
+    source_refs_from_excerpt,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.json_types import JsonObject
@@ -32,6 +33,7 @@ from src.infrastructure.llm.embedding_service import embed_batch, embed_text
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
+from src.domain.project_plane.knowledge_compilation import SourceChunk
 
 
 logger = get_logger(__name__)
@@ -88,6 +90,10 @@ def _jsonb_array(value: object) -> str:
     if not isinstance(value, (list, tuple)):
         value = []
     return json.dumps(list(value), ensure_ascii=False)
+
+
+def _jsonb_object(value: Mapping[str, object]) -> str:
+    return json.dumps(dict(value), ensure_ascii=False, default=str)
 
 
 def _pg_vector_text(embedding: list[float]) -> str:
@@ -497,6 +503,9 @@ class KnowledgeRepository:
                     entry_kind=_optional_row_text(row, "entry_kind"),
                     title=_optional_row_text(row, "title"),
                     source_excerpt=_optional_row_text(row, "source_excerpt"),
+                    source_refs=source_refs_from_excerpt(
+                        _optional_row_text(row, "source_excerpt")
+                    ),
                     embedding_text=_optional_row_text(row, "embedding_text"),
                     questions=_optional_row_value(row, "questions"),
                     synonyms=_optional_row_value(row, "synonyms"),
@@ -675,6 +684,9 @@ class KnowledgeRepository:
                 entry_kind=_optional_row_text(row, "entry_kind"),
                 title=_optional_row_text(row, "title"),
                 source_excerpt=_optional_row_text(row, "source_excerpt"),
+                source_refs=source_refs_from_excerpt(
+                    _optional_row_text(row, "source_excerpt")
+                ),
                 embedding_text=_optional_row_text(row, "embedding_text"),
                 questions=_optional_row_value(row, "questions"),
                 synonyms=_optional_row_value(row, "synonyms"),
@@ -744,6 +756,81 @@ class KnowledgeRepository:
                             _jsonb_array(chunk.tags),
                             chunk.embedding_text or None,
                         )
+
+        return len(chunks)
+
+    async def add_source_chunks(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        chunks: Sequence[SourceChunk],
+    ) -> int:
+        """Persist raw extracted SourceChunk records separately from runtime KB rows."""
+        if not chunks:
+            return 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM knowledge_source_chunks WHERE document_id = $1",
+                    ensure_uuid(document_id),
+                )
+
+                for chunk in chunks:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_source_chunks (
+                            id,
+                            project_id,
+                            document_id,
+                            source_index,
+                            content,
+                            page,
+                            section_title,
+                            start_offset,
+                            end_offset,
+                            checksum,
+                            metadata
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            $6,
+                            $7,
+                            $8,
+                            $9,
+                            $10,
+                            $11::jsonb
+                        )
+                        ON CONFLICT (id) DO UPDATE SET
+                            project_id = EXCLUDED.project_id,
+                            document_id = EXCLUDED.document_id,
+                            source_index = EXCLUDED.source_index,
+                            content = EXCLUDED.content,
+                            page = EXCLUDED.page,
+                            section_title = EXCLUDED.section_title,
+                            start_offset = EXCLUDED.start_offset,
+                            end_offset = EXCLUDED.end_offset,
+                            checksum = EXCLUDED.checksum,
+                            metadata = EXCLUDED.metadata,
+                            updated_at = NOW()
+                        """,
+                        chunk.id,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        chunk.source_index,
+                        chunk.content,
+                        chunk.page,
+                        chunk.section_title or None,
+                        chunk.start_offset,
+                        chunk.end_offset,
+                        chunk.checksum or None,
+                        _jsonb_object(chunk.metadata),
+                    )
 
         return len(chunks)
 
@@ -1066,10 +1153,15 @@ class KnowledgeRepository:
 
     async def delete_document_chunks(self, document_id: str) -> None:
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM knowledge_base WHERE document_id = $1",
-                ensure_uuid(document_id),
-            )
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM knowledge_base WHERE document_id = $1",
+                    ensure_uuid(document_id),
+                )
+                await conn.execute(
+                    "DELETE FROM knowledge_source_chunks WHERE document_id = $1",
+                    ensure_uuid(document_id),
+                )
 
     async def delete_document(self, document_id: str) -> None:
         logger.info("Deleting knowledge document", extra={"document_id": document_id})

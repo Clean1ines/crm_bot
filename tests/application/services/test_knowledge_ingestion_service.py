@@ -27,6 +27,7 @@ async def test_process_document_marks_plain_upload_processed():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_knowledge_chunks = AsyncMock(return_value=2)
+    repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
     usage_repo = _usage_repo()
@@ -79,6 +80,7 @@ async def test_process_document_marks_document_error_on_embedding_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_knowledge_chunks = AsyncMock(side_effect=RuntimeError("embed failed"))
+    repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
 
@@ -115,6 +117,7 @@ async def test_process_document_retries_transient_embedding_provider_failure():
             retry_after_seconds=90.0,
         )
     )
+    repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
 
@@ -148,6 +151,7 @@ async def test_process_document_marks_document_error_on_permanent_provider_failu
             model="voyage-4-lite",
         )
     )
+    repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
 
@@ -176,6 +180,7 @@ async def test_process_document_records_preprocessing_usage():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_knowledge_chunks = AsyncMock(return_value=1)
+    repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
     usage_repo = _usage_repo()

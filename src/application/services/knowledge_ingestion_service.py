@@ -39,6 +39,8 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+import hashlib
+from src.domain.project_plane.knowledge_compilation import SourceChunk
 
 
 _PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
@@ -353,6 +355,74 @@ def _combined_chunks_for_canonical_persistence(
     return combined
 
 
+def _source_chunk_optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, float) and value.is_integer():
+        converted = int(value)
+        return converted if converted >= 0 else None
+    if isinstance(value, str) and value.strip().isdigit():
+        converted = int(value.strip())
+        return converted if converted >= 0 else None
+    return None
+
+
+def _source_chunk_text(value: object) -> str:
+    if value is None:
+        return ""
+    return " ".join(str(value).strip().split())
+
+
+def _source_chunk_index(chunk: JsonObject, fallback_index: int) -> int:
+    raw_index = _source_chunk_optional_int(chunk.get("index"))
+    return raw_index if raw_index is not None else fallback_index
+
+
+def _source_chunks_from_json_chunks(
+    *,
+    project_id: str,
+    document_id: str,
+    chunks: list[JsonObject],
+) -> tuple[SourceChunk, ...]:
+    source_chunks: list[SourceChunk] = []
+    used_indices: set[int] = set()
+
+    for fallback_index, chunk in enumerate(chunks):
+        content = _chunk_content(chunk)
+        if not content:
+            continue
+
+        source_index = _source_chunk_index(chunk, fallback_index)
+        while source_index in used_indices:
+            source_index += 1
+        used_indices.add(source_index)
+
+        checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        metadata: dict[str, object] = {"upload_chunk_index": fallback_index}
+
+        source_chunks.append(
+            SourceChunk(
+                id=f"{document_id}:{source_index}",
+                document_id=document_id,
+                project_id=project_id,
+                source_index=source_index,
+                content=content,
+                page=_source_chunk_optional_int(chunk.get("page")),
+                section_title=_source_chunk_text(
+                    chunk.get("section_title") or chunk.get("title")
+                ),
+                start_offset=_source_chunk_optional_int(chunk.get("start_offset")),
+                end_offset=_source_chunk_optional_int(chunk.get("end_offset")),
+                checksum=checksum,
+                metadata=metadata,
+            )
+        )
+
+    return tuple(source_chunks)
+
+
 class KnowledgeIngestionService:
     def __init__(self, pool: KnowledgeDbPoolPort) -> None:
         self.pool = pool
@@ -471,7 +541,18 @@ class KnowledgeIngestionService:
             await repo.update_document_status(document_id, "error", message)
             raise ValidationError(message)
 
+        source_chunks = _source_chunks_from_json_chunks(
+            project_id=project_id,
+            document_id=document_id,
+            chunks=indexable_chunks,
+        )
+
         if mode == MODE_PLAIN:
+            await repo.add_source_chunks(
+                project_id=project_id,
+                document_id=document_id,
+                chunks=source_chunks,
+            )
             await self._persist_plain_chunks(
                 repo=repo,
                 project_id=project_id,
@@ -497,6 +578,12 @@ class KnowledgeIngestionService:
             raise ValidationError(
                 "Knowledge preprocessing adapter is required for non-plain upload modes"
             )
+
+        await repo.add_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+            chunks=source_chunks,
+        )
 
         await repo.update_document_preprocessing_status(
             document_id,
