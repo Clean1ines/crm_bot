@@ -5,6 +5,10 @@ from datetime import UTC, datetime
 
 import pytest
 
+from src.application.rag_eval.failure_classification import (
+    KnowledgeEditAction,
+    KnowledgeEditActionType,
+)
 from src.application.rag_eval.schemas import (
     RagEvalDataset,
     RagEvalQuestion,
@@ -293,3 +297,122 @@ async def test_save_and_get_latest_report() -> None:
     assert latest["id"] == "report_1"
     assert latest["score"] == 88.5
     assert latest["readiness"] == "needs_review"
+
+
+@pytest.mark.asyncio
+async def test_get_latest_report_includes_actionable_results_without_raw_evidence() -> (
+    None
+):
+    conn = FakeConn()
+    repo = RagEvalRepository(FakePool(conn))
+
+    created_at = datetime.now(UTC)
+    action = KnowledgeEditAction(
+        action_type=KnowledgeEditActionType.ATTACH_QUESTION_TO_ENTRY,
+        target_entry_id="00000000-0000-0000-0000-000000000003",
+        reason="Attach missing user wording to canonical entry.",
+        payload={
+            "question": "Как подключить менеджера к проекту?",
+            "embedding_text": "INTERNAL_EMBEDDING_TEXT_MUST_NOT_LEAK",
+        },
+    )
+
+    conn.fetchrow_result = {
+        "id": "report_1",
+        "run_id": "run_1",
+        "dataset_id": "dataset_1",
+        "project_id": PROJECT_ID,
+        "document_id": DOCUMENT_ID,
+        "score": 61.0,
+        "readiness": "needs_review",
+        "strengths": ["some evidence found"],
+        "problems": ["missing wording"],
+        "recommendations": ["apply proposed actions"],
+        "metrics": {"top3_rate": 60.0},
+        "markdown": "# Report",
+        "created_at": "2026-05-05T11:10:00Z",
+    }
+    conn.fetch_rows = [
+        {
+            "id": "result_1",
+            "run_id": "run_1",
+            "question_id": "question_1",
+            "retrieved_entry_ids": ["00000000-0000-0000-0000-000000000004"],
+            "top1_hit": False,
+            "top3_hit": False,
+            "top5_hit": False,
+            "expected_entry_found": False,
+            "wrong_entry_top1": True,
+            "classification": None,
+            "proposed_actions": [action.to_json()],
+            "answer_text": "Raw generated answer must not be exposed here.",
+            "answer_supported": False,
+            "hallucination_risk": "high",
+            "should_answer_passed": False,
+            "score": 0.25,
+            "notes": "debug notes should stay out of actionable summary",
+            "judge_json": {
+                "retrieved_entry_ids": ["00000000-0000-0000-0000-000000000004"],
+                "embedding_text": "JUDGE_INTERNAL_EMBEDDING_TEXT_MUST_NOT_LEAK",
+            },
+            "latency_ms": 123,
+            "created_at": created_at,
+            "q_id": "question_1",
+            "q_dataset_id": "dataset_1",
+            "q_project_id": PROJECT_ID,
+            "q_document_id": DOCUMENT_ID,
+            "q_question": "Как подключить менеджера?",
+            "q_question_type": "direct",
+            "q_expected_entry_ids": ["00000000-0000-0000-0000-000000000003"],
+            "q_expected_answer_summary": "Менеджера можно подключить в настройках проекта.",
+            "q_should_answer": True,
+            "q_should_escalate": False,
+            "q_difficulty": 1,
+            "q_severity": "medium",
+            "q_source": "llm_generated",
+            "q_metadata": {"source_chunk_ids": ["legacy-source-ref"]},
+            "q_created_at": created_at,
+        }
+    ]
+
+    latest = await repo.get_latest_report(
+        project_id=PROJECT_ID,
+        document_id=DOCUMENT_ID,
+    )
+
+    assert latest is not None
+    actionable_results = latest["actionable_results"]
+    assert isinstance(actionable_results, list)
+    assert len(actionable_results) == 1
+
+    item = actionable_results[0]
+    assert isinstance(item, dict)
+    assert item["result_id"] == "result_1"
+    assert item["run_id"] == "run_1"
+    assert item["question_id"] == "question_1"
+    assert item["question"] == "Как подключить менеджера?"
+    assert item["expected_entry_ids"] == ["00000000-0000-0000-0000-000000000003"]
+    assert item["retrieved_entry_ids"] == ["00000000-0000-0000-0000-000000000004"]
+    assert item["answer_supported"] is False
+    assert item["wrong_entry_top1"] is True
+    assert item["hallucination_risk"] == "high"
+
+    proposed_actions = item["proposed_actions"]
+    assert isinstance(proposed_actions, list)
+    assert proposed_actions[0]["action_type"] == "attach_question_to_entry"
+    assert (
+        proposed_actions[0]["target_entry_id"] == "00000000-0000-0000-0000-000000000003"
+    )
+    assert proposed_actions[0]["payload"] == {
+        "question": "Как подключить менеджера к проекту?"
+    }
+
+    rendered = repr(latest)
+    assert "INTERNAL_EMBEDDING_TEXT_MUST_NOT_LEAK" not in rendered
+    assert "JUDGE_INTERNAL_EMBEDDING_TEXT_MUST_NOT_LEAK" not in rendered
+    assert "Raw generated answer must not be exposed here." not in rendered
+    assert "debug notes should stay out of actionable summary" not in rendered
+
+    assert "SELECT" in conn.execute_calls[0][0]
+    assert "FROM rag_quality_reports" in conn.execute_calls[0][0]
+    assert "FROM rag_eval_results AS rr" in conn.execute_calls[1][0]
