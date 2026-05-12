@@ -38,7 +38,6 @@ class FakeRagService:
                 "document_id": "doc_1",
                 "entry_kind": "answer",
                 "source_excerpt": "Evidence excerpt",
-                "embedding_text": "evidence semantic surface",
                 "questions": ["What is the evidence?"],
                 "synonyms": ["proof"],
                 "tags": ["kb"],
@@ -72,7 +71,6 @@ async def test_rag_service_retriever_maps_production_rag_results() -> None:
     assert chunks[0].metadata["source_refs"] == [
         {"quote": "Evidence excerpt", "source_index": 0}
     ]
-    assert chunks[0].metadata["embedding_text"] == "evidence semantic surface"
     assert chunks[0].metadata["questions"] == ["What is the evidence?"]
     assert chunks[0].metadata["synonyms"] == ["proof"]
     assert chunks[0].metadata["tags"] == ["kb"]

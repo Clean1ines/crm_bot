@@ -32,6 +32,10 @@ from src.infrastructure.llm.embedding_service import embed_batch, embed_text
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
+from src.domain.project_plane.embedding_text import (
+    build_canonical_entry_embedding_text,
+    build_retrieval_surface_search_text,
+)
 from src.domain.project_plane.knowledge_compilation import (
     CompilerRun,
     CompilationMetrics,
@@ -115,17 +119,11 @@ def _batched_canonical_entries(
 
 
 def _entry_embedding_text(entry: CanonicalKnowledgeEntry) -> str:
-    if entry.embedding_text is not None:
-        return entry.embedding_text.value
-    return entry.answer
+    return build_canonical_entry_embedding_text(entry).value
 
 
 def _entry_embedding_text_version(entry: CanonicalKnowledgeEntry) -> str:
-    if entry.embedding_text_version:
-        return entry.embedding_text_version
-    if entry.embedding_text is not None:
-        return entry.embedding_text.version
-    return "entry_embedding_text_v1"
+    return build_canonical_entry_embedding_text(entry).version
 
 
 def _enrichment_payload(entry: CanonicalKnowledgeEntry) -> dict[str, object]:
@@ -160,23 +158,7 @@ def _source_refs_payload(entry: CanonicalKnowledgeEntry) -> list[dict[str, objec
 
 
 def _surface_search_text(entry: CanonicalKnowledgeEntry) -> str:
-    enrichment = entry.enrichment
-    return "\n".join(
-        part
-        for part in (
-            entry.title,
-            entry.entry_kind.value,
-            _entry_embedding_text(entry),
-            entry.answer,
-            " ".join(enrichment.questions),
-            " ".join(enrichment.paraphrases),
-            " ".join(enrichment.synonyms),
-            " ".join(enrichment.typo_queries),
-            " ".join(enrichment.colloquial_queries),
-            " ".join(enrichment.tags),
-        )
-        if part
-    )
+    return build_retrieval_surface_search_text(entry)
 
 
 def _optional_int(value: object) -> int | None:

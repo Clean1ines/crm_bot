@@ -13,9 +13,6 @@ from src.domain.project_plane.knowledge_chunks import (
     KnowledgeChunkRole,
     KnowledgeSectionPath,
 )
-from src.domain.project_plane.knowledge_embedding_text import (
-    build_knowledge_embedding_text,
-)
 
 
 def test_chunk_draft_normalizes_text_fields_and_dedupes_sequences() -> None:
@@ -89,29 +86,6 @@ def test_chunk_from_draft_is_typed_without_legacy_dict_contract() -> None:
     assert chunk.title == "Refund policy"
     assert chunk.metadata["source"] == "upload"
     assert isinstance(chunk.metadata, MappingProxyType)
-
-
-def test_embedding_text_uses_typed_chunk_fields() -> None:
-    draft = KnowledgeChunkDraft(
-        content="The assistant can transfer complex cases to a human.",
-        title="Handoff",
-        source_excerpt="Transfer complex cases to a human.",
-        questions=("Can I talk to a person?",),
-        synonyms=("operator", "human"),
-        tags=("handoff",),
-    )
-
-    embedding_text = build_knowledge_embedding_text(draft)
-
-    assert "Title: Handoff" in embedding_text
-    assert "Source excerpt: Transfer complex cases to a human." in embedding_text
-    assert "Questions: Can I talk to a person?" in embedding_text
-    assert "Synonyms: operator, human" in embedding_text
-    assert "Tags: handoff" in embedding_text
-    assert (
-        "Content: The assistant can transfer complex cases to a human."
-        in embedding_text
-    )
 
 
 def test_new_domain_contract_does_not_contain_legacy_chunk_api() -> None:

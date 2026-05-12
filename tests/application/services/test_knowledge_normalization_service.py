@@ -26,7 +26,7 @@ def _document(*chunks: KnowledgeChunkDraft) -> ParsedKnowledgeDocument:
     )
 
 
-def test_normalization_classifies_and_builds_embedding_text() -> None:
+def test_normalization_classifies_without_legacy_chunk_embedding_text() -> None:
     service = KnowledgeNormalizationService()
     document = _document(
         KnowledgeChunkDraft(
@@ -45,8 +45,7 @@ def test_normalization_classifies_and_builds_embedding_text() -> None:
     assert result.total_chunks == 1
     chunk = result.chunks[0]
     assert chunk.role == KnowledgeChunkRole.FAQ
-    assert "FAQ" in chunk.embedding_text
-    assert "Can I upload documents" in chunk.embedding_text
+    assert chunk.embedding_text == ""
 
 
 def test_normalization_filters_non_indexable_separator_chunks() -> None:

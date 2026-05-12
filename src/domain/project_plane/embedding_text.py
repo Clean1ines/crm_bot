@@ -1,147 +1,95 @@
-"""
-Utilities for building retrieval-oriented embedding text.
-
-The embedding text is intentionally richer than the visible chunk text:
-it repeats section titles, question-like lines and keyword-like markers so
-semantic search has more anchors for short user queries.
-"""
-
 from __future__ import annotations
 
-import re
+from collections.abc import Iterable
 
-
-_HEADING_RE = re.compile(
-    r"^\s*(?:#{1,6}\s+|\d{1,3}[.)]\s+)?(?P<title>[A-ZА-ЯЁ0-9][^\n]{3,120})\s*$"
+from src.domain.project_plane.knowledge_compilation import (
+    CanonicalKnowledgeEntry,
+    EmbeddingText,
 )
-_QUESTION_RE = re.compile(
-    r"(^|\s)(что|как|можно|сколько|когда|где|зачем|почему|кто|какие|какая|какой|can|how|what|when|where|why)\b",
-    re.IGNORECASE,
-)
-_BULLET_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(?P<item>.+?)\s*$")
-_WS_RE = re.compile(r"\s+")
+
+CANONICAL_EMBEDDING_TEXT_VERSION = "entry_embedding_text_v2"
 
 
-def normalize_text(value: str) -> str:
-    return _WS_RE.sub(" ", value).strip()
+def build_canonical_entry_embedding_text(
+    entry: CanonicalKnowledgeEntry,
+) -> EmbeddingText:
+    """Build the only production embedding text for a canonical entry.
+
+    The builder is intentionally derived from authoritative entry.answer plus
+    positive query enrichment. It does not consume entry.embedding_text, because
+    raw LLM/preprocessing embedding text is not authoritative production content.
+    """
+
+    sections: list[str] = []
+
+    _append_plain(sections, entry.title)
+    _append_labeled(sections, "Ответ:", entry.answer)
+
+    enrichment = entry.enrichment
+    _append_values(sections, "Возможные вопросы пользователей:", enrichment.questions)
+    _append_values(sections, "Перефразы:", enrichment.paraphrases)
+    _append_values(sections, "Синонимы и близкие выражения:", enrichment.synonyms)
+    _append_values(
+        sections,
+        "Разговорные/ошибочные формулировки:",
+        enrichment.typo_queries + enrichment.colloquial_queries,
+    )
+    _append_values(sections, "Теги:", enrichment.tags)
+
+    text = "\n\n".join(sections)
+    return EmbeddingText(
+        value=text or entry.answer,
+        version=CANONICAL_EMBEDDING_TEXT_VERSION,
+    )
 
 
-def extract_title(text: str) -> str | None:
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        match = _HEADING_RE.match(line)
-        if not match:
-            continue
-        title = normalize_text(match.group("title"))
-        if len(title) >= 4:
-            return title
-    return None
+def build_retrieval_surface_search_text(entry: CanonicalKnowledgeEntry) -> str:
+    """Build lexical search text for the published retrieval surface.
+
+    retrieval_guards are intentionally excluded: negative hints must not become
+    positive searchable text.
+    """
+
+    embedding_text = build_canonical_entry_embedding_text(entry).value
+    return _join_unique_non_blank((entry.title, entry.answer, embedding_text))
 
 
-def extract_question_aliases(text: str, *, limit: int = 12) -> list[str]:
-    aliases: list[str] = []
-    seen: set[str] = set()
-
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        bullet = _BULLET_RE.match(line)
-        candidate = bullet.group("item") if bullet else line
-        candidate = normalize_text(candidate.strip("-–—:;. "))
-
-        if not candidate:
-            continue
-
-        looks_like_question = "?" in candidate or _QUESTION_RE.search(candidate)
-        short_enough = 5 <= len(candidate) <= 140
-
-        if looks_like_question and short_enough:
-            key = candidate.casefold()
-            if key not in seen:
-                seen.add(key)
-                aliases.append(candidate)
-
-        if len(aliases) >= limit:
-            break
-
-    return aliases
+def _append_plain(sections: list[str], value: str) -> None:
+    text = _clean_text(value)
+    if text:
+        sections.append(text)
 
 
-def extract_keyword_markers(text: str, *, limit: int = 24) -> list[str]:
-    normalized = normalize_text(text)
-    tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9+/#.-]{2,}", normalized)
+def _append_labeled(sections: list[str], label: str, value: str) -> None:
+    text = _clean_text(value)
+    if text:
+        sections.append(f"{label}\n{text}")
 
-    stop = {
-        "это",
-        "как",
-        "что",
-        "для",
-        "или",
-        "если",
-        "при",
-        "где",
-        "над",
-        "под",
-        "the",
-        "and",
-        "for",
-        "with",
-        "that",
-        "this",
-        "you",
-        "are",
-    }
 
+def _append_values(
+    sections: list[str],
+    label: str,
+    values: Iterable[str],
+) -> None:
+    cleaned = tuple(_clean_text(value) for value in values)
+    filtered = tuple(value for value in cleaned if value)
+    if filtered:
+        sections.append(f"{label}\n" + "\n".join(filtered))
+
+
+def _join_unique_non_blank(values: Iterable[str]) -> str:
     result: list[str] = []
     seen: set[str] = set()
 
-    for token in tokens:
-        key = token.casefold()
-        if key in stop:
+    for value in values:
+        text = _clean_text(value)
+        if not text or text in seen:
             continue
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(token)
-        if len(result) >= limit:
-            break
+        seen.add(text)
+        result.append(text)
 
-    return result
+    return "\n".join(result)
 
 
-def build_embedding_text(
-    *,
-    content: str,
-    title: str | None = None,
-    content_type: str | None = None,
-    source_name: str | None = None,
-) -> str:
-    clean_content = normalize_text(content)
-    detected_title = title or extract_title(content)
-    aliases = extract_question_aliases(content)
-    keywords = extract_keyword_markers(content)
-
-    parts: list[str] = []
-
-    if detected_title:
-        parts.append(f"Title: {detected_title}")
-
-    if content_type:
-        parts.append(f"Type: {content_type}")
-
-    if source_name:
-        parts.append(f"Source: {source_name}")
-
-    if aliases:
-        parts.append("Questions: " + "; ".join(aliases))
-
-    if keywords:
-        parts.append("Keywords: " + ", ".join(keywords))
-
-    parts.append("Content: " + clean_content)
-
-    return "\n".join(parts).strip()
+def _clean_text(value: str) -> str:
+    return " ".join(str(value or "").strip().split())
