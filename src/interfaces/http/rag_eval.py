@@ -6,6 +6,10 @@ from typing import Annotated, TypedDict, cast
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from src.application.services.knowledge_edit_action_service import (
+    KnowledgeEditActionExecutionResult,
+    KnowledgeEditActionService,
+)
 from src.domain.project_plane.json_types import JsonValue
 from src.infrastructure.db.repositories.project import ProjectRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
@@ -48,6 +52,36 @@ class DocumentHealth(TypedDict):
     status: str
     file_name: str
     entry_count: int
+
+
+class KnowledgeEditActionExecutionSummary(TypedDict):
+    ok: bool
+    source_result_id: str
+    project_id: str
+    document_id: str
+    total_actions: int
+    applied_actions: int
+    rejected_actions: int
+    failed_actions: int
+    skipped_actions: int
+    queued_rerun_job_ids: list[str]
+
+
+def _knowledge_edit_action_execution_summary(
+    result: KnowledgeEditActionExecutionResult,
+) -> KnowledgeEditActionExecutionSummary:
+    return {
+        "ok": True,
+        "source_result_id": result.source_result_id,
+        "project_id": result.project_id,
+        "document_id": result.document_id,
+        "total_actions": result.total_actions,
+        "applied_actions": result.applied_actions,
+        "rejected_actions": result.rejected_actions,
+        "failed_actions": result.failed_actions,
+        "skipped_actions": result.skipped_actions,
+        "queued_rerun_job_ids": list(result.queued_rerun_job_ids),
+    }
 
 
 def _require_groq_key() -> None:
@@ -150,6 +184,67 @@ async def _document_health(
         "file_name": str(row["file_name"]),
         "entry_count": int(row["entry_count"] or 0),
     }
+
+
+@router.post("/results/{result_id}/actions/execute")
+async def execute_rag_eval_result_actions(
+    result_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+    queue_repo: QueueRepository = Depends(get_queue_repo),
+) -> KnowledgeEditActionExecutionSummary:
+    action_source = RagEvalRepository(pool)
+    source_payload = await action_source.load_result_action_source(result_id)
+    if source_payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RAG eval result not found: {result_id}",
+        )
+
+    project_id = str(source_payload.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="RAG eval result action source is missing project_id",
+        )
+
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
+    )
+
+    service = KnowledgeEditActionService(
+        action_source=action_source,
+        knowledge_repo=KnowledgeRepository(pool),
+        queue_repo=queue_repo,
+    )
+
+    try:
+        result = await service.execute_result_actions(
+            result_id=result_id,
+            actor_user_id=current_user_id,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if "not found" in detail.lower():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=detail,
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=detail,
+        ) from exc
+
+    return _knowledge_edit_action_execution_summary(result)
 
 
 @router.get("/documents/{document_id}/latest-report")

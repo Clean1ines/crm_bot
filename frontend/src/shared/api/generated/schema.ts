@@ -104,10 +104,228 @@ export interface paths {
         put?: never;
         /**
          * Upload Knowledge
-         * @description Загружает текстовый файл или PDF, разбивает на чанки, генерирует эмбеддинги
-         *     и сохраняет в базу знаний проекта.
+         * @description Загружает текстовый, Markdown, JSON файл или PDF, разбивает на чанки,
+         *     генерирует эмбеддинги и сохраняет в базу знаний проекта.
+         *
+         *     preprocessing_mode:
+         *     - plain: legacy chunk persistence, no LLM preprocessing
+         *     - faq: FAQ normalization
+         *     - price_list: price/menu/catalog normalization
+         *     - instruction: policy/procedure normalization
          */
         post: operations["upload_knowledge_api_projects__project_id__knowledge_post"];
+        /**
+         * Clear Knowledge
+         * @description Deletes all knowledge documents and chunks for a project.
+         */
+        delete: operations["clear_knowledge_api_projects__project_id__knowledge_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Knowledge
+         * @description Returns the best knowledge-base matches for a customer question without
+         *     calling LLM generation.
+         */
+        post: operations["preview_knowledge_api_projects__project_id__knowledge_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Knowledge Usage */
+        get: operations["knowledge_usage_api_projects__project_id__knowledge_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/results/{result_id}/actions/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Execute Rag Eval Result Actions */
+        post: operations["execute_rag_eval_result_actions_api_rag_eval_results__result_id__actions_execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/documents/{document_id}/latest-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Latest Rag Eval Report */
+        get: operations["get_latest_rag_eval_report_api_rag_eval_documents__document_id__latest_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/documents/{document_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Rag Eval Document Status */
+        get: operations["get_rag_eval_document_status_api_rag_eval_documents__document_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/documents/{document_id}/run-full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enqueue Full Rag Eval For Document */
+        post: operations["enqueue_full_rag_eval_for_document_api_rag_eval_documents__document_id__run_full_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/documents/{document_id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Rag Eval For Document */
+        post: operations["run_rag_eval_for_document_api_rag_eval_documents__document_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/documents/{document_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Rag Eval Jobs For Document */
+        get: operations["list_rag_eval_jobs_for_document_api_rag_eval_documents__document_id__jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/jobs/{job_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Rag Eval Job Progress */
+        get: operations["get_rag_eval_job_progress_api_rag_eval_jobs__job_id__progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Rag Eval Job */
+        post: operations["cancel_rag_eval_job_api_rag_eval_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/jobs/{job_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Rag Eval Job */
+        post: operations["pause_rag_eval_job_api_rag_eval_jobs__job_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/rag-eval/jobs/{job_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Rag Eval Job */
+        post: operations["resume_rag_eval_job_api_rag_eval_jobs__job_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -537,6 +755,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/members/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Invite Project Member */
+        post: operations["invite_project_member_api_projects__project_id__members_invitations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Project Invitation */
+        post: operations["accept_project_invitation_api_projects_invitations_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/members": {
         parameters: {
             query?: never;
@@ -763,7 +1015,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Claim Thread */
+        /**
+         * Claim Thread
+         * @description Claim a waiting ticket for a manager in the web panel.
+         */
         post: operations["claim_thread_api_threads__thread_id__claim_post"];
         delete?: never;
         options?: never;
@@ -780,7 +1035,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Close Thread */
+        /**
+         * Close Thread
+         * @description Close a ticket from the web panel and return the next client message to AI.
+         */
         post: operations["close_thread_api_threads__thread_id__close_post"];
         delete?: never;
         options?: never;
@@ -1003,6 +1261,11 @@ export interface components {
         Body_upload_knowledge_api_projects__project_id__knowledge_post: {
             /** File */
             file: string;
+            /**
+             * Preprocessing Mode
+             * @default plain
+             */
+            preprocessing_mode: string;
         };
         /** BotConnectRequest */
         BotConnectRequest: {
@@ -1071,6 +1334,39 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** KnowledgeEditActionExecutionSummary */
+        KnowledgeEditActionExecutionSummary: {
+            /** Ok */
+            ok: boolean;
+            /** Source Result Id */
+            source_result_id: string;
+            /** Project Id */
+            project_id: string;
+            /** Document Id */
+            document_id: string;
+            /** Total Actions */
+            total_actions: number;
+            /** Applied Actions */
+            applied_actions: number;
+            /** Rejected Actions */
+            rejected_actions: number;
+            /** Failed Actions */
+            failed_actions: number;
+            /** Skipped Actions */
+            skipped_actions: number;
+            /** Queued Rerun Job Ids */
+            queued_rerun_job_ids: string[];
+        };
+        /** KnowledgePreviewRequestModel */
+        KnowledgePreviewRequestModel: {
+            /** Question */
+            question: string;
+            /**
+             * Limit
+             * @default 5
+             */
+            limit: number;
+        };
         /** LinkEmailRequest */
         LinkEmailRequest: {
             /** Email */
@@ -1095,6 +1391,8 @@ export interface components {
             manager_user_id: string;
             /** Text */
             text: string;
+            /** Manager Display Name */
+            manager_display_name?: string | null;
             /** Manager Chat Id */
             manager_chat_id?: string | null;
             /** Created At */
@@ -1207,6 +1505,55 @@ export interface components {
             /** Credentials Encrypted */
             credentials_encrypted?: string | null;
         };
+        /** ProjectInvitationAcceptRequest */
+        ProjectInvitationAcceptRequest: {
+            /** Token */
+            token: string;
+        };
+        /** ProjectInvitationAcceptResponse */
+        ProjectInvitationAcceptResponse: {
+            /** Status */
+            status: string;
+            /** Project Id */
+            project_id: string;
+            /** User Id */
+            user_id: string;
+            /** Email */
+            email: string;
+            /** Role */
+            role: string;
+        };
+        /** ProjectInvitationCreateRequest */
+        ProjectInvitationCreateRequest: {
+            /** Email */
+            email: string;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+            /**
+             * Role
+             * @default manager
+             */
+            role: string;
+        };
+        /** ProjectInvitationResponse */
+        ProjectInvitationResponse: {
+            /** Status */
+            status: string;
+            /** Project Id */
+            project_id: string;
+            /** Email */
+            email: string;
+            /** Role */
+            role: string;
+            /** Expires At */
+            expires_at: string;
+            /** Delivery */
+            delivery: string;
+            /** Invite Link */
+            invite_link?: string | null;
+        };
         /** ProjectLimitProfileUpdate */
         ProjectLimitProfileUpdate: {
             /** Monthly Token Limit */
@@ -1277,6 +1624,8 @@ export interface components {
             client_bot_username?: string | null;
             /** Manager Bot Username */
             manager_bot_username?: string | null;
+            /** Access Role */
+            access_role?: string | null;
         };
         /** ProjectSettingsUpdate */
         ProjectSettingsUpdate: {
@@ -1320,6 +1669,11 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /** ThreadActionResponse */
+        ThreadActionResponse: {
+            /** Status */
+            status: string;
+        };
         /** ThreadResponse */
         ThreadResponse: {
             /** Thread Id */
@@ -1342,11 +1696,6 @@ export interface components {
             } | null;
             /** Unread Count */
             unread_count: number;
-        };
-        /** ThreadActionResponse */
-        ThreadActionResponse: {
-            /** Status */
-            status: string;
         };
         /** TokenActionRequest */
         TokenActionRequest: {
@@ -1575,6 +1924,466 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_knowledge_api_projects__project_id__knowledge_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_knowledge_api_projects__project_id__knowledge_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgePreviewRequestModel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    knowledge_usage_api_projects__project_id__knowledge_usage_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_rag_eval_result_actions_api_rag_eval_results__result_id__actions_execute_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                result_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEditActionExecutionSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_rag_eval_report_api_rag_eval_documents__document_id__latest_report_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_rag_eval_document_status_api_rag_eval_documents__document_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_full_rag_eval_for_document_api_rag_eval_documents__document_id__run_full_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_rag_eval_for_document_api_rag_eval_documents__document_id__run_post: {
+        parameters: {
+            query?: {
+                /** @description RAG eval mode. */
+                mode?: string;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rag_eval_jobs_for_document_api_rag_eval_documents__document_id__jobs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_rag_eval_job_progress_api_rag_eval_jobs__job_id__progress_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_rag_eval_job_api_rag_eval_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: {
+                /** @description Optional cancellation reason. */
+                reason?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_rag_eval_job_api_rag_eval_jobs__job_id__pause_post: {
+        parameters: {
+            query?: {
+                /** @description Optional pause reason. */
+                reason?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_rag_eval_job_api_rag_eval_jobs__job_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -2584,6 +3393,78 @@ export interface operations {
             };
         };
     };
+    invite_project_member_api_projects__project_id__members_invitations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectInvitationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectInvitationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_project_invitation_api_projects_invitations_accept_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectInvitationAcceptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectInvitationAcceptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_project_members_api_projects__project_id__members_get: {
         parameters: {
             query?: never;
@@ -3014,7 +3895,7 @@ export interface operations {
                 project_id: string;
                 limit?: number;
                 offset?: number;
-                /** @description Filter by thread status (active, manual, closed) */
+                /** @description Filter by thread status (active, waiting_manager, manual, closed, manager) */
                 status_filter?: string | null;
                 /** @description Search by client name or username */
                 search?: string | null;
