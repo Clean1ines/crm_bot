@@ -103,8 +103,8 @@ const statusLabel = (status: string): string => {
 
 const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
   const rawMessage = typeof progress.message === 'string' ? progress.message : '';
-  if (stage === 'dataset_generation') return 'Система читает чанки и составляет контрольные вопросы.';
-  if (stage === 'answer_generation') return 'Система задаёт эти вопросы боту, ищет релевантные чанки и оценивает ответы.';
+  if (stage === 'dataset_generation') return 'Система читает фрагменты документа и составляет контрольные вопросы.';
+  if (stage === 'answer_generation') return 'Система задаёт эти вопросы боту, ищет подходящие фрагменты и оценивает ответы.';
   if (stage === 'paused') return 'Пауза включена. Текущий запрос может завершиться, новые вопросы не начнутся до продолжения.';
   if (stage === 'cancelled') return 'Задача остановлена пользователем.';
   if (stage === 'failed') return rawMessage || 'Проверка завершилась с ошибкой.';
@@ -190,18 +190,74 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
 };
 
 const actionTypeLabel = (value: string): string => {
-  if (value === 'attach_question_to_entry') return 'Добавить пользовательскую формулировку';
-  if (value === 'rebuild_entry_embedding') return 'Пересобрать embedding';
+  if (value === 'attach_question_to_entry') return 'Добавить формулировку клиента';
+  if (value === 'rebuild_entry_embedding') return 'Обновить поисковое представление записи';
   if (value === 'rerun_eval') return 'Запустить повторную проверку';
-  if (value === 'create_entry_from_failure') return 'Создать entry вручную';
-  return value || 'Action';
+  if (value === 'create_entry_from_failure') return 'Создать новую запись вручную';
+  return value || 'Действие';
+};
+
+const actionTypeDescription = (value: string): string => {
+  if (value === 'attach_question_to_entry') {
+    return 'Система добавит вопрос клиента к уже существующей записи базы знаний, чтобы бот лучше находил её по такой формулировке.';
+  }
+
+  if (value === 'rebuild_entry_embedding') {
+    return 'Система обновит поисковый образ записи после изменений, чтобы она корректнее участвовала в поиске.';
+  }
+
+  if (value === 'rerun_eval') {
+    return 'Система поставит повторную проверку документа в очередь, чтобы проверить результат после исправлений.';
+  }
+
+  if (value === 'create_entry_from_failure') {
+    return 'Это действие требует ручного разбора: система не будет автоматически создавать новую запись базы знаний.';
+  }
+
+  return 'Система подготовила действие для улучшения базы знаний.';
+};
+
+const formatResultScore = (score: number): string => {
+  const normalized = score > 1 ? score : score * 100;
+  return `${Math.round(normalized)}%`;
+};
+
+const riskLabel = (value: string): string => {
+  if (value === 'high') return 'Высокий риск недостоверного ответа';
+  if (value === 'medium') return 'Средний риск недостоверного ответа';
+  if (value === 'low') return 'Низкий риск недостоверного ответа';
+  return 'Риск не определён';
+};
+
+const resultProblemLabel = (result: RagEvalActionableResult): string => {
+  if (result.wrong_entry_top1 && !result.answer_supported) {
+    return 'Бот опирается не на ту запись базы знаний, поэтому ответ может быть неправильным.';
+  }
+
+  if (result.wrong_entry_top1) {
+    return 'Первым найден не тот фрагмент. Поиск нужно направить к правильной записи.';
+  }
+
+  if (!result.answer_supported) {
+    return 'Ответ не подтверждён найденной базой знаний. Нужно усилить связь вопроса с правильной записью.';
+  }
+
+  if (result.hallucination_risk === 'high') {
+    return 'Проверка увидела высокий риск недостоверного ответа. Лучше применить предложенные исправления и запустить повторную проверку.';
+  }
+
+  if (!result.should_answer_passed) {
+    return 'Поведение бота не совпало с ожидаемым: нужно уточнить базу знаний или правила ответа.';
+  }
+
+  return 'Система нашла место, где база знаний может отвечать лучше.';
 };
 
 const readinessLabel = (value: unknown): string => {
   const readiness = String(value || '').trim();
   if (readiness === 'ready') return 'Готово к использованию';
   if (readiness === 'needs_review') return 'Нужна ручная проверка';
-  if (readiness === 'not_ready') return 'Не готово к production';
+  if (readiness === 'not_ready') return 'Не готово к работе';
   return readiness || 'Нет статуса';
 };
 
@@ -227,12 +283,14 @@ const ReportList: React.FC<{ title: string; items: string[] }> = ({ title, items
 
 interface ActionableResultsPanelProps {
   results: RagEvalActionableResult[];
+  executionSummary: KnowledgeEditActionExecutionSummary | null;
   executingResultId: string | null;
   onExecute: (resultId: string) => void;
 }
 
 const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
   results,
+  executionSummary,
   executingResultId,
   onExecute,
 }) => {
@@ -245,18 +303,39 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
           <RotateCcw className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Actionable failures</h2>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Безопасные auto-actions из последнего отчёта. Внутренние диагностические поля и сырой ответ здесь не выводятся.
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+            Предложенные исправления базы знаний
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-[var(--text-muted)]">
+            Здесь показаны проблемы, которые проверка нашла в ответах бота. Кнопка применяет
+            только безопасные изменения: добавляет недостающие формулировки к существующим
+            записям, обновляет поисковое представление или запускает повторную проверку.
+            Действия, где нужно вручную создать новую запись, не применяются автоматически.
           </p>
         </div>
       </div>
 
+      {executionSummary && (
+        <div className="mb-4 rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4">
+          <div className="text-sm font-semibold text-[var(--text-primary)]">
+            Последнее применение исправлений
+          </div>
+          <div className="mt-2 grid gap-2 text-sm text-[var(--text-secondary)] sm:grid-cols-2 lg:grid-cols-4">
+            <div>Применено: {formatNumber(executionSummary.applied_actions)}</div>
+            <div>Пропущено: {formatNumber(executionSummary.skipped_actions)}</div>
+            <div>Нужна ручная проверка: {formatNumber(executionSummary.rejected_actions)}</div>
+            <div>Ошибок: {formatNumber(executionSummary.failed_actions)}</div>
+          </div>
+          {executionSummary.queued_rerun_job_ids.length > 0 && (
+            <p className="mt-2 text-sm text-[var(--text-muted)]">
+              Повторная проверка запущена. Её прогресс появится выше на этой странице.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="space-y-3">
         {results.map((result) => {
-          const classification = getRecord(result.classification);
-          const failureStage = String(classification.failure_stage || classification.stage || '').trim();
-          const failureType = String(classification.failure_type || classification.type || '').trim();
           const isExecuting = executingResultId === result.result_id;
           const canExecute = result.proposed_actions.length > 0;
 
@@ -265,51 +344,78 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
               key={result.result_id}
               className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4"
             >
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="min-w-0 space-y-2">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                      score {Math.round(result.score * 100)}%
+                      Уверенность проверки: {formatResultScore(result.score)}
                     </span>
                     <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                      {result.hallucination_risk || 'risk n/a'}
+                      {riskLabel(result.hallucination_risk)}
                     </span>
                     {result.wrong_entry_top1 && (
                       <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
-                        wrong top-1
+                        найден не тот источник
                       </span>
                     )}
                     {!result.answer_supported && (
                       <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
-                        unsupported answer
+                        ответ не подтверждён
                       </span>
                     )}
                   </div>
 
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Question</div>
+                    <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                      Проверочный вопрос
+                    </div>
                     <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
                       {result.question || 'Без текста вопроса'}
                     </div>
                   </div>
 
-                  {(failureStage || failureType) && (
-                    <div className="text-xs text-[var(--text-muted)]">
-                      Failure: {[failureStage, failureType].filter(Boolean).join(' / ')}
+                  <div className="rounded-lg bg-[var(--surface-elevated)] p-3">
+                    <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                      Что не так
                     </div>
-                  )}
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                      {resultProblemLabel(result)}
+                    </p>
+                  </div>
 
-                  <div className="grid gap-2 text-xs text-[var(--text-muted)] sm:grid-cols-2">
-                    <div>
-                      Expected entries: {result.expected_entry_ids.length
-                        ? result.expected_entry_ids.map((id) => id.slice(0, 8)).join(', ')
-                        : 'none'}
+                  <div className="rounded-lg bg-[var(--surface-elevated)] p-3">
+                    <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                      Что будет сделано
                     </div>
-                    <div>
-                      Retrieved entries: {result.retrieved_entry_ids.length
-                        ? result.retrieved_entry_ids.map((id) => id.slice(0, 8)).join(', ')
-                        : 'none'}
-                    </div>
+                    {result.proposed_actions.length ? (
+                      <ul className="mt-2 space-y-3 text-sm text-[var(--text-secondary)]">
+                        {result.proposed_actions.map((action, index) => {
+                          const payloadQuestion = typeof action.payload.question === 'string'
+                            ? action.payload.question.trim()
+                            : '';
+
+                          return (
+                            <li key={`${result.result_id}-${action.action_type}-${index}`}>
+                              <div className="font-medium text-[var(--text-primary)]">
+                                {actionTypeLabel(action.action_type)}
+                              </div>
+                              <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                                {actionTypeDescription(action.action_type)}
+                              </p>
+                              {payloadQuestion && (
+                                <div className="mt-2 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-xs text-[var(--text-muted)]">
+                                  Новая формулировка для поиска: “{payloadQuestion}”
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-sm text-[var(--text-muted)]">
+                        Для этой проблемы нет автоматического исправления. Нужен ручной разбор.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -320,45 +426,8 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
                   className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isExecuting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                  Применить safe actions
+                  {isExecuting ? 'Применяю исправления...' : 'Применить предложенные исправления'}
                 </button>
-              </div>
-
-              <div className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                  Proposed actions: {formatNumber(result.proposed_actions.length)}
-                </div>
-                {result.proposed_actions.length ? (
-                  <ul className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
-                    {result.proposed_actions.map((action, index) => {
-                      const payloadQuestion = typeof action.payload.question === 'string'
-                        ? action.payload.question
-                        : '';
-
-                      return (
-                        <li key={`${result.result_id}-${action.action_type}-${index}`}>
-                          <span className="font-medium text-[var(--text-primary)]">
-                            {actionTypeLabel(action.action_type)}
-                          </span>
-                          {action.target_entry_id && (
-                            <span className="text-[var(--text-muted)]">
-                              {' '}→ {action.target_entry_id.slice(0, 8)}…
-                            </span>
-                          )}
-                          {payloadQuestion && (
-                            <div className="mt-1 text-xs text-[var(--text-muted)]">
-                              “{payloadQuestion}”
-                            </div>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="mt-2 text-sm text-[var(--text-muted)]">
-                    Для этого результата нет auto-safe actions.
-                  </p>
-                )}
               </div>
             </article>
           );
@@ -392,7 +461,7 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
         <div>
           <h3 className="text-base font-semibold text-[var(--text-primary)]">Человекочитаемый отчёт</h3>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Это итог проверки: насколько база знаний помогает боту находить правильные чанки и отвечать без галлюцинаций.
+            Это итог проверки: насколько база знаний помогает боту находить правильные фрагменты и отвечать без выдуманных фактов.
           </p>
         </div>
         <div className="rounded-xl bg-[var(--surface-elevated)] px-4 py-3 text-right shadow-[var(--shadow-card)]">
@@ -403,12 +472,12 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <MetricPill label="Всего вопросов" value={total || '—'} />
-        <MetricPill label="Top-1 chunk" value={`${top1Rate}%`} />
-        <MetricPill label="Top-3 chunks" value={`${top3Rate}%`} />
-        <MetricPill label="Top-5 chunks" value={`${top5Rate}%`} />
+        <MetricPill label="Первый найденный фрагмент" value={`${top1Rate}%`} />
+        <MetricPill label="Первые 3 фрагмента" value={`${top3Rate}%`} />
+        <MetricPill label="Первые 5 фрагментов" value={`${top5Rate}%`} />
         <MetricPill label="Ответы подтверждены" value={`${answerSupportedRate}%`} />
-        <MetricPill label="Риск галлюцинаций" value={highHallucinationRisk} />
-        <MetricPill label="Ошибочный первый chunk" value={wrongChunkTop1} />
+        <MetricPill label="Риск выдуманного ответа" value={highHallucinationRisk} />
+        <MetricPill label="Первый фрагмент оказался неверным" value={wrongChunkTop1} />
       </div>
 
       <ReportList title="Сильные стороны" items={strengths} />
@@ -448,7 +517,7 @@ const JobProgressCard: React.FC<{
             <BarChart3 className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс RAG eval</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс проверки</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
               Активных или недавних задач для выбранного документа пока нет.
             </p>
@@ -484,9 +553,9 @@ const JobProgressCard: React.FC<{
             {active ? <Loader2 className="h-5 w-5 animate-spin" /> : <BarChart3 className="h-5 w-5" />}
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс RAG eval</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс проверки</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              ID задачи: <span className="font-mono">{job.id.slice(0, 8)}…</span>
+              Текущая проверка выбранного документа.
             </p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
               Статус: <span className="font-semibold text-[var(--text-primary)]">{statusLabel(effectiveStatus || job.status)}</span>
@@ -547,8 +616,8 @@ const JobProgressCard: React.FC<{
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatPill label="Вопросы готовы" value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
         <StatPill label="Ответы проверены" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
-        <StatPill label="Пачки чанков" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
-        <StatPill label="Чанки" value={sourceChunkCount || '—'} />
+        <StatPill label="Группы фрагментов" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
+        <StatPill label="Фрагменты" value={sourceChunkCount || '—'} />
         <StatPill label="Попытки" value={`${job.attempts}/${job.max_attempts}`} />
       </div>
 
@@ -567,6 +636,7 @@ export const RagEvalPage: React.FC = () => {
 
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [lastQueued, setLastQueued] = useState<RagEvalFullRunAcceptedResponse | null>(null);
+  const [lastActionExecutionSummary, setLastActionExecutionSummary] = useState<KnowledgeEditActionExecutionSummary | null>(null);
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -673,13 +743,14 @@ export const RagEvalPage: React.FC = () => {
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      if (!activeDocumentId) throw new Error('Нет обработанного документа для RAG eval');
+      if (!activeDocumentId) throw new Error('Нет обработанного документа для проверки');
 
         return await ragEvalApi.runFullDocumentEval(activeDocumentId);
     },
     onSuccess: async (result) => {
       setLastQueued(result);
-      toast.success(`Проверка поставлена в очередь: ${result.job_id.slice(0, 8)}…`);
+      setLastActionExecutionSummary(null);
+      toast.success('Проверка запущена. Прогресс появится на этой странице.');
       await invalidateEvalQueries();
     },
     onError: (error) => {
@@ -727,13 +798,19 @@ export const RagEvalPage: React.FC = () => {
   const executeActionsMutation = useMutation<KnowledgeEditActionExecutionSummary, unknown, string>({
     mutationFn: async (resultId: string) => ragEvalApi.executeResultActions(resultId),
     onSuccess: async (summary) => {
+      setLastActionExecutionSummary(summary);
+
+      const rerunMessage = summary.queued_rerun_job_ids.length
+        ? ', повторная проверка поставлена в очередь'
+        : '';
+
       toast.success(
-        `Safe actions applied: ${summary.applied_actions}, rejected: ${summary.rejected_actions}, failed: ${summary.failed_actions}`,
+        `Исправления применены: ${summary.applied_actions}; ручная проверка: ${summary.rejected_actions}; ошибок: ${summary.failed_actions}${rerunMessage}`,
       );
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось применить safe actions');
+      toast.error(error instanceof Error ? error.message : 'Не удалось применить предложенные исправления');
     },
   });
 
@@ -741,6 +818,7 @@ export const RagEvalPage: React.FC = () => {
   const latestReport = getRecord(latestReportPayload);
   const actionableResults = useMemo(() => getActionableResults(latestReport), [latestReport]);
   const latestRun = statusQuery.data?.run ?? null;
+  const latestRunRecord = getRecord(latestRun);
   const progressJob = progressQuery.data?.job ?? visibleJob;
   const progressPayload = progressJob?.progress ?? visibleJob?.progress ?? (
     progressJob
@@ -764,11 +842,11 @@ export const RagEvalPage: React.FC = () => {
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div>
         <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">
-          Full-document RAG eval
+          Проверка качества базы знаний
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-[var(--text-muted)]">
-          Полная проверка документа после обработки базы знаний. Теперь задача видна как job: можно смотреть прогресс,
-          ставить на паузу, продолжать и отменять без ручного доступа к production DB.
+          Полная проверка документа после обработки базы знаний. Страница показывает, где бот отвечает уверенно,
+          где ему не хватает знаний и какие безопасные исправления можно применить без ручного доступа к базе.
         </p>
       </div>
 
@@ -780,7 +858,7 @@ export const RagEvalPage: React.FC = () => {
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">Запуск полной проверки</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Система сама извлекает факты из каждого chunk и генерирует набор пользовательских перефразов для проверки retrieval.
+              Система читает документ, составляет проверочные вопросы и проверяет, насколько бот находит нужные фрагменты.
             </p>
           </div>
         </div>
@@ -790,12 +868,15 @@ export const RagEvalPage: React.FC = () => {
             <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Документ</span>
             <select
               value={activeDocumentId}
-              onChange={(event) => setSelectedDocumentId(event.target.value)}
+              onChange={(event) => {
+                setSelectedDocumentId(event.target.value);
+                setLastActionExecutionSummary(null);
+              }}
               className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
             >
               {processedDocuments.map((doc) => (
                 <option key={doc.id} value={doc.id}>
-                  {doc.file_name} · {doc.chunk_count} chunks
+                  {doc.file_name} · {doc.chunk_count} фрагментов
                 </option>
               ))}
             </select>
@@ -819,7 +900,7 @@ export const RagEvalPage: React.FC = () => {
             <FileText className="h-4 w-4" />
             <span>{activeDocument.file_name}</span>
             <span>·</span>
-            <span>{formatNumber(activeDocument.chunk_count)} chunks</span>
+            <span>{formatNumber(activeDocument.chunk_count)} фрагментов</span>
           </div>
         )}
       </section>
@@ -845,7 +926,7 @@ export const RagEvalPage: React.FC = () => {
             <BarChart3 className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Последний run/report</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Последний результат проверки</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
               Здесь остаётся статистика после завершения, отмены или ошибки.
             </p>
@@ -860,20 +941,36 @@ export const RagEvalPage: React.FC = () => {
         ) : statusQuery.error ? (
           <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
             <XCircle className="h-4 w-4" />
-            Не удалось загрузить статус RAG eval.
+            Не удалось загрузить статус проверки.
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Run</h3>
-              <ReportJsonBlock value={latestRun} />
+              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Запуск проверки</h3>
+              <div className="rounded-xl bg-[var(--control-bg)] p-4">
+                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Статус запуска</div>
+                <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                  {statusLabel(String(latestRunRecord.status || ''))}
+                </div>
+                <p className="mt-2 text-sm text-[var(--text-muted)]">
+                  Здесь показано состояние последней проверки без служебного JSON.
+                </p>
+              </div>
+              <details className="mt-4 rounded-xl border border-[var(--border-primary)] p-3">
+                <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
+                  Технические подробности запуска
+                </summary>
+                <div className="mt-3">
+                  <ReportJsonBlock value={latestRun} />
+                </div>
+              </details>
             </div>
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Report</h3>
+              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Итоги</h3>
               <ReportSummaryCard report={latestReport} />
               <details className="mt-4 rounded-xl border border-[var(--border-primary)] p-3">
                 <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
-                  Показать raw JSON
+                  Технические подробности отчёта
                 </summary>
                 <div className="mt-3">
                   <ReportJsonBlock value={Object.keys(latestReport).length ? latestReport : null} />
@@ -886,6 +983,7 @@ export const RagEvalPage: React.FC = () => {
 
       <ActionableResultsPanel
         results={actionableResults}
+        executionSummary={lastActionExecutionSummary}
         executingResultId={executingResultId}
         onExecute={(resultId) => executeActionsMutation.mutate(resultId)}
       />

@@ -1334,7 +1334,7 @@ class KnowledgeRepository:
                         chunk.source_index,
                         chunk.content,
                         chunk.page,
-                        chunk.section_title or None,
+                        chunk.section_title,
                         chunk.start_offset,
                         chunk.end_offset,
                         chunk.checksum or None,
