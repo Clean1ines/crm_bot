@@ -1,7 +1,7 @@
 import hashlib
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import asyncpg
@@ -41,7 +41,10 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_FAILED,
     PREPROCESSING_STATUS_NOT_REQUESTED,
     PREPROCESSING_STATUS_PROCESSING,
+    KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
+    KnowledgePreprocessingResult,
+    entry_kind_for_preprocessing_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.knowledge_compilation import (
@@ -374,6 +377,66 @@ def _combined_chunks_for_canonical_persistence(
     return combined
 
 
+def _technical_chunk_batches_for_answer_compiler(
+    chunks: list[JsonObject],
+) -> tuple[list[JsonObject], ...]:
+    batches: list[list[JsonObject]] = []
+
+    for chunk in chunks:
+        if _chunk_content(chunk):
+            batches.append([chunk])
+
+    return tuple(batches)
+
+
+def _merged_preprocessing_result(
+    *,
+    mode: KnowledgePreprocessingMode,
+    results: Sequence[KnowledgePreprocessingResult],
+) -> KnowledgePreprocessingResult:
+    if not results:
+        raise ValidationError("Knowledge preprocessing produced no compiler results")
+
+    entries: list[KnowledgePreprocessingEntry] = []
+    metrics: JsonObject = {
+        "technical_compiler_call_count": len(results),
+        "technical_chunk_batch_size": KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL,
+    }
+
+    for index, result in enumerate(results):
+        entries.extend(result.entries)
+        metrics[f"technical_call_{index}_entry_count"] = len(result.entries)
+
+    latest = results[-1]
+    return KnowledgePreprocessingResult(
+        mode=mode,
+        prompt_version=latest.prompt_version,
+        model=latest.model,
+        entries=tuple(entries),
+        metrics=metrics,
+    )
+
+
+def _answer_titles_from_preprocessing_results(
+    *,
+    mode: KnowledgePreprocessingMode,
+    results: Sequence[KnowledgePreprocessingResult],
+) -> tuple[str, ...]:
+    if not results:
+        return ()
+
+    merged_result = _merged_preprocessing_result(mode=mode, results=results)
+    drafts = _compiled_answer_drafts_from_preprocessing_result(merged_result)
+    titles: list[str] = []
+
+    for draft in drafts:
+        title = _clean_optional_text(draft.title)
+        if title and title not in titles:
+            titles.append(title)
+
+    return tuple(titles[-KCD_STAGE_K_PREVIOUS_TITLE_LIMIT:])
+
+
 def _source_chunk_optional_int(value: object) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -444,6 +507,9 @@ def _source_chunks_from_json_chunks(
 
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
 KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
+KCD_STAGE_K_COMPILER_VERSION = "kcd_v1_stage_k_answer_compiler"
+KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL = 1
+KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 
 
 def _entry_kind_from_chunk_role(role: KnowledgeChunkRole) -> KnowledgeEntryKind:
@@ -502,6 +568,362 @@ def _canonical_source_ref(
         end_offset=source_chunk.end_offset,
         confidence=1.0,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledAnswerEntryDraft:
+    title: str
+    answer: str
+    source_excerpts: tuple[str, ...]
+    questions: tuple[str, ...]
+    synonyms: tuple[str, ...]
+    tags: tuple[str, ...]
+    embedding_text: str
+    metadata: Mapping[str, object]
+
+
+def _normalized_answer_topic_key(value: str) -> str:
+    text = value.lower().replace("ё", "е")
+    text = re.sub(r"[^0-9a-zа-я]+", " ", text)
+    return " ".join(text.split())
+
+
+def _answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
+    title_key = _normalized_answer_topic_key(entry.title)
+    if title_key:
+        return title_key
+
+    answer_key = _normalized_answer_topic_key(entry.answer)
+    if answer_key:
+        return answer_key[:160]
+
+    return f"entry-{index}"
+
+
+def _merge_text_tuple_values(
+    *groups: tuple[str, ...],
+) -> tuple[str, ...]:
+    result: list[str] = []
+    for group in groups:
+        for value in group:
+            cleaned = _clean_optional_text(value)
+            if cleaned and cleaned not in result:
+                result.append(cleaned)
+    return tuple(result)
+
+
+def _merge_answer_text(left: str, right: str) -> str:
+    left_clean = _clean_optional_text(left)
+    right_clean = _clean_optional_text(right)
+
+    if not left_clean:
+        return right_clean
+    if not right_clean:
+        return left_clean
+
+    left_normalized = _normalized_answer_topic_key(left_clean)
+    right_normalized = _normalized_answer_topic_key(right_clean)
+
+    if left_normalized == right_normalized:
+        return left_clean
+    if right_normalized and right_normalized in left_normalized:
+        return left_clean
+    if left_normalized and left_normalized in right_normalized:
+        return right_clean
+
+    return f"{left_clean}\n\n{right_clean}"
+
+
+def _source_excerpts_from_preprocessing_entry(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[str, ...]:
+    normalized = entry.source_excerpt.replace("\r\n", "\n").replace("\r", "\n")
+    parts = tuple(part.strip() for part in normalized.split("\n\n"))
+    return _text_tuple(parts)
+
+
+def _preprocessing_entry_to_compiled_draft(
+    entry: KnowledgePreprocessingEntry,
+    *,
+    mode: KnowledgePreprocessingMode,
+    index: int,
+) -> _CompiledAnswerEntryDraft:
+    return _CompiledAnswerEntryDraft(
+        title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
+        answer=_clean_optional_text(entry.answer),
+        source_excerpts=_source_excerpts_from_preprocessing_entry(entry),
+        questions=_text_tuple(entry.questions),
+        synonyms=_text_tuple(entry.synonyms),
+        tags=_text_tuple(entry.tags),
+        embedding_text=_clean_optional_text(entry.embedding_text),
+        metadata={
+            "compiler_stage": "stage_k_answer_compiler",
+            "preprocessing_mode": mode,
+            "preprocessing_entry_indices": (index,),
+        },
+    )
+
+
+def _merge_compiled_answer_drafts(
+    left: _CompiledAnswerEntryDraft,
+    right: _CompiledAnswerEntryDraft,
+) -> _CompiledAnswerEntryDraft:
+    left_indices = left.metadata.get("preprocessing_entry_indices")
+    right_indices = right.metadata.get("preprocessing_entry_indices")
+    merged_indices: list[int] = []
+
+    for value in (left_indices, right_indices):
+        if not isinstance(value, tuple):
+            continue
+        for item in value:
+            if isinstance(item, int) and item not in merged_indices:
+                merged_indices.append(item)
+
+    metadata: dict[str, object] = dict(left.metadata)
+    metadata["compiler_merge"] = "normalized_title"
+    metadata["preprocessing_entry_indices"] = tuple(merged_indices)
+    metadata["merged_preprocessing_entry_count"] = len(merged_indices)
+
+    return _CompiledAnswerEntryDraft(
+        title=left.title,
+        answer=_merge_answer_text(left.answer, right.answer),
+        source_excerpts=_merge_text_tuple_values(
+            left.source_excerpts,
+            right.source_excerpts,
+        ),
+        questions=_merge_text_tuple_values(left.questions, right.questions),
+        synonyms=_merge_text_tuple_values(left.synonyms, right.synonyms),
+        tags=_merge_text_tuple_values(left.tags, right.tags),
+        embedding_text=_merge_answer_text(left.embedding_text, right.embedding_text),
+        metadata=metadata,
+    )
+
+
+def _compiled_answer_drafts_from_preprocessing_result(
+    result: KnowledgePreprocessingResult,
+) -> tuple[_CompiledAnswerEntryDraft, ...]:
+    grouped: dict[str, _CompiledAnswerEntryDraft] = {}
+    ordered_keys: list[str] = []
+
+    for index, entry in enumerate(result.entries):
+        draft = _preprocessing_entry_to_compiled_draft(
+            entry,
+            mode=result.mode,
+            index=index,
+        )
+        if not draft.answer:
+            continue
+
+        key = _answer_topic_key(entry, index=index)
+        if key in grouped:
+            grouped[key] = _merge_compiled_answer_drafts(grouped[key], draft)
+            continue
+
+        grouped[key] = draft
+        ordered_keys.append(key)
+
+    return tuple(grouped[key] for key in ordered_keys)
+
+
+def _merge_source_excerpt_text(
+    *entries: KnowledgePreprocessingEntry,
+) -> str:
+    excerpts: list[str] = []
+
+    for entry in entries:
+        for excerpt in _source_excerpts_from_preprocessing_entry(entry):
+            if excerpt and excerpt not in excerpts:
+                excerpts.append(excerpt)
+
+    return "\n\n".join(excerpts)
+
+
+def _entry_from_llm_merge_with_preserved_evidence(
+    *,
+    existing_entry: KnowledgePreprocessingEntry,
+    incoming_entry: KnowledgePreprocessingEntry,
+    merged_entry: KnowledgePreprocessingEntry,
+) -> KnowledgePreprocessingEntry:
+    return KnowledgePreprocessingEntry(
+        title=_clean_optional_text(merged_entry.title)
+        or _clean_optional_text(existing_entry.title)
+        or _clean_optional_text(incoming_entry.title),
+        answer=_clean_optional_text(merged_entry.answer),
+        source_excerpt=_merge_source_excerpt_text(
+            existing_entry,
+            incoming_entry,
+            merged_entry,
+        ),
+        questions=_merge_text_tuple_values(
+            _text_tuple(existing_entry.questions),
+            _text_tuple(incoming_entry.questions),
+            _text_tuple(merged_entry.questions),
+        ),
+        synonyms=_merge_text_tuple_values(
+            _text_tuple(existing_entry.synonyms),
+            _text_tuple(incoming_entry.synonyms),
+            _text_tuple(merged_entry.synonyms),
+        ),
+        tags=_merge_text_tuple_values(
+            _text_tuple(existing_entry.tags),
+            _text_tuple(incoming_entry.tags),
+            _text_tuple(merged_entry.tags),
+        ),
+        embedding_text=_clean_optional_text(merged_entry.embedding_text),
+    )
+
+
+def _preprocessing_result_from_entries(
+    *,
+    mode: KnowledgePreprocessingMode,
+    template: KnowledgePreprocessingResult,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    metrics: JsonObject,
+) -> KnowledgePreprocessingResult:
+    return KnowledgePreprocessingResult(
+        mode=mode,
+        prompt_version=template.prompt_version,
+        model=template.model,
+        entries=tuple(entries),
+        metrics=metrics,
+    )
+
+
+def _source_chunk_for_quote(
+    *,
+    quote: str,
+    source_chunks: Sequence[SourceChunk],
+) -> SourceChunk:
+    if not source_chunks:
+        raise ValidationError("Cannot ground answer entry without source chunks")
+
+    quote_clean = _clean_optional_text(quote)
+    if quote_clean:
+        for source_chunk in source_chunks:
+            if (
+                quote_clean in source_chunk.content
+                or source_chunk.content in quote_clean
+            ):
+                return source_chunk
+
+    quote_terms = {
+        token
+        for token in re.findall(
+            r"[0-9a-zа-яё]+",
+            quote_clean.lower().replace("ё", "е"),
+        )
+        if len(token) >= 4
+    }
+
+    if quote_terms:
+        best_chunk = source_chunks[0]
+        best_score = -1
+        for source_chunk in source_chunks:
+            chunk_terms = {
+                token
+                for token in re.findall(
+                    r"[0-9a-zа-яё]+",
+                    source_chunk.content.lower().replace("ё", "е"),
+                )
+                if len(token) >= 4
+            }
+            score = len(quote_terms & chunk_terms)
+            if score > best_score:
+                best_chunk = source_chunk
+                best_score = score
+        return best_chunk
+
+    return source_chunks[0]
+
+
+def _source_refs_for_compiled_answer_draft(
+    *,
+    draft: _CompiledAnswerEntryDraft,
+    source_chunks: Sequence[SourceChunk],
+) -> tuple[SourceRef, ...]:
+    refs: list[SourceRef] = []
+    seen_quotes: set[str] = set()
+
+    quotes = draft.source_excerpts or (draft.answer,)
+    for quote in quotes:
+        cleaned_quote = _clean_optional_text(quote)
+        if not cleaned_quote or cleaned_quote in seen_quotes:
+            continue
+
+        source_chunk = _source_chunk_for_quote(
+            quote=cleaned_quote,
+            source_chunks=source_chunks,
+        )
+        refs.append(
+            SourceRef(
+                source_index=source_chunk.source_index,
+                quote=cleaned_quote,
+                source_chunk_id=source_chunk.id,
+                start_offset=source_chunk.start_offset,
+                end_offset=source_chunk.end_offset,
+                confidence=1.0,
+            )
+        )
+        seen_quotes.add(cleaned_quote)
+
+    return tuple(refs)
+
+
+def _canonical_entries_from_preprocessing_result(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    result: KnowledgePreprocessingResult,
+    source_chunks: Sequence[SourceChunk],
+) -> tuple[CanonicalKnowledgeEntry, ...]:
+    drafts = _compiled_answer_drafts_from_preprocessing_result(result)
+    entry_kind = entry_kind_for_preprocessing_mode(result.mode)
+    entries: list[CanonicalKnowledgeEntry] = []
+
+    for index, draft in enumerate(drafts):
+        source_refs = _source_refs_for_compiled_answer_draft(
+            draft=draft,
+            source_chunks=source_chunks,
+        )
+        stable_key_digest = hashlib.sha256(
+            (
+                f"{document_id}:stage_k:{entry_kind.value}:{draft.title}:{draft.answer}"
+            ).encode("utf-8")
+        ).hexdigest()
+        stable_key = f"{document_id}:stage_k:{stable_key_digest[:24]}"
+        entry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+        metadata: dict[str, object] = dict(draft.metadata)
+        metadata["source_ref_count"] = len(source_refs)
+        metadata["compiler_index"] = index
+
+        entry = CanonicalKnowledgeEntry(
+            id=entry_id,
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            stable_key=stable_key,
+            entry_kind=entry_kind,
+            title=draft.title,
+            answer=draft.answer,
+            source_refs=source_refs,
+            enrichment=KnowledgeEnrichment(
+                questions=draft.questions,
+                synonyms=draft.synonyms,
+                tags=draft.tags,
+            ),
+            embedding_text=None,
+            status=KnowledgeEntryStatus.PUBLISHED,
+            visibility=KnowledgeEntryVisibility.RUNTIME,
+            version=1,
+            compiler_version=KCD_STAGE_K_COMPILER_VERSION,
+            embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
+            metadata=metadata,
+        )
+        entry.assert_publishable()
+        entries.append(entry)
+
+    return tuple(entries)
 
 
 def _canonical_entries_from_knowledge_chunks(
@@ -586,7 +1008,9 @@ def _stage_e_compiler_run(
         project_id=project_id,
         document_id=document_id,
         mode=str(mode),
-        compiler_version=KCD_STAGE_E_COMPILER_VERSION,
+        compiler_version=KCD_STAGE_E_COMPILER_VERSION
+        if mode == MODE_PLAIN
+        else KCD_STAGE_K_COMPILER_VERSION,
         status=CompilerRunStatus.RUNNING,
         metrics=CompilationMetrics(source_chunk_count=source_chunk_count),
     )
@@ -615,7 +1039,11 @@ def _stage_e_answer_candidates_from_entries(
                     "entry_id": entry.id,
                     "stable_key": entry.stable_key,
                     "entry_kind": entry.entry_kind.value,
-                    "stage": "stage_e_one_to_one_trace",
+                    "stage": (
+                        "stage_k_answer_compiler"
+                        if entry.compiler_version == KCD_STAGE_K_COMPILER_VERSION
+                        else "stage_e_one_to_one_trace"
+                    ),
                 },
             )
         )
@@ -932,55 +1360,129 @@ class KnowledgeIngestionService:
         )
 
         try:
-            execution = await preprocessor_factory().preprocess(
-                mode=mode,
-                chunks=indexable_chunks,
-                file_name=file_name,
-            )
-            if execution.usage is not None:
-                await usage_repo.record_event(
-                    ModelUsageEventCreate.from_measurement(
-                        project_id=project_id,
-                        source="knowledge_preprocessing",
-                        measurement=execution.usage,
-                        document_id=document_id,
+            preprocessor = preprocessor_factory()
+            preprocessing_results: list[KnowledgePreprocessingResult] = []
+            compiled_entries: list[KnowledgePreprocessingEntry] = []
+            compiled_entry_keys: list[str] = []
+            compiled_entry_index_by_key: dict[str, int] = {}
+            usage_event_count = 0
+            llm_merge_call_count = 0
+            latest_result: KnowledgePreprocessingResult | None = None
+
+            for technical_chunks in _technical_chunk_batches_for_answer_compiler(
+                indexable_chunks
+            ):
+                previous_entry_titles = tuple(entry.title for entry in compiled_entries)
+                execution = await preprocessor.preprocess(
+                    mode=mode,
+                    chunks=technical_chunks,
+                    file_name=file_name,
+                    previous_entry_titles=previous_entry_titles[
+                        -KCD_STAGE_K_PREVIOUS_TITLE_LIMIT:
+                    ],
+                )
+                if execution.usage is not None:
+                    await usage_repo.record_event(
+                        ModelUsageEventCreate.from_measurement(
+                            project_id=project_id,
+                            source="knowledge_preprocessing",
+                            measurement=execution.usage,
+                            document_id=document_id,
+                        )
                     )
-                )
+                    usage_event_count += 1
 
-            result = execution.result
-            structured_chunks = _indexable_chunks(result.to_chunks())
-            if not structured_chunks:
-                raise ValidationError(
-                    "Knowledge preprocessing produced no indexable structured chunks"
-                )
+                latest_result = execution.result
+                preprocessing_results.append(execution.result)
 
-            canonical_chunks = _combined_chunks_for_canonical_persistence(
-                raw_chunks=indexable_chunks,
-                structured_chunks=structured_chunks,
+                for incoming_entry in execution.result.entries:
+                    entry_key = _answer_topic_key(
+                        incoming_entry,
+                        index=len(compiled_entries),
+                    )
+                    if entry_key not in compiled_entry_index_by_key:
+                        compiled_entry_index_by_key[entry_key] = len(compiled_entries)
+                        compiled_entry_keys.append(entry_key)
+                        compiled_entries.append(incoming_entry)
+                        continue
+
+                    existing_index = compiled_entry_index_by_key[entry_key]
+                    existing_entry = compiled_entries[existing_index]
+                    merge_execution = await preprocessor.merge_answer_entry(
+                        mode=mode,
+                        file_name=file_name,
+                        existing_entry=existing_entry,
+                        incoming_entry=incoming_entry,
+                    )
+                    if merge_execution.usage is not None:
+                        await usage_repo.record_event(
+                            ModelUsageEventCreate.from_measurement(
+                                project_id=project_id,
+                                source="knowledge_preprocessing",
+                                measurement=merge_execution.usage,
+                                document_id=document_id,
+                            )
+                        )
+                        usage_event_count += 1
+
+                    if len(merge_execution.result.entries) != 1:
+                        raise ValidationError(
+                            "Knowledge answer merge produced invalid entry count"
+                        )
+
+                    compiled_entries[existing_index] = (
+                        _entry_from_llm_merge_with_preserved_evidence(
+                            existing_entry=existing_entry,
+                            incoming_entry=incoming_entry,
+                            merged_entry=merge_execution.result.entries[0],
+                        )
+                    )
+                    llm_merge_call_count += 1
+
+            if latest_result is None:
+                raise ValidationError("Knowledge preprocessing produced no results")
+
+            result = _preprocessing_result_from_entries(
+                mode=mode,
+                template=latest_result,
+                entries=compiled_entries,
+                metrics={
+                    "technical_compiler_call_count": len(preprocessing_results),
+                    "technical_chunk_batch_size": (
+                        KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL
+                    ),
+                    "llm_merge_call_count": llm_merge_call_count,
+                    "compiled_entry_key_count": len(compiled_entry_keys),
+                },
             )
-            document = _document_from_json_chunks(
-                file_name=file_name,
-                chunks=canonical_chunks,
-            )
-            normalized = KnowledgeNormalizationService().normalize_document(
-                document,
-                project_id=project_id,
-                document_id=document_id,
-            )
-            _log_plain_chunk_audit(
-                logger,
-                project_id=project_id,
-                document_id=document_id,
-                chunks=canonical_chunks,
-                context=f"{mode}_canonical_upload",
-            )
-            canonical_entries = _canonical_entries_from_knowledge_chunks(
+            canonical_entries = _canonical_entries_from_preprocessing_result(
                 project_id=project_id,
                 document_id=document_id,
                 compiler_run_id=compiler_run_id,
-                chunks=normalized.chunks,
+                result=result,
                 source_chunks=source_chunks,
             )
+            if not canonical_entries:
+                raise ValidationError(
+                    "Knowledge preprocessing produced no grounded answer entries"
+                )
+
+            logger.info(
+                "Knowledge answer compiler persistence audit",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "context": f"{mode}_answer_compiler_upload",
+                    "source_chunk_count": len(source_chunks),
+                    "llm_entry_count": len(result.entries),
+                    "canonical_entry_count": len(canonical_entries),
+                    "row_explosion_guard": (
+                        "raw_source_chunks_not_persisted_as_runtime_entries"
+                    ),
+                    "metadata_preserved": True,
+                },
+            )
+
             await _persist_stage_e_compiler_outputs(
                 repo=repo,
                 project_id=project_id,
@@ -991,9 +1493,20 @@ class KnowledgeIngestionService:
             )
 
             preprocessing_metrics: JsonObject = dict(result.metrics)
-            preprocessing_metrics["raw_chunk_count"] = len(indexable_chunks)
-            preprocessing_metrics["structured_chunk_count"] = len(structured_chunks)
-            preprocessing_metrics["canonical_chunk_count"] = len(normalized.chunks)
+            preprocessing_metrics["raw_source_chunk_count"] = len(indexable_chunks)
+            preprocessing_metrics["llm_entry_count"] = len(result.entries)
+            preprocessing_metrics["canonical_entry_count"] = len(canonical_entries)
+            preprocessing_metrics["answer_compiler"] = KCD_STAGE_K_COMPILER_VERSION
+            preprocessing_metrics["technical_compiler_call_count"] = len(
+                preprocessing_results
+            )
+            preprocessing_metrics["usage_event_count"] = usage_event_count
+            preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
+            preprocessing_metrics["previous_title_carryover"] = True
+            preprocessing_metrics["one_meaning_at_a_time_merge"] = True
+            preprocessing_metrics["row_explosion_guard"] = (
+                "raw_source_chunks_not_persisted_as_runtime_entries"
+            )
 
             await repo.update_document_preprocessing_status(
                 document_id,
@@ -1007,7 +1520,7 @@ class KnowledgeIngestionService:
             return KnowledgeDocumentProcessingResult(
                 document_id=document_id,
                 preprocessing_status=PREPROCESSING_STATUS_COMPLETED,
-                structured_entries=len(structured_chunks),
+                structured_entries=len(canonical_entries),
             )
         except EmbeddingProviderError as exc:
             if exc.retryable:
