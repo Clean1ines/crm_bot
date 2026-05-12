@@ -17,11 +17,10 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentDetailView,
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
-    source_refs_from_excerpt,
+    SourceRefView,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_chunks import KnowledgeChunk
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.domain.project_plane.knowledge_retrieval_surface import (
     RUNTIME_ENTRY_KIND_VALUES,
@@ -33,7 +32,11 @@ from src.infrastructure.llm.embedding_service import embed_batch, embed_text
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
-from src.domain.project_plane.knowledge_compilation import SourceChunk
+from src.domain.project_plane.knowledge_compilation import (
+    CanonicalKnowledgeEntry,
+    SourceChunk,
+    SourceRef,
+)
 
 
 logger = get_logger(__name__)
@@ -100,11 +103,132 @@ def _pg_vector_text(embedding: list[float]) -> str:
     return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
-def _batched_knowledge_chunks(
-    chunks: Sequence[KnowledgeChunk], batch_size: int
-) -> Iterator[Sequence[KnowledgeChunk]]:
-    for start in range(0, len(chunks), batch_size):
-        yield chunks[start : start + batch_size]
+def _batched_canonical_entries(
+    entries: Sequence[CanonicalKnowledgeEntry], batch_size: int
+) -> Iterator[Sequence[CanonicalKnowledgeEntry]]:
+    for start in range(0, len(entries), batch_size):
+        yield entries[start : start + batch_size]
+
+
+def _entry_embedding_text(entry: CanonicalKnowledgeEntry) -> str:
+    if entry.embedding_text is not None:
+        return entry.embedding_text.value
+    return entry.answer
+
+
+def _entry_embedding_text_version(entry: CanonicalKnowledgeEntry) -> str:
+    if entry.embedding_text_version:
+        return entry.embedding_text_version
+    if entry.embedding_text is not None:
+        return entry.embedding_text.version
+    return "entry_embedding_text_v1"
+
+
+def _enrichment_payload(entry: CanonicalKnowledgeEntry) -> dict[str, object]:
+    return {
+        "questions": list(entry.enrichment.questions),
+        "paraphrases": list(entry.enrichment.paraphrases),
+        "synonyms": list(entry.enrichment.synonyms),
+        "typo_queries": list(entry.enrichment.typo_queries),
+        "colloquial_queries": list(entry.enrichment.colloquial_queries),
+        "tags": list(entry.enrichment.tags),
+        "retrieval_guards": list(entry.enrichment.retrieval_guards),
+    }
+
+
+def _source_ref_payload(ref: SourceRef) -> dict[str, object]:
+    payload: dict[str, object] = {"quote": ref.quote}
+    if ref.source_index is not None:
+        payload["source_index"] = ref.source_index
+    if ref.source_chunk_id is not None:
+        payload["source_chunk_id"] = ref.source_chunk_id
+    if ref.start_offset is not None:
+        payload["start_offset"] = ref.start_offset
+    if ref.end_offset is not None:
+        payload["end_offset"] = ref.end_offset
+    if ref.confidence is not None:
+        payload["confidence"] = ref.confidence
+    return payload
+
+
+def _source_refs_payload(entry: CanonicalKnowledgeEntry) -> list[dict[str, object]]:
+    return [_source_ref_payload(ref) for ref in entry.source_refs]
+
+
+def _surface_search_text(entry: CanonicalKnowledgeEntry) -> str:
+    enrichment = entry.enrichment
+    return "\n".join(
+        part
+        for part in (
+            entry.title,
+            entry.entry_kind.value,
+            _entry_embedding_text(entry),
+            entry.answer,
+            " ".join(enrichment.questions),
+            " ".join(enrichment.paraphrases),
+            " ".join(enrichment.synonyms),
+            " ".join(enrichment.typo_queries),
+            " ".join(enrichment.colloquial_queries),
+            " ".join(enrichment.tags),
+        )
+        if part
+    )
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float | str):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _source_ref_view_from_mapping(payload: Mapping[str, object]) -> SourceRefView:
+    quote = " ".join(str(payload.get("quote") or "").strip().split())
+    source_chunk_id_value = payload.get("source_chunk_id")
+    return SourceRefView(
+        source_index=_optional_int(payload.get("source_index")),
+        quote=quote,
+        source_chunk_id=str(source_chunk_id_value) if source_chunk_id_value else None,
+        start_offset=_optional_int(payload.get("start_offset")),
+        end_offset=_optional_int(payload.get("end_offset")),
+        confidence=_optional_float(payload.get("confidence")),
+    )
+
+
+def _source_ref_views_from_payload(value: object) -> tuple[SourceRefView, ...]:
+    if not isinstance(value, list):
+        return ()
+
+    refs: list[SourceRefView] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            ref = _source_ref_view_from_mapping(item)
+            if ref.quote:
+                refs.append(ref)
+    return tuple(refs)
+
+
+def _first_source_excerpt(source_refs: tuple[SourceRefView, ...]) -> str | None:
+    for source_ref in source_refs:
+        if source_ref.quote:
+            return source_ref.quote
+    return None
 
 
 class KnowledgeRepository:
@@ -147,13 +271,8 @@ class KnowledgeRepository:
             return []
 
         query_embedding_result = await embed_text(query)
-        query_embedding_str = (
-            "[" + ",".join(str(x) for x in query_embedding_result.embedding) + "]"
-        )
+        query_embedding_str = _pg_vector_text(query_embedding_result.embedding)
         project_uuid = ensure_uuid(project_id)
-        # First-stage retrieval must be broad enough for hybrid ranking.
-        # Ranking cannot rescue a relevant chunk that never entered the candidate set.
-        candidate_limit = max(limit * 20, 80)
 
         if query_embedding_result.usage is not None:
             await self._usage_repo.record_event(
@@ -165,8 +284,6 @@ class KnowledgeRepository:
                 )
             )
 
-        # Wider candidate pool matters more than tiny top-N changes.
-        # For small KBs this is cheap; for larger KBs it gives ranking enough room.
         candidate_limit = max(limit * 10, 50)
 
         async with self.pool.acquire() as conn:
@@ -174,34 +291,31 @@ class KnowledgeRepository:
                 rows = await conn.fetch(
                     """
                     SELECT
-                        kb.id,
-                        kb.content,
-                        kb.document_id,
+                        rs.entry_id AS id,
+                        rs.answer AS content,
+                        rs.document_id,
                         d.file_name AS source,
                         d.status AS document_status,
-                        kb.entry_kind,
-                        kb.title,
-                        kb.source_excerpt,
-                        kb.embedding_text,
-                        kb.questions,
-                        kb.synonyms,
-                        kb.tags,
-                        COALESCE(kb.embedding_text, kb.content, '') AS search_text,
-                        (1 - (kb.embedding <=> $1::vector)) AS vector_score,
+                        rs.entry_kind,
+                        rs.title,
+                        rs.source_refs,
+                        rs.embedding_text,
+                        rs.enrichment->'questions' AS questions,
+                        rs.enrichment->'synonyms' AS synonyms,
+                        rs.enrichment->'tags' AS tags,
+                        rs.search_text,
+                        (1 - (rs.embedding <=> $1::vector)) AS vector_score,
                         0.0::double precision AS lexical_score,
-                        0.0::double precision AS exact_score,
-                        (1 - (kb.embedding <=> $1::vector)) AS combined_score
-                    FROM knowledge_base AS kb
-                    LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
-                    WHERE kb.project_id = $2
-                      AND kb.embedding IS NOT NULL
-                      AND kb.entry_kind = ANY($4::text[])
-                      AND (
-                          kb.document_id IS NOT NULL
-                          OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
-                      )
+                        0.0::double precision AS exact_score
+                    FROM knowledge_retrieval_surface AS rs
+                    LEFT JOIN knowledge_documents AS d ON d.id = rs.document_id
+                    WHERE rs.project_id = $2
+                      AND rs.embedding IS NOT NULL
+                      AND rs.entry_kind = ANY($4::text[])
+                      AND rs.status = 'published'
+                      AND rs.visibility = 'runtime'
                       AND (d.status = 'processed' OR d.status IS NULL)
-                    ORDER BY kb.embedding <=> $1::vector
+                    ORDER BY rs.embedding <=> $1::vector
                     LIMIT $3
                     """,
                     query_embedding_str,
@@ -220,60 +334,27 @@ class KnowledgeRepository:
                     ),
                     base AS (
                         SELECT
-                            kb.id,
-                            kb.content,
-                            kb.document_id,
+                            rs.entry_id AS id,
+                            rs.answer AS content,
+                            rs.document_id,
                             d.file_name AS source,
                             d.status AS document_status,
-                            kb.entry_kind,
-                            kb.title,
-                            kb.source_excerpt,
-                            kb.embedding_text,
-                            kb.questions,
-                            kb.synonyms,
-                            kb.tags,
-                            trim(concat_ws(
-                                E'\n',
-                                kb.title,
-                                kb.entry_kind,
-                                kb.embedding_text,
-                                kb.source_excerpt,
-                                kb.content,
-                                CASE
-                                    WHEN jsonb_typeof(kb.questions) = 'array'
-                                    THEN (
-                                        SELECT string_agg(value, ' ')
-                                        FROM jsonb_array_elements_text(kb.questions) AS value
-                                    )
-                                    ELSE ''
-                                END,
-                                CASE
-                                    WHEN jsonb_typeof(kb.synonyms) = 'array'
-                                    THEN (
-                                        SELECT string_agg(value, ' ')
-                                        FROM jsonb_array_elements_text(kb.synonyms) AS value
-                                    )
-                                    ELSE ''
-                                END,
-                                CASE
-                                    WHEN jsonb_typeof(kb.tags) = 'array'
-                                    THEN (
-                                        SELECT string_agg(value, ' ')
-                                        FROM jsonb_array_elements_text(kb.tags) AS value
-                                    )
-                                    ELSE ''
-                                END
-                            )) AS search_text,
-                            kb.embedding
-                        FROM knowledge_base AS kb
-                        LEFT JOIN knowledge_documents AS d ON d.id = kb.document_id
-                        WHERE kb.project_id = $3
-                          AND kb.embedding IS NOT NULL
-                          AND kb.entry_kind = ANY($6::text[])
-                          AND (
-                              kb.document_id IS NOT NULL
-                              OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
-                          )
+                            rs.entry_kind,
+                            rs.title,
+                            rs.source_refs,
+                            rs.embedding_text,
+                            rs.enrichment->'questions' AS questions,
+                            rs.enrichment->'synonyms' AS synonyms,
+                            rs.enrichment->'tags' AS tags,
+                            rs.search_text,
+                            rs.embedding
+                        FROM knowledge_retrieval_surface AS rs
+                        LEFT JOIN knowledge_documents AS d ON d.id = rs.document_id
+                        WHERE rs.project_id = $3
+                          AND rs.embedding IS NOT NULL
+                          AND rs.entry_kind = ANY($6::text[])
+                          AND rs.status = 'published'
+                          AND rs.visibility = 'runtime'
                           AND (d.status = 'processed' OR d.status IS NULL)
                     ),
                     vector_candidates AS (
@@ -312,7 +393,7 @@ class KnowledgeRepository:
                             document_status,
                             entry_kind,
                             title,
-                            source_excerpt,
+                            source_refs,
                             embedding_text,
                             questions,
                             synonyms,
@@ -334,7 +415,7 @@ class KnowledgeRepository:
                             document_status,
                             entry_kind,
                             title,
-                            source_excerpt,
+                            source_refs,
                             embedding_text,
                             questions,
                             synonyms,
@@ -355,7 +436,7 @@ class KnowledgeRepository:
                             max(document_status) AS document_status,
                             max(entry_kind) AS entry_kind,
                             max(title) AS title,
-                            max(source_excerpt) AS source_excerpt,
+                            (jsonb_agg(source_refs)->0) AS source_refs,
                             max(embedding_text) AS embedding_text,
                             (jsonb_agg(questions)->0) AS questions,
                             (jsonb_agg(synonyms)->0) AS synonyms,
@@ -376,7 +457,7 @@ class KnowledgeRepository:
                         document_status,
                         entry_kind,
                         title,
-                        source_excerpt,
+                        source_refs,
                         embedding_text,
                         questions,
                         synonyms,
@@ -388,28 +469,17 @@ class KnowledgeRepository:
                             WHEN lower(search_text) LIKE ('%' || (SELECT query_text FROM q) || '%')
                             THEN 1.0
                             ELSE 0.0
-                        END AS exact_score,
-                        (
-                            COALESCE(vector_score, 0.0) * 0.72
-                            + LEAST(COALESCE(lexical_score, 0.0), 1.0) * 0.18
-                            + CASE
-                                WHEN lower(search_text) LIKE ('%' || (SELECT query_text FROM q) || '%')
-                                THEN 0.10
-                                ELSE 0.0
-                              END
-                            + CASE
-                                WHEN vector_rank IS NOT NULL
-                                THEN 0.04 / (60.0 + vector_rank)
-                                ELSE 0.0
-                              END
-                            + CASE
-                                WHEN lexical_rank IS NOT NULL
-                                THEN 0.04 / (60.0 + lexical_rank)
-                                ELSE 0.0
-                              END
-                        ) AS combined_score
+                        END AS exact_score
                     FROM merged
-                    ORDER BY combined_score DESC
+                    ORDER BY (
+                        COALESCE(vector_score, 0.0) * 0.72
+                        + LEAST(COALESCE(lexical_score, 0.0), 1.0) * 0.18
+                        + CASE
+                            WHEN lower(search_text) LIKE ('%' || (SELECT query_text FROM q) || '%')
+                            THEN 0.10
+                            ELSE 0.0
+                          END
+                    ) DESC
                     LIMIT $5
                     """,
                     query_embedding_str,
@@ -426,56 +496,36 @@ class KnowledgeRepository:
 
         for row in rows:
             content = str(row["content"])
-            try:
-                raw_search_text = row["search_text"]
-            except KeyError:
-                raw_search_text = None
+            raw_search_text = _optional_row_value(row, "search_text")
             search_text = str(raw_search_text or content)
             search_lower = search_text.lower()
             search_tokens = self._query_tokens(search_text)
 
-            try:
-                raw_vector_score = row["vector_score"]
-            except KeyError:
-                raw_vector_score = row["score"] if "score" in row else 0.0
-
-            try:
-                raw_lexical_score = row["lexical_score"]
-            except KeyError:
-                raw_lexical_score = 0.0
-
-            try:
-                raw_exact_score = row["exact_score"]
-            except KeyError:
-                raw_exact_score = 0.0
-
-            vector_score = float(raw_vector_score or 0.0)
-            lexical_score = float(raw_lexical_score or 0.0)
-            exact_score = float(raw_exact_score or 0.0)
+            vector_score = (
+                _optional_float(_optional_row_value(row, "vector_score")) or 0.0
+            )
+            lexical_score = (
+                _optional_float(_optional_row_value(row, "lexical_score")) or 0.0
+            )
+            exact_score = (
+                _optional_float(_optional_row_value(row, "exact_score")) or 0.0
+            )
 
             token_overlap = 0.0
             if query_tokens:
                 token_overlap = len(query_tokens & search_tokens) / len(query_tokens)
 
-            # Rare/important query words should beat generic semantic similarity.
-            # Example: "ночью", "подписку", "заменит", "стиль", "менеджер".
-            rare_token_hits = 0
-            for token in query_tokens:
-                if len(token) >= 5 and token in search_tokens:
-                    rare_token_hits += 1
-
+            rare_token_hits = sum(
+                1
+                for token in query_tokens
+                if len(token) >= 5 and token in search_tokens
+            )
             rare_token_bonus = min(0.24, rare_token_hits * 0.08)
             exact_phrase_bonus = (
                 0.22 if query_lower and query_lower in search_lower else 0.0
             )
-
-            # ts_rank values are often tiny, so normalize by amplification + cap.
             lexical_bonus = min(0.35, lexical_score * 4.0)
 
-            # Final ranking:
-            # - vector keeps semantic recall;
-            # - lexical/token bonuses rescue precise domain markers;
-            # - exact phrase catches FAQ-like chunks.
             score = (
                 vector_score * 0.48
                 + lexical_bonus
@@ -491,6 +541,9 @@ class KnowledgeRepository:
             elif vector_score <= 0.0:
                 method = "fts"
 
+            source_refs = _source_ref_views_from_payload(
+                _optional_row_value(row, "source_refs")
+            )
             results.append(
                 KnowledgeSearchResultView(
                     id=str(row["id"]),
@@ -502,10 +555,8 @@ class KnowledgeRepository:
                     document_status=_optional_row_text(row, "document_status"),
                     entry_kind=_optional_row_text(row, "entry_kind"),
                     title=_optional_row_text(row, "title"),
-                    source_excerpt=_optional_row_text(row, "source_excerpt"),
-                    source_refs=source_refs_from_excerpt(
-                        _optional_row_text(row, "source_excerpt")
-                    ),
+                    source_excerpt=_first_source_excerpt(source_refs),
+                    source_refs=source_refs,
                     embedding_text=_optional_row_text(row, "embedding_text"),
                     questions=_optional_row_value(row, "questions"),
                     synonyms=_optional_row_value(row, "synonyms"),
@@ -514,7 +565,6 @@ class KnowledgeRepository:
             )
 
         results.sort(key=lambda item: item.score, reverse=True)
-
         return results[:limit]
 
     async def preview_search(
@@ -540,98 +590,39 @@ class KnowledgeRepository:
                         websearch_to_tsquery('russian', $1) AS query_ts,
                         lower($1) AS query_text
                 ),
-                base AS (
-                    SELECT
-                        kb.id,
-                        kb.content,
-                        kb.document_id,
-                        d.file_name AS source,
-                        d.status AS document_status,
-                        kb.entry_kind,
-                        kb.title,
-                        kb.source_excerpt,
-                        kb.embedding_text,
-                        kb.questions,
-                        kb.synonyms,
-                        kb.tags,
-                        trim(concat_ws(
-                            E'\n',
-                            kb.title,
-                            kb.entry_kind,
-                            kb.embedding_text,
-                            kb.source_excerpt,
-                            kb.content,
-                            CASE
-                                WHEN jsonb_typeof(kb.questions) = 'array'
-                                THEN (
-                                    SELECT string_agg(value, ' ')
-                                    FROM jsonb_array_elements_text(kb.questions) AS value
-                                )
-                                ELSE ''
-                            END,
-                            CASE
-                                WHEN jsonb_typeof(kb.synonyms) = 'array'
-                                THEN (
-                                    SELECT string_agg(value, ' ')
-                                    FROM jsonb_array_elements_text(kb.synonyms) AS value
-                                )
-                                ELSE ''
-                            END,
-                            CASE
-                                WHEN jsonb_typeof(kb.tags) = 'array'
-                                THEN (
-                                    SELECT string_agg(value, ' ')
-                                    FROM jsonb_array_elements_text(kb.tags) AS value
-                                )
-                                ELSE ''
-                            END
-                        )) AS search_text
-                    FROM knowledge_documents AS d
-                    JOIN knowledge_base AS kb ON kb.document_id = d.id
-                    WHERE d.project_id = $2
-                      AND d.status = 'processed'
-                      AND kb.entry_kind = ANY($4::text[])
-                      AND (
-                          kb.document_id IS NOT NULL
-                          OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
-                      )
-                ),
                 scored AS (
                     SELECT
-                        base.*,
+                        rs.entry_id AS id,
+                        rs.answer AS content,
+                        rs.document_id,
+                        d.file_name AS source,
+                        d.status AS document_status,
+                        rs.entry_kind,
+                        rs.title,
+                        rs.source_refs,
+                        rs.embedding_text,
+                        rs.enrichment->'questions' AS questions,
+                        rs.enrichment->'synonyms' AS synonyms,
+                        rs.enrichment->'tags' AS tags,
+                        rs.search_text,
                         ts_rank_cd(
-                            to_tsvector('russian', COALESCE(base.search_text, '')),
+                            to_tsvector('russian', COALESCE(rs.search_text, '')),
                             q.query_ts
                         ) AS lexical_score,
                         (
                             SELECT COUNT(DISTINCT token)::double precision
                             FROM regexp_split_to_table(q.query_text, '[^[:alnum:]а-яё]+') AS token
                             WHERE length(token) >= 4
-                              AND token NOT IN (
-                                  'чем', 'этот', 'этого', 'этой', 'есть',
-                                  'можно', 'какие', 'какая', 'какой',
-                                  'перед', 'после', 'нужно', 'просто',
-                                  'словами', 'ваша', 'вашей', 'вашу'
-                              )
-                              AND lower(base.search_text) LIKE '%' || token || '%'
-                        ) AS token_overlap,
-                        CASE
-                            WHEN COALESCE(base.entry_kind, '') <> ''
-                             AND base.entry_kind <> 'answer'
-                            THEN 0.45::double precision
-                            ELSE 0.0::double precision
-                        END AS canonical_kind_boost,
-                        CASE
-                            WHEN lower(base.content) LIKE '%ожидаемая тема:%'
-                            THEN 0.25::double precision
-                            ELSE 0.0::double precision
-                        END AS legacy_penalty,
-                        CASE
-                            WHEN COALESCE(base.title, '') <> ''
-                            THEN 0.05::double precision
-                            ELSE 0.0::double precision
-                        END AS title_boost
-                    FROM base, q
+                              AND lower(rs.search_text) LIKE '%' || token || '%'
+                        ) AS token_overlap
+                    FROM knowledge_retrieval_surface AS rs
+                    LEFT JOIN knowledge_documents AS d ON d.id = rs.document_id,
+                    q
+                    WHERE rs.project_id = $2
+                      AND rs.entry_kind = ANY($4::text[])
+                      AND rs.status = 'published'
+                      AND rs.visibility = 'runtime'
+                      AND (d.status = 'processed' OR d.status IS NULL)
                 )
                 SELECT
                     id,
@@ -641,17 +632,20 @@ class KnowledgeRepository:
                     document_status,
                     entry_kind,
                     title,
-                    source_excerpt,
+                    source_refs,
                     embedding_text,
                     questions,
                     synonyms,
                     tags,
+                    search_text,
                     (
                         lexical_score
                         + (token_overlap * 0.06)
-                        + canonical_kind_boost
-                        + title_boost
-                        - legacy_penalty
+                        + CASE
+                            WHEN COALESCE(title, '') <> ''
+                            THEN 0.05::double precision
+                            ELSE 0.0::double precision
+                          END
                     ) AS score
                 FROM scored
                 WHERE lexical_score > 0.0
@@ -665,55 +659,57 @@ class KnowledgeRepository:
                 list(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS),
             )
 
-        results = [
-            KnowledgeSearchResultView(
-                id=str(row["id"]),
-                content=str(row["content"]),
-                score=max(
-                    0.0,
-                    float(row["score"] or 0.0)
-                    + self._keyword_overlap(normalized_query, str(row["content"]))
-                    * 0.05,
-                ),
-                method="structured_lexical"
-                if _optional_row_text(row, "entry_kind") not in {None, "", "answer"}
-                else "fts",
-                document_id=_optional_row_text(row, "document_id"),
-                source=_optional_row_text(row, "source"),
-                document_status=_optional_row_text(row, "document_status"),
-                entry_kind=_optional_row_text(row, "entry_kind"),
-                title=_optional_row_text(row, "title"),
-                source_excerpt=_optional_row_text(row, "source_excerpt"),
-                source_refs=source_refs_from_excerpt(
-                    _optional_row_text(row, "source_excerpt")
-                ),
-                embedding_text=_optional_row_text(row, "embedding_text"),
-                questions=_optional_row_value(row, "questions"),
-                synonyms=_optional_row_value(row, "synonyms"),
-                tags=_optional_row_value(row, "tags"),
+        results: list[KnowledgeSearchResultView] = []
+        for row in rows:
+            source_refs = _source_ref_views_from_payload(
+                _optional_row_value(row, "source_refs")
             )
-            for row in rows
-        ]
+            results.append(
+                KnowledgeSearchResultView(
+                    id=str(row["id"]),
+                    content=str(row["content"]),
+                    score=max(
+                        0.0,
+                        float(row["score"] or 0.0)
+                        + self._keyword_overlap(normalized_query, str(row["content"]))
+                        * 0.05,
+                    ),
+                    method="retrieval_surface_lexical",
+                    document_id=_optional_row_text(row, "document_id"),
+                    source=_optional_row_text(row, "source"),
+                    document_status=_optional_row_text(row, "document_status"),
+                    entry_kind=_optional_row_text(row, "entry_kind"),
+                    title=_optional_row_text(row, "title"),
+                    source_excerpt=_first_source_excerpt(source_refs),
+                    source_refs=source_refs,
+                    embedding_text=_optional_row_text(row, "embedding_text"),
+                    questions=_optional_row_value(row, "questions"),
+                    synonyms=_optional_row_value(row, "synonyms"),
+                    tags=_optional_row_value(row, "tags"),
+                )
+            )
+
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:limit]
 
-    async def add_knowledge_chunks(
+    async def add_canonical_entries(
         self,
         *,
         project_id: str,
         document_id: str,
-        chunks: Sequence[KnowledgeChunk],
+        entries: Sequence[CanonicalKnowledgeEntry],
     ) -> int:
-        """Persist typed normalized knowledge chunks."""
-        if not chunks:
+        """Persist canonical entries, source refs, and runtime retrieval surface atomically."""
+        if not entries:
             return 0
 
-        for batch in _batched_knowledge_chunks(
-            chunks, settings.KNOWLEDGE_EMBED_BATCH_SIZE
+        for batch in _batched_canonical_entries(
+            entries, settings.KNOWLEDGE_EMBED_BATCH_SIZE
         ):
-            texts = [chunk.embedding_text or chunk.content for chunk in batch]
+            texts = [_entry_embedding_text(entry) for entry in batch]
             embedding_result = await embed_batch(texts)
             embeddings = embedding_result.embeddings
+
             if embedding_result.usage is not None:
                 await self._usage_repo.record_event(
                     ModelUsageEventCreate.from_measurement(
@@ -726,38 +722,190 @@ class KnowledgeRepository:
 
             async with self.pool.acquire() as conn:
                 async with conn.transaction():
-                    for index, chunk in enumerate(batch):
+                    for index, entry in enumerate(batch):
+                        entry_uuid = ensure_uuid(entry.id)
+                        enrichment_payload = _enrichment_payload(entry)
+                        source_refs_payload = _source_refs_payload(entry)
+                        embedding_text = _entry_embedding_text(entry)
+                        embedding_text_version = _entry_embedding_text_version(entry)
+
                         await conn.execute(
                             """
-                            INSERT INTO knowledge_base (
+                            INSERT INTO knowledge_entries (
+                                id,
                                 project_id,
                                 document_id,
-                                content,
-                                embedding,
+                                compiler_run_id,
+                                stable_key,
                                 entry_kind,
                                 title,
-                                source_excerpt,
-                                questions,
-                                synonyms,
-                                tags,
-                                embedding_text
+                                answer,
+                                status,
+                                visibility,
+                                version,
+                                compiler_version,
+                                embedding_text,
+                                embedding_text_version,
+                                enrichment,
+                                metadata
                             )
-                            VALUES ($1, $2, $3, $4::vector, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)
+                            VALUES (
+                                $1,
+                                $2,
+                                $3,
+                                $4,
+                                $5,
+                                $6,
+                                $7,
+                                $8,
+                                $9,
+                                $10,
+                                $11,
+                                $12,
+                                $13,
+                                $14,
+                                $15::jsonb,
+                                $16::jsonb
+                            )
+                            ON CONFLICT (project_id, document_id, stable_key, version)
+                            DO UPDATE SET
+                                entry_kind = EXCLUDED.entry_kind,
+                                title = EXCLUDED.title,
+                                answer = EXCLUDED.answer,
+                                status = EXCLUDED.status,
+                                visibility = EXCLUDED.visibility,
+                                compiler_version = EXCLUDED.compiler_version,
+                                embedding_text = EXCLUDED.embedding_text,
+                                embedding_text_version = EXCLUDED.embedding_text_version,
+                                enrichment = EXCLUDED.enrichment,
+                                metadata = EXCLUDED.metadata,
+                                updated_at = now()
                             """,
+                            entry_uuid,
                             ensure_uuid(project_id),
                             ensure_uuid(document_id),
-                            chunk.content,
-                            _pg_vector_text(embeddings[index]),
-                            chunk.role.value,
-                            chunk.title or None,
-                            chunk.source_excerpt or None,
-                            _jsonb_array(chunk.questions),
-                            _jsonb_array(chunk.synonyms),
-                            _jsonb_array(chunk.tags),
-                            chunk.embedding_text or None,
+                            entry.compiler_run_id or None,
+                            entry.stable_key,
+                            entry.entry_kind.value,
+                            entry.title,
+                            entry.answer,
+                            entry.status.value,
+                            entry.visibility.value,
+                            entry.version,
+                            entry.compiler_version,
+                            embedding_text,
+                            embedding_text_version,
+                            _jsonb_object(enrichment_payload),
+                            _jsonb_object(entry.metadata),
                         )
 
-        return len(chunks)
+                        await conn.execute(
+                            "DELETE FROM knowledge_entry_source_refs WHERE entry_id = $1",
+                            entry_uuid,
+                        )
+
+                        for source_ref in entry.source_refs:
+                            if source_ref.source_chunk_id is None:
+                                continue
+                            await conn.execute(
+                                """
+                                INSERT INTO knowledge_entry_source_refs (
+                                    entry_id,
+                                    source_chunk_id,
+                                    source_index,
+                                    quote,
+                                    start_offset,
+                                    end_offset,
+                                    confidence,
+                                    metadata
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb)
+                                """,
+                                entry_uuid,
+                                source_ref.source_chunk_id,
+                                source_ref.source_index or 0,
+                                source_ref.quote,
+                                source_ref.start_offset,
+                                source_ref.end_offset,
+                                source_ref.confidence,
+                            )
+
+                        await conn.execute(
+                            "DELETE FROM knowledge_retrieval_surface WHERE entry_id = $1",
+                            entry_uuid,
+                        )
+
+                        if entry.is_published_runtime_entry:
+                            await conn.execute(
+                                """
+                                INSERT INTO knowledge_retrieval_surface (
+                                    project_id,
+                                    document_id,
+                                    entry_id,
+                                    stable_key,
+                                    entry_kind,
+                                    title,
+                                    answer,
+                                    embedding_text,
+                                    embedding_text_version,
+                                    embedding,
+                                    search_text,
+                                    enrichment,
+                                    source_refs,
+                                    metadata,
+                                    status,
+                                    visibility
+                                )
+                                VALUES (
+                                    $1,
+                                    $2,
+                                    $3,
+                                    $4,
+                                    $5,
+                                    $6,
+                                    $7,
+                                    $8,
+                                    $9,
+                                    $10::vector,
+                                    $11,
+                                    $12::jsonb,
+                                    $13::jsonb,
+                                    $14::jsonb,
+                                    'published',
+                                    'runtime'
+                                )
+                                ON CONFLICT (entry_id)
+                                DO UPDATE SET
+                                    stable_key = EXCLUDED.stable_key,
+                                    entry_kind = EXCLUDED.entry_kind,
+                                    title = EXCLUDED.title,
+                                    answer = EXCLUDED.answer,
+                                    embedding_text = EXCLUDED.embedding_text,
+                                    embedding_text_version = EXCLUDED.embedding_text_version,
+                                    embedding = EXCLUDED.embedding,
+                                    search_text = EXCLUDED.search_text,
+                                    enrichment = EXCLUDED.enrichment,
+                                    source_refs = EXCLUDED.source_refs,
+                                    metadata = EXCLUDED.metadata,
+                                    updated_at = now()
+                                """,
+                                ensure_uuid(project_id),
+                                ensure_uuid(document_id),
+                                entry_uuid,
+                                entry.stable_key,
+                                entry.entry_kind.value,
+                                entry.title,
+                                entry.answer,
+                                embedding_text,
+                                embedding_text_version,
+                                _pg_vector_text(embeddings[index]),
+                                _surface_search_text(entry),
+                                _jsonb_object(enrichment_payload),
+                                json.dumps(source_refs_payload, ensure_ascii=False),
+                                _jsonb_object(entry.metadata),
+                            )
+
+        return len(entries)
 
     async def add_source_chunks(
         self,
@@ -892,13 +1040,11 @@ class KnowledgeRepository:
                     d.preprocessing_model,
                     d.preprocessing_prompt_version,
                     d.preprocessing_metrics,
-                    COUNT(kb.id)::int AS chunk_count,
-                    COUNT(kb.id) FILTER (
-                        WHERE COALESCE(kb.entry_kind, '') <> ''
-                          AND kb.entry_kind <> 'answer'
-                    )::int AS structured_chunk_count
+                    COUNT(DISTINCT ke.id)::int AS entry_count,
+                    COUNT(DISTINCT rs.entry_id)::int AS runtime_entry_count
                 FROM knowledge_documents AS d
-                LEFT JOIN knowledge_base AS kb ON kb.document_id = d.id
+                LEFT JOIN knowledge_entries AS ke ON ke.document_id = d.id
+                LEFT JOIN knowledge_retrieval_surface AS rs ON rs.entry_id = ke.id
                 WHERE d.project_id = $1
                 GROUP BY
                     d.id,
@@ -917,7 +1063,7 @@ class KnowledgeRepository:
                     d.preprocessing_metrics
                 ORDER BY d.created_at DESC
                 LIMIT $2 OFFSET $3
-            """,
+                """,
                 ensure_uuid(project_id),
                 limit,
                 offset,
@@ -937,7 +1083,7 @@ class KnowledgeRepository:
                 else None,
                 created_at=_normalize_timestamp(row["created_at"]),
                 updated_at=_normalize_timestamp(row["updated_at"]),
-                chunk_count=int(row["chunk_count"] or 0),
+                chunk_count=int(row["entry_count"] or 0),
                 preprocessing_mode=str(row["preprocessing_mode"])
                 if row["preprocessing_mode"] is not None
                 else None,
@@ -954,8 +1100,8 @@ class KnowledgeRepository:
                 if row["preprocessing_prompt_version"] is not None
                 else None,
                 preprocessing_metrics=row["preprocessing_metrics"],
-                structured_entries=int(row["structured_chunk_count"] or 0),
-                structured_chunk_count=int(row["structured_chunk_count"] or 0),
+                structured_entries=int(row["runtime_entry_count"] or 0),
+                structured_chunk_count=int(row["runtime_entry_count"] or 0),
             )
             for row in rows or []
         ]
@@ -989,7 +1135,7 @@ class KnowledgeRepository:
                     preprocessing_metrics
                 FROM knowledge_documents
                 WHERE id = $1
-            """,
+                """,
                 ensure_uuid(document_id),
             )
 
@@ -999,19 +1145,17 @@ class KnowledgeRepository:
             counts = await conn.fetchrow(
                 """
                 SELECT
-                    COUNT(id)::int AS chunk_count,
-                    COUNT(id) FILTER (
-                        WHERE COALESCE(entry_kind, '') <> ''
-                          AND entry_kind <> 'answer'
-                    )::int AS structured_chunk_count
-                FROM knowledge_base
-                WHERE document_id = $1
+                    COUNT(DISTINCT ke.id)::int AS entry_count,
+                    COUNT(DISTINCT rs.entry_id)::int AS runtime_entry_count
+                FROM knowledge_entries AS ke
+                LEFT JOIN knowledge_retrieval_surface AS rs ON rs.entry_id = ke.id
+                WHERE ke.document_id = $1
                 """,
                 row["id"],
             )
-            chunk_count = int(counts["chunk_count"] or 0) if counts else 0
-            structured_chunk_count = (
-                int(counts["structured_chunk_count"] or 0) if counts else 0
+            entry_count = int(counts["entry_count"] or 0) if counts else 0
+            runtime_entry_count = (
+                int(counts["runtime_entry_count"] or 0) if counts else 0
             )
 
         return KnowledgeDocumentDetailView(
@@ -1026,7 +1170,7 @@ class KnowledgeRepository:
             else None,
             created_at=_normalize_timestamp(row["created_at"]),
             updated_at=_normalize_timestamp(row["updated_at"]),
-            chunk_count=int(chunk_count or 0),
+            chunk_count=entry_count,
             preprocessing_mode=str(row["preprocessing_mode"])
             if row["preprocessing_mode"] is not None
             else None,
@@ -1043,8 +1187,8 @@ class KnowledgeRepository:
             if row["preprocessing_prompt_version"] is not None
             else None,
             preprocessing_metrics=row["preprocessing_metrics"],
-            structured_entries=structured_chunk_count,
-            structured_chunk_count=structured_chunk_count,
+            structured_entries=runtime_entry_count,
+            structured_chunk_count=runtime_entry_count,
         )
 
     async def update_document_status(
@@ -1155,7 +1299,11 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute(
-                    "DELETE FROM knowledge_base WHERE document_id = $1",
+                    "DELETE FROM knowledge_retrieval_surface WHERE document_id = $1",
+                    ensure_uuid(document_id),
+                )
+                await conn.execute(
+                    "DELETE FROM knowledge_entries WHERE document_id = $1",
                     ensure_uuid(document_id),
                 )
                 await conn.execute(
@@ -1169,10 +1317,6 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             await self._cancel_document_jobs(conn, document_id)
             await conn.execute(
-                "DELETE FROM knowledge_base WHERE document_id = $1",
-                ensure_uuid(document_id),
-            )
-            await conn.execute(
                 "DELETE FROM knowledge_documents WHERE id = $1",
                 ensure_uuid(document_id),
             )
@@ -1180,18 +1324,14 @@ class KnowledgeRepository:
         logger.info("Document deleted", extra={"document_id": document_id})
 
     async def clear_project_knowledge(self, project_id: str) -> None:
-        logger.info("Clearing knowledge base", extra={"project_id": project_id})
+        logger.info("Clearing project knowledge", extra={"project_id": project_id})
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await self._cancel_project_knowledge_jobs(conn, project_id)
                 await conn.execute(
-                    "DELETE FROM knowledge_base WHERE project_id = $1",
-                    ensure_uuid(project_id),
-                )
-                await conn.execute(
                     "DELETE FROM knowledge_documents WHERE project_id = $1",
                     ensure_uuid(project_id),
                 )
 
-        logger.info("Knowledge base cleared", extra={"project_id": project_id})
+        logger.info("Project knowledge cleared", extra={"project_id": project_id})

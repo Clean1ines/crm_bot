@@ -71,14 +71,20 @@ def test_knowledge_repository_filters_by_entry_kind_not_old_column() -> None:
     source = inspect.getsource(KnowledgeRepository.search)
     source += inspect.getsource(KnowledgeRepository.preview_search)
 
-    assert "kb.entry_kind = ANY" in source
-    assert _old_entry_column_sql() not in source
-    assert "TRANSITIONAL_" not in source
+    assert "knowledge_retrieval_surface AS rs" in source
+    assert "rs.entry_kind = ANY" in source
+    assert "rs.status = 'published'" in source
+    assert "rs.visibility = 'runtime'" in source
+    assert "kb.entry_kind = ANY" not in source
+    assert "entry_type" not in source
 
 
 def test_rag_eval_repository_filters_by_entry_kind_not_old_column() -> None:
     source = inspect.getsource(RagEvalRepository.load_document_chunks)
 
-    assert "kb.entry_kind = ANY" in source
-    assert _old_entry_column_sql() not in source
-    assert "TRANSITIONAL_" not in source
+    assert "knowledge_retrieval_surface AS rs" in source
+    assert "rs.entry_kind = ANY" in source
+    assert "rs.status = 'published'" in source
+    assert "rs.visibility = 'runtime'" in source
+    assert "kb.entry_kind = ANY" not in source
+    assert "entry_type" not in source

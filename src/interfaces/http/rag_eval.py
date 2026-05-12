@@ -94,8 +94,8 @@ async def _latest_processed_document_id(pool: asyncpg.Pool) -> str:
             WHERE d.status = 'processed'
               AND EXISTS (
                   SELECT 1
-                  FROM knowledge_base AS kb
-                  WHERE kb.document_id = d.id
+                  FROM knowledge_retrieval_surface AS rs
+                  WHERE rs.document_id = d.id
               )
             ORDER BY d.created_at DESC, d.id DESC
             LIMIT 1
@@ -128,9 +128,9 @@ async def _document_health(
                 d.project_id,
                 d.status,
                 d.file_name,
-                COUNT(kb.id)::int AS chunk_count
+                COUNT(rs.id)::int AS chunk_count
             FROM knowledge_documents AS d
-            LEFT JOIN knowledge_base AS kb ON kb.document_id = d.id
+            LEFT JOIN knowledge_retrieval_surface AS rs ON rs.document_id = d.id
             WHERE d.id = $1::uuid
             GROUP BY d.id, d.project_id, d.status, d.file_name
             """,
@@ -252,7 +252,7 @@ async def enqueue_full_rag_eval_for_document(
     if health["chunk_count"] <= 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Document has no knowledge_base chunks",
+            detail="Document has no retrieval surface entries",
         )
 
     payload: dict[str, JsonValue] = {
@@ -309,7 +309,7 @@ async def run_rag_eval_for_document(
     if health["chunk_count"] <= 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Document has no knowledge_base chunks",
+            detail="Document has no retrieval surface entries",
         )
 
     # Lazy imports keep plain FastAPI app import light.
