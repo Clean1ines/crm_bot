@@ -5,9 +5,12 @@ from collections.abc import Mapping
 from typing import Literal, TypeAlias, cast
 
 from src.application.rag_eval.ports import RagEvalJsonLlmPort
+from src.application.rag_eval.failure_classification import (
+    failure_classification_from_mapping,
+)
 from src.application.rag_eval.schemas import (
     RagEvalAnswerJudgeResult,
-    RagEvalChunk,
+    RagEvalEvidenceEntry,
     RagEvalQuestion,
 )
 
@@ -23,14 +26,14 @@ class LlmRagEvalAnswerJudge:
         self,
         *,
         question: RagEvalQuestion,
-        retrieved_chunks: list[RagEvalChunk],
+        retrieved_entries: list[RagEvalEvidenceEntry],
         answer_text: str,
     ) -> RagEvalAnswerJudgeResult:
         response = await self._llm.complete_json(
             system_prompt=self._system_prompt(),
             user_prompt=self._user_prompt(
                 question=question,
-                retrieved_chunks=retrieved_chunks,
+                retrieved_entries=retrieved_entries,
                 answer_text=answer_text,
             ),
             schema_name="rag_eval_answer_judge_v1",
@@ -48,7 +51,7 @@ You must judge only from:
 - question;
 - expected evidence ids;
 - expected answer summary;
-- retrieved chunks;
+- retrieved entries;
 - final answer.
 
 Return strict JSON only.
@@ -59,7 +62,7 @@ Do not include hidden chain-of-thought.
         self,
         *,
         question: RagEvalQuestion,
-        retrieved_chunks: list[RagEvalChunk],
+        retrieved_entries: list[RagEvalEvidenceEntry],
         answer_text: str,
     ) -> str:
         question_json = json.dumps(
@@ -68,7 +71,7 @@ Do not include hidden chain-of-thought.
             separators=(",", ":"),
         )
         evidence_json = json.dumps(
-            [chunk.to_json() for chunk in retrieved_chunks[:8]],
+            [chunk.to_json() for chunk in retrieved_entries[:8]],
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -101,6 +104,9 @@ Return one strict JSON object with exactly these fields:
         if risk not in {"low", "medium", "high"}:
             risk = "medium"
 
+        classification = failure_classification_from_mapping(
+            payload.get("classification") or payload
+        )
         return RagEvalAnswerJudgeResult(
             answer_supported=bool(payload.get("answer_supported")),
             hallucination_risk=cast(HallucinationRiskValue, risk),
@@ -110,6 +116,7 @@ Return one strict JSON object with exactly these fields:
             notes=str(payload.get("notes") or "").strip()[:1000],
             score=self._score(payload.get("score")),
             metadata={"judge": "llm_rag_eval_answer_judge_v1"},
+            classification=classification,
         )
 
     def _score(self, value: object) -> float:

@@ -10,7 +10,7 @@ from src.domain.project_plane.knowledge_retrieval_surface import (
     RUNTIME_ENTRY_KIND_VALUES,
 )
 from src.application.rag_eval.schemas import (
-    RagEvalChunk,
+    RagEvalEvidenceEntry,
     RagEvalDataset,
     RagEvalQuestion,
     RagEvalQuestionType,
@@ -24,7 +24,7 @@ ALLOWED_SEVERITIES = set(get_args(RagEvalSeverity))
 RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 
-MAX_CHUNKS_PER_LLM_BATCH = 1
+MAX_ENTRIES_PER_LLM_BATCH = 1
 MAX_CHUNK_CHARS = 700
 MIN_VARIANTS_PER_FACT = 5
 MIN_EVAL_SOURCE_CONTENT_CHARS = 16
@@ -112,14 +112,14 @@ For one source fact generate at most:
 
 
 class LlmRagEvalDatasetGenerator:
-    """Generates a universal fact/variant RAG eval dataset from document chunks.
+    """Generates a universal fact/variant RAG eval dataset from document entries.
 
     The LLM must:
     1. extract atomic facts from each chunk;
     2. generate multiple user-question variants for every extracted fact;
     3. return strict JSON only.
 
-    Application code validates taxonomy, chunk ids and JSON shape.
+    Application code validates taxonomy, entry ids and JSON shape.
     """
 
     def __init__(
@@ -136,7 +136,7 @@ class LlmRagEvalDatasetGenerator:
         *,
         project_id: str,
         document_id: str,
-        chunks: list[RagEvalChunk],
+        chunks: list[RagEvalEvidenceEntry],
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> RagEvalDataset:
@@ -156,14 +156,14 @@ class LlmRagEvalDatasetGenerator:
         if not batches:
             dataset.status = "ready"
             dataset.total_questions = 0
-            dataset.metadata = {"warning": "document_has_no_useful_chunks"}
+            dataset.metadata = {"warning": "document_has_no_useful_entries"}
             if progress_callback is not None:
                 await progress_callback(0, 0, 0)
             return dataset
 
         questions: list[RagEvalQuestion] = []
-        valid_chunk_ids = {chunk.id for chunk in chunks if chunk.id}
-        related_chunk_ids_by_id = self._canonical_related_chunk_ids(eval_chunks)
+        valid_entry_ids = {chunk.id for chunk in chunks if chunk.id}
+        related_entry_ids_by_id = self._canonical_related_entry_ids(eval_chunks)
 
         if progress_callback is not None:
             await progress_callback(0, total_batches, 0)
@@ -212,8 +212,8 @@ class LlmRagEvalDatasetGenerator:
                     project_id=project_id,
                     document_id=document_id,
                     payload=item,
-                    valid_chunk_ids=valid_chunk_ids,
-                    related_chunk_ids_by_id=related_chunk_ids_by_id,
+                    valid_entry_ids=valid_entry_ids,
+                    related_entry_ids_by_id=related_entry_ids_by_id,
                 )
                 if question is None:
                     continue
@@ -233,9 +233,9 @@ class LlmRagEvalDatasetGenerator:
         dataset.status = "ready"
         dataset.metadata = {
             "generation_strategy": "llm_fact_variant_coverage_batches",
-            "source_chunk_count": len(chunks),
+            "source_entry_count": len(chunks),
             "canonical_eval_unit_count": len(eval_chunks),
-            "useful_chunk_count": sum(len(batch) for batch in batches),
+            "useful_entry_count": sum(len(batch) for batch in batches),
             "llm_batches": total_batches,
             "min_variants_per_fact": MIN_VARIANTS_PER_FACT,
         }
@@ -252,7 +252,7 @@ class LlmRagEvalDatasetGenerator:
         *,
         project_id: str,
         document_id: str,
-        batch: list[RagEvalChunk],
+        batch: list[RagEvalEvidenceEntry],
         batch_index: int,
         total_batches: int,
     ) -> Mapping[str, object]:
@@ -284,7 +284,7 @@ class LlmRagEvalDatasetGenerator:
 
     def _fallback_question_payload(
         self,
-        chunk: RagEvalChunk,
+        chunk: RagEvalEvidenceEntry,
         *,
         error: ValueError,
     ) -> dict[str, object]:
@@ -293,7 +293,7 @@ class LlmRagEvalDatasetGenerator:
         return {
             "question": self._fallback_question_text(chunk),
             "question_type": "direct",
-            "expected_chunk_ids": source_chunk_ids,
+            "expected_entry_ids": source_chunk_ids,
             "expected_answer_summary": expected_answer_summary,
             "should_answer": bool(source_chunk_ids),
             "should_escalate": False,
@@ -308,7 +308,7 @@ class LlmRagEvalDatasetGenerator:
             },
         }
 
-    def _fallback_question_text(self, chunk: RagEvalChunk) -> str:
+    def _fallback_question_text(self, chunk: RagEvalEvidenceEntry) -> str:
         title = str(chunk.metadata.get("title") or "").strip()
         if title:
             return f"Какой практический факт нужно знать по теме «{title}»?"
@@ -319,7 +319,7 @@ class LlmRagEvalDatasetGenerator:
 
         return "Какой практический факт содержит эта база знаний?"
 
-    def _fallback_expected_answer_summary(self, chunk: RagEvalChunk) -> str:
+    def _fallback_expected_answer_summary(self, chunk: RagEvalEvidenceEntry) -> str:
         source_excerpt = str(chunk.metadata.get("source_excerpt") or "").strip()
         source_text = source_excerpt or chunk.content
         return self._clip(source_text)
@@ -333,7 +333,7 @@ class LlmRagEvalDatasetGenerator:
     def _system_prompt(self) -> str:
         question_types = ",".join(sorted(ALLOWED_QUESTION_TYPES))
         return (
-            "Role: generate RAG eval questions from one KB chunk. "
+            "Role: generate RAG eval questions from one KB entry. "
             "Output: one compact valid JSON object only, top-level key questions. "
             "No markdown, prose, comments, code fences, or reasoning. "
             "Use source language. Extract every atomic answerable fact. "
@@ -341,7 +341,7 @@ class LlmRagEvalDatasetGenerator:
             "Variant styles: direct, paraphrase, vague, typo/slang, client_context, edge_case. "
             "Add unknown/similar_wrong/risky/contradiction only when grounded and useful. "
             f"Allowed question_type values: {question_types}. "
-            "Each item needs question, question_type, expected_chunk_ids, expected_answer_summary, "
+            "Each item needs question, question_type, expected_entry_ids, expected_answer_summary, "
             "should_answer, should_escalate, difficulty, severity, metadata. "
             "metadata must include fact_id, fact_summary, variant_style, source_chunk_ids. "
             "Same fact variants reuse same fact_id and fact_summary."
@@ -352,7 +352,7 @@ class LlmRagEvalDatasetGenerator:
         *,
         project_id: str,
         document_id: str,
-        chunks: list[RagEvalChunk],
+        chunks: list[RagEvalEvidenceEntry],
         batch_index: int,
         total_batches: int | None = None,
     ) -> str:
@@ -375,7 +375,7 @@ class LlmRagEvalDatasetGenerator:
                     {
                         "question": "будет ли бот отвечать ночью?",
                         "question_type": "paraphrase",
-                        "expected_chunk_ids": ["chunk_id"],
+                        "expected_entry_ids": ["entry_id"],
                         "expected_answer_summary": "Ассистент отвечает в любое время суток, если проект и инфраструктура работают.",
                         "should_answer": True,
                         "should_escalate": False,
@@ -385,7 +385,7 @@ class LlmRagEvalDatasetGenerator:
                             "fact_id": "assistant_24_7_if_project_and_infra_work",
                             "fact_summary": "Ассистент может отвечать в любое время суток при работающих проекте и инфраструктуре.",
                             "variant_style": "semantic_paraphrase",
-                            "source_chunk_ids": ["chunk_id"],
+                            "source_chunk_ids": ["entry_id"],
                         },
                     }
                 ]
@@ -410,8 +410,8 @@ class LlmRagEvalDatasetGenerator:
             f"- For each fact emit >= {MIN_VARIANTS_PER_FACT} variants when possible.",
             "- Required variants: direct, paraphrase, vague, typo/slang, client_context, edge_case.",
             "- Same fact => same metadata.fact_id and metadata.fact_summary.",
-            "- Answerable => should_answer=true and expected_chunk_ids uses only input ids.",
-            "- Unsupported adjacent trap => should_answer=false and expected_chunk_ids=[].",
+            "- Answerable => should_answer=true and expected_entry_ids uses only input ids.",
+            "- Unsupported adjacent trap => should_answer=false and expected_entry_ids=[].",
             "- expected_answer_summary = compact user-facing business/product fact, not document-structure prose.",
             "- Do not generate questions about section numbers, headings, markdown structure, or whether the document contains a section.",
             "- Reject meta-document facts like 'Document contains a section titled ...' as eval targets.",
@@ -467,8 +467,8 @@ class LlmRagEvalDatasetGenerator:
         project_id: str,
         document_id: str,
         payload: Mapping[str, object],
-        valid_chunk_ids: set[str],
-        related_chunk_ids_by_id: Mapping[str, list[str]],
+        valid_entry_ids: set[str],
+        related_entry_ids_by_id: Mapping[str, list[str]],
     ) -> RagEvalQuestion | None:
         question = str(payload.get("question") or "").strip()
         question_type = str(payload.get("question_type") or "").strip()
@@ -483,30 +483,30 @@ class LlmRagEvalDatasetGenerator:
         if severity not in ALLOWED_SEVERITIES:
             severity = "medium"
 
-        expected_chunk_ids = self._expand_related_chunk_ids(
-            self._string_list(payload.get("expected_chunk_ids")),
-            valid_chunk_ids=valid_chunk_ids,
-            related_chunk_ids_by_id=related_chunk_ids_by_id,
+        expected_entry_ids = self._expand_related_entry_ids(
+            self._string_list(payload.get("expected_entry_ids")),
+            valid_entry_ids=valid_entry_ids,
+            related_entry_ids_by_id=related_entry_ids_by_id,
         )
 
         raw_should_answer = payload.get("should_answer")
         should_answer = (
             raw_should_answer
             if isinstance(raw_should_answer, bool)
-            else bool(expected_chunk_ids)
+            else bool(expected_entry_ids)
         )
 
-        if should_answer and not expected_chunk_ids:
+        if should_answer and not expected_entry_ids:
             return None
 
         metadata = self._metadata(payload.get("metadata"))
-        source_chunk_ids = self._expand_related_chunk_ids(
+        source_chunk_ids = self._expand_related_entry_ids(
             self._string_list(metadata.get("source_chunk_ids")),
-            valid_chunk_ids=valid_chunk_ids,
-            related_chunk_ids_by_id=related_chunk_ids_by_id,
+            valid_entry_ids=valid_entry_ids,
+            related_entry_ids_by_id=related_entry_ids_by_id,
         )
-        if not source_chunk_ids and expected_chunk_ids:
-            source_chunk_ids = list(expected_chunk_ids)
+        if not source_chunk_ids and expected_entry_ids:
+            source_chunk_ids = list(expected_entry_ids)
 
         if source_chunk_ids:
             metadata["source_chunk_ids"] = source_chunk_ids
@@ -542,7 +542,7 @@ class LlmRagEvalDatasetGenerator:
             document_id=document_id,
             question=question[:1000],
             question_type=cast(RagEvalQuestionType, question_type),
-            expected_chunk_ids=expected_chunk_ids,
+            expected_entry_ids=expected_entry_ids,
             expected_answer_summary=expected_answer_summary,
             should_answer=bool(should_answer),
             should_escalate=bool(payload.get("should_escalate")),
@@ -676,21 +676,21 @@ class LlmRagEvalDatasetGenerator:
         normalized = re.sub(r"_+", "_", normalized).strip("_")
         return (normalized or "fact")[:80]
 
-    def _chunk_related_ids(self, chunk: RagEvalChunk) -> list[str]:
-        related_ids = self._string_list(chunk.metadata.get("related_chunk_ids"))
+    def _chunk_related_ids(self, chunk: RagEvalEvidenceEntry) -> list[str]:
+        related_ids = self._string_list(chunk.metadata.get("related_entry_ids"))
         if chunk.id and chunk.id not in related_ids:
             related_ids.insert(0, chunk.id)
 
         result: list[str] = []
-        for chunk_id in related_ids:
-            if chunk_id and chunk_id not in result:
-                result.append(chunk_id)
+        for entry_id in related_ids:
+            if entry_id and entry_id not in result:
+                result.append(entry_id)
 
         return result[:50]
 
-    def _canonical_related_chunk_ids(
+    def _canonical_related_entry_ids(
         self,
-        chunks: list[RagEvalChunk],
+        chunks: list[RagEvalEvidenceEntry],
     ) -> dict[str, list[str]]:
         result: dict[str, list[str]] = {}
         for chunk in chunks:
@@ -698,28 +698,30 @@ class LlmRagEvalDatasetGenerator:
                 result[chunk.id] = self._chunk_related_ids(chunk)
         return result
 
-    def _expand_related_chunk_ids(
+    def _expand_related_entry_ids(
         self,
-        chunk_ids: list[str],
+        entry_ids: list[str],
         *,
-        valid_chunk_ids: set[str],
-        related_chunk_ids_by_id: Mapping[str, list[str]],
+        valid_entry_ids: set[str],
+        related_entry_ids_by_id: Mapping[str, list[str]],
     ) -> list[str]:
         result: list[str] = []
 
-        for chunk_id in chunk_ids:
-            if chunk_id not in valid_chunk_ids:
+        for entry_id in entry_ids:
+            if entry_id not in valid_entry_ids:
                 continue
 
-            related_ids = related_chunk_ids_by_id.get(chunk_id, [chunk_id])
+            related_ids = related_entry_ids_by_id.get(entry_id, [entry_id])
             for related_id in related_ids:
-                if related_id in valid_chunk_ids and related_id not in result:
+                if related_id in valid_entry_ids and related_id not in result:
                     result.append(related_id)
 
         return result[:50]
 
-    def _eval_source_chunks(self, chunks: list[RagEvalChunk]) -> list[RagEvalChunk]:
-        groups_by_key: dict[tuple[str, str], list[RagEvalChunk]] = {}
+    def _eval_source_chunks(
+        self, chunks: list[RagEvalEvidenceEntry]
+    ) -> list[RagEvalEvidenceEntry]:
+        groups_by_key: dict[tuple[str, str], list[RagEvalEvidenceEntry]] = {}
         ordered_keys: list[tuple[str, str]] = []
 
         for chunk in chunks:
@@ -737,14 +739,16 @@ class LlmRagEvalDatasetGenerator:
             for group_key in ordered_keys
         ]
 
-    def _eval_group_key(self, chunk: RagEvalChunk) -> tuple[str, str]:
+    def _eval_group_key(self, chunk: RagEvalEvidenceEntry) -> tuple[str, str]:
         entry_kind = self._metadata_text(chunk.metadata, "entry_kind") or "legacy"
         normalized_title = self._normalized_title(chunk.metadata.get("title"))
         if normalized_title:
             return (entry_kind, normalized_title)
         return (entry_kind, f"chunk:{chunk.id}")
 
-    def _canonical_eval_chunk(self, chunks: list[RagEvalChunk]) -> RagEvalChunk:
+    def _canonical_eval_chunk(
+        self, chunks: list[RagEvalEvidenceEntry]
+    ) -> RagEvalEvidenceEntry:
         primary = chunks[0]
         related_ids = [chunk.id for chunk in chunks if chunk.id]
 
@@ -761,12 +765,12 @@ class LlmRagEvalDatasetGenerator:
             content = primary.content
 
         metadata = dict(primary.metadata)
-        metadata["canonical_chunk_id"] = primary.id
-        metadata["related_chunk_ids"] = related_ids
-        metadata["merged_chunk_count"] = len(chunks)
+        metadata["canonical_entry_id"] = primary.id
+        metadata["related_entry_ids"] = related_ids
+        metadata["merged_entry_count"] = len(chunks)
         metadata["compacted_source_part_count"] = len(compacted_content_parts)
 
-        return RagEvalChunk(
+        return RagEvalEvidenceEntry(
             id=primary.id,
             content=content,
             document_id=primary.document_id,
@@ -812,7 +816,7 @@ class LlmRagEvalDatasetGenerator:
         normalized = re.sub(r"[^0-9a-zа-яё]+", " ", normalized)
         return " ".join(normalized.split())
 
-    def _is_useful_chunk(self, chunk: RagEvalChunk) -> bool:
+    def _is_useful_chunk(self, chunk: RagEvalEvidenceEntry) -> bool:
         if not chunk.id.strip():
             return False
 
@@ -904,11 +908,13 @@ class LlmRagEvalDatasetGenerator:
         normalized = re.sub(r"^\d+[.)\-:]*\s*", "", normalized)
         return normalized.strip()
 
-    def _batches(self, chunks: list[RagEvalChunk]) -> list[list[RagEvalChunk]]:
+    def _batches(
+        self, chunks: list[RagEvalEvidenceEntry]
+    ) -> list[list[RagEvalEvidenceEntry]]:
         useful_chunks = [chunk for chunk in chunks if self._is_useful_chunk(chunk)]
         return [
-            useful_chunks[index : index + MAX_CHUNKS_PER_LLM_BATCH]
-            for index in range(0, len(useful_chunks), MAX_CHUNKS_PER_LLM_BATCH)
+            useful_chunks[index : index + MAX_ENTRIES_PER_LLM_BATCH]
+            for index in range(0, len(useful_chunks), MAX_ENTRIES_PER_LLM_BATCH)
         ]
 
     def _clip(self, value: str) -> str:

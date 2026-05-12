@@ -16,7 +16,7 @@ from groq import (
     RateLimitError,
 )
 
-from src.application.rag_eval.schemas import JsonObject, RagEvalChunk
+from src.application.rag_eval.schemas import JsonObject, RagEvalEvidenceEntry
 from src.domain.project_plane.knowledge_views import (
     SourceRefView,
     source_refs_from_excerpt,
@@ -136,7 +136,7 @@ class RagServiceRagEvalRetriever:
         project_id: str,
         question: str,
         limit: int,
-    ) -> list[RagEvalChunk]:
+    ) -> list[RagEvalEvidenceEntry]:
         search = getattr(self._rag_service, "search_with_expansion")
         rows = await search(
             project_id=project_id,
@@ -146,10 +146,10 @@ class RagServiceRagEvalRetriever:
         if not isinstance(rows, list):
             return []
 
-        chunks: list[RagEvalChunk] = []
+        chunks: list[RagEvalEvidenceEntry] = []
         for index, row in enumerate(rows):
             if isinstance(row, Mapping):
-                chunk = _chunk_from_mapping(row, fallback_id=f"retrieved_{index}")
+                chunk = _entry_from_mapping(row, fallback_id=f"retrieved_{index}")
                 if chunk is not None:
                     chunks.append(chunk)
 
@@ -211,19 +211,19 @@ def _strip_json_fence(text: str) -> str:
     return stripped
 
 
-def _chunk_from_mapping(
+def _entry_from_mapping(
     row: Mapping[str, object],
     *,
     fallback_id: str,
-) -> RagEvalChunk | None:
+) -> RagEvalEvidenceEntry | None:
     content = str(row.get("content") or row.get("text") or "").strip()
     if not content:
         return None
 
-    chunk_id = str(row.get("id") or row.get("chunk_id") or fallback_id)
+    entry_id = str(row.get("id") or row.get("entry_id") or fallback_id)
     source_refs = _source_refs_from_mapping(row)
-    return RagEvalChunk(
-        id=chunk_id,
+    return RagEvalEvidenceEntry(
+        id=entry_id,
         content=content,
         document_id=_optional_text(row.get("document_id")),
         source=_optional_text(row.get("source")),
@@ -260,10 +260,10 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
-def _prompt_chunk(chunk: RagEvalChunk) -> dict[str, object]:
+def _prompt_entry(chunk: RagEvalEvidenceEntry) -> dict[str, object]:
     return {
         "id": chunk.id,
-        "chunk_id": chunk.id,
+        "entry_id": chunk.id,
         "content": chunk.content,
         "text": chunk.content,
         "source": chunk.source,

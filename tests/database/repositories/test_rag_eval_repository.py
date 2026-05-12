@@ -10,7 +10,7 @@ from src.application.rag_eval.schemas import (
     RagEvalQuestion,
     RagEvalResult,
     RagEvalRun,
-    RagEvalChunk,
+    RagEvalEvidenceEntry,
     RagQualityReport,
 )
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
@@ -62,7 +62,7 @@ class FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_load_document_chunks_maps_retrieval_surface_rows() -> None:
+async def test_load_document_entries_maps_retrieval_surface_rows() -> None:
     conn = FakeConn()
     conn.fetch_rows = [
         {
@@ -88,7 +88,7 @@ async def test_load_document_chunks_maps_retrieval_surface_rows() -> None:
     ]
 
     repo = RagEvalRepository(FakePool(conn))
-    chunks = await repo.load_document_chunks(
+    chunks = await repo.load_document_entries(
         project_id=PROJECT_ID,
         document_id=DOCUMENT_ID,
     )
@@ -124,7 +124,7 @@ async def test_save_dataset_persists_dataset_and_questions() -> None:
         document_id=DOCUMENT_ID,
         question="Сколько занимает подключение?",
         question_type="direct",
-        expected_chunk_ids=["chunk_1"],
+        expected_entry_ids=["chunk_1"],
         expected_answer_summary="Подключение занимает 1 день.",
         should_answer=True,
         metadata={"why": "direct evidence"},
@@ -166,7 +166,7 @@ async def test_save_result_persists_metrics_and_judge_json() -> None:
         document_id=DOCUMENT_ID,
         question="Сколько занимает подключение?",
         question_type="direct",
-        expected_chunk_ids=["chunk_1"],
+        expected_entry_ids=["chunk_1"],
         expected_answer_summary="Подключение занимает 1 день.",
         should_answer=True,
     )
@@ -176,15 +176,15 @@ async def test_save_result_persists_metrics_and_judge_json() -> None:
         run_id="run_1",
         question_id="question_1",
         question=question,
-        retrieved_chunks=[
-            RagEvalChunk(id="chunk_1", content="Подключение занимает 1 день.")
+        retrieved_entries=[
+            RagEvalEvidenceEntry(id="chunk_1", content="Подключение занимает 1 день.")
         ],
         answer_text="Подключение занимает 1 день.",
         top1_hit=True,
         top3_hit=True,
         top5_hit=True,
-        expected_chunk_found=True,
-        wrong_chunk_top1=False,
+        expected_entry_found=True,
+        wrong_entry_top1=False,
         answer_supported=True,
         hallucination_risk="low",
         should_answer_passed=True,
@@ -254,7 +254,7 @@ async def test_save_and_get_latest_report() -> None:
         score=88.5,
         readiness="needs_review",
         strengths=["retrieval ok"],
-        problems=["one wrong chunk"],
+        problems=["one wrong entry"],
         recommendations=["split sections"],
         metrics={"top3_rate": 90.0},
         markdown="# Report",
@@ -277,7 +277,7 @@ async def test_save_and_get_latest_report() -> None:
         "score": 88.5,
         "readiness": "needs_review",
         "strengths": ["retrieval ok"],
-        "problems": ["one wrong chunk"],
+        "problems": ["one wrong entry"],
         "recommendations": ["split sections"],
         "metrics": {"top3_rate": 90.0},
         "markdown": "# Report",

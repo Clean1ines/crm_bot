@@ -7,26 +7,36 @@ from typing import Literal, cast
 
 import asyncpg
 
-from src.domain.project_plane.knowledge_retrieval_surface import (
-    RUNTIME_ENTRY_KIND_VALUES,
+from src.application.rag_eval.failure_classification import (
+    failure_classification_from_mapping,
+    knowledge_edit_actions_from_value,
 )
-from src.domain.project_plane.knowledge_views import SourceRefView
 from src.application.rag_eval.schemas import (
     JsonObject,
-    RagEvalChunk,
     RagEvalDataset,
+    RagEvalEvidenceEntry,
     RagEvalQuestion,
     RagEvalQuestionType,
     RagEvalResult,
     RagEvalRun,
+    RagEvalSeverity,
     RagEvalStatus,
     RagQualityReport,
-    RagEvalSeverity,
 )
+from src.domain.project_plane.knowledge_retrieval_surface import (
+    RUNTIME_ENTRY_KIND_VALUES,
+)
+from src.domain.project_plane.knowledge_views import SourceRefView
 
 
 def _jsonb(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _optional_jsonb(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return _jsonb(value)
 
 
 def _optional_text(row: Mapping[str, object], key: str) -> str | None:
@@ -174,12 +184,12 @@ class RagEvalRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
 
-    async def load_document_chunks(
+    async def load_document_entries(
         self,
         *,
         project_id: str,
         document_id: str,
-    ) -> list[RagEvalChunk]:
+    ) -> list[RagEvalEvidenceEntry]:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -209,7 +219,7 @@ class RagEvalRepository:
                 list(RAG_EVAL_SOURCE_ENTRY_KINDS),
             )
 
-        return [self._chunk_from_row(row) for row in rows]
+        return [self._entry_from_row(row) for row in rows]
 
     async def save_dataset(self, *, dataset: RagEvalDataset) -> None:
         async with self.pool.acquire() as conn:
@@ -262,7 +272,7 @@ class RagEvalRepository:
                         document_id,
                         question,
                         question_type,
-                        expected_chunk_ids,
+                        expected_entry_ids,
                         expected_answer_summary,
                         should_answer,
                         should_escalate,
@@ -292,7 +302,7 @@ class RagEvalRepository:
                     ON CONFLICT (id) DO UPDATE SET
                         question = EXCLUDED.question,
                         question_type = EXCLUDED.question_type,
-                        expected_chunk_ids = EXCLUDED.expected_chunk_ids,
+                        expected_entry_ids = EXCLUDED.expected_entry_ids,
                         expected_answer_summary = EXCLUDED.expected_answer_summary,
                         should_answer = EXCLUDED.should_answer,
                         should_escalate = EXCLUDED.should_escalate,
@@ -359,12 +369,12 @@ class RagEvalRepository:
                     id,
                     run_id,
                     question_id,
-                    retrieved_chunk_ids,
+                    retrieved_entry_ids,
                     top1_hit,
                     top3_hit,
                     top5_hit,
-                    expected_chunk_found,
-                    wrong_chunk_top1,
+                    expected_entry_found,
+                    wrong_entry_top1,
                     answer_text,
                     answer_supported,
                     hallucination_risk,
@@ -373,7 +383,9 @@ class RagEvalRepository:
                     notes,
                     judge_json,
                     latency_ms,
-                    created_at
+                    created_at,
+                    classification,
+                    proposed_actions
                 )
                 VALUES (
                     $1,
@@ -393,15 +405,17 @@ class RagEvalRepository:
                     $15,
                     $16::jsonb,
                     $17,
-                    $18
+                    $18,
+                    $19::jsonb,
+                    $20::jsonb
                 )
                 ON CONFLICT (id) DO UPDATE SET
-                    retrieved_chunk_ids = EXCLUDED.retrieved_chunk_ids,
+                    retrieved_entry_ids = EXCLUDED.retrieved_entry_ids,
                     top1_hit = EXCLUDED.top1_hit,
                     top3_hit = EXCLUDED.top3_hit,
                     top5_hit = EXCLUDED.top5_hit,
-                    expected_chunk_found = EXCLUDED.expected_chunk_found,
-                    wrong_chunk_top1 = EXCLUDED.wrong_chunk_top1,
+                    expected_entry_found = EXCLUDED.expected_entry_found,
+                    wrong_entry_top1 = EXCLUDED.wrong_entry_top1,
                     answer_text = EXCLUDED.answer_text,
                     answer_supported = EXCLUDED.answer_supported,
                     hallucination_risk = EXCLUDED.hallucination_risk,
@@ -409,17 +423,19 @@ class RagEvalRepository:
                     score = EXCLUDED.score,
                     notes = EXCLUDED.notes,
                     judge_json = EXCLUDED.judge_json,
-                    latency_ms = EXCLUDED.latency_ms
+                    latency_ms = EXCLUDED.latency_ms,
+                    classification = EXCLUDED.classification,
+                    proposed_actions = EXCLUDED.proposed_actions
                 """,
                 result.id,
                 result.run_id,
                 result.question_id,
-                _jsonb([chunk.id for chunk in result.retrieved_chunks]),
+                _jsonb([entry.id for entry in result.retrieved_entries]),
                 result.top1_hit,
                 result.top3_hit,
                 result.top5_hit,
-                result.expected_chunk_found,
-                result.wrong_chunk_top1,
+                result.expected_entry_found,
+                result.wrong_entry_top1,
                 result.answer_text,
                 result.answer_supported,
                 result.hallucination_risk,
@@ -429,6 +445,12 @@ class RagEvalRepository:
                 _jsonb(result.judge_json),
                 result.latency_ms,
                 result.created_at,
+                _optional_jsonb(
+                    result.classification.to_json()
+                    if result.classification is not None
+                    else None
+                ),
+                _jsonb([action.to_json() for action in result.proposed_actions]),
             )
 
     async def finish_run(self, *, run: RagEvalRun) -> None:
@@ -617,7 +639,7 @@ class RagEvalRepository:
                     document_id,
                     question,
                     question_type,
-                    expected_chunk_ids,
+                    expected_entry_ids,
                     expected_answer_summary,
                     should_answer,
                     should_escalate,
@@ -709,12 +731,14 @@ class RagEvalRepository:
                     rr.id,
                     rr.run_id,
                     rr.question_id,
-                    rr.retrieved_chunk_ids,
+                    rr.retrieved_entry_ids,
                     rr.top1_hit,
                     rr.top3_hit,
                     rr.top5_hit,
-                    rr.expected_chunk_found,
-                    rr.wrong_chunk_top1,
+                    rr.expected_entry_found,
+                    rr.wrong_entry_top1,
+                    rr.classification,
+                    rr.proposed_actions,
                     rr.answer_text,
                     rr.answer_supported,
                     rr.hallucination_risk,
@@ -730,7 +754,7 @@ class RagEvalRepository:
                     q.document_id AS q_document_id,
                     q.question AS q_question,
                     q.question_type AS q_question_type,
-                    q.expected_chunk_ids AS q_expected_chunk_ids,
+                    q.expected_entry_ids AS q_expected_entry_ids,
                     q.expected_answer_summary AS q_expected_answer_summary,
                     q.should_answer AS q_should_answer,
                     q.should_escalate AS q_should_escalate,
@@ -801,10 +825,10 @@ class RagEvalRepository:
             "created_at": str(row["created_at"]),
         }
 
-    def _chunk_from_row(self, row: Mapping[str, object]) -> RagEvalChunk:
+    def _entry_from_row(self, row: Mapping[str, object]) -> RagEvalEvidenceEntry:
         source_refs = _source_ref_views_from_payload(row.get("source_refs"))
         source_excerpt = source_refs[0].quote if source_refs else ""
-        return RagEvalChunk(
+        return RagEvalEvidenceEntry(
             id=str(row["id"]),
             content=str(row["content"] or ""),
             document_id=_optional_text(row, "document_id"),
@@ -822,9 +846,9 @@ class RagEvalRepository:
         )
 
     def _question_from_row(self, row: Mapping[str, object]) -> RagEvalQuestion:
-        expected_chunk_ids = [
+        expected_entry_ids = [
             str(item)
-            for item in _json_list(row.get("expected_chunk_ids"))
+            for item in _json_list(row.get("expected_entry_ids"))
             if str(item).strip()
         ]
 
@@ -837,7 +861,7 @@ class RagEvalRepository:
             question_type=cast(
                 RagEvalQuestionType, str(row["question_type"] or "direct")
             ),
-            expected_chunk_ids=expected_chunk_ids,
+            expected_entry_ids=expected_entry_ids,
             expected_answer_summary=str(row["expected_answer_summary"] or ""),
             should_answer=bool(row["should_answer"]),
             should_escalate=bool(row["should_escalate"]),
@@ -852,9 +876,9 @@ class RagEvalRepository:
         self,
         row: Mapping[str, object],
     ) -> RagEvalQuestion:
-        expected_chunk_ids = [
+        expected_entry_ids = [
             str(item)
-            for item in _json_list(row.get("q_expected_chunk_ids"))
+            for item in _json_list(row.get("q_expected_entry_ids"))
             if str(item).strip()
         ]
 
@@ -868,7 +892,7 @@ class RagEvalRepository:
                 RagEvalQuestionType,
                 str(row["q_question_type"] or "direct"),
             ),
-            expected_chunk_ids=expected_chunk_ids,
+            expected_entry_ids=expected_entry_ids,
             expected_answer_summary=str(row["q_expected_answer_summary"] or ""),
             should_answer=bool(row["q_should_answer"]),
             should_escalate=bool(row["q_should_escalate"]),
@@ -885,13 +909,19 @@ class RagEvalRepository:
             run_id=str(row["run_id"]),
             question_id=str(row["question_id"]),
             question=self._question_from_joined_result_row(row),
-            retrieved_chunks=[],
+            retrieved_entries=[],
             answer_text=str(row["answer_text"] or ""),
             top1_hit=bool(row["top1_hit"]),
             top3_hit=bool(row["top3_hit"]),
             top5_hit=bool(row["top5_hit"]),
-            expected_chunk_found=bool(row["expected_chunk_found"]),
-            wrong_chunk_top1=bool(row["wrong_chunk_top1"]),
+            expected_entry_found=bool(row["expected_entry_found"]),
+            wrong_entry_top1=bool(row["wrong_entry_top1"]),
+            classification=failure_classification_from_mapping(
+                row.get("classification")
+            ),
+            proposed_actions=knowledge_edit_actions_from_value(
+                row.get("proposed_actions")
+            ),
             answer_supported=bool(row["answer_supported"]),
             hallucination_risk=cast(
                 Literal["low", "medium", "high"],
@@ -913,7 +943,7 @@ class RagEvalRepository:
             question.document_id,
             question.question,
             question.question_type,
-            _jsonb(question.expected_chunk_ids),
+            _jsonb(question.expected_entry_ids),
             question.expected_answer_summary,
             question.should_answer,
             question.should_escalate,

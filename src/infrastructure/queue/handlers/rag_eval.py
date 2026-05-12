@@ -13,7 +13,7 @@ from groq import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
 from src.application.rag_eval.dataset_generator import (
     LlmRagEvalDatasetGenerator,
-    MAX_CHUNKS_PER_LLM_BATCH,
+    MAX_ENTRIES_PER_LLM_BATCH,
 )
 from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.reporter import RagQualityReporter
@@ -450,17 +450,17 @@ async def _run_full_document_rag_eval(
     requested_by = str(payload.get("requested_by") or "").strip() or None
 
     rag_eval_repo = RagEvalRepository(db_pool)
-    chunks = await rag_eval_repo.load_document_chunks(
+    chunks = await rag_eval_repo.load_document_entries(
         project_id=project_id,
         document_id=document_id,
     )
 
     if not chunks:
-        raise PermanentJobError("Document has no processed knowledge chunks")
+        raise PermanentJobError("Document has no processed knowledge entries")
 
     total_batches = max(
         1,
-        (len(chunks) + MAX_CHUNKS_PER_LLM_BATCH - 1) // MAX_CHUNKS_PER_LLM_BATCH,
+        (len(chunks) + MAX_ENTRIES_PER_LLM_BATCH - 1) // MAX_ENTRIES_PER_LLM_BATCH,
     )
     full_document_target = total_batches
 
@@ -512,7 +512,7 @@ async def _run_full_document_rag_eval(
     )
 
     service = RagEvalService(
-        chunk_source=rag_eval_repo,
+        entry_source=rag_eval_repo,
         dataset_generator=dataset_generator,
         runner=runner,
         reporter=RagQualityReporter(),
@@ -520,17 +520,17 @@ async def _run_full_document_rag_eval(
         report_sink=None,
     )
 
-    source_chunk_count = len(chunks)
+    source_entry_count = len(chunks)
     total_batches = max(
         1,
-        (len(chunks) + MAX_CHUNKS_PER_LLM_BATCH - 1) // MAX_CHUNKS_PER_LLM_BATCH,
+        (len(chunks) + MAX_ENTRIES_PER_LLM_BATCH - 1) // MAX_ENTRIES_PER_LLM_BATCH,
     )
 
     base_progress: dict[str, object] = {
         "project_id": project_id,
         "document_id": document_id,
         "requested_by": requested_by,
-        "source_chunk_count": source_chunk_count,
+        "source_entry_count": source_entry_count,
         "target_questions": full_document_target,
         "retrieval_limit": retrieval_limit,
         "total_batches": total_batches,
@@ -566,7 +566,7 @@ async def _run_full_document_rag_eval(
             **base_progress,
             "stage": "dataset_generation",
             "status": "running",
-            "message": "Generating RAG eval questions from document chunks",
+            "message": "Generating RAG eval questions from document entries",
             "generated_questions": generated_questions,
             "target_questions": target_questions,
             "processed_batches": processed_batches,

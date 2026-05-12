@@ -71,7 +71,7 @@ def test_runtime_retrieval_reads_retrieval_surface_not_knowledge_base() -> None:
 def test_rag_eval_loads_retrieval_surface_not_knowledge_base() -> None:
     source = _read("src/infrastructure/db/repositories/rag_eval_repository.py")
     load_block = source[
-        source.index("    async def load_document_chunks(") : source.index(
+        source.index("    async def load_document_entries(") : source.index(
             "    async def save_dataset("
         )
     ]

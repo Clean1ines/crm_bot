@@ -9,7 +9,7 @@ from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerato
 from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.runner import RagEvalRunner
 from src.application.rag_eval.schemas import (
-    RagEvalChunk,
+    RagEvalEvidenceEntry,
     RagEvalDataset,
     RagEvalQuestion,
     RagEvalResult,
@@ -32,7 +32,7 @@ class _StaticQuestionLlm:
                 {
                     "question": "Есть ли в документе раздел с номером 1?",
                     "question_type": "risky",
-                    "expected_chunk_ids": ["chunk-1"],
+                    "expected_entry_ids": ["chunk-1"],
                     "expected_answer_summary": 'Section titled "Назначение продукта" exists.',
                     "should_answer": True,
                     "should_escalate": False,
@@ -48,7 +48,7 @@ class _StaticQuestionLlm:
                 {
                     "question": "Что делает продукт с намерением пользователя?",
                     "question_type": "direct",
-                    "expected_chunk_ids": ["chunk-1"],
+                    "expected_entry_ids": ["chunk-1"],
                     "expected_answer_summary": "Продукт классифицирует намерение пользователя.",
                     "should_answer": True,
                     "should_escalate": False,
@@ -76,7 +76,7 @@ async def test_dataset_generator_rejects_document_structure_questions() -> None:
         project_id="project-1",
         document_id="document-1",
         chunks=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk-1",
                 content="## 1. Назначение продукта\n\nПродукт классифицирует намерение пользователя.",
                 metadata={"title": "Назначение продукта"},
@@ -96,7 +96,7 @@ def test_fallback_question_does_not_generate_section_scaffold_prompt() -> None:
     )
 
     question = generator._fallback_question_text(
-        RagEvalChunk(
+        RagEvalEvidenceEntry(
             id="chunk-1",
             content="## 1. Назначение продукта\n\nПродукт классифицирует намерение пользователя.",
             metadata={"title": "Назначение продукта"},
@@ -144,12 +144,12 @@ async def test_judge_prompt_uses_json_not_python_repr() -> None:
             document_id="document-1",
             question="Что делает продукт?",
             question_type="direct",
-            expected_chunk_ids=["chunk-1"],
+            expected_entry_ids=["chunk-1"],
             expected_answer_summary="Продукт классифицирует намерение.",
             should_answer=True,
         ),
-        retrieved_chunks=[
-            RagEvalChunk(
+        retrieved_entries=[
+            RagEvalEvidenceEntry(
                 id="chunk-1",
                 content="Продукт классифицирует намерение.",
             )
@@ -163,13 +163,17 @@ async def test_judge_prompt_uses_json_not_python_repr() -> None:
 
 
 class _ChunkSource:
-    async def load_document_chunks(
+    async def load_document_entries(
         self,
         *,
         project_id: str,
         document_id: str,
-    ) -> list[RagEvalChunk]:
-        return [RagEvalChunk(id="chunk-1", content="Продукт классифицирует намерение.")]
+    ) -> list[RagEvalEvidenceEntry]:
+        return [
+            RagEvalEvidenceEntry(
+                id="chunk-1", content="Продукт классифицирует намерение."
+            )
+        ]
 
 
 class _DatasetGenerator:
@@ -178,7 +182,7 @@ class _DatasetGenerator:
         *,
         project_id: str,
         document_id: str,
-        chunks: list[RagEvalChunk],
+        chunks: list[RagEvalEvidenceEntry],
         progress_callback: object | None = None,
         control_callback: object | None = None,
     ) -> RagEvalDataset:
@@ -189,7 +193,7 @@ class _DatasetGenerator:
             document_id=document_id,
             question="сломай judge",
             question_type="direct",
-            expected_chunk_ids=["chunk-1"],
+            expected_entry_ids=["chunk-1"],
             expected_answer_summary="Продукт классифицирует намерение.",
             should_answer=True,
         )
@@ -200,7 +204,7 @@ class _DatasetGenerator:
             document_id=document_id,
             question="нормальный вопрос",
             question_type="direct",
-            expected_chunk_ids=["chunk-1"],
+            expected_entry_ids=["chunk-1"],
             expected_answer_summary="Продукт классифицирует намерение.",
             should_answer=True,
         )
@@ -231,13 +235,13 @@ class _Runner:
             run_id=run_id,
             question_id=question.id,
             question=question,
-            retrieved_chunks=[],
+            retrieved_entries=[],
             answer_text="ok",
             top1_hit=True,
             top3_hit=True,
             top5_hit=True,
-            expected_chunk_found=True,
-            wrong_chunk_top1=False,
+            expected_entry_found=True,
+            wrong_entry_top1=False,
             answer_supported=True,
             hallucination_risk="low",
             should_answer_passed=True,
@@ -258,13 +262,13 @@ class _Runner:
             run_id=run_id,
             question_id=question.id,
             question=question,
-            retrieved_chunks=[],
+            retrieved_entries=[],
             answer_text="",
             top1_hit=False,
             top3_hit=False,
             top5_hit=False,
-            expected_chunk_found=False,
-            wrong_chunk_top1=True,
+            expected_entry_found=False,
+            wrong_entry_top1=True,
             answer_supported=False,
             hallucination_risk="high",
             should_answer_passed=False,
@@ -298,7 +302,7 @@ class _Store:
 async def test_service_records_failed_question_and_continues_run() -> None:
     store = _Store()
     service = RagEvalService(
-        chunk_source=_ChunkSource(),
+        entry_source=_ChunkSource(),
         dataset_generator=_DatasetGenerator(),
         runner=cast(RagEvalRunner, _Runner()),
         store=store,
@@ -325,8 +329,12 @@ class _RetrieverForTechnicalAnswer:
         project_id: str,
         question: str,
         limit: int,
-    ) -> list[RagEvalChunk]:
-        return [RagEvalChunk(id="chunk-1", content="Продукт классифицирует намерение.")]
+    ) -> list[RagEvalEvidenceEntry]:
+        return [
+            RagEvalEvidenceEntry(
+                id="chunk-1", content="Продукт классифицирует намерение."
+            )
+        ]
 
 
 class _TechnicalAnswerer:
@@ -335,7 +343,7 @@ class _TechnicalAnswerer:
         *,
         project_id: str,
         question: str,
-        evidence: list[RagEvalChunk],
+        evidence: list[RagEvalEvidenceEntry],
     ) -> str:
         return (
             "Не получилось сгенерировать ответ из-за технической ошибки. "
@@ -348,7 +356,7 @@ class _JudgeMustNotRun:
         self,
         *,
         question: RagEvalQuestion,
-        retrieved_chunks: list[RagEvalChunk],
+        retrieved_entries: list[RagEvalEvidenceEntry],
         answer_text: str,
     ):
         raise AssertionError("judge must not run for technical fallback answers")
@@ -378,7 +386,7 @@ async def test_runner_rejects_technical_answer_fallback_before_judge() -> None:
                 document_id="document-1",
                 question="Что делает продукт?",
                 question_type="direct",
-                expected_chunk_ids=["chunk-1"],
+                expected_entry_ids=["chunk-1"],
                 expected_answer_summary="Продукт классифицирует намерение.",
                 should_answer=True,
             ),
