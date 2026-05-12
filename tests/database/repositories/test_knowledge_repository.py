@@ -10,7 +10,16 @@ from src.infrastructure.llm.embedding_service import (
     EmbeddingBatchResult,
     EmbeddingTextResult,
 )
-from src.domain.project_plane.knowledge_compilation import SourceChunk
+from src.domain.project_plane.knowledge_compilation import (
+    CanonicalKnowledgeEntry,
+    EmbeddingText,
+    KnowledgeEnrichment,
+    KnowledgeEntryKind,
+    KnowledgeEntryStatus,
+    KnowledgeEntryVisibility,
+    SourceChunk,
+    SourceRef,
+)
 
 
 @pytest.fixture
@@ -165,10 +174,10 @@ async def test_clear_project_knowledge_success(knowledge_repo, mock_pool):
 
     assert "UPDATE execution_queue" in executed_sql
     assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
-    assert "DELETE FROM knowledge_base WHERE project_id = $1" in executed_sql
     assert "DELETE FROM knowledge_documents WHERE project_id = $1" in executed_sql
+    assert "DELETE FROM knowledge_base WHERE project_id = $1" not in executed_sql
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
-        "DELETE FROM knowledge_base WHERE project_id = $1"
+        "DELETE FROM knowledge_documents WHERE project_id = $1"
     )
 
 
@@ -234,8 +243,9 @@ async def test_delete_document_cancels_related_queue_jobs_before_hard_delete() -
     assert "payload::jsonb ->> 'document_id' = $3" in executed_sql
     assert "process_knowledge_upload" in repr(conn.execute_calls)
     assert "run_full_rag_eval" in repr(conn.execute_calls)
+    assert "DELETE FROM knowledge_base WHERE document_id = $1" not in executed_sql
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
-        "DELETE FROM knowledge_base WHERE document_id = $1"
+        "DELETE FROM knowledge_documents WHERE id = $1"
     )
 
 
@@ -254,72 +264,107 @@ async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete()
     assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
     assert "process_knowledge_upload" in repr(conn.execute_calls)
     assert "run_full_rag_eval" in repr(conn.execute_calls)
+    assert "DELETE FROM knowledge_base WHERE project_id = $1" not in executed_sql
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
-        "DELETE FROM knowledge_base WHERE project_id = $1"
+        "DELETE FROM knowledge_documents WHERE project_id = $1"
     )
 
 
 @patch("src.infrastructure.db.repositories.knowledge_repository.embed_batch")
-async def test_add_knowledge_chunks_persists_typed_chunks(
+async def test_add_canonical_entries_persists_entries_refs_and_retrieval_surface(
     mock_embed_batch,
     knowledge_repo,
     mock_pool,
 ):
-    from src.domain.project_plane.knowledge_chunks import (
-        KnowledgeChunk,
-        KnowledgeChunkDraft,
-        KnowledgeChunkRole,
-        KnowledgeSectionPath,
-    )
-
     project_id = str(uuid4())
     document_id = str(uuid4())
+    entry_id = str(uuid4())
+
     mock_embed_batch.return_value = EmbeddingBatchResult(embeddings=[[0.1, 0.2]])
+
     transaction = AsyncMock()
     transaction.__aenter__.return_value = mock_pool.mock_conn
     transaction.__aexit__.return_value = None
     mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
     mock_pool.mock_conn.execute = AsyncMock()
 
-    chunk = KnowledgeChunk.from_draft(
+    entry = CanonicalKnowledgeEntry(
+        id=entry_id,
         project_id=project_id,
         document_id=document_id,
-        draft=KnowledgeChunkDraft(
-            content="Typed answer content with enough useful words.",
-            role=KnowledgeChunkRole.FAQ,
-            title="FAQ",
-            source_excerpt="Typed answer content",
-            section_path=KnowledgeSectionPath(
-                document_title="knowledge.md",
-                headings=("FAQ",),
+        compiler_run_id="compiler-run-1",
+        stable_key="stable-key-1",
+        entry_kind=KnowledgeEntryKind.ANSWER,
+        title="FAQ",
+        answer="Typed answer content with enough useful words.",
+        source_refs=(
+            SourceRef(
+                source_index=0,
+                quote="Typed answer content",
+                source_chunk_id=f"{document_id}:0",
+                confidence=1.0,
             ),
+        ),
+        enrichment=KnowledgeEnrichment(
             questions=("Can I upload documents?",),
             synonyms=("upload docs",),
             tags=("docs",),
-            embedding_text="FAQ upload documents typed embedding text",
         ),
+        embedding_text=EmbeddingText(
+            value="FAQ upload documents typed embedding text",
+            version="entry_embedding_text_v1",
+        ),
+        status=KnowledgeEntryStatus.PUBLISHED,
+        visibility=KnowledgeEntryVisibility.RUNTIME,
+        version=1,
+        compiler_version="kcd_v1_stage_cd",
+        embedding_text_version="entry_embedding_text_v1",
+        metadata={"source": "test"},
     )
 
-    result = await knowledge_repo.add_knowledge_chunks(
+    result = await knowledge_repo.add_canonical_entries(
         project_id=project_id,
         document_id=document_id,
-        chunks=(chunk,),
+        entries=(entry,),
     )
 
     assert result == 1
     mock_embed_batch.assert_awaited_once_with(
         ["FAQ upload documents typed embedding text"]
     )
-    executed_args = mock_pool.mock_conn.execute.await_args.args
-    assert "embedding_text" in executed_args[0]
-    assert executed_args[3] == "Typed answer content with enough useful words."
-    assert executed_args[5] == "faq_answer"
-    assert executed_args[6] == "FAQ"
-    assert executed_args[7] == "Typed answer content"
-    assert executed_args[8] == '["Can I upload documents?"]'
-    assert executed_args[9] == '["upload docs"]'
-    assert executed_args[10] == '["docs"]'
-    assert executed_args[11] == "FAQ upload documents typed embedding text"
+
+    executed_sql = "\n".join(
+        str(call_item.args[0])
+        for call_item in mock_pool.mock_conn.execute.await_args_list
+    )
+    assert "INSERT INTO knowledge_entries" in executed_sql
+    assert "INSERT INTO knowledge_entry_source_refs" in executed_sql
+    assert "INSERT INTO knowledge_retrieval_surface" in executed_sql
+    assert "INSERT INTO knowledge_base" not in executed_sql
+
+    first_insert_args = mock_pool.mock_conn.execute.await_args_list[0].args
+    assert "INSERT INTO knowledge_entries" in first_insert_args[0]
+    assert first_insert_args[5] == "stable-key-1"
+    assert first_insert_args[6] == "answer"
+    assert first_insert_args[7] == "FAQ"
+    assert first_insert_args[8] == "Typed answer content with enough useful words."
+    assert first_insert_args[9] == "published"
+    assert first_insert_args[10] == "runtime"
+    assert first_insert_args[13] == "FAQ upload documents typed embedding text"
+
+    source_ref_insert_args = mock_pool.mock_conn.execute.await_args_list[2].args
+    assert "INSERT INTO knowledge_entry_source_refs" in source_ref_insert_args[0]
+    assert source_ref_insert_args[2] == f"{document_id}:0"
+    assert source_ref_insert_args[3] == 0
+    assert source_ref_insert_args[4] == "Typed answer content"
+
+    surface_insert_args = mock_pool.mock_conn.execute.await_args_list[4].args
+    assert "INSERT INTO knowledge_retrieval_surface" in surface_insert_args[0]
+    assert surface_insert_args[4] == "stable-key-1"
+    assert surface_insert_args[5] == "answer"
+    assert surface_insert_args[6] == "FAQ"
+    assert surface_insert_args[7] == "Typed answer content with enough useful words."
+    assert surface_insert_args[8] == "FAQ upload documents typed embedding text"
 
 
 def test_search_filters_non_answer_knowledge_roles() -> None:
@@ -328,10 +373,13 @@ def test_search_filters_non_answer_knowledge_roles() -> None:
     ).read_text(encoding="utf-8")
 
     assert "ANSWERABLE_KNOWLEDGE_ENTRY_KINDS" in source
-    assert "AND kb.entry_kind = ANY($4::text[])" in source
-    assert "AND kb.entry_kind = ANY($6::text[])" in source
-    assert '"debug_artifact"' not in source
-    assert '"debug_artifact"' not in source
+    assert "AND rs.entry_kind = ANY($4::text[])" in source
+    assert "AND rs.entry_kind = ANY($6::text[])" in source
+    assert "rs.status = 'published'" in source
+    assert "rs.visibility = 'runtime'" in source
+    assert "knowledge_retrieval_surface AS rs" in source
+    assert "kb.entry_kind = ANY" not in source
+    assert "entry_type" not in source
     assert '"debug_artifact"' not in source
 
 
@@ -355,28 +403,18 @@ def test_search_returns_metadata_observability_fields() -> None:
         )
     ]
 
-    assert "kb.entry_kind," in search_source
-    assert "kb.title," in search_source
-    assert "kb.source_excerpt," in search_source
-    assert "kb.embedding_text," in search_source
-    assert "kb.questions," in search_source
-    assert "kb.synonyms," in search_source
-    assert "kb.tags," in search_source
-    assert "max(entry_kind) AS entry_kind" in search_source
-    assert "(jsonb_agg(questions)->0) AS questions" in search_source
-    assert "(jsonb_agg(synonyms)->0) AS synonyms" in search_source
-    assert "(jsonb_agg(tags)->0) AS tags" in search_source
-    assert "max(questions) AS questions" not in search_source
-    assert "max(synonyms) AS synonyms" not in search_source
-    assert "max(tags) AS tags" not in search_source
-    assert 'entry_kind=_optional_row_text(row, "entry_kind"),' in search_source
-    assert 'title=_optional_row_text(row, "title"),' in search_source
-    assert 'source_excerpt=_optional_row_text(row, "source_excerpt"),' in search_source
-    assert "source_refs=source_refs_from_excerpt(" in search_source
-    assert 'embedding_text=_optional_row_text(row, "embedding_text"),' in search_source
-    assert 'questions=_optional_row_value(row, "questions"),' in search_source
-    assert 'synonyms=_optional_row_value(row, "synonyms"),' in search_source
-    assert 'tags=_optional_row_value(row, "tags"),' in search_source
+    assert "knowledge_retrieval_surface AS rs" in search_source
+    assert "rs.entry_kind," in search_source
+    assert "rs.title," in search_source
+    assert "rs.source_refs," in search_source
+    assert "rs.embedding_text," in search_source
+    assert "rs.enrichment->'questions' AS questions" in search_source
+    assert "rs.enrichment->'synonyms' AS synonyms" in search_source
+    assert "rs.enrichment->'tags' AS tags" in search_source
+    assert "source_refs=_source_ref_views_from_payload" not in search_source
+    assert "source_refs=source_refs" in search_source
+    assert "source_refs_from_excerpt" not in search_source
+    assert "knowledge_base" not in search_source
 
 
 @pytest.mark.asyncio

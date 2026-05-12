@@ -62,7 +62,7 @@ class FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_load_document_chunks_maps_knowledge_base_rows() -> None:
+async def test_load_document_chunks_maps_retrieval_surface_rows() -> None:
     conn = FakeConn()
     conn.fetch_rows = [
         {
@@ -72,7 +72,14 @@ async def test_load_document_chunks_maps_knowledge_base_rows() -> None:
             "source": "kb.md",
             "entry_kind": "faq_answer",
             "title": "Подключение",
-            "source_excerpt": "excerpt",
+            "source_refs": [
+                {
+                    "quote": "excerpt",
+                    "source_index": 0,
+                    "source_chunk_id": f"{DOCUMENT_ID}:0",
+                    "confidence": 1.0,
+                }
+            ],
             "embedding_text": "Подключение срок",
             "questions": ["Сколько подключение?"],
             "synonyms": ["запуск"],
@@ -92,10 +99,17 @@ async def test_load_document_chunks_maps_knowledge_base_rows() -> None:
     assert chunks[0].metadata["title"] == "Подключение"
     assert chunks[0].source_refs[0].quote == "excerpt"
     assert chunks[0].source_refs[0].source_index == 0
+    assert chunks[0].source_refs[0].source_chunk_id == f"{DOCUMENT_ID}:0"
     assert chunks[0].metadata["source_refs"] == [
-        {"quote": "excerpt", "source_index": 0}
+        {
+            "quote": "excerpt",
+            "source_index": 0,
+            "source_chunk_id": f"{DOCUMENT_ID}:0",
+            "confidence": 1.0,
+        }
     ]
-    assert "FROM knowledge_base AS kb" in conn.execute_calls[0][0]
+    assert "FROM knowledge_retrieval_surface AS rs" in conn.execute_calls[0][0]
+    assert "knowledge_base" not in conn.execute_calls[0][0]
 
 
 @pytest.mark.asyncio

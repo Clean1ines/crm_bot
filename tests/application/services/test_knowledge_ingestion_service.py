@@ -26,7 +26,7 @@ def _usage_repo() -> Mock:
 async def test_process_document_marks_plain_upload_processed():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_chunks = AsyncMock(return_value=2)
+    repo.add_canonical_entries = AsyncMock(return_value=2)
     repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
@@ -53,17 +53,17 @@ async def test_process_document_marks_plain_upload_processed():
     assert result.preprocessing_status == "not_requested"
     assert result.structured_entries == 0
     repo.delete_document_chunks.assert_awaited_once_with("doc-1")
-    repo.add_knowledge_chunks.assert_awaited_once()
-    typed_call = repo.add_knowledge_chunks.await_args.kwargs
+    repo.add_canonical_entries.assert_awaited_once()
+    typed_call = repo.add_canonical_entries.await_args.kwargs
     assert typed_call["project_id"] == "project-1"
     assert typed_call["document_id"] == "doc-1"
-    assert len(typed_call["chunks"]) == 2
+    assert len(typed_call["entries"]) == 2
     assert (
-        typed_call["chunks"][0].content
+        typed_call["entries"][0].answer
         == "First useful knowledge paragraph with enough content."
     )
     assert (
-        typed_call["chunks"][1].content
+        typed_call["entries"][1].answer
         == "Second useful knowledge paragraph with enough content."
     )
     repo.update_document_preprocessing_status.assert_awaited_once_with(
@@ -79,7 +79,7 @@ async def test_process_document_marks_plain_upload_processed():
 async def test_process_document_marks_document_error_on_embedding_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_chunks = AsyncMock(side_effect=RuntimeError("embed failed"))
+    repo.add_canonical_entries = AsyncMock(side_effect=RuntimeError("embed failed"))
     repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
@@ -108,7 +108,7 @@ async def test_process_document_marks_document_error_on_embedding_failure():
 async def test_process_document_retries_transient_embedding_provider_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_chunks = AsyncMock(
+    repo.add_canonical_entries = AsyncMock(
         side_effect=TransientEmbeddingProviderError(
             "Embedding provider temporary failure",
             provider="voyage",
@@ -143,7 +143,7 @@ async def test_process_document_retries_transient_embedding_provider_failure():
 async def test_process_document_marks_document_error_on_permanent_provider_failure():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_chunks = AsyncMock(
+    repo.add_canonical_entries = AsyncMock(
         side_effect=PermanentEmbeddingProviderError(
             "Embedding provider access denied",
             provider="voyage",
@@ -179,7 +179,7 @@ async def test_process_document_marks_document_error_on_permanent_provider_failu
 async def test_process_document_records_preprocessing_usage():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
-    repo.add_knowledge_chunks = AsyncMock(return_value=1)
+    repo.add_canonical_entries = AsyncMock(return_value=1)
     repo.add_source_chunks = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()

@@ -1,4 +1,7 @@
+import hashlib
 import re
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import asyncpg
@@ -17,6 +20,7 @@ from src.application.services.knowledge_normalization_service import (
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_chunks import (
+    KnowledgeChunk,
     KnowledgeChunkDraft,
     KnowledgeChunkRole,
     KnowledgeSectionPath,
@@ -39,8 +43,16 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
-import hashlib
-from src.domain.project_plane.knowledge_compilation import SourceChunk
+from src.domain.project_plane.knowledge_compilation import (
+    CanonicalKnowledgeEntry,
+    EmbeddingText,
+    KnowledgeEnrichment,
+    KnowledgeEntryKind,
+    KnowledgeEntryStatus,
+    KnowledgeEntryVisibility,
+    SourceChunk,
+    SourceRef,
+)
 
 
 _PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
@@ -423,6 +435,142 @@ def _source_chunks_from_json_chunks(
     return tuple(source_chunks)
 
 
+KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
+KCD_STAGE_CD_EMBEDDING_TEXT_VERSION = "entry_embedding_text_v1"
+
+
+def _entry_kind_from_chunk_role(role: KnowledgeChunkRole) -> KnowledgeEntryKind:
+    try:
+        return KnowledgeEntryKind(role.value)
+    except ValueError:
+        return KnowledgeEntryKind.ANSWER
+
+
+def _canonical_entry_stable_key(
+    *,
+    document_id: str,
+    index: int,
+    chunk: KnowledgeChunk,
+) -> str:
+    digest = hashlib.sha256(
+        f"{document_id}:{index}:{chunk.role.value}:{chunk.title}:{chunk.content}".encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return f"{document_id}:{index}:{digest[:24]}"
+
+
+def _source_chunk_for_knowledge_chunk(
+    *,
+    chunk: KnowledgeChunk,
+    index: int,
+    source_chunks: Sequence[SourceChunk],
+) -> SourceChunk:
+    if not source_chunks:
+        raise ValidationError("Cannot create canonical entry without source chunks")
+
+    excerpt = _clean_optional_text(chunk.source_excerpt)
+    if excerpt:
+        for source_chunk in source_chunks:
+            if excerpt in source_chunk.content or source_chunk.content in excerpt:
+                return source_chunk
+
+    if index < len(source_chunks):
+        return source_chunks[index]
+
+    return source_chunks[0]
+
+
+def _canonical_source_ref(
+    *,
+    chunk: KnowledgeChunk,
+    source_chunk: SourceChunk,
+) -> SourceRef:
+    quote = _clean_optional_text(chunk.source_excerpt) or source_chunk.content
+    return SourceRef(
+        source_index=source_chunk.source_index,
+        quote=quote,
+        source_chunk_id=source_chunk.id,
+        start_offset=source_chunk.start_offset,
+        end_offset=source_chunk.end_offset,
+        confidence=1.0,
+    )
+
+
+def _canonical_embedding_text(chunk: KnowledgeChunk) -> EmbeddingText:
+    text = _clean_optional_text(chunk.embedding_text)
+    if not text:
+        parts = [
+            chunk.title,
+            chunk.source_excerpt,
+            chunk.content,
+            " ".join(chunk.questions),
+            " ".join(chunk.synonyms),
+            " ".join(chunk.tags),
+        ]
+        text = "\n".join(_clean_optional_text(part) for part in parts if part)
+    return EmbeddingText(
+        value=text,
+        version=KCD_STAGE_CD_EMBEDDING_TEXT_VERSION,
+    )
+
+
+def _canonical_entries_from_knowledge_chunks(
+    *,
+    project_id: str,
+    document_id: str,
+    chunks: Sequence[KnowledgeChunk],
+    source_chunks: Sequence[SourceChunk],
+) -> tuple[CanonicalKnowledgeEntry, ...]:
+    entries: list[CanonicalKnowledgeEntry] = []
+
+    for index, chunk in enumerate(chunks):
+        source_chunk = _source_chunk_for_knowledge_chunk(
+            chunk=chunk,
+            index=index,
+            source_chunks=source_chunks,
+        )
+        stable_key = _canonical_entry_stable_key(
+            document_id=document_id,
+            index=index,
+            chunk=chunk,
+        )
+        entry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
+        title = (
+            chunk.title or chunk.section_path.title or f"Knowledge entry {index + 1}"
+        )
+
+        entries.append(
+            CanonicalKnowledgeEntry(
+                id=entry_id,
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id="",
+                stable_key=stable_key,
+                entry_kind=_entry_kind_from_chunk_role(chunk.role),
+                title=title,
+                answer=chunk.content,
+                source_refs=(
+                    _canonical_source_ref(chunk=chunk, source_chunk=source_chunk),
+                ),
+                enrichment=KnowledgeEnrichment(
+                    questions=chunk.questions,
+                    synonyms=chunk.synonyms,
+                    tags=chunk.tags,
+                ),
+                embedding_text=_canonical_embedding_text(chunk),
+                status=KnowledgeEntryStatus.PUBLISHED,
+                visibility=KnowledgeEntryVisibility.RUNTIME,
+                version=1,
+                compiler_version=KCD_STAGE_CD_COMPILER_VERSION,
+                embedding_text_version=KCD_STAGE_CD_EMBEDDING_TEXT_VERSION,
+                metadata=dict(chunk.metadata),
+            )
+        )
+
+    return tuple(entries)
+
+
 class KnowledgeIngestionService:
     def __init__(self, pool: KnowledgeDbPoolPort) -> None:
         self.pool = pool
@@ -435,6 +583,7 @@ class KnowledgeIngestionService:
         document_id: str,
         file_name: str,
         chunks: list[JsonObject],
+        source_chunks: Sequence[SourceChunk],
         logger: LoggerPort,
         context: str,
     ) -> None:
@@ -457,10 +606,16 @@ class KnowledgeIngestionService:
             raise ValidationError(message)
 
         try:
-            await repo.add_knowledge_chunks(
+            canonical_entries = _canonical_entries_from_knowledge_chunks(
                 project_id=project_id,
                 document_id=document_id,
                 chunks=normalized.chunks,
+                source_chunks=source_chunks,
+            )
+            await repo.add_canonical_entries(
+                project_id=project_id,
+                document_id=document_id,
+                entries=canonical_entries,
             )
         except EmbeddingProviderError as exc:
             if exc.retryable:
@@ -559,6 +714,7 @@ class KnowledgeIngestionService:
                 document_id=document_id,
                 file_name=file_name,
                 chunks=indexable_chunks,
+                source_chunks=source_chunks,
                 logger=logger,
                 context="plain_upload",
             )
@@ -634,10 +790,16 @@ class KnowledgeIngestionService:
                 chunks=canonical_chunks,
                 context=f"{mode}_canonical_upload",
             )
-            await repo.add_knowledge_chunks(
+            canonical_entries = _canonical_entries_from_knowledge_chunks(
                 project_id=project_id,
                 document_id=document_id,
                 chunks=normalized.chunks,
+                source_chunks=source_chunks,
+            )
+            await repo.add_canonical_entries(
+                project_id=project_id,
+                document_id=document_id,
+                entries=canonical_entries,
             )
 
             preprocessing_metrics: JsonObject = dict(result.metrics)
@@ -716,6 +878,7 @@ class KnowledgeIngestionService:
                 document_id=document_id,
                 file_name=file_name,
                 chunks=indexable_chunks,
+                source_chunks=source_chunks,
                 logger=logger,
                 context="preprocessing_fallback",
             )

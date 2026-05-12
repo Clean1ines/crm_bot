@@ -10,7 +10,7 @@ import asyncpg
 from src.domain.project_plane.knowledge_retrieval_surface import (
     RUNTIME_ENTRY_KIND_VALUES,
 )
-from src.domain.project_plane.knowledge_views import source_refs_from_excerpt
+from src.domain.project_plane.knowledge_views import SourceRefView
 from src.application.rag_eval.schemas import (
     JsonObject,
     RagEvalChunk,
@@ -129,6 +129,37 @@ def _row_optional_datetime_value(
     raise ValueError(f"Expected optional datetime field {key}")
 
 
+def _source_ref_views_from_payload(value: object) -> tuple[SourceRefView, ...]:
+    if not isinstance(value, list):
+        return ()
+
+    refs: list[SourceRefView] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        quote = " ".join(str(item.get("quote") or "").strip().split())
+        if not quote:
+            continue
+        source_chunk_id = item.get("source_chunk_id")
+        refs.append(
+            SourceRefView(
+                source_index=_row_int_value(item, "source_index", 0),
+                quote=quote,
+                source_chunk_id=str(source_chunk_id) if source_chunk_id else None,
+                start_offset=_row_int_value(item, "start_offset", 0)
+                if item.get("start_offset") is not None
+                else None,
+                end_offset=_row_int_value(item, "end_offset", 0)
+                if item.get("end_offset") is not None
+                else None,
+                confidence=_row_float_value(item, "confidence", 0.0)
+                if item.get("confidence") is not None
+                else None,
+            )
+        )
+    return tuple(refs)
+
+
 RAG_EVAL_SOURCE_ENTRY_KINDS = tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
 
 
@@ -153,28 +184,26 @@ class RagEvalRepository:
             rows = await conn.fetch(
                 """
                 SELECT
-                    kb.id,
-                    kb.content,
-                    kb.document_id,
+                    rs.entry_id AS id,
+                    rs.answer AS content,
+                    rs.document_id,
                     d.file_name AS source,
-                    kb.entry_kind,
-                    kb.title,
-                    kb.source_excerpt,
-                    kb.embedding_text,
-                    kb.questions,
-                    kb.synonyms,
-                    kb.tags
-                FROM knowledge_base AS kb
-                JOIN knowledge_documents AS d ON d.id = kb.document_id
-                WHERE kb.project_id = $1::uuid
-                  AND kb.document_id = $2::uuid
-                  AND kb.entry_kind = ANY($3::text[])
-                  AND (
-                      kb.document_id IS NOT NULL
-                      OR NULLIF(btrim(kb.source_excerpt), '') IS NOT NULL
-                  )
+                    rs.entry_kind,
+                    rs.title,
+                    rs.source_refs,
+                    rs.embedding_text,
+                    rs.enrichment->'questions' AS questions,
+                    rs.enrichment->'synonyms' AS synonyms,
+                    rs.enrichment->'tags' AS tags
+                FROM knowledge_retrieval_surface AS rs
+                JOIN knowledge_documents AS d ON d.id = rs.document_id
+                WHERE rs.project_id = $1::uuid
+                  AND rs.document_id = $2::uuid
+                  AND rs.entry_kind = ANY($3::text[])
+                  AND rs.status = 'published'
+                  AND rs.visibility = 'runtime'
                   AND d.status = 'processed'
-                ORDER BY kb.created_at ASC NULLS LAST, kb.id ASC
+                ORDER BY rs.created_at ASC NULLS LAST, rs.entry_id ASC
                 """,
                 project_id,
                 document_id,
@@ -774,7 +803,8 @@ class RagEvalRepository:
         }
 
     def _chunk_from_row(self, row: Mapping[str, object]) -> RagEvalChunk:
-        source_refs = source_refs_from_excerpt(_optional_text(row, "source_excerpt"))
+        source_refs = _source_ref_views_from_payload(row.get("source_refs"))
+        source_excerpt = source_refs[0].quote if source_refs else ""
         return RagEvalChunk(
             id=str(row["id"]),
             content=str(row["content"] or ""),
@@ -784,7 +814,7 @@ class RagEvalRepository:
             metadata={
                 "entry_kind": row.get("entry_kind"),
                 "title": row.get("title"),
-                "source_excerpt": row.get("source_excerpt"),
+                "source_excerpt": source_excerpt,
                 "source_refs": [source_ref.to_dict() for source_ref in source_refs],
                 "embedding_text": row.get("embedding_text"),
                 "questions": row.get("questions"),

@@ -11,7 +11,7 @@ def _repo() -> Mock:
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_source_chunks = AsyncMock(return_value=1)
-    repo.add_knowledge_chunks = AsyncMock(return_value=1)
+    repo.add_canonical_entries = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
     return repo
@@ -55,7 +55,7 @@ async def test_process_document_persists_source_chunks_before_runtime_knowledge(
         "00000000-0000-0000-0000-000000000002"
     )
     repo.add_source_chunks.assert_awaited_once()
-    repo.add_knowledge_chunks.assert_awaited_once()
+    repo.add_canonical_entries.assert_awaited_once()
 
     source_call = repo.add_source_chunks.await_args.kwargs
     source_chunks = source_call["chunks"]
