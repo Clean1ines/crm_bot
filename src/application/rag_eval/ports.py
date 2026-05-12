@@ -7,7 +7,7 @@ from typing import Protocol
 from src.application.rag_eval.schemas import (
     JsonObject,
     RagEvalAnswerJudgeResult,
-    RagEvalChunk,
+    RagEvalEvidenceEntry,
     RagEvalDataset,
     RagEvalQuestion,
     RagEvalResult,
@@ -31,13 +31,13 @@ class RagEvalJsonLlmPort(Protocol):
     ) -> Mapping[str, object]: ...
 
 
-class RagEvalChunkSourcePort(Protocol):
-    async def load_document_chunks(
+class RagEvalEvidenceEntrySourcePort(Protocol):
+    async def load_document_entries(
         self,
         *,
         project_id: str,
         document_id: str,
-    ) -> list[RagEvalChunk]: ...
+    ) -> list[RagEvalEvidenceEntry]: ...
 
 
 class RagEvalDatasetGeneratorPort(Protocol):
@@ -46,7 +46,7 @@ class RagEvalDatasetGeneratorPort(Protocol):
         *,
         project_id: str,
         document_id: str,
-        chunks: list[RagEvalChunk],
+        chunks: list[RagEvalEvidenceEntry],
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
     ) -> RagEvalDataset: ...
@@ -59,7 +59,7 @@ class RagEvalRetrieverPort(Protocol):
         project_id: str,
         question: str,
         limit: int,
-    ) -> list[RagEvalChunk]: ...
+    ) -> list[RagEvalEvidenceEntry]: ...
 
 
 class RagEvalAnswererPort(Protocol):
@@ -68,7 +68,7 @@ class RagEvalAnswererPort(Protocol):
         *,
         project_id: str,
         question: str,
-        evidence: list[RagEvalChunk],
+        evidence: list[RagEvalEvidenceEntry],
     ) -> str: ...
 
 
@@ -77,7 +77,7 @@ class RagEvalAnswerJudgePort(Protocol):
         self,
         *,
         question: RagEvalQuestion,
-        retrieved_chunks: list[RagEvalChunk],
+        retrieved_entries: list[RagEvalEvidenceEntry],
         answer_text: str,
     ) -> RagEvalAnswerJudgeResult: ...
 

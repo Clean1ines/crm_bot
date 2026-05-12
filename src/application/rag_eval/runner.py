@@ -62,7 +62,7 @@ class RagEvalRunner:
     ) -> RagEvalResult:
         started = perf_counter()
 
-        retrieved_chunks = await self._retriever.retrieve(
+        retrieved_entries = await self._retriever.retrieve(
             project_id=project_id,
             question=question.question,
             limit=self._retrieval_limit,
@@ -71,7 +71,7 @@ class RagEvalRunner:
         answer_text = await self._answerer.answer(
             project_id=project_id,
             question=question.question,
-            evidence=retrieved_chunks,
+            evidence=retrieved_entries,
         )
 
         if is_rag_eval_technical_answer(answer_text):
@@ -79,21 +79,21 @@ class RagEvalRunner:
 
         judge = await self._answer_judge.judge_answer(
             question=question,
-            retrieved_chunks=retrieved_chunks,
+            retrieved_entries=retrieved_entries,
             answer_text=answer_text,
         )
 
         latency_ms = int((perf_counter() - started) * 1000)
-        retrieved_ids = [chunk.id for chunk in retrieved_chunks]
-        expected_ids = set(question.expected_chunk_ids)
+        retrieved_ids = [chunk.id for chunk in retrieved_entries]
+        expected_ids = set(question.expected_entry_ids)
 
         top1_hit = bool(expected_ids and expected_ids.intersection(retrieved_ids[:1]))
         top3_hit = bool(expected_ids and expected_ids.intersection(retrieved_ids[:3]))
         top5_hit = bool(expected_ids and expected_ids.intersection(retrieved_ids[:5]))
-        expected_chunk_found = bool(
+        expected_entry_found = bool(
             expected_ids and expected_ids.intersection(retrieved_ids)
         )
-        wrong_chunk_top1 = bool(
+        wrong_entry_top1 = bool(
             expected_ids and retrieved_ids and retrieved_ids[0] not in expected_ids
         )
 
@@ -102,8 +102,8 @@ class RagEvalRunner:
             top1_hit=top1_hit,
             top3_hit=top3_hit,
             top5_hit=top5_hit,
-            expected_chunk_found=expected_chunk_found,
-            wrong_chunk_top1=wrong_chunk_top1,
+            expected_entry_found=expected_entry_found,
+            wrong_entry_top1=wrong_entry_top1,
         )
         final_score = self._final_score(
             question=question,
@@ -119,13 +119,13 @@ class RagEvalRunner:
             run_id=run_id,
             question_id=question.id,
             question=question,
-            retrieved_chunks=retrieved_chunks,
+            retrieved_entries=retrieved_entries,
             answer_text=answer_text,
             top1_hit=top1_hit,
             top3_hit=top3_hit,
             top5_hit=top5_hit,
-            expected_chunk_found=expected_chunk_found,
-            wrong_chunk_top1=wrong_chunk_top1,
+            expected_entry_found=expected_entry_found,
+            wrong_entry_top1=wrong_entry_top1,
             answer_supported=judge.answer_supported,
             hallucination_risk=judge.hallucination_risk,
             should_answer_passed=judge.should_answer_passed,
@@ -152,13 +152,13 @@ class RagEvalRunner:
             run_id=run_id,
             question_id=question.id,
             question=question,
-            retrieved_chunks=[],
+            retrieved_entries=[],
             answer_text="",
             top1_hit=False,
             top3_hit=False,
             top5_hit=False,
-            expected_chunk_found=False,
-            wrong_chunk_top1=bool(question.expected_chunk_ids),
+            expected_entry_found=False,
+            wrong_entry_top1=bool(question.expected_entry_ids),
             answer_supported=False,
             hallucination_risk="high",
             should_answer_passed=not question.should_answer,
@@ -180,11 +180,11 @@ class RagEvalRunner:
         top1_hit: bool,
         top3_hit: bool,
         top5_hit: bool,
-        expected_chunk_found: bool,
-        wrong_chunk_top1: bool,
+        expected_entry_found: bool,
+        wrong_entry_top1: bool,
     ) -> float:
-        if not question.expected_chunk_ids:
-            return 1.0 if not wrong_chunk_top1 else 0.35
+        if not question.expected_entry_ids:
+            return 1.0 if not wrong_entry_top1 else 0.35
 
         if top1_hit:
             return 1.0
@@ -192,9 +192,9 @@ class RagEvalRunner:
             return 0.82
         if top5_hit:
             return 0.68
-        if expected_chunk_found:
+        if expected_entry_found:
             return 0.55
-        if wrong_chunk_top1:
+        if wrong_entry_top1:
             return 0.15
         return 0.25
 

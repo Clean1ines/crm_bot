@@ -81,7 +81,7 @@ class RagQualityReporter:
                 "answer_supported_rate": 0.0,
                 SHOULD_ANSWER_RATE_KEY: 0.0,
                 "high_hallucination_risk": 0,
-                "wrong_chunk_top1": 0,
+                "wrong_entry_top1": 0,
             }
 
         return {
@@ -107,7 +107,7 @@ class RagQualityReporter:
             "high_hallucination_risk": sum(
                 1 for result in results if result.hallucination_risk == "high"
             ),
-            "wrong_chunk_top1": sum(result.wrong_chunk_top1 for result in results),
+            "wrong_entry_top1": sum(result.wrong_entry_top1 for result in results),
             "by_question_type": dict(
                 Counter(result.question.question_type for result in results)
             ),
@@ -115,7 +115,7 @@ class RagQualityReporter:
 
     def _readiness(self, score: float, results: list[RagEvalResult]) -> str:
         high_risk = any(result.hallucination_risk == "high" for result in results)
-        wrong_top1_count = sum(result.wrong_chunk_top1 for result in results)
+        wrong_top1_count = sum(result.wrong_entry_top1 for result in results)
 
         if score < 75 or high_risk or wrong_top1_count >= 3:
             return "not_ready"
@@ -145,7 +145,7 @@ class RagQualityReporter:
         if _metric_float(metrics, "top3_rate") < 75:
             problems.append("Слабое попадание ожидаемых chunks в top-3 retrieval.")
 
-        wrong_top1 = _metric_int(metrics, "wrong_chunk_top1")
+        wrong_top1 = _metric_int(metrics, "wrong_entry_top1")
         if wrong_top1:
             problems.append(
                 f"{wrong_top1} вопросов получили неправильный chunk на первом месте."
@@ -170,10 +170,10 @@ class RagQualityReporter:
 
         if _metric_float(metrics, "top3_rate") < 75:
             recommendations.append(
-                "Усилить retrieval: проверить chunking, embedding_text и hybrid search."
+                "Усилить retrieval: проверить entry compilation, embedding_text и hybrid search."
             )
 
-        if _metric_int(metrics, "wrong_chunk_top1"):
+        if _metric_int(metrics, "wrong_entry_top1"):
             recommendations.append(
                 "Разделить похожие темы в базе знаний или добавить более явные заголовки/FAQ."
             )

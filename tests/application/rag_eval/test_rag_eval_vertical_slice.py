@@ -9,7 +9,7 @@ import pytest
 from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
 from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.runner import RagEvalRunner
-from src.application.rag_eval.schemas import RagEvalChunk
+from src.application.rag_eval.schemas import RagEvalEvidenceEntry
 
 
 class FakeJsonLlm:
@@ -26,7 +26,7 @@ class FakeJsonLlm:
                     {
                         "question": "Сколько занимает подключение?",
                         "question_type": "direct",
-                        "expected_chunk_ids": ["chunk_1"],
+                        "expected_entry_ids": ["chunk_1"],
                         "expected_answer_summary": "Подключение занимает 1 рабочий день.",
                         "should_answer": True,
                         "should_escalate": False,
@@ -42,7 +42,7 @@ class FakeJsonLlm:
                     {
                         "question": "Можно вернуть деньги после отключения?",
                         "question_type": "unknown",
-                        "expected_chunk_ids": [],
+                        "expected_entry_ids": [],
                         "expected_answer_summary": "В документе нет информации о возврате.",
                         "should_answer": False,
                         "should_escalate": False,
@@ -90,9 +90,9 @@ class FakeRetriever:
         project_id: str,
         question: str,
         limit: int,
-    ) -> list[RagEvalChunk]:
+    ) -> list[RagEvalEvidenceEntry]:
         return [
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk_1",
                 content="Подключение занимает 1 рабочий день.",
                 score=0.95,
@@ -106,7 +106,7 @@ class FakeAnswerer:
         *,
         project_id: str,
         question: str,
-        evidence: list[RagEvalChunk],
+        evidence: list[RagEvalEvidenceEntry],
     ) -> str:
         if "вернуть деньги" in question:
             return "Да, возврат денег возможен после отключения."
@@ -122,7 +122,7 @@ async def test_llm_dataset_generator_creates_eval_artifact_without_topic_hardcod
         project_id="00000000-0000-0000-0000-000000000001",
         document_id="00000000-0000-0000-0000-000000000002",
         chunks=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk_1",
                 content="Подключение занимает 1 рабочий день.",
             )
@@ -135,7 +135,7 @@ async def test_llm_dataset_generator_creates_eval_artifact_without_topic_hardcod
         "direct",
         "unknown",
     }
-    assert dataset.questions[0].expected_chunk_ids == ["chunk_1"]
+    assert dataset.questions[0].expected_entry_ids == ["chunk_1"]
 
 
 @pytest.mark.asyncio
@@ -145,7 +145,7 @@ async def test_runner_combines_retrieval_metrics_and_llm_judge() -> None:
         project_id="00000000-0000-0000-0000-000000000001",
         document_id="00000000-0000-0000-0000-000000000002",
         chunks=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk_1",
                 content="Подключение занимает 1 рабочий день.",
             )
@@ -203,7 +203,7 @@ async def test_llm_dataset_generator_falls_back_when_question_json_is_malformed(
         project_id="00000000-0000-0000-0000-000000000001",
         document_id="00000000-0000-0000-0000-000000000002",
         chunks=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk_1",
                 content=(
                     "Ассистент должен передать диалог менеджеру, "
@@ -223,7 +223,7 @@ async def test_llm_dataset_generator_falls_back_when_question_json_is_malformed(
     assert dataset.total_questions == 1
     question = dataset.questions[0]
     assert question.question_type == "direct"
-    assert question.expected_chunk_ids == ["chunk_1"]
+    assert question.expected_entry_ids == ["chunk_1"]
     assert question.should_answer is True
     assert "Передача менеджеру" in question.question
     assert "оплату, возврат или договор" in question.expected_answer_summary

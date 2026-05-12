@@ -6,6 +6,11 @@ from typing import Literal, Mapping, TypeAlias
 from uuid import uuid4
 
 from src.domain.project_plane.knowledge_views import SourceRefView
+from src.application.rag_eval.failure_classification import (
+    FailureClassification,
+    KnowledgeEditAction,
+    propose_knowledge_edit_actions,
+)
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -61,7 +66,7 @@ def json_value(value: object) -> JsonValue:
 
 
 @dataclass(frozen=True, slots=True)
-class RagEvalChunk:
+class RagEvalEvidenceEntry:
     id: str
     content: str
     document_id: str | None = None
@@ -92,7 +97,7 @@ class RagEvalQuestion:
     document_id: str
     question: str
     question_type: RagEvalQuestionType
-    expected_chunk_ids: list[str]
+    expected_entry_ids: list[str]
     expected_answer_summary: str
     should_answer: bool
     should_escalate: bool = False
@@ -110,7 +115,7 @@ class RagEvalQuestion:
             "document_id": self.document_id,
             "question": self.question,
             "question_type": self.question_type,
-            "expected_chunk_ids": list(self.expected_chunk_ids),
+            "expected_entry_ids": list(self.expected_entry_ids),
             "expected_answer_summary": self.expected_answer_summary,
             "should_answer": self.should_answer,
             "should_escalate": self.should_escalate,
@@ -158,6 +163,7 @@ class RagEvalAnswerJudgeResult:
     notes: str
     score: float
     metadata: Mapping[str, object] = field(default_factory=dict)
+    classification: FailureClassification | None = None
 
     def to_json(self) -> JsonObject:
         return {
@@ -169,6 +175,9 @@ class RagEvalAnswerJudgeResult:
             "notes": self.notes,
             "score": self.score,
             "metadata": json_value(dict(self.metadata)),
+            "classification": json_value(self.classification.to_json())
+            if self.classification is not None
+            else None,
         }
 
 
@@ -178,21 +187,47 @@ class RagEvalResult:
     run_id: str
     question_id: str
     question: RagEvalQuestion
-    retrieved_chunks: list[RagEvalChunk]
+    retrieved_entries: list[RagEvalEvidenceEntry]
     answer_text: str
     top1_hit: bool
     top3_hit: bool
     top5_hit: bool
-    expected_chunk_found: bool
-    wrong_chunk_top1: bool
+    expected_entry_found: bool
+    wrong_entry_top1: bool
     answer_supported: bool
     hallucination_risk: Literal["low", "medium", "high"]
     should_answer_passed: bool
     score: float
+    classification: FailureClassification | None = None
+    proposed_actions: list[KnowledgeEditAction] = field(default_factory=list)
     notes: str = ""
     latency_ms: int = 0
     judge_json: JsonObject = field(default_factory=dict)
     created_at: datetime = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if (
+            not self.is_passed
+            and self.classification is not None
+            and not self.proposed_actions
+        ):
+            object.__setattr__(
+                self,
+                "proposed_actions",
+                propose_knowledge_edit_actions(
+                    question=self.question,
+                    classification=self.classification,
+                ),
+            )
+
+    @property
+    def is_passed(self) -> bool:
+        return (
+            self.score >= 0.75
+            and self.answer_supported
+            and self.should_answer_passed
+            and not self.wrong_entry_top1
+        )
 
     def to_json(self) -> JsonObject:
         return {
@@ -200,14 +235,20 @@ class RagEvalResult:
             "run_id": self.run_id,
             "question_id": self.question_id,
             "question": self.question.to_json(),
-            "retrieved_chunk_ids": [chunk.id for chunk in self.retrieved_chunks],
-            "retrieved_chunks": [chunk.to_json() for chunk in self.retrieved_chunks],
+            "retrieved_entry_ids": [entry.id for entry in self.retrieved_entries],
+            "retrieved_entries": [entry.to_json() for entry in self.retrieved_entries],
             "answer_text": self.answer_text,
             "top1_hit": self.top1_hit,
             "top3_hit": self.top3_hit,
             "top5_hit": self.top5_hit,
-            "expected_chunk_found": self.expected_chunk_found,
-            "wrong_chunk_top1": self.wrong_chunk_top1,
+            "expected_entry_found": self.expected_entry_found,
+            "wrong_entry_top1": self.wrong_entry_top1,
+            "classification": json_value(self.classification.to_json())
+            if self.classification is not None
+            else None,
+            "proposed_actions": json_value(
+                [action.to_json() for action in self.proposed_actions]
+            ),
             "answer_supported": self.answer_supported,
             "hallucination_risk": self.hallucination_risk,
             "should_answer_passed": self.should_answer_passed,

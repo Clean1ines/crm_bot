@@ -47,7 +47,7 @@ class DocumentHealth(TypedDict):
     project_id: str
     status: str
     file_name: str
-    chunk_count: int
+    entry_count: int
 
 
 def _require_groq_key() -> None:
@@ -105,7 +105,7 @@ async def _latest_processed_document_id(pool: asyncpg.Pool) -> str:
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No processed knowledge document with chunks found",
+            detail="No processed knowledge document with entries found",
         )
     return str(row["id"])
 
@@ -128,7 +128,7 @@ async def _document_health(
                 d.project_id,
                 d.status,
                 d.file_name,
-                COUNT(rs.id)::int AS chunk_count
+                COUNT(rs.id)::int AS entry_count
             FROM knowledge_documents AS d
             LEFT JOIN knowledge_retrieval_surface AS rs ON rs.document_id = d.id
             WHERE d.id = $1::uuid
@@ -148,7 +148,7 @@ async def _document_health(
         "project_id": str(row["project_id"]),
         "status": str(row["status"]),
         "file_name": str(row["file_name"]),
-        "chunk_count": int(row["chunk_count"] or 0),
+        "entry_count": int(row["entry_count"] or 0),
     }
 
 
@@ -249,7 +249,7 @@ async def enqueue_full_rag_eval_for_document(
             detail=f"Document must be processed, got status={health['status']}",
         )
 
-    if health["chunk_count"] <= 0:
+    if health["entry_count"] <= 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Document has no retrieval surface entries",
@@ -306,7 +306,7 @@ async def run_rag_eval_for_document(
             detail=f"Document must be processed, got status={health['status']}",
         )
 
-    if health["chunk_count"] <= 0:
+    if health["entry_count"] <= 0:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Document has no retrieval surface entries",
@@ -360,7 +360,7 @@ async def run_rag_eval_for_document(
     )
 
     service = RagEvalService(
-        chunk_source=rag_eval_repo,
+        entry_source=rag_eval_repo,
         dataset_generator=dataset_generator,
         runner=runner,
         reporter=RagQualityReporter(),

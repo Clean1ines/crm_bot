@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 
 from src.agent.nodes.response_generator import create_response_generator_node
-from src.application.rag_eval.schemas import RagEvalChunk
+from src.application.rag_eval.schemas import RagEvalEvidenceEntry
 
 
 RagEvalNode = Callable[[Mapping[str, object]], Awaitable[Mapping[str, object]]]
@@ -25,7 +25,7 @@ class ProductionRagEvalAnswerer:
         *,
         project_id: str,
         question: str,
-        evidence: list[RagEvalChunk],
+        evidence: list[RagEvalEvidenceEntry],
     ) -> str:
         node = self._node_factory()
         state: dict[str, object] = {
@@ -44,7 +44,7 @@ class ProductionRagEvalAnswerer:
         return str(result.get("response_text") or "").strip()
 
 
-def _prompt_chunk(chunk: RagEvalChunk) -> dict[str, object]:
+def _prompt_chunk(chunk: RagEvalEvidenceEntry) -> dict[str, object]:
     return {
         "id": chunk.id,
         "chunk_id": chunk.id,

@@ -80,7 +80,7 @@ def test_knowledge_repository_filters_by_entry_kind_not_old_column() -> None:
 
 
 def test_rag_eval_repository_filters_by_entry_kind_not_old_column() -> None:
-    source = inspect.getsource(RagEvalRepository.load_document_chunks)
+    source = inspect.getsource(RagEvalRepository.load_document_entries)
 
     assert "knowledge_retrieval_surface AS rs" in source
     assert "rs.entry_kind = ANY" in source

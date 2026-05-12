@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from src.application.rag_eval.ports import (
-    RagEvalChunkSourcePort,
+    RagEvalEvidenceEntrySourcePort,
     RagEvalDatasetControlCallback,
     RagEvalDatasetGeneratorPort,
     RagEvalDatasetProgressCallback,
@@ -24,14 +24,14 @@ class RagEvalService:
     def __init__(
         self,
         *,
-        chunk_source: RagEvalChunkSourcePort,
+        entry_source: RagEvalEvidenceEntrySourcePort,
         dataset_generator: RagEvalDatasetGeneratorPort,
         runner: RagEvalRunner,
         reporter: RagQualityReporter | None = None,
         store: RagEvalStorePort | None = None,
         report_sink: RagEvalReportSinkPort | None = None,
     ) -> None:
-        self._chunk_source = chunk_source
+        self._entry_source = entry_source
         self._dataset_generator = dataset_generator
         self._runner = runner
         self._reporter = reporter or RagQualityReporter()
@@ -47,7 +47,7 @@ class RagEvalService:
         control_callback: RagEvalDatasetControlCallback | None = None,
         run_progress_callback: RagEvalRunProgressCallback | None = None,
     ) -> tuple[RagEvalRun, RagQualityReport]:
-        chunks = await self._chunk_source.load_document_chunks(
+        chunks = await self._entry_source.load_document_entries(
             project_id=project_id,
             document_id=document_id,
         )

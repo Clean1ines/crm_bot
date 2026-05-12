@@ -7,7 +7,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from src.application.rag_eval.schemas import RagEvalChunk
+from src.application.rag_eval.schemas import RagEvalEvidenceEntry
 from src.domain.project_plane.knowledge_views import SourceRefView
 from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswerer
 from src.infrastructure.rag_eval.adapters import (
@@ -93,7 +93,7 @@ async def test_production_answerer_uses_response_generator_state_contract() -> N
         project_id="project_1",
         question="Что известно?",
         evidence=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk_1",
                 content="Evidence text",
                 document_id="doc_1",
@@ -138,7 +138,7 @@ def test_extract_json_object_accepts_plain_and_fenced_json() -> None:
 
 
 def test_rag_eval_chunk_json_exposes_source_refs() -> None:
-    chunk = RagEvalChunk(
+    chunk = RagEvalEvidenceEntry(
         id="chunk_1",
         content="Evidence text",
         source_refs=(SourceRefView(source_index=7, quote="Exact evidence."),),

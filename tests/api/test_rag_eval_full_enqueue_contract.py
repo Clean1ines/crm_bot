@@ -37,7 +37,7 @@ class _Conn:
             "project_id": "00000000-0000-0000-0000-000000000001",
             "status": "processed",
             "file_name": "full-doc.md",
-            "chunk_count": 17,
+            "entry_count": 17,
         }
 
 

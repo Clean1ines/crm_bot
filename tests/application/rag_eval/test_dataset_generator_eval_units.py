@@ -5,7 +5,7 @@ from collections.abc import Mapping
 import pytest
 
 from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
-from src.application.rag_eval.schemas import RagEvalChunk
+from src.application.rag_eval.schemas import RagEvalEvidenceEntry
 
 
 class _PromptCapturingLlm:
@@ -31,7 +31,7 @@ class _PromptCapturingLlm:
                 {
                     "question": "Что делает CRM Bot с обращениями клиентов?",
                     "question_type": "direct",
-                    "expected_chunk_ids": ["chunk-a"],
+                    "expected_entry_ids": ["chunk-a"],
                     "expected_answer_summary": (
                         "CRM Bot принимает обращения клиентов и классифицирует "
                         "их намерение."
@@ -65,7 +65,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
         project_id="project-1",
         document_id="document-1",
         chunks=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk-a",
                 content="## 1. Назначение продукта CRM Bot принимает обращения клиентов.",
                 metadata={
@@ -73,7 +73,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "1. Назначение продукта",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk-b",
                 content=(
                     "CRM Bot принимает обращения клиентов и классифицирует "
@@ -84,7 +84,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "1. Назначение продукта",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="faq-1",
                 content="Клиент может спросить о сроках подключения продукта.",
                 metadata={
@@ -92,7 +92,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "Сроки подключения",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="price-1",
                 content="Стоимость внедрения зависит от количества проектов.",
                 metadata={
@@ -100,7 +100,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "Стоимость",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="eval-test-1",
                 content="НЕ ДОЛЖНО ПОПАСТЬ В PROMPT: встроенный тест.",
                 metadata={
@@ -108,7 +108,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "Тесты",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="guideline-1",
                 content="НЕ ДОЛЖНО ПОПАСТЬ В PROMPT: правило поиска.",
                 metadata={
@@ -116,7 +116,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "Правила поиска",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="negative-1",
                 content="НЕ ДОЛЖНО ПОПАСТЬ В PROMPT: негативная проверка.",
                 metadata={
@@ -124,7 +124,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "Негативные тесты",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="empty-section",
                 content="## 9. Пустой раздел\n\n---",
                 metadata={
@@ -132,7 +132,7 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
                     "title": "9. Пустой раздел",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="",
                 content="У этого chunk нет id, его нельзя использовать как source.",
                 metadata={
@@ -156,13 +156,13 @@ async def test_dataset_generator_builds_canonical_eval_units_and_expands_expecte
     assert "нет id" not in joined_prompts
 
     assert dataset.status == "ready"
-    assert dataset.metadata["source_chunk_count"] == 9
+    assert dataset.metadata["source_entry_count"] == 9
     assert dataset.metadata["canonical_eval_unit_count"] == 3
-    assert dataset.metadata["useful_chunk_count"] == 3
+    assert dataset.metadata["useful_entry_count"] == 3
 
     assert dataset.total_questions == 1
     question = dataset.questions[0]
-    assert question.expected_chunk_ids == ["chunk-a", "chunk-b"]
+    assert question.expected_entry_ids == ["chunk-a", "chunk-b"]
     assert question.metadata["source_chunk_ids"] == ["chunk-a", "chunk-b"]
 
 
@@ -186,7 +186,7 @@ async def test_dataset_generator_fallback_expands_expected_ids_for_same_title_fr
         project_id="project-1",
         document_id="document-1",
         chunks=[
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk-a",
                 content="CRM Bot принимает обращения клиентов.",
                 metadata={
@@ -194,7 +194,7 @@ async def test_dataset_generator_fallback_expands_expected_ids_for_same_title_fr
                     "title": "1. Назначение продукта",
                 },
             ),
-            RagEvalChunk(
+            RagEvalEvidenceEntry(
                 id="chunk-b",
                 content="CRM Bot классифицирует намерение клиента.",
                 metadata={
@@ -207,5 +207,5 @@ async def test_dataset_generator_fallback_expands_expected_ids_for_same_title_fr
 
     assert dataset.status == "ready"
     assert dataset.total_questions == 1
-    assert dataset.questions[0].expected_chunk_ids == ["chunk-a", "chunk-b"]
+    assert dataset.questions[0].expected_entry_ids == ["chunk-a", "chunk-b"]
     assert dataset.questions[0].metadata["source_chunk_ids"] == ["chunk-a", "chunk-b"]
