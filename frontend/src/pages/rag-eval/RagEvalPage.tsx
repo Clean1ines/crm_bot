@@ -17,6 +17,8 @@ import { useParams } from 'react-router-dom';
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
   ragEvalApi,
+  type KnowledgeEditActionExecutionSummary,
+  type RagEvalActionableResult,
   type RagEvalDocumentStatusResponse,
   type RagEvalFullRunAcceptedResponse,
   type RagEvalJob,
@@ -136,6 +138,65 @@ const asStringList = (value: unknown): string[] => {
   return [];
 };
 
+const asBoolean = (value: unknown, fallback = false): boolean => (
+  typeof value === 'boolean' ? value : fallback
+);
+
+const getActionableResults = (report: Record<string, unknown>): RagEvalActionableResult[] => {
+  const parsed = parseJsonValue(report.actionable_results);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((raw): RagEvalActionableResult | null => {
+      const item = getRecord(raw);
+      const resultId = String(item.result_id || '').trim();
+      if (!resultId) return null;
+
+      const rawActions = parseJsonValue(item.proposed_actions);
+      const proposedActions = Array.isArray(rawActions)
+        ? rawActions.map((rawAction) => {
+          const action = getRecord(rawAction);
+          const targetEntryId = String(action.target_entry_id || '').trim();
+
+          return {
+            action_type: String(action.action_type || '').trim(),
+            target_entry_id: targetEntryId || null,
+            reason: String(action.reason || '').trim(),
+            payload: getRecord(action.payload),
+          };
+        }).filter((action) => action.action_type)
+        : [];
+
+      const classification = getRecord(item.classification);
+
+      return {
+        result_id: resultId,
+        run_id: String(item.run_id || '').trim(),
+        question_id: String(item.question_id || '').trim(),
+        question: String(item.question || '').trim(),
+        question_type: String(item.question_type || '').trim(),
+        expected_entry_ids: asStringList(item.expected_entry_ids),
+        retrieved_entry_ids: asStringList(item.retrieved_entry_ids),
+        score: asNumber(item.score),
+        answer_supported: asBoolean(item.answer_supported),
+        wrong_entry_top1: asBoolean(item.wrong_entry_top1),
+        hallucination_risk: String(item.hallucination_risk || '').trim(),
+        should_answer_passed: asBoolean(item.should_answer_passed),
+        classification: Object.keys(classification).length ? classification : null,
+        proposed_actions: proposedActions,
+      };
+    })
+    .filter((item): item is RagEvalActionableResult => item !== null);
+};
+
+const actionTypeLabel = (value: string): string => {
+  if (value === 'attach_question_to_entry') return 'Добавить пользовательскую формулировку';
+  if (value === 'rebuild_entry_embedding') return 'Пересобрать embedding';
+  if (value === 'rerun_eval') return 'Запустить повторную проверку';
+  if (value === 'create_entry_from_failure') return 'Создать entry вручную';
+  return value || 'Action';
+};
+
 const readinessLabel = (value: unknown): string => {
   const readiness = String(value || '').trim();
   if (readiness === 'ready') return 'Готово к использованию';
@@ -163,6 +224,149 @@ const ReportList: React.FC<{ title: string; items: string[] }> = ({ title, items
     )}
   </div>
 );
+
+interface ActionableResultsPanelProps {
+  results: RagEvalActionableResult[];
+  executingResultId: string | null;
+  onExecute: (resultId: string) => void;
+}
+
+const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
+  results,
+  executingResultId,
+  onExecute,
+}) => {
+  if (!results.length) return null;
+
+  return (
+    <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+          <RotateCcw className="h-5 w-5" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Actionable failures</h2>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
+              Безопасные auto-actions из последнего отчёта. Внутренние диагностические поля и сырой ответ здесь не выводятся.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {results.map((result) => {
+          const classification = getRecord(result.classification);
+          const failureStage = String(classification.failure_stage || classification.stage || '').trim();
+          const failureType = String(classification.failure_type || classification.type || '').trim();
+          const isExecuting = executingResultId === result.result_id;
+          const canExecute = result.proposed_actions.length > 0;
+
+          return (
+            <article
+              key={result.result_id}
+              className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                      score {Math.round(result.score * 100)}%
+                    </span>
+                    <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                      {result.hallucination_risk || 'risk n/a'}
+                    </span>
+                    {result.wrong_entry_top1 && (
+                      <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
+                        wrong top-1
+                      </span>
+                    )}
+                    {!result.answer_supported && (
+                      <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
+                        unsupported answer
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Question</div>
+                    <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
+                      {result.question || 'Без текста вопроса'}
+                    </div>
+                  </div>
+
+                  {(failureStage || failureType) && (
+                    <div className="text-xs text-[var(--text-muted)]">
+                      Failure: {[failureStage, failureType].filter(Boolean).join(' / ')}
+                    </div>
+                  )}
+
+                  <div className="grid gap-2 text-xs text-[var(--text-muted)] sm:grid-cols-2">
+                    <div>
+                      Expected entries: {result.expected_entry_ids.length
+                        ? result.expected_entry_ids.map((id) => id.slice(0, 8)).join(', ')
+                        : 'none'}
+                    </div>
+                    <div>
+                      Retrieved entries: {result.retrieved_entry_ids.length
+                        ? result.retrieved_entry_ids.map((id) => id.slice(0, 8)).join(', ')
+                        : 'none'}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onExecute(result.result_id)}
+                  disabled={!canExecute || Boolean(executingResultId)}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isExecuting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  Применить safe actions
+                </button>
+              </div>
+
+              <div className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3">
+                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
+                  Proposed actions: {formatNumber(result.proposed_actions.length)}
+                </div>
+                {result.proposed_actions.length ? (
+                  <ul className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
+                    {result.proposed_actions.map((action, index) => {
+                      const payloadQuestion = typeof action.payload.question === 'string'
+                        ? action.payload.question
+                        : '';
+
+                      return (
+                        <li key={`${result.result_id}-${action.action_type}-${index}`}>
+                          <span className="font-medium text-[var(--text-primary)]">
+                            {actionTypeLabel(action.action_type)}
+                          </span>
+                          {action.target_entry_id && (
+                            <span className="text-[var(--text-muted)]">
+                              {' '}→ {action.target_entry_id.slice(0, 8)}…
+                            </span>
+                          )}
+                          {payloadQuestion && (
+                            <div className="mt-1 text-xs text-[var(--text-muted)]">
+                              “{payloadQuestion}”
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-[var(--text-muted)]">
+                    Для этого результата нет auto-safe actions.
+                  </p>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
 
 const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ report }) => {
   if (!Object.keys(report).length) {
@@ -519,8 +723,23 @@ export const RagEvalPage: React.FC = () => {
       toast.error(error instanceof Error ? error.message : 'Не удалось отменить задачу');
     },
   });
+
+  const executeActionsMutation = useMutation<KnowledgeEditActionExecutionSummary, unknown, string>({
+    mutationFn: async (resultId: string) => ragEvalApi.executeResultActions(resultId),
+    onSuccess: async (summary) => {
+      toast.success(
+        `Safe actions applied: ${summary.applied_actions}, rejected: ${summary.rejected_actions}, failed: ${summary.failed_actions}`,
+      );
+      await invalidateEvalQueries();
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : 'Не удалось применить safe actions');
+    },
+  });
+
   const latestReportPayload = statusQuery.data?.report ?? null;
   const latestReport = getRecord(latestReportPayload);
+  const actionableResults = useMemo(() => getActionableResults(latestReport), [latestReport]);
   const latestRun = statusQuery.data?.run ?? null;
   const progressJob = progressQuery.data?.job ?? visibleJob;
   const progressPayload = progressJob?.progress ?? visibleJob?.progress ?? (
@@ -529,6 +748,9 @@ export const RagEvalPage: React.FC = () => {
       : null
   );
   const isControlMutating = pauseMutation.isPending || resumeMutation.isPending || cancelMutation.isPending;
+  const executingResultId = executeActionsMutation.isPending
+    ? executeActionsMutation.variables ?? null
+    : null;
 
   if (documentsQuery.isLoading) {
     return (
@@ -661,6 +883,12 @@ export const RagEvalPage: React.FC = () => {
           </div>
         )}
       </section>
+
+      <ActionableResultsPanel
+        results={actionableResults}
+        executingResultId={executingResultId}
+        onExecute={(resultId) => executeActionsMutation.mutate(resultId)}
+      />
     </div>
   );
 };

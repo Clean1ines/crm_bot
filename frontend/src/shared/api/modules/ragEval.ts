@@ -85,6 +85,43 @@ export interface RagEvalJobActionResponse {
   job: RagEvalJob;
 }
 
+export interface RagEvalProposedActionSummary {
+  action_type: string;
+  target_entry_id: string | null;
+  reason: string;
+  payload: Record<string, unknown>;
+}
+
+export interface RagEvalActionableResult {
+  result_id: string;
+  run_id: string;
+  question_id: string;
+  question: string;
+  question_type: string;
+  expected_entry_ids: string[];
+  retrieved_entry_ids: string[];
+  score: number;
+  answer_supported: boolean;
+  wrong_entry_top1: boolean;
+  hallucination_risk: string;
+  should_answer_passed: boolean;
+  classification: Record<string, unknown> | null;
+  proposed_actions: RagEvalProposedActionSummary[];
+}
+
+export interface KnowledgeEditActionExecutionSummary {
+  ok: boolean;
+  source_result_id: string;
+  project_id: string;
+  document_id: string;
+  total_actions: number;
+  applied_actions: number;
+  rejected_actions: number;
+  failed_actions: number;
+  skipped_actions: number;
+  queued_rerun_job_ids: string[];
+}
+
 interface RunDocumentEvalOptions {
   mode?: 'quick' | 'standard' | 'deep' | 'paranoid';
 }
@@ -155,6 +192,15 @@ export const ragEvalApi = {
     return unwrap(
       authedJsonRequest<RagEvalJobActionResponse>(
         `/api/rag-eval/jobs/${encode(jobId)}/resume`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  async executeResultActions(resultId: string): Promise<KnowledgeEditActionExecutionSummary> {
+    return unwrap(
+      authedJsonRequest<KnowledgeEditActionExecutionSummary>(
+        `/api/rag-eval/results/${encode(resultId)}/actions/execute`,
         { method: 'POST' },
       ),
     );
