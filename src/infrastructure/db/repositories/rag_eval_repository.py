@@ -7,8 +7,9 @@ from typing import Literal, cast
 
 import asyncpg
 
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, JsonValue
 from src.application.rag_eval.failure_classification import (
+    KnowledgeEditAction,
     failure_classification_from_mapping,
     knowledge_edit_actions_from_value,
 )
@@ -31,6 +32,16 @@ from src.domain.project_plane.knowledge_views import SourceRefView
 
 def _jsonb(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_value(item) for item in value]
+    return str(value)
 
 
 def _optional_jsonb(value: object | None) -> str | None:
@@ -171,6 +182,57 @@ def _source_ref_views_from_payload(value: object) -> tuple[SourceRefView, ...]:
 
 
 RAG_EVAL_SOURCE_ENTRY_KINDS = tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
+
+
+def _is_actionable_result(result: RagEvalResult) -> bool:
+    return bool(result.proposed_actions) or (
+        not result.is_passed and result.classification is not None
+    )
+
+
+def _actionable_action_payload(payload: Mapping[str, object]) -> JsonObject:
+    question = payload.get("question")
+    if isinstance(question, str) and question.strip():
+        return {"question": question.strip()}
+    return {}
+
+
+def _actionable_action_summary(action: KnowledgeEditAction) -> JsonObject:
+    summary: JsonObject = {
+        "action_type": action.action_type.value,
+        "reason": action.reason,
+        "payload": _actionable_action_payload(action.payload),
+    }
+    if action.target_entry_id:
+        summary["target_entry_id"] = action.target_entry_id
+    return summary
+
+
+def _actionable_result_summary(result: RagEvalResult) -> JsonObject:
+    return {
+        "result_id": result.id,
+        "run_id": result.run_id,
+        "question_id": result.question_id,
+        "question": result.question.question,
+        "question_type": result.question.question_type,
+        "expected_entry_ids": list(result.question.expected_entry_ids),
+        "retrieved_entry_ids": [
+            str(item)
+            for item in _json_list(result.judge_json.get("retrieved_entry_ids"))
+        ]
+        or [entry.id for entry in result.retrieved_entries],
+        "score": result.score,
+        "answer_supported": result.answer_supported,
+        "should_answer_passed": result.should_answer_passed,
+        "wrong_entry_top1": result.wrong_entry_top1,
+        "hallucination_risk": result.hallucination_risk,
+        "classification": _json_value(result.classification.to_json())
+        if result.classification is not None
+        else None,
+        "proposed_actions": [
+            _actionable_action_summary(action) for action in result.proposed_actions
+        ],
+    }
 
 
 class RagEvalRepository:
@@ -809,9 +871,12 @@ class RagEvalRepository:
         if row is None:
             return None
 
+        run_id = str(row["run_id"])
+        run_results = await self.load_run_results(run_id=run_id)
+
         return {
             "id": str(row["id"]),
-            "run_id": str(row["run_id"]),
+            "run_id": run_id,
             "dataset_id": str(row["dataset_id"]),
             "project_id": str(row["project_id"]),
             "document_id": str(row["document_id"]),
@@ -823,6 +888,11 @@ class RagEvalRepository:
             "metrics": row["metrics"] or {},
             "markdown": str(row["markdown"] or ""),
             "created_at": str(row["created_at"]),
+            "actionable_results": [
+                _actionable_result_summary(result)
+                for result in run_results
+                if _is_actionable_result(result)
+            ],
         }
 
     def _entry_from_row(self, row: Mapping[str, object]) -> RagEvalEvidenceEntry:
