@@ -29,7 +29,12 @@ def test_stage_h2_rag_eval_page_renders_actionable_results_and_executes_actions(
     assert "const executeActionsMutation = useMutation" in source
     assert "ragEvalApi.executeResultActions(resultId)" in source
     assert "results={actionableResults}" in source
-    assert "Safe actions applied" in source
+    assert "Исправления применены" in source
+    assert "Предложенные исправления базы знаний" in source
+    assert "Что не так" in source
+    assert "Что будет сделано" in source
+    assert "Применить предложенные исправления" in source
+    assert "lastActionExecutionSummary" in source
 
 
 def test_stage_h2_actionable_panel_does_not_render_internal_payload_keys() -> None:
@@ -42,3 +47,5 @@ def test_stage_h2_actionable_panel_does_not_render_internal_payload_keys() -> No
     assert "judge_json" not in panel
     assert "embedding_text" not in panel
     assert "raw evidence" not in panel.lower()
+    assert "Actionable failures" not in panel
+    assert "Safe actions" not in panel
