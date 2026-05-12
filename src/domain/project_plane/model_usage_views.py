@@ -8,7 +8,10 @@ from src.domain.project_plane.json_types import JsonObject
 
 ModelUsageType: TypeAlias = Literal["embedding", "llm"]
 ModelUsageSource: TypeAlias = Literal[
-    "knowledge_upload", "knowledge_preprocessing", "rag_search"
+    "knowledge_upload",
+    "knowledge_preprocessing",
+    "rag_search",
+    "knowledge_edit_action",
 ]
 
 

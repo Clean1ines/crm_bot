@@ -7,12 +7,12 @@ from typing import Literal, cast
 
 import asyncpg
 
+from src.domain.project_plane.json_types import JsonObject
 from src.application.rag_eval.failure_classification import (
     failure_classification_from_mapping,
     knowledge_edit_actions_from_value,
 )
 from src.application.rag_eval.schemas import (
-    JsonObject,
     RagEvalDataset,
     RagEvalEvidenceEntry,
     RagEvalQuestion,
@@ -902,6 +902,38 @@ class RagEvalRepository:
             metadata=_json_object(row.get("q_metadata")),
             created_at=_row_datetime_value(row, "q_created_at"),
         )
+
+    async def load_result_action_source(self, result_id: str) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    rr.id,
+                    rr.run_id,
+                    rr.question_id,
+                    rr.proposed_actions,
+                    q.project_id,
+                    q.document_id,
+                    q.question
+                FROM rag_eval_results AS rr
+                JOIN rag_eval_questions AS q ON q.id = rr.question_id
+                WHERE rr.id = $1
+                """,
+                result_id,
+            )
+
+        if row is None:
+            return None
+
+        return {
+            "id": str(row["id"]),
+            "run_id": str(row["run_id"]),
+            "question_id": str(row["question_id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]),
+            "question": str(row["question"]),
+            "proposed_actions": row["proposed_actions"],
+        }
 
     def _result_from_joined_row(self, row: Mapping[str, object]) -> RagEvalResult:
         return RagEvalResult(
