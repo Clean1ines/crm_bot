@@ -14,6 +14,7 @@ from src.domain.project_plane.knowledge_compilation import (
     SourceChunk,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
 )
@@ -182,6 +183,16 @@ class KnowledgePreprocessorPort(Protocol):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
+        previous_entry_titles: Sequence[str] = (),
+    ) -> KnowledgePreprocessingExecutionResult: ...
+
+    async def merge_answer_entry(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        file_name: str,
+        existing_entry: KnowledgePreprocessingEntry,
+        incoming_entry: KnowledgePreprocessingEntry,
     ) -> KnowledgePreprocessingExecutionResult: ...
 
 
