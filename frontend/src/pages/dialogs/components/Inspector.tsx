@@ -6,6 +6,7 @@ import type { MemoryEntry, TimelineEvent, ThreadState } from '../../../entities/
 import { Edit2, Save, X, AlertCircle, ChevronDown, ChevronLeft } from 'lucide-react';
 import frontendLogger from '../../../shared/lib/logger';
 import { getClientDisplayName } from '../../../shared/lib/clients';
+import { threadStatusLabel } from '../../../shared/lib/uiLabels';
 
 interface Tab {
   id: string;
@@ -90,7 +91,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 text-xs text-[var(--text-muted)]">Статус</div>
-            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.status || '—'}</div>
+            <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{threadStatusLabel(state?.status)}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 text-xs text-[var(--text-muted)]">Стадия</div>
@@ -113,7 +114,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
             </div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Summary</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">Краткая сводка</div>
             <div className="whitespace-pre-wrap break-words text-sm leading-snug text-[var(--text-primary)]">
               {state?.conversation_summary || '—'}
             </div>
@@ -152,7 +153,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
               <div className="mt-1 break-all font-mono text-sm text-[var(--text-secondary)]">
                 {typeof entry.value === 'object' ? JSON.stringify(entry.value, null, 2) : String(entry.value)}
               </div>
-              <div className="mt-1 text-xs text-[var(--text-muted)]">тип: {entry.type}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">Категория: {entry.type}</div>
             </div>
           )}
         </div>
@@ -182,7 +183,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
               </div>
               <div className="font-mono text-sm">Решение: {decision}</div>
               <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                Намерение: {intent}, ЖЦ: {lifecycle}, CTA: {cta}
+                Намерение: {intent}, этап: {lifecycle}, действие: {cta}
               </div>
               {repeatCount !== undefined && (
                 <div className="mt-1 text-xs text-[var(--text-muted)]">Повторов: {repeatCount}</div>
@@ -230,18 +231,11 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     </div>
   );
 
-  const renderRaw = () => (
-    <pre className="overflow-auto rounded-lg bg-[var(--surface-secondary)] p-2 text-xs">
-      {JSON.stringify(threadState, null, 2)}
-    </pre>
-  );
-
   const tabs: Tab[] = [
     { id: 'summary', label: 'Сводка', component: renderSummary },
     { id: 'memory', label: 'Память', component: renderMemory },
     { id: 'decision', label: 'Решение', component: renderDecisionTrace },
     { id: 'timeline', label: 'События', component: renderTimeline },
-    { id: 'raw', label: 'Raw', component: renderRaw },
   ];
 
   useEffect(() => {
@@ -467,7 +461,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
             <div className="min-w-0">
               <h1 className="truncate text-lg font-semibold leading-tight text-[var(--text-primary)]">Сводка диалога</h1>
               <p className="text-xs text-[var(--text-muted)]">
-                {threadId ? `Диалог ${threadId.slice(0, 8)}` : 'Диалог не выбран'}
+                {threadId ? 'Выбранный диалог' : 'Диалог не выбран'}
               </p>
             </div>
           </div>
@@ -491,7 +485,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
                   key={tab.id}
                   onClick={() => {
                     frontendLogger.debug('Inspector tab clicked from dropdown', { tabId: tab.id });
-                    setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline' | 'raw');
+                    setInspectorActiveTab(tab.id as 'summary' | 'memory' | 'decision' | 'timeline');
                     setShowTabMenu(false);
                   }}
                   className={`block w-full px-3 py-2 text-left text-sm ${

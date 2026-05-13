@@ -20,7 +20,7 @@ export const THREAD_STATUS_FILTER_OPTIONS: ReadonlyArray<{
   value: ThreadStatusFilter;
 }> = [
   { label: 'Все', value: null },
-  { label: 'Авто', value: AUTO_THREAD_FILTER },
+  { label: 'Ассистент', value: AUTO_THREAD_FILTER },
   { label: 'Менеджер', value: MANAGER_THREAD_FILTER },
 ];
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../shared/api/core/errors';
+import { threadStatusLabel } from '../../shared/lib/uiLabels';
 
 import type { Client, Message, ThreadState } from '../../entities/thread/model/types';
 import { threadsApi } from '../../shared/api/modules/threads';
@@ -27,7 +28,7 @@ export const TicketDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['ticket_messages', threadId],
     queryFn: async () => {
-      if (!threadId) throw new Error('No thread ID');
+      if (!threadId) throw new Error('Диалог не выбран');
 
       const { data, error } = await threadsApi.getMessages(threadId);
       if (error) throw error;
@@ -86,7 +87,7 @@ export const TicketDetailPage: React.FC = () => {
 
   const claimMutation = useMutation({
     mutationFn: async () => {
-      if (!threadId) throw new Error('No thread ID');
+      if (!threadId) throw new Error('Диалог не выбран');
       const { error } = await threadsApi.claim(threadId);
       if (error) throw error;
     },
@@ -99,7 +100,7 @@ export const TicketDetailPage: React.FC = () => {
 
   const closeMutation = useMutation({
     mutationFn: async () => {
-      if (!threadId) throw new Error('No thread ID');
+      if (!threadId) throw new Error('Диалог не выбран');
       const { error } = await threadsApi.close(threadId);
       if (error) throw error;
     },
@@ -121,7 +122,7 @@ export const TicketDetailPage: React.FC = () => {
 
   const replyMutation = useMutation({
     mutationFn: async (message: string) => {
-      if (!threadId) throw new Error('No thread ID');
+      if (!threadId) throw new Error('Диалог не выбран');
       const { error } = await threadsApi.reply(threadId, message);
       if (error) throw error;
     },
@@ -141,7 +142,7 @@ export const TicketDetailPage: React.FC = () => {
   if (!threadId) {
     return (
       <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">
-        Некорректный ID тикета
+        Не удалось открыть обращение
       </div>
     );
   }
@@ -165,7 +166,7 @@ export const TicketDetailPage: React.FC = () => {
           </h1>
           <div className="mt-2 flex flex-wrap gap-4 text-sm text-[var(--text-secondary)]">
             <span>
-              Статус: <span className="font-medium">{ticketStatus}</span>
+              Статус: <span className="font-medium">{threadStatusLabel(ticketStatus)}</span>
             </span>
             <span>Создан: {ticketCreatedAt}</span>
           </div>

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { getErrorMessage } from '../../shared/api/core/errors';
+import { threadStatusLabel } from '../../shared/lib/uiLabels';
 
 import {
   TICKET_NEW_FILTER,
@@ -141,9 +142,8 @@ export const TicketsPage: React.FC = () => {
                   {lastMsg?.content || 'Нет сообщений'}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
-                  <span>Статус: {ticket.status}</span>
+                  <span>Статус: {threadStatusLabel(ticket.status)}</span>
                   <span>Создан: {new Date(ticket.thread_created_at).toLocaleString()}</span>
-                  <span>ID диалога: {ticket.thread_id.slice(0, 8)}</span>
                 </div>
               </div>
             );

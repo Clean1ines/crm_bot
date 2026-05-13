@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 
 import { useProjectConfiguration } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
+import { channelKindLabel, channelProviderLabel, channelStatusLabel, integrationProviderLabel } from '@shared/lib/uiLabels';
 import { projectsApi } from '@shared/api/modules/projects';
 
 type SettingsDraft = {
@@ -61,7 +62,7 @@ export const ProjectSettingsPage: React.FC = () => {
 
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Project is not selected');
+      if (!projectId) throw new Error('Сначала выберите проект');
       await projectsApi.updateSettings(projectId, {
         brand_name: brandName || undefined,
         tone_of_voice: toneOfVoice || undefined,
@@ -83,7 +84,7 @@ export const ProjectSettingsPage: React.FC = () => {
 
   const saveIntegrationMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Project is not selected');
+      if (!projectId) throw new Error('Сначала выберите проект');
       if (!integrationProvider.trim()) throw new Error('Укажите поставщика интеграции');
       await projectsApi.upsertIntegration(projectId, {
         provider: integrationProvider.trim(),
@@ -101,7 +102,7 @@ export const ProjectSettingsPage: React.FC = () => {
 
   const saveWidgetChannelMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Project is not selected');
+      if (!projectId) throw new Error('Сначала выберите проект');
       await projectsApi.upsertChannel(projectId, {
         kind: 'widget',
         provider: 'web',
@@ -112,7 +113,7 @@ export const ProjectSettingsPage: React.FC = () => {
     onSuccess: async () => {
       await invalidateConfiguration();
       setDraft((current) => ({ ...current, widgetOrigin: undefined }));
-      toast.success('Канал веб-виджета сохранен');
+      toast.success('Канал веб-виджета сохранён');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -168,7 +169,7 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Timezone</span>
+            <span className="text-[var(--text-muted)]">Часовой пояс</span>
             <input
               value={defaultTimezone}
               onChange={(event) => updateDraft({ defaultTimezone: event.target.value })}
@@ -192,11 +193,11 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Резервная модель</span>
+            <span className="text-[var(--text-muted)]">Модель ассистента</span>
             <input
               value={fallbackModel}
               onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
-              placeholder="llama-3.1-8b-instant"
+              placeholder="например: быстрая модель для ответов"
               className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
@@ -213,16 +214,14 @@ export const ProjectSettingsPage: React.FC = () => {
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
         <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Интеграции</h2>
         <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1 text-sm">
+            <span className="text-[var(--text-muted)]">Тип подключения</span>
+            <div className="flex min-h-10 items-center rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
+              {integrationProviderLabel(integrationProvider)}
+            </div>
+          </div>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Поставщик</span>
-            <input
-              value={integrationProvider}
-              onChange={(event) => updateDraft({ integrationProvider: event.target.value })}
-              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-            />
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Адрес webhook</span>
+            <span className="text-[var(--text-muted)]">Адрес внешнего обработчика</span>
             <input
               value={integrationUrl}
               onChange={(event) => updateDraft({ integrationUrl: event.target.value })}
@@ -270,9 +269,9 @@ export const ProjectSettingsPage: React.FC = () => {
               >
                 <div>
                   <div className="font-medium text-[var(--text-primary)]">
-                    {String(channel.kind)} / {String(channel.provider)}
+                    {channelKindLabel(String(channel.kind))} · {channelProviderLabel(String(channel.provider))}
                   </div>
-                  <div className="text-xs text-[var(--text-muted)]">{String(channel.status ?? 'disabled')}</div>
+                  <div className="text-xs text-[var(--text-muted)]">{channelStatusLabel(String(channel.status ?? 'disabled'))}</div>
                 </div>
               </div>
             ))}

@@ -192,7 +192,7 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
 
 const actionTypeLabel = (value: string): string => {
   if (value === 'attach_question_to_entry') return 'Добавить формулировку клиента';
-  if (value === 'rebuild_entry_embedding') return 'Обновить поисковое представление записи';
+  if (value === 'rebuild_entry_embedding') return 'Обновить поисковую версию записи';
   if (value === 'rerun_eval') return 'Запустить повторную проверку';
   if (value === 'create_entry_from_failure') return 'Создать новую запись вручную';
   return value || 'Действие';
@@ -204,7 +204,7 @@ const actionTypeDescription = (value: string): string => {
   }
 
   if (value === 'rebuild_entry_embedding') {
-    return 'Система обновит поисковый образ записи после изменений, чтобы она корректнее участвовала в поиске.';
+    return 'Система обновит поисковую версию записи после изменений, чтобы она корректнее участвовала в поиске.';
   }
 
   if (value === 'rerun_eval') {
@@ -473,9 +473,9 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <MetricPill label="Всего вопросов" value={total || '—'} />
-        <MetricPill label="Первый найденный фрагмент" value={`${top1Rate}%`} />
-        <MetricPill label="Первые 3 фрагмента" value={`${top3Rate}%`} />
-        <MetricPill label="Первые 5 фрагментов" value={`${top5Rate}%`} />
+        <MetricPill label="Лучшее совпадение" value={`${top1Rate}%`} />
+        <MetricPill label="В трёх лучших совпадениях" value={`${top3Rate}%`} />
+        <MetricPill label="В пяти лучших совпадениях" value={`${top5Rate}%`} />
         <MetricPill label="Ответы подтверждены" value={`${answerSupportedRate}%`} />
         <MetricPill label="Риск выдуманного ответа" value={highHallucinationRisk} />
         <MetricPill label="Первый фрагмент оказался неверным" value={wrongChunkTop1} />
@@ -487,7 +487,7 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
 
       {typeof report.markdown === 'string' && report.markdown.trim() && (
         <details className="rounded-xl bg-[var(--surface-elevated)] p-3 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-card)]">
-          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">Показать markdown-отчёт</summary>
+          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">Показать подробный отчёт</summary>
           <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{report.markdown}</pre>
         </details>
       )}
