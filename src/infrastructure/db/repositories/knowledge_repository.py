@@ -373,6 +373,44 @@ class KnowledgeRepository:
         preprocessing_status = str(row["preprocessing_status"] or "")
         return status == "error" or preprocessing_status in {"failed", "cancelled"}
 
+    async def list_runtime_entry_titles(
+        self,
+        *,
+        project_id: str,
+        exclude_document_id: str | None = None,
+        limit: int = 300,
+    ) -> tuple[str, ...]:
+        safe_limit = max(1, min(limit, 500))
+        excluded_document_uuid = (
+            ensure_uuid(exclude_document_id) if exclude_document_id else None
+        )
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT title
+                FROM knowledge_retrieval_surface
+                WHERE project_id = $1
+                  AND status = 'published'
+                  AND visibility = 'runtime'
+                  AND ($2::uuid IS NULL OR document_id <> $2::uuid)
+                  AND NULLIF(BTRIM(title), '') IS NOT NULL
+                ORDER BY title ASC
+                LIMIT $3
+                """,
+                ensure_uuid(project_id),
+                excluded_document_uuid,
+                safe_limit,
+            )
+
+        titles: list[str] = []
+        for row in rows:
+            title = str(row["title"] or "").strip()
+            if title and title not in titles:
+                titles.append(title)
+
+        return tuple(titles)
+
     async def search(
         self,
         project_id: str,
