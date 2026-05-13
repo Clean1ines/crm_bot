@@ -90,3 +90,8 @@ def test_stage_k_ingestion_records_compiler_loop_and_merge_metrics() -> None:
     assert "one_meaning_at_a_time_merge" in source
     assert "llm_merge_call_count" in source
     assert "KCD_STAGE_K_COMPILER_VERSION" in source
+    assert "Knowledge answer compiler technical batch processed" in source
+    assert "technical_compiler_total_count" in source
+    assert "compiled_entry_count" in source
+    assert "status_message" in source
+    assert "model" in source

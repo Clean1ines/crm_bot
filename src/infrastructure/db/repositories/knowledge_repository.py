@@ -284,6 +284,95 @@ class KnowledgeRepository:
             return 0.0
         return len(q & t) / len(q)
 
+    async def cancel_document_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        reason: str,
+    ) -> bool:
+        project_uuid = ensure_uuid(project_id)
+        document_uuid = ensure_uuid(document_id)
+        document_id_text = str(document_id)
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                document_row = await conn.fetchrow(
+                    """
+                    UPDATE knowledge_documents
+                    SET
+                        status = 'error',
+                        error = $3,
+                        preprocessing_status = 'failed',
+                        preprocessing_error = $3,
+                        updated_at = now()
+                    WHERE project_id = $1
+                      AND id = $2
+                    RETURNING id
+                    """,
+                    project_uuid,
+                    document_uuid,
+                    reason,
+                )
+                if document_row is None:
+                    return False
+
+                await conn.execute(
+                    """
+                    UPDATE execution_queue
+                    SET
+                        status = 'failed',
+                        attempts = max_attempts,
+                        error = $4,
+                        locked_at = NULL,
+                        worker_id = NULL,
+                        next_attempt_at = NULL,
+                        updated_at = now()
+                    WHERE payload->>'document_id' = $1
+                      AND task_type = ANY($2::text[])
+                      AND NOT (status = ANY($3::text[]))
+                    """,
+                    document_id_text,
+                    list(CANCELLABLE_KNOWLEDGE_JOB_TYPES),
+                    list(TERMINAL_QUEUE_STATUSES),
+                    reason,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_compiler_runs
+                    SET
+                        status = 'failed',
+                        error = $2,
+                        finished_at = now(),
+                        updated_at = now()
+                    WHERE document_id = $1
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    """,
+                    document_uuid,
+                    reason,
+                )
+
+        return True
+
+    async def is_document_processing_cancelled(self, document_id: str) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT status, preprocessing_status
+                FROM knowledge_documents
+                WHERE id = $1
+                """,
+                ensure_uuid(document_id),
+            )
+
+        if row is None:
+            return True
+
+        status = str(row["status"] or "")
+        preprocessing_status = str(row["preprocessing_status"] or "")
+        return status == "error" or preprocessing_status in {"failed", "cancelled"}
+
     async def search(
         self,
         project_id: str,

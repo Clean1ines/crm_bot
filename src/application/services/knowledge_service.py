@@ -39,6 +39,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
 
 BEARER_PREFIX = "Bearer "
 UPLOAD_FALLBACK_NAME = "upload"
+KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE = "Остановлено пользователем"
 
 
 @dataclass(frozen=True)
@@ -229,6 +230,32 @@ class KnowledgeService:
             preprocessing_mode=mode,
             preprocessing_status=preprocessing_status,
             structured_entries=0,
+        )
+
+    async def cancel_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> None:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        cancelled = await repo.cancel_document_processing(
+            project_id=project_id,
+            document_id=document_id,
+            reason=KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE,
+        )
+        if not cancelled:
+            raise NotFoundError("Knowledge document not found")
+
+        logger.info(
+            "Knowledge document processing cancelled",
+            extra={"project_id": project_id, "document_id": document_id},
         )
 
     async def preview_query(

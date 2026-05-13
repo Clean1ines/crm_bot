@@ -174,17 +174,39 @@ def build_embedding_text(entry: KnowledgePreprocessingEntry) -> str:
 def _loads_json_object(text: str) -> Mapping[str, object]:
     cleaned = _strip_json_fence(text)
     try:
-        payload = json.loads(cleaned)
+        return _loads_first_json_mapping(cleaned)
     except json.JSONDecodeError as exc:
         raise KnowledgePreprocessingValidationError(
             f"Invalid preprocessing JSON: {exc}"
         ) from exc
 
-    if not isinstance(payload, Mapping):
-        raise KnowledgePreprocessingValidationError(
-            "Preprocessing JSON root must be an object"
-        )
-    return cast(Mapping[str, object], payload)
+
+def _loads_first_json_mapping(text: str) -> Mapping[str, object]:
+    stripped = text.strip()
+    decoder = json.JSONDecoder()
+    first_error: json.JSONDecodeError | None = None
+
+    for index, char in enumerate(stripped):
+        if char != "{":
+            continue
+
+        try:
+            payload, _end = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError as exc:
+            if first_error is None:
+                first_error = exc
+            continue
+
+        if not isinstance(payload, Mapping):
+            raise KnowledgePreprocessingValidationError(
+                "Preprocessing JSON root must be an object"
+            )
+        return cast(Mapping[str, object], payload)
+
+    if first_error is not None:
+        raise first_error
+
+    raise json.JSONDecodeError("Expected JSON object", stripped, 0)
 
 
 def _strip_json_fence(text: str) -> str:

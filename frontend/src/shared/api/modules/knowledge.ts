@@ -89,6 +89,11 @@ export const knowledgeApi = {
       method: 'DELETE',
     }),
 
+  cancel: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/cancel`, {
+      method: 'POST',
+    }),
+
   preview: (projectId: string, question: string, limit = 5) =>
     authedJsonRequest<KnowledgePreviewResponse, { question: string; limit: number }>(
       `/api/projects/${projectId}/knowledge/preview`,

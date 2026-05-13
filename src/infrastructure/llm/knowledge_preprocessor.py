@@ -61,9 +61,13 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         max_chunk_chars: int = 1800,
     ) -> None:
         self._client = client or RotatingAsyncGroq()
-        self._model = model or settings.GROQ_MODEL
+        self._model = model or settings.GROQ_KNOWLEDGE_PREPROCESSING_MODEL
         self._max_chunks = max(1, max_chunks)
         self._max_chunk_chars = max(200, max_chunk_chars)
+
+    @property
+    def model_name(self) -> str:
+        return self._model
 
     async def preprocess(
         self,
