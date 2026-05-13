@@ -12,6 +12,13 @@ ModelUsageSource: TypeAlias = Literal[
     "knowledge_preprocessing",
     "rag_search",
     "knowledge_edit_action",
+    "client_response",
+    "user_response",
+    "agent_response",
+    "conversation_answer",
+    "rag_eval",
+    "rag_eval_dataset",
+    "rag_eval_judge",
 ]
 
 

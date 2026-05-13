@@ -78,6 +78,7 @@ class ModelUsageRepository:
                     COALESCE(SUM(estimated_cost_usd), 0)::double precision AS estimated_cost_month_usd
                 FROM model_usage_events
                 WHERE project_id = $1
+                  AND usage_type = 'llm'
                   AND created_at >= $2
                   AND created_at < $3
                 """,
@@ -90,6 +91,7 @@ class ModelUsageRepository:
                 SELECT COALESCE(SUM(tokens_total), 0)::bigint AS tokens_today_total
                 FROM model_usage_events
                 WHERE project_id = $1
+                  AND usage_type = 'llm'
                   AND created_at >= $2
                   AND created_at < $3
                 """,
@@ -111,6 +113,7 @@ class ModelUsageRepository:
                     COUNT(*)::int AS events_count
                 FROM model_usage_events
                 WHERE project_id = $1
+                  AND usage_type = 'llm'
                   AND created_at >= $2
                   AND created_at < $3
                 GROUP BY provider, model, usage_type, source
@@ -128,6 +131,7 @@ class ModelUsageRepository:
                     COALESCE(SUM(estimated_cost_usd), 0)::double precision AS estimated_cost_usd
                 FROM model_usage_events
                 WHERE project_id = $1
+                  AND usage_type = 'llm'
                   AND created_at >= $2
                   AND created_at < $3
                 GROUP BY day
@@ -198,7 +202,19 @@ def _coerce_usage_type(value: object) -> ModelUsageType:
 
 def _coerce_usage_source(value: object) -> ModelUsageSource:
     text = str(value)
-    if text not in {"knowledge_upload", "knowledge_preprocessing", "rag_search"}:
+    if text not in {
+        "knowledge_upload",
+        "knowledge_preprocessing",
+        "rag_search",
+        "knowledge_edit_action",
+        "client_response",
+        "user_response",
+        "agent_response",
+        "conversation_answer",
+        "rag_eval",
+        "rag_eval_dataset",
+        "rag_eval_judge",
+    }:
         raise ValueError(f"Unsupported usage source in ledger row: {text}")
     return cast(ModelUsageSource, text)
 
