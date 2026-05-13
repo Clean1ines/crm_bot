@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from src.application.services.knowledge_ingestion_service import (
+    KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
     _apply_semantic_merge_tightening_decisions,
+    _semantic_merge_candidate_from_entry,
     _semantic_merge_suspect_groups_from_entries,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -122,3 +124,30 @@ def test_stage_k8_keeps_unrelated_entries_out_of_suspect_groups() -> None:
     )
 
     assert _semantic_merge_suspect_groups_from_entries(entries) == ()
+
+
+def test_stage_k8_semantic_merge_llm_candidate_payload_is_compact() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Условия возврата",
+        answer="Полный пользовательский ответ не должен уходить во второй LLM-вызов.",
+        source_excerpt="Источник остаётся в детерминированном merge, а не в prompt payload.",
+        questions=("Как оформить возврат?",),
+        synonyms=("возврат", "refund"),
+        tags=("policy",),
+        embedding_text="Условия возврата " + ("очень длинный embedding text " * 200),
+    )
+
+    candidate = _semantic_merge_candidate_from_entry(index=3, entry=entry)
+
+    assert candidate.candidate_id == "entry-3"
+    assert candidate.title == "Условия возврата"
+    assert candidate.answer == ""
+    assert candidate.questions == ()
+    assert candidate.synonyms == ()
+    assert candidate.tags == ()
+    assert candidate.source_ref_count == 1
+    assert len(candidate.embedding_text) <= (
+        KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS
+    )
+    assert "Полный пользовательский ответ" not in candidate.embedding_text
+    assert "Источник остаётся" not in candidate.embedding_text

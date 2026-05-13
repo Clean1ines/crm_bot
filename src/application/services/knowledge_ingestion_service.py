@@ -866,6 +866,7 @@ def _compiled_answer_drafts_from_preprocessing_result(
 
 KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS = 16
 KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE = 8
+KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS = 1400
 KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS = 3
 
 
@@ -978,14 +979,26 @@ def _semantic_merge_candidate_from_entry(
     index: int,
     entry: KnowledgePreprocessingEntry,
 ) -> KnowledgeSemanticMergeCandidate:
+    """Build a compact LLM payload for semantic retightening decisions.
+
+    The retightening model only needs a stable candidate id, title and compact
+    embedding text to decide whether entries represent the same answer meaning.
+    Full answers, questions, synonyms, tags and source excerpts are merged
+    deterministically by application code after the decision, so sending them
+    here only duplicates tokens and can exceed provider TPM limits.
+    """
+
     return KnowledgeSemanticMergeCandidate(
         candidate_id=_semantic_merge_candidate_id(index),
         title=_clean_optional_text(entry.title),
-        answer=_clean_optional_text(entry.answer),
-        embedding_text=_clean_optional_text(entry.embedding_text),
-        questions=_text_tuple(entry.questions),
-        synonyms=_text_tuple(entry.synonyms),
-        tags=_text_tuple(entry.tags),
+        answer="",
+        embedding_text=_limit_compiled_text(
+            _clean_optional_text(entry.embedding_text),
+            max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
+        ),
+        questions=(),
+        synonyms=(),
+        tags=(),
         source_ref_count=len(_source_excerpts_from_preprocessing_entry(entry)),
     )
 
