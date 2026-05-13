@@ -6,7 +6,10 @@ from collections.abc import Mapping
 
 import asyncpg
 
-from src.application.errors import EmbeddingProviderError
+from src.application.errors import EmbeddingProviderError, ValidationError
+from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgePreprocessingValidationError,
+)
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
@@ -63,6 +66,8 @@ async def handle_process_knowledge_upload(
             preprocessor_factory=GroqKnowledgePreprocessor,
             logger=logger,
         )
+    except (KnowledgePreprocessingValidationError, ValidationError) as exc:
+        raise PermanentJobError(str(exc)) from exc
     except EmbeddingProviderError as exc:
         if exc.retryable:
             raise TransientJobError(

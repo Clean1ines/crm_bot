@@ -135,9 +135,7 @@ def test_price_list_still_rejects_broad_noisy_synonyms() -> None:
         )
 
 
-def test_parse_preprocessing_payload_accepts_first_json_object_with_trailing_text() -> (
-    None
-):
+def test_parse_preprocessing_payload_rejects_trailing_text_after_json_object() -> None:
     raw_payload = json.dumps(
         {
             "entries": [_valid_entry()],
@@ -147,13 +145,13 @@ def test_parse_preprocessing_payload_accepts_first_json_object_with_trailing_tex
     )
     llm_response = f'{raw_payload}\n\n{{"ignored": true}}'
 
-    result = parse_preprocessing_payload(
-        llm_response,
-        mode=MODE_FAQ,
-        model="test-model",
-        prompt_version="knowledge_preprocess_faq_v2",
-    )
-
-    assert len(result.entries) == 1
-    assert result.entries[0].title == "Refund policy"
-    assert result.metrics == {"source": "unit-test"}
+    with pytest.raises(
+        KnowledgePreprocessingValidationError,
+        match="Extra data",
+    ):
+        parse_preprocessing_payload(
+            llm_response,
+            mode=MODE_FAQ,
+            model="test-model",
+            prompt_version="knowledge_preprocess_faq_v2",
+        )
