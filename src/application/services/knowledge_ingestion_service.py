@@ -1249,22 +1249,33 @@ async def _tighten_compiled_entries_with_semantic_merge(
         metrics["llm_call_count"] = 0
         return tuple(entries), source_excerpts, metrics
 
+    llm_call_count = 0
     try:
-        execution = await preprocessor.tighten_semantic_merges(
+        first_execution = await preprocessor.tighten_semantic_merges(
             mode=mode,
             file_name=file_name,
-            groups=groups,
+            groups=(groups[0],),
             existing_project_titles=existing_project_titles,
         )
+        llm_call_count = 1
+        decisions = first_execution.result.decisions
+        for group in groups[1:]:
+            execution = await preprocessor.tighten_semantic_merges(
+                mode=mode,
+                file_name=file_name,
+                groups=(group,),
+                existing_project_titles=existing_project_titles,
+            )
+            llm_call_count += 1
+            decisions = (*decisions, *execution.result.decisions)
     except Exception as exc:
         metrics["skipped"] = True
         metrics["error_type"] = type(exc).__name__
         metrics["error"] = str(exc)[:240]
         metrics["entry_count_after"] = len(entries)
-        metrics["llm_call_count"] = 1
+        metrics["llm_call_count"] = llm_call_count
         return tuple(entries), source_excerpts, metrics
 
-    decisions = execution.result.decisions
     tightened_entries, tightened_source_excerpts = (
         _apply_semantic_merge_tightening_decisions(
             entries=entries,
@@ -1279,7 +1290,7 @@ async def _tighten_compiled_entries_with_semantic_merge(
     )
     metrics["entry_count_after"] = len(tightened_entries)
     metrics["collapsed_entry_count"] = len(entries) - len(tightened_entries)
-    metrics["llm_call_count"] = 1
+    metrics["llm_call_count"] = llm_call_count
 
     return tightened_entries, tightened_source_excerpts, metrics
 
@@ -2108,36 +2119,86 @@ class KnowledgeIngestionService:
             project_id=project_id,
             document_id=document_id,
         )
-        execution = await preprocessor.tighten_semantic_merges(
-            mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
-            file_name=file_name,
-            groups=groups,
-            existing_project_titles=existing_project_titles,
-        )
-        if execution.usage is not None:
-            await usage_repo.record_event(
-                ModelUsageEventCreate.from_measurement(
-                    project_id=project_id,
-                    source="knowledge_preprocessing",
-                    measurement=execution.usage,
-                    document_id=document_id,
-                )
+        llm_call_count = 0
+        usage_event_count = 0
+        try:
+            first_execution = await preprocessor.tighten_semantic_merges(
+                mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
+                file_name=file_name,
+                groups=(groups[0],),
+                existing_project_titles=existing_project_titles,
             )
+            llm_call_count = 1
+            decisions = first_execution.result.decisions
+            model = first_execution.result.model
+            prompt_version = first_execution.result.prompt_version
+            if first_execution.usage is not None:
+                await usage_repo.record_event(
+                    ModelUsageEventCreate.from_measurement(
+                        project_id=project_id,
+                        source="knowledge_preprocessing",
+                        measurement=first_execution.usage,
+                        document_id=document_id,
+                    )
+                )
+                usage_event_count += 1
+
+            for group in groups[1:]:
+                execution = await preprocessor.tighten_semantic_merges(
+                    mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
+                    file_name=file_name,
+                    groups=(group,),
+                    existing_project_titles=existing_project_titles,
+                )
+                llm_call_count += 1
+                decisions = (*decisions, *execution.result.decisions)
+                model = execution.result.model
+                prompt_version = execution.result.prompt_version
+                if execution.usage is not None:
+                    await usage_repo.record_event(
+                        ModelUsageEventCreate.from_measurement(
+                            project_id=project_id,
+                            source="knowledge_preprocessing",
+                            measurement=execution.usage,
+                            document_id=document_id,
+                        )
+                    )
+                    usage_event_count += 1
+        except Exception as exc:
+            metrics["status"] = "skipped"
+            metrics["reason"] = "semantic_merge_tightening_failed"
+            metrics["error_type"] = type(exc).__name__
+            metrics["error"] = str(exc)[:240]
+            metrics["entry_count_after"] = len(current_entries)
+            metrics["llm_call_count"] = llm_call_count
+            metrics["usage_event_count"] = usage_event_count
+            logger.warning(
+                "Knowledge document semantic retighten skipped after LLM failure",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "candidate_group_count": len(groups),
+                    "llm_call_count": llm_call_count,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return metrics
 
         plan = _retighten_existing_document_plan(
             entries=preprocessing_entries,
-            decisions=execution.result.decisions,
+            decisions=decisions,
         )
 
-        metrics["decision_count"] = len(execution.result.decisions)
+        metrics["decision_count"] = len(decisions)
         metrics["merge_decision_count"] = sum(
-            1 for decision in execution.result.decisions if decision.is_merge
+            1 for decision in decisions if decision.is_merge
         )
         metrics["collapsed_entry_count"] = len(plan.removed_source_indexes)
         metrics["entry_count_after"] = len(plan.entries)
-        metrics["llm_call_count"] = 1
-        metrics["model"] = execution.result.model
-        metrics["prompt_version"] = execution.result.prompt_version
+        metrics["llm_call_count"] = llm_call_count
+        metrics["usage_event_count"] = usage_event_count
+        metrics["model"] = model
+        metrics["prompt_version"] = prompt_version
 
         if not plan.removed_source_indexes:
             metrics["status"] = "completed"

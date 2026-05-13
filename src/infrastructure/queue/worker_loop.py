@@ -117,9 +117,14 @@ async def run_worker_loop(
                 "Worker loop cancelled", extra={"worker_id": resolved_worker_id}
             )
             break
-        except Exception:
-            logger.exception(
-                "Error in worker loop", extra={"worker_id": resolved_worker_id}
+        except Exception as exc:
+            logger.error(
+                "Unexpected worker loop error",
+                extra={
+                    "worker_id": resolved_worker_id,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:240],
+                },
             )
             await asyncio.sleep(error_sleep_seconds)
 

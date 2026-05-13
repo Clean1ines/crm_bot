@@ -4,6 +4,7 @@ Provides a middleware for FastAPI to inject correlation IDs.
 """
 
 import logging
+import re
 
 # Do not let httpx/httpcore INFO request logs expose provider URLs with secrets.
 # Telegram Bot API puts the bot token in the URL path, so INFO request logging is unsafe.
@@ -11,7 +12,7 @@ import logging
 import sys
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from typing import TypeVar
 
 import structlog
@@ -22,6 +23,70 @@ from src.application.ports.logger_port import LoggerPort
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+_SENSITIVE_LOG_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "bearer",
+    "database_url",
+    "dsn",
+    "password",
+    "secret",
+    "token",
+)
+
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"gsk_[A-Za-z0-9_\-]{20,}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", re.IGNORECASE),
+    re.compile(r"postgres(?:ql)?://[^\s'\"]+", re.IGNORECASE),
+    re.compile(r"https://api\.telegram\.org/bot[^/\s'\"]+", re.IGNORECASE),
+)
+
+
+def _is_sensitive_log_key(key: object) -> bool:
+    normalized = str(key).lower()
+    return any(part in normalized for part in _SENSITIVE_LOG_KEY_PARTS)
+
+
+def _redact_string_value(value: str) -> str:
+    redacted = value
+    for pattern in _SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub("[REDACTED]", redacted)
+    return redacted
+
+
+def _redact_log_value(value: object, *, key: object | None = None) -> object:
+    if key is not None and _is_sensitive_log_key(key):
+        return "[REDACTED]"
+
+    if isinstance(value, str):
+        return _redact_string_value(value)
+
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _redact_log_value(child_value, key=child_key)
+            for child_key, child_value in value.items()
+        }
+
+    if isinstance(value, tuple):
+        return tuple(_redact_log_value(item) for item in value)
+
+    if isinstance(value, list):
+        return [_redact_log_value(item) for item in value]
+
+    return value
+
+
+def redact_sensitive_log_values(
+    logger: object,
+    method_name: str,
+    event_dict: MutableMapping[str, object],
+) -> MutableMapping[str, object]:
+    for key, value in tuple(event_dict.items()):
+        event_dict[key] = _redact_log_value(value, key=key)
+    return event_dict
 
 
 def configure_logging():
@@ -36,6 +101,7 @@ def configure_logging():
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
+            redact_sensitive_log_values,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         context_class=dict,
