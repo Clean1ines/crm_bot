@@ -251,7 +251,7 @@ const processingModelLabel = (doc: Document): string => {
   ].filter((value): value is string => Boolean(value && value.trim()));
 
   return candidates.find((model) => !isLikelyEmbeddingModel(model))
-    || 'LLM-модель пока определяется';
+    || 'Модель пока определяется';
 };
 
 const compiledEntryCount = (doc: Document): number | null => (
@@ -413,43 +413,43 @@ const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
         </div>
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            LLM-токены за месяц
+            Расход моделей за месяц
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Только фактические LLM-вызовы. Embedding-модели и remaining-лимиты здесь не учитываются.
+            Сколько токенов потрачено на обработку документов, проверки качества и ответы ассистента. Техническая индексация поиска здесь не учитывается.
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <UsageScenarioCard
-          title="Общее использование"
-          description={`Все LLM-сценарии за месяц · cost ${formatUsd(totalCost)}`}
+          title="Всего за месяц"
+          description={`Все сценарии работы модели · примерная стоимость ${formatUsd(totalCost)}`}
           breakdown={llmBreakdown}
-          emptyText="За месяц нет записанных LLM events"
+          emptyText="За месяц пока нет записанного расхода модели"
         />
         <UsageScenarioCard
-          title="Ответы пользователям"
-          description="LLM-токены генерации ответов клиентам и диалогов"
+          title="Ответы клиентам"
+          description="Генерация ответов в клиентских диалогах"
           breakdown={answerBreakdown}
-          emptyText="Пока нет LLM events для ответов пользователям"
+          emptyText="За месяц пока нет записанного расхода на ответы клиентам"
         />
         <UsageScenarioCard
-          title="Загрузка документов"
-          description="LLM-токены KCD-компиляции и merge_embedding_text"
+          title="Обработка базы знаний"
+          description="Разбор документов, сборка смысловых ответов и объединение повторов"
           breakdown={uploadBreakdown}
-          emptyText="Пока нет LLM events для загрузки документов"
+          emptyText="За месяц пока нет записанного расхода на обработку базы знаний"
         />
         <UsageScenarioCard
-          title="RAG eval"
-          description="LLM-токены генерации/оценки eval-сценариев"
+          title="Проверки качества"
+          description="Тестовые вопросы и автоматическая оценка качества поиска"
           breakdown={ragEvalBreakdown}
-          emptyText="Пока нет LLM events для RAG eval"
+          emptyText="За месяц пока нет записанного расхода на проверки качества"
         />
       </div>
 
       <div className="mt-4 text-sm text-[var(--text-muted)]">
-        Всего LLM-токенов за месяц: {formatNumber(totalTokens)}.
+        Всего токенов за месяц: {formatNumber(totalTokens)}.
       </div>
     </section>
   );
@@ -910,13 +910,13 @@ export const KnowledgePage: React.FC = () => {
                       </div>
                     )}
                     <div className="space-y-1 text-xs text-[var(--text-muted)]">
-                      <div>LLM-модель компиляции: {processingModelLabel(doc)}</div>
+                      <div>Модель обработки: {processingModelLabel(doc)}</div>
                       <div>Времени прошло: {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
                       {sourceChunkCount(doc) !== null && (
                         <div>Исходные source-фрагменты: {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
                       )}
                       {technicalChunkProgressText(doc) !== null && (
-                        <div>Технические фрагменты / LLM-батчи: {technicalChunkProgressText(doc)}</div>
+                        <div>Шаги обработки документа: {technicalChunkProgressText(doc)}</div>
                       )}
                       {compiledEntryCount(doc) !== null && (
                         <div>Собрано смысловых ответов: {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
@@ -930,10 +930,10 @@ export const KnowledgePage: React.FC = () => {
                         </div>
                       )}
                       {documentLlmTokenText(doc) !== null && (
-                        <div>LLM-токены документа: {documentLlmTokenText(doc)}</div>
+                        <div>Токены обработки документа: {documentLlmTokenText(doc)}</div>
                       )}
                       {documentLlmModels(doc) !== null && (
-                        <div>LLM-модели токенов документа: {documentLlmModels(doc)}</div>
+                        <div>Модели обработки документа: {documentLlmModels(doc)}</div>
                       )}
                     </div>
                   </div>
