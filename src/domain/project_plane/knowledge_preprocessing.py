@@ -81,6 +81,12 @@ class KnowledgePreprocessingExecutionResult:
     usage: ModelUsageMeasurement | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class KnowledgeEmbeddingTextMergeExecutionResult:
+    embedding_text: str
+    usage: ModelUsageMeasurement | None = None
+
+
 def entry_kind_for_preprocessing_mode(
     mode: KnowledgePreprocessingMode,
 ) -> KnowledgeEntryKind:
@@ -153,6 +159,38 @@ def parse_preprocessing_payload(
         if isinstance(metrics, Mapping)
         else {},
     )
+
+
+def parse_embedding_text_merge_payload(
+    payload: object,
+    *,
+    max_chars: int = 2400,
+) -> str:
+    if isinstance(payload, str):
+        parsed = _loads_json_object(payload)
+    elif isinstance(payload, Mapping):
+        parsed = payload
+    else:
+        raise KnowledgePreprocessingValidationError(
+            "Embedding text merge payload must be a JSON object"
+        )
+
+    raw_embedding_text = parsed.get("embedding_text")
+    if not isinstance(raw_embedding_text, str):
+        raise KnowledgePreprocessingValidationError(
+            "Embedding text merge payload must contain embedding_text"
+        )
+
+    embedding_text = _compact_text(raw_embedding_text)
+    if not embedding_text:
+        raise KnowledgePreprocessingValidationError(
+            "Embedding text merge payload contains empty embedding_text"
+        )
+
+    if len(embedding_text) > max_chars:
+        return embedding_text[:max_chars].rstrip()
+
+    return embedding_text
 
 
 def _json_object_from_mapping(value: Mapping[object, object]) -> JsonObject:

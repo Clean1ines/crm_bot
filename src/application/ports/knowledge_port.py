@@ -14,7 +14,7 @@ from src.domain.project_plane.knowledge_compilation import (
     SourceChunk,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingEntry,
+    KnowledgeEmbeddingTextMergeExecutionResult,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
 )
@@ -199,14 +199,15 @@ class KnowledgePreprocessorPort(Protocol):
         previous_entry_titles: Sequence[str] = (),
     ) -> KnowledgePreprocessingExecutionResult: ...
 
-    async def merge_answer_entry(
+    async def merge_embedding_text(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        existing_entry: KnowledgePreprocessingEntry,
-        incoming_entry: KnowledgePreprocessingEntry,
-    ) -> KnowledgePreprocessingExecutionResult: ...
+        title: str,
+        existing_embedding_text: str,
+        incoming_embedding_text: str,
+    ) -> KnowledgeEmbeddingTextMergeExecutionResult: ...
 
 
 class KnowledgePreprocessorFactoryPort(Protocol):

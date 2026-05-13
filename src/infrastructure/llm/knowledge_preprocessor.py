@@ -18,11 +18,11 @@ from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     MODE_INSTRUCTION,
     MODE_PRICE_LIST,
-    KnowledgePreprocessingEntry,
+    KnowledgeEmbeddingTextMergeExecutionResult,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
-    entry_kind_for_preprocessing_mode,
     KnowledgePreprocessingValidationError,
+    parse_embedding_text_merge_payload,
     parse_preprocessing_payload,
     prompt_version_for_mode,
 )
@@ -148,20 +148,22 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    async def merge_answer_entry(
+    async def merge_embedding_text(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        existing_entry: KnowledgePreprocessingEntry,
-        incoming_entry: KnowledgePreprocessingEntry,
-    ) -> KnowledgePreprocessingExecutionResult:
+        title: str,
+        existing_embedding_text: str,
+        incoming_embedding_text: str,
+    ) -> KnowledgeEmbeddingTextMergeExecutionResult:
         prompt_version = prompt_version_for_mode(mode)
-        prompt = self._build_merge_prompt(
+        prompt = self._build_embedding_text_merge_prompt(
             mode=mode,
             file_name=file_name,
-            existing_entry=existing_entry,
-            incoming_entry=incoming_entry,
+            title=title,
+            existing_embedding_text=existing_embedding_text,
+            incoming_embedding_text=incoming_embedding_text,
         )
 
         try:
@@ -172,30 +174,21 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=2400,
+                max_tokens=900,
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
-                task="merge_answer_entry",
+                task="merge_embedding_text",
                 mode=mode,
                 model=self._model,
                 prompt_version=prompt_version,
                 content=content,
                 response=response,
             )
-            result = parse_preprocessing_payload(
-                content,
-                mode=mode,
-                model=self._model,
-                prompt_version=prompt_version,
-            )
-            if len(result.entries) != 1:
-                raise KnowledgePreprocessingValidationError(
-                    "Answer merge must return exactly one entry"
-                )
-            return KnowledgePreprocessingExecutionResult(
-                result=result,
+            embedding_text = parse_embedding_text_merge_payload(content)
+            return KnowledgeEmbeddingTextMergeExecutionResult(
+                embedding_text=embedding_text,
                 usage=_response_usage_measurement(
                     response=response,
                     model=self._model,
@@ -215,7 +208,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             KnowledgePreprocessingValidationError,
         ) as exc:
             logger.warning(
-                "Knowledge answer merge failed",
+                "Knowledge embedding text merge failed",
                 extra={
                     "mode": mode,
                     "model": self._model,
@@ -225,47 +218,42 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    def _build_merge_prompt(
+    def _build_embedding_text_merge_prompt(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        existing_entry: KnowledgePreprocessingEntry,
-        incoming_entry: KnowledgePreprocessingEntry,
+        title: str,
+        existing_embedding_text: str,
+        incoming_embedding_text: str,
     ) -> str:
-        instruction = _load_mode_prompt(mode)
+        compact_existing = " ".join(existing_embedding_text.split())[:2400]
+        compact_incoming = " ".join(incoming_embedding_text.split())[:1600]
         merge_payload = {
             "file_name": file_name,
             "mode": mode,
-            "existing_entry": existing_entry.to_chunk(
-                entry_kind=entry_kind_for_preprocessing_mode(mode)
-            ),
-            "incoming_entry": incoming_entry.to_chunk(
-                entry_kind=entry_kind_for_preprocessing_mode(mode)
-            ),
+            "title": title,
+            "existing_embedding_text": compact_existing,
+            "incoming_embedding_text": compact_incoming,
         }
-        merge_instruction = (
-            "ONE-MEANING MERGE TASK:\n"
-            "- Merge exactly these two grounded answer entries into one "
-            "canonical answer meaning.\n"
-            "- Preserve only facts supported by existing_entry.source_excerpt "
-            "or incoming_entry.source_excerpt.\n"
-            "- Keep one stable topic-like title. Prefer existing_entry.title "
-            "unless incoming_entry.title is clearly more precise.\n"
-            "- Expand the answer when incoming_entry adds grounded details.\n"
-            "- Merge questions, synonyms and tags as retrieval enrichment.\n"
-            "- Return exactly one JSON entry in the same schema as the main "
-            "preprocessing task.\n"
-            "- Do not create standalone question/test/debug entries.\n"
-        )
+
         return (
-            f"{instruction}\n\n"
-            f"{merge_instruction}\n"
+            "EMBEDDING TEXT MERGE TASK:\n"
+            "Return exactly one JSON object and nothing else.\n\n"
+            "Schema:\n"
+            '{"embedding_text": "..."}\n\n'
+            "Rules:\n"
+            "- Merge only existing_embedding_text and incoming_embedding_text.\n"
+            "- Return one dense Russian/English retrieval text for semantic search.\n"
+            "- Preserve grounded facts, limitations, conditions, product terms, prices, dates, escalation rules, and user-facing wording from both inputs.\n"
+            "- Remove exact duplicates and near-duplicate phrases.\n"
+            "- Do not invent facts.\n"
+            "- Do not return title, answer, source_excerpt, questions, synonyms, tags, entries, markdown, or explanation.\n"
+            "- Keep the result detailed but compact.\n\n"
             "STRICT OUTPUT CONTRACT:\n"
-            "- Return exactly one JSON object matching the requested schema.\n"
-            "- Do not return markdown fences.\n"
-            "- Do not return explanations before or after JSON.\n"
-            "- Do not return multiple JSON objects.\n"
+            "- Return exactly one JSON object.\n"
+            "- The only allowed key is embedding_text.\n"
+            "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n\n"
             "NOW MERGE THIS JSON. Return ONLY the JSON result:\n"
             f"{json.dumps(merge_payload, ensure_ascii=False)}"
         )

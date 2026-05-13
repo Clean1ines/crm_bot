@@ -59,9 +59,10 @@ def test_stage_k_preprocessor_port_requires_carryover_and_one_meaning_merge() ->
     source = _source(KNOWLEDGE_PORT)
 
     assert "previous_entry_titles: Sequence[str] = ()" in source
-    assert "async def merge_answer_entry(" in source
-    assert "existing_entry: KnowledgePreprocessingEntry" in source
-    assert "incoming_entry: KnowledgePreprocessingEntry" in source
+    assert "async def merge_embedding_text(" in source
+    assert "existing_embedding_text: str" in source
+    assert "incoming_embedding_text: str" in source
+    assert "KnowledgeEmbeddingTextMergeExecutionResult" in source
 
 
 def test_stage_k_groq_preprocessor_prompt_has_cross_chunk_carryover_contract() -> None:
@@ -76,10 +77,10 @@ def test_stage_k_groq_preprocessor_prompt_has_cross_chunk_carryover_contract() -
 def test_stage_k_groq_preprocessor_has_one_meaning_merge_contract() -> None:
     source = _source(KNOWLEDGE_PREPROCESSOR)
 
-    assert "ONE-MEANING MERGE TASK" in source
-    assert "Merge exactly these two grounded answer entries into one" in source
-    assert "Return exactly one JSON entry" in source
-    assert "Answer merge must return exactly one entry" in source
+    assert "EMBEDDING TEXT MERGE TASK" in source
+    assert "Merge only existing_embedding_text and incoming_embedding_text" in source
+    assert "The only allowed key is embedding_text" in source
+    assert "parse_embedding_text_merge_payload" in source
 
 
 def test_stage_k_ingestion_records_compiler_loop_and_merge_metrics() -> None:

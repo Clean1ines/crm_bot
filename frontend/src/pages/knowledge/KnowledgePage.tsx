@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   BookOpen,
   Upload,
@@ -123,8 +123,10 @@ const knowledgeProcessingModeLabel = (mode: string | null | undefined): string =
 );
 
 const processingProgressPercent = (doc: Document): number | null => {
-  const current = metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
-  const total = metricNumber(doc.preprocessing_metrics, 'technical_compiler_total_count');
+  const current = metricNumber(doc.preprocessing_metrics, 'technical_chunk_processed_count')
+    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
+  const total = metricNumber(doc.preprocessing_metrics, 'technical_chunk_total_count')
+    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_total_count');
 
   if (current === null || total === null || total <= 0) return null;
 
@@ -133,8 +135,10 @@ const processingProgressPercent = (doc: Document): number | null => {
 
 const processingProgressLabel = (doc: Document): string => {
   const metrics = doc.preprocessing_metrics;
-  const current = metricNumber(metrics, 'technical_compiler_call_count');
-  const total = metricNumber(metrics, 'technical_compiler_total_count');
+  const current = metricNumber(metrics, 'technical_chunk_processed_count')
+    ?? metricNumber(metrics, 'technical_compiler_call_count');
+  const total = metricNumber(metrics, 'technical_chunk_total_count')
+    ?? metricNumber(metrics, 'technical_compiler_total_count');
 
   if (current !== null && total !== null && total > 0) {
     return `Шаг ${formatNumber(current)} из ${formatNumber(total)}`;
@@ -151,10 +155,58 @@ const processingModelLabel = (doc: Document): string => (
 );
 
 const compiledEntryCount = (doc: Document): number | null => (
-  metricNumber(doc.preprocessing_metrics, 'compiled_entry_count')
+  metricNumber(doc.preprocessing_metrics, 'semantic_answer_count')
+  ?? metricNumber(doc.preprocessing_metrics, 'compiled_entry_count')
   ?? metricNumber(doc.preprocessing_metrics, 'canonical_entry_count')
   ?? (typeof doc.structured_entries === 'number' ? doc.structured_entries : null)
 );
+
+const semanticMergeCount = (doc: Document): number | null => (
+  metricNumber(doc.preprocessing_metrics, 'semantic_answer_merge_count')
+  ?? metricNumber(doc.preprocessing_metrics, 'embedding_text_merge_call_count')
+  ?? metricNumber(doc.preprocessing_metrics, 'llm_merge_call_count')
+);
+
+const technicalChunkProgressText = (doc: Document): string | null => {
+  const current = metricNumber(doc.preprocessing_metrics, 'technical_chunk_processed_count')
+    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
+  const total = metricNumber(doc.preprocessing_metrics, 'technical_chunk_total_count')
+    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_total_count');
+
+  if (current === null && total === null) return null;
+  if (current !== null && total !== null && total > 0) {
+    return `${formatNumber(current)} из ${formatNumber(total)}`;
+  }
+  if (total !== null && total > 0) return `0 из ${formatNumber(total)}`;
+  return current !== null ? formatNumber(current) : null;
+};
+
+const formatDurationSeconds = (seconds: number): string => {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const restSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours} ч ${minutes.toString().padStart(2, '0')} мин ${restSeconds.toString().padStart(2, '0')} сек`;
+  }
+  if (minutes > 0) {
+    return `${minutes} мин ${restSeconds.toString().padStart(2, '0')} сек`;
+  }
+  return `${restSeconds} сек`;
+};
+
+const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
+  const metricElapsed = metricNumber(doc.preprocessing_metrics, 'elapsed_seconds') ?? 0;
+  const startedAt = Date.parse(doc.created_at || doc.updated_at || '');
+
+  if (!Number.isFinite(startedAt) || !isDocumentProcessing(doc)) {
+    return metricElapsed;
+  }
+
+  const localElapsed = Math.max(0, (nowMs - startedAt) / 1000);
+  return Math.max(metricElapsed, localElapsed);
+};
 
 const PreviewResultCard: React.FC<{
   title: string;
@@ -272,6 +324,17 @@ export const KnowledgePage: React.FC = () => {
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!hasProcessingDocuments) return undefined;
+
+    const timer = window.setInterval(() => {
+      setProcessingNowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [hasProcessingDocuments]);
 
   const usageQuery = useQuery({
     queryKey: ['knowledge-usage', projectId],
@@ -690,12 +753,16 @@ export const KnowledgePage: React.FC = () => {
                     )}
                     <div className="space-y-1 text-xs text-[var(--text-muted)]">
                       <div>Модель: {processingModelLabel(doc)}</div>
+                      <div>Времени прошло: {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
+                      {technicalChunkProgressText(doc) !== null && (
+                        <div>Технические фрагменты: {technicalChunkProgressText(doc)}</div>
+                      )}
                       {compiledEntryCount(doc) !== null && (
                         <div>Собрано смысловых ответов: {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
                       )}
-                      {metricNumber(doc.preprocessing_metrics, 'llm_merge_call_count') !== null && (
+                      {semanticMergeCount(doc) !== null && (
                         <div>
-                          Объединено повторов: {formatNumber(metricNumber(doc.preprocessing_metrics, 'llm_merge_call_count') ?? 0)}
+                          Объединено смысловых повторов: {formatNumber(semanticMergeCount(doc) ?? 0)}
                         </div>
                       )}
                     </div>
