@@ -234,7 +234,26 @@ async def test_process_document_records_preprocessing_usage():
         mode="faq",
         prompt_version="knowledge_preprocess_faq_v2",
         model="llama-test",
-        entries=(),
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Manager handoff",
+                answer="Assistant transfers payment questions to a human manager.",
+                source_excerpt="Assistant transfers payment questions to a human manager.",
+                questions=(
+                    "Can I talk to a manager?",
+                    "Who handles payment questions?",
+                    "Can support transfer me?",
+                ),
+                synonyms=(
+                    "manager handoff",
+                    "human manager",
+                    "payment support",
+                    "operator transfer",
+                    "human support",
+                ),
+                tags=("handoff", "payment"),
+            ),
+        ),
         metrics={},
     )
     preprocessor = Mock()
@@ -1035,21 +1054,22 @@ async def test_structured_preprocessing_failure_marks_document_error():
 
     service = KnowledgeIngestionService(object())
 
-    result = await service.process_document(
-        project_id="project-1",
-        document_id="doc-json-failure",
-        file_name="faq.txt",
-        chunks=[{"content": "Useful knowledge paragraph with enough content."}],
-        mode="faq",
-        knowledge_repo_factory=Mock(return_value=repo),
-        model_usage_repo_factory=Mock(return_value=_usage_repo()),
-        preprocessor_factory=Mock(return_value=preprocessor),
-        logger=Mock(),
-    )
-
-    assert result.preprocessing_status == "failed"
+    with pytest.raises(Exception, match="Invalid preprocessing JSON: Extra data"):
+        await service.process_document(
+            project_id="project-1",
+            document_id="doc-json-failure",
+            file_name="faq.txt",
+            chunks=[{"content": "Useful knowledge paragraph with enough content."}],
+            mode="faq",
+            knowledge_repo_factory=Mock(return_value=repo),
+            model_usage_repo_factory=Mock(return_value=_usage_repo()),
+            preprocessor_factory=Mock(return_value=preprocessor),
+            logger=Mock(),
+        )
     repo.update_document_status.assert_awaited_with(
         "doc-json-failure",
         "error",
         "Invalid preprocessing JSON: Extra data",
     )
+
+    repo.update_document_status.assert_awaited()

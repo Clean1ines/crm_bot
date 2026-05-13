@@ -33,6 +33,15 @@ from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
+STRICT_JSON_SYSTEM_MESSAGE = (
+    "You are a strict JSON API. Return exactly one valid JSON object. "
+    "Do not include markdown, code fences, explanations, comments, apologies, "
+    "prefixes, suffixes, or multiple JSON objects. "
+    "The first non-whitespace character must be { and the last non-whitespace "
+    "character must be }."
+)
+KCD_LLM_RESPONSE_LOG_CHUNK_CHARS = 3500
+
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
 MODE_PROMPT_FILES = {
     MODE_FAQ: "knowledge_preprocess_faq.txt",
@@ -57,8 +66,8 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         *,
         client: AsyncGroq | None = None,
         model: str | None = None,
-        max_chunks: int = 30,
-        max_chunk_chars: int = 1800,
+        max_chunks: int = 1,
+        max_chunk_chars: int = 900,
     ) -> None:
         self._client = client or RotatingAsyncGroq()
         self._model = model or settings.GROQ_KNOWLEDGE_PREPROCESSING_MODEL
@@ -88,11 +97,23 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                messages=[
+                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
                 max_tokens=4000,
+                response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
+            _log_llm_response(
+                task="preprocess",
+                mode=mode,
+                model=self._model,
+                prompt_version=prompt_version,
+                content=content,
+                response=response,
+            )
             result = parse_preprocessing_payload(
                 content, mode=mode, model=self._model, prompt_version=prompt_version
             )
@@ -146,11 +167,23 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         try:
             response = await self._client.chat.completions.create(
                 model=self._model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
+                messages=[
+                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
                 max_tokens=2400,
+                response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
+            _log_llm_response(
+                task="merge_answer_entry",
+                mode=mode,
+                model=self._model,
+                prompt_version=prompt_version,
+                content=content,
+                response=response,
+            )
             result = parse_preprocessing_payload(
                 content,
                 mode=mode,
@@ -228,6 +261,11 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         return (
             f"{instruction}\n\n"
             f"{merge_instruction}\n"
+            "STRICT OUTPUT CONTRACT:\n"
+            "- Return exactly one JSON object matching the requested schema.\n"
+            "- Do not return markdown fences.\n"
+            "- Do not return explanations before or after JSON.\n"
+            "- Do not return multiple JSON objects.\n"
             "NOW MERGE THIS JSON. Return ONLY the JSON result:\n"
             f"{json.dumps(merge_payload, ensure_ascii=False)}"
         )
@@ -272,8 +310,56 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         return (
             f"{instruction}\n\n"
             f"{carryover_instruction}\n"
+            "STRICT OUTPUT CONTRACT:\n"
+            "- Return exactly one JSON object matching the requested schema.\n"
+            "- Do not return markdown fences.\n"
+            "- Do not return explanations before or after JSON.\n"
+            "- Do not return multiple JSON objects.\n"
+            "- Keep entries compact because this is one small technical source slice.\n"
             "NOW PROCESS THIS SOURCE JSON. Return ONLY the JSON result:\n"
             f"{json.dumps(source_payload, ensure_ascii=False)}"
+        )
+
+
+def _log_llm_response(
+    *,
+    task: str,
+    mode: KnowledgePreprocessingMode,
+    model: str,
+    prompt_version: str,
+    content: str,
+    response: object,
+) -> None:
+    raw_choices = getattr(response, "choices", ())
+    finish_reason = ""
+    if isinstance(raw_choices, Sequence) and raw_choices:
+        finish_reason = str(getattr(raw_choices[0], "finish_reason", "") or "")
+
+    base_extra = {
+        "task": task,
+        "mode": mode,
+        "model": model,
+        "prompt_version": prompt_version,
+        "content_length": len(content),
+        "finish_reason": finish_reason,
+    }
+
+    if not content:
+        logger.warning("Knowledge LLM returned empty JSON response", extra=base_extra)
+        return
+
+    for chunk_index, start in enumerate(
+        range(0, len(content), KCD_LLM_RESPONSE_LOG_CHUNK_CHARS),
+        start=1,
+    ):
+        chunk = content[start : start + KCD_LLM_RESPONSE_LOG_CHUNK_CHARS]
+        logger.info(
+            "Knowledge LLM raw JSON response",
+            extra={
+                **base_extra,
+                "chunk_index": chunk_index,
+                "raw_response_chunk": chunk,
+            },
         )
 
 

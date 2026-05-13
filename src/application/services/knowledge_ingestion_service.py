@@ -18,7 +18,7 @@ from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_normalization_service import (
     KnowledgeNormalizationService,
 )
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.embedding_text import CANONICAL_EMBEDDING_TEXT_VERSION
 from src.domain.project_plane.knowledge_chunks import (
     KnowledgeChunk,
@@ -378,14 +378,89 @@ def _combined_chunks_for_canonical_persistence(
     return combined
 
 
+def _split_technical_source_text(
+    content: str,
+    *,
+    char_budget: int,
+) -> tuple[str, ...]:
+    text = content.strip()
+    if not text:
+        return ()
+    if len(text) <= char_budget:
+        return (text,)
+
+    parts: list[str] = []
+    remaining = text
+
+    while remaining:
+        if len(remaining) <= char_budget:
+            parts.append(remaining.strip())
+            break
+
+        window = remaining[:char_budget]
+        cut = char_budget
+        min_cut = max(120, char_budget // 3)
+
+        for separator in ("\n\n", "\n", ". ", "; ", ", ", " "):
+            position = window.rfind(separator)
+            if position >= min_cut:
+                cut = position + len(separator)
+                break
+
+        part = remaining[:cut].strip()
+        if part:
+            parts.append(part)
+        remaining = remaining[cut:].strip()
+
+    return tuple(part for part in parts if part)
+
+
+def _technical_chunk_part(
+    chunk: JsonObject,
+    *,
+    content: str,
+    part_index: int,
+    part_count: int,
+) -> JsonObject:
+    technical_chunk: JsonObject = {
+        str(key): json_value_from_unknown(value) for key, value in chunk.items()
+    }
+    technical_chunk["content"] = content
+    technical_chunk["technical_part_index"] = part_index
+    technical_chunk["technical_part_count"] = part_count
+    technical_chunk["technical_source_char_budget"] = (
+        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
+    )
+    return technical_chunk
+
+
 def _technical_chunk_batches_for_answer_compiler(
     chunks: list[JsonObject],
 ) -> tuple[list[JsonObject], ...]:
     batches: list[list[JsonObject]] = []
 
     for chunk in chunks:
-        if _chunk_content(chunk):
-            batches.append([chunk])
+        content = _chunk_content(chunk)
+        if not content:
+            continue
+
+        parts = _split_technical_source_text(
+            content,
+            char_budget=KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
+        )
+        part_count = len(parts)
+
+        for part_index, part_content in enumerate(parts, start=1):
+            batches.append(
+                [
+                    _technical_chunk_part(
+                        chunk,
+                        content=part_content,
+                        part_index=part_index,
+                        part_count=part_count,
+                    )
+                ]
+            )
 
     return tuple(batches)
 
@@ -511,6 +586,7 @@ KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
 KCD_STAGE_K_COMPILER_VERSION = "kcd_v1_stage_k_answer_compiler"
 KCD_STAGE_K_CANCELLED_ERROR = "Knowledge preprocessing cancelled by operator"
 KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL = 1
+KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET = 650
 KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 
 
@@ -1361,10 +1437,13 @@ class KnowledgeIngestionService:
             status=PREPROCESSING_STATUS_PROCESSING,
         )
 
+        active_model = ""
+        active_prompt_version = prompt_version_for_mode(mode)
+        technical_batches: tuple[list[JsonObject], ...] = ()
+
         try:
             preprocessor = preprocessor_factory()
             active_model = preprocessor.model_name
-            active_prompt_version = prompt_version_for_mode(mode)
             technical_batches = tuple(
                 _technical_chunk_batches_for_answer_compiler(indexable_chunks)
             )
@@ -1393,6 +1472,9 @@ class KnowledgeIngestionService:
                     "prompt_version": active_prompt_version,
                     "source_chunk_count": len(indexable_chunks),
                     "technical_compiler_total_count": len(technical_batches),
+                    "technical_source_char_budget": (
+                        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
+                    ),
                     "technical_compiler_call_count": 0,
                     "compiled_entry_count": 0,
                     "incoming_entry_count": 0,
@@ -1488,6 +1570,9 @@ class KnowledgeIngestionService:
                     "prompt_version": active_prompt_version,
                     "source_chunk_count": len(indexable_chunks),
                     "technical_compiler_total_count": len(technical_batches),
+                    "technical_source_char_budget": (
+                        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
+                    ),
                     "technical_compiler_call_count": batch_index,
                     "compiled_entry_count": len(compiled_entries),
                     "incoming_entry_count": len(execution.result.entries),
@@ -1538,6 +1623,9 @@ class KnowledgeIngestionService:
                     "technical_compiler_call_count": len(preprocessing_results),
                     "technical_chunk_batch_size": (
                         KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL
+                    ),
+                    "technical_source_char_budget": (
+                        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
                     "llm_merge_call_count": llm_merge_call_count,
                     "compiled_entry_key_count": len(compiled_entry_keys),
@@ -1661,35 +1749,39 @@ class KnowledgeIngestionService:
                 "Knowledge document was deleted before structured indexing completed"
             ) from exc
         except Exception as exc:
+            error_message = str(exc)[:500] or type(exc).__name__
             logger.warning(
-                "Knowledge preprocessing failed; original chunks remain usable",
+                "Knowledge preprocessing failed; structured pipeline stopped",
                 extra={
                     "project_id": project_id,
                     "document_id": document_id,
                     "mode": mode,
                     "error_type": type(exc).__name__,
+                    "error": error_message,
+                    "fallback": "disabled",
                 },
-            )
-            await self._persist_plain_chunks(
-                repo=repo,
-                project_id=project_id,
-                document_id=document_id,
-                file_name=file_name,
-                chunks=indexable_chunks,
-                source_chunks=source_chunks,
-                compiler_run_id=compiler_run_id,
-                logger=logger,
-                context="preprocessing_fallback",
             )
             await repo.update_document_preprocessing_status(
                 document_id,
                 mode=mode,
                 status=PREPROCESSING_STATUS_FAILED,
-                error=str(exc)[:1000],
+                error=error_message,
+                model=active_model or None,
+                prompt_version=active_prompt_version,
+                metrics={
+                    "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                    "stage": "failed",
+                    "status_message": (
+                        "Ошибка предобработки: LLM не вернула корректный JSON"
+                    ),
+                    "error_type": type(exc).__name__,
+                    "fallback": "disabled",
+                    "source_chunk_count": len(indexable_chunks),
+                    "technical_compiler_total_count": len(technical_batches),
+                    "technical_source_char_budget": (
+                        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
+                    ),
+                },
             )
-            await repo.update_document_status(document_id, "error", str(exc)[:500])
-            return KnowledgeDocumentProcessingResult(
-                document_id=document_id,
-                preprocessing_status=PREPROCESSING_STATUS_FAILED,
-                structured_entries=0,
-            )
+            await repo.update_document_status(document_id, "error", error_message)
+            raise ValidationError(error_message) from exc
