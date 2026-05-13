@@ -1264,12 +1264,23 @@ class KnowledgeRepository:
                                     source_chunk_id,
                                     source_index,
                                     quote,
+                                    quote_hash,
                                     start_offset,
                                     end_offset,
                                     confidence,
                                     metadata
                                 )
-                                VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb)
+                                VALUES (
+                                    $1,
+                                    $2,
+                                    $3,
+                                    $4,
+                                    md5(coalesce($4, '')),
+                                    $5,
+                                    $6,
+                                    $7,
+                                    '{}'::jsonb
+                                )
                                 """,
                                 entry_uuid,
                                 source_ref.source_chunk_id,

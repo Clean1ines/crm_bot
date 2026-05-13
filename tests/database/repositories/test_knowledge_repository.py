@@ -472,3 +472,23 @@ async def test_add_source_chunks_persists_raw_source_chunks(
     assert insert_args[7] == "Evidence"
     assert insert_args[10] == "checksum-1"
     assert '"upload_chunk_index": 0' in insert_args[11]
+
+
+def test_canonical_source_ref_insert_uses_quote_hash_identity() -> None:
+    """Stage K.7 allows multiple quotes from the same source chunk."""
+
+    repository_source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+    migration_source = Path(
+        "migrations/061_allow_multiple_source_ref_quotes_per_chunk.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "quote_hash" in repository_source
+    assert "md5(coalesce($4, ''))" in repository_source
+    assert "PRIMARY KEY (entry_id, source_chunk_id, source_index, quote_hash)" in (
+        migration_source
+    )
+    assert "DROP CONSTRAINT IF EXISTS pk_knowledge_entry_source_refs" in (
+        migration_source
+    )
