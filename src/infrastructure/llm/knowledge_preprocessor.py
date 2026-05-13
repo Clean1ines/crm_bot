@@ -22,8 +22,13 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
+    KnowledgeSemanticMergeExecutionResult,
+    KnowledgeSemanticMergeGroup,
+    KnowledgeSemanticMergeTighteningResult,
+    SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
     parse_embedding_text_merge_payload,
     parse_preprocessing_payload,
+    parse_semantic_merge_tightening_payload,
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
@@ -218,6 +223,93 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
+    async def tighten_semantic_merges(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        file_name: str,
+        groups: Sequence[KnowledgeSemanticMergeGroup],
+        existing_project_titles: Sequence[str] = (),
+    ) -> KnowledgeSemanticMergeExecutionResult:
+        prompt_version = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
+
+        if not groups:
+            return KnowledgeSemanticMergeExecutionResult(
+                result=KnowledgeSemanticMergeTighteningResult(
+                    mode=mode,
+                    prompt_version=prompt_version,
+                    model=self._model,
+                    decisions=(),
+                    metrics={"group_count": 0},
+                ),
+                usage=None,
+            )
+
+        prompt = self._build_semantic_merge_tightening_prompt(
+            mode=mode,
+            file_name=file_name,
+            groups=groups,
+            existing_project_titles=existing_project_titles,
+        )
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content or ""
+            _log_llm_response(
+                task="semantic_merge_tightening",
+                mode=mode,
+                model=self._model,
+                prompt_version=prompt_version,
+                content=content,
+                response=response,
+            )
+            result = parse_semantic_merge_tightening_payload(
+                content,
+                mode=mode,
+                model=self._model,
+                prompt_version=prompt_version,
+            )
+            return KnowledgeSemanticMergeExecutionResult(
+                result=result,
+                usage=_response_usage_measurement(
+                    response=response,
+                    model=self._model,
+                    prompt=prompt,
+                    content=content,
+                ),
+            )
+        except (
+            APIConnectionError,
+            APIError,
+            APITimeoutError,
+            RateLimitError,
+            AttributeError,
+            IndexError,
+            TypeError,
+            ValueError,
+            KnowledgePreprocessingValidationError,
+        ) as exc:
+            logger.warning(
+                "Knowledge semantic merge tightening failed",
+                extra={
+                    "mode": mode,
+                    "model": self._model,
+                    "group_count": len(groups),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:300],
+                },
+            )
+            raise
+
     def _build_embedding_text_merge_prompt(
         self,
         *,
@@ -255,6 +347,70 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "- The only allowed key is embedding_text.\n"
             "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n\n"
             "NOW MERGE THIS JSON. Return ONLY the JSON result:\n"
+            f"{json.dumps(merge_payload, ensure_ascii=False)}"
+        )
+
+    def _build_semantic_merge_tightening_prompt(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        file_name: str,
+        groups: Sequence[KnowledgeSemanticMergeGroup],
+        existing_project_titles: Sequence[str] = (),
+    ) -> str:
+        compact_project_titles = [
+            " ".join(str(title).strip().split())
+            for title in existing_project_titles
+            if str(title).strip()
+        ][:300]
+        merge_payload = {
+            "file_name": file_name,
+            "mode": mode,
+            "existing_project_titles": compact_project_titles,
+            "suspect_groups": [group.to_payload() for group in groups],
+        }
+
+        return (
+            "SEMANTIC MERGE TIGHTENING TASK:\n"
+            "Return exactly one JSON object and nothing else.\n\n"
+            "Purpose:\n"
+            "- You receive groups of already grounded canonical-entry candidates.\n"
+            "- Each group is only a suspect duplicate group, not a command to merge.\n"
+            "- Decide whether candidates in each group are truly the same answer meaning.\n"
+            "- Merge only when one user question should retrieve one consolidated answer.\n"
+            "- Keep separate when candidates answer different user intents, constraints, audiences, or operations.\n\n"
+            "Schema:\n"
+            "{\n"
+            '  "decisions": [\n'
+            "    {\n"
+            '      "group_id": "...",\n'
+            '      "action": "merge | keep_separate",\n'
+            '      "candidate_ids": ["..."],\n'
+            '      "survivor_title": "...",\n'
+            '      "merged_embedding_text": "..."\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Rules for action=merge:\n"
+            "- candidate_ids MUST contain all candidates being collapsed.\n"
+            "- survivor_title MUST be exactly one concise canonical title.\n"
+            "- merged_embedding_text MUST combine retrieval wording from all merged candidates.\n"
+            "- Preserve grounded facts, limitations, product terms, handoff rules, prices, dates, and negative constraints.\n"
+            "- Remove exact and near-duplicate phrases.\n"
+            "- Do not invent facts.\n\n"
+            "Rules for action=keep_separate:\n"
+            "- Use when candidates are related but not the same answer meaning.\n"
+            "- candidate_ids MUST contain the candidates considered for that decision.\n"
+            "- survivor_title and merged_embedding_text MAY be empty.\n\n"
+            "Project-level title context:\n"
+            "- existing_project_titles are already published project answers.\n"
+            "- Prefer a survivor_title compatible with an existing project title when the meaning is the same.\n"
+            "- Do not merge with existing_project_titles here; only use them for naming consistency.\n\n"
+            "STRICT OUTPUT CONTRACT:\n"
+            "- Return exactly one JSON object.\n"
+            "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n"
+            "- Do not return markdown, explanation, entries[], source refs, or full answers.\n\n"
+            "NOW PROCESS THIS JSON. Return ONLY the JSON result:\n"
             f"{json.dumps(merge_payload, ensure_ascii=False)}"
         )
 

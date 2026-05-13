@@ -9,7 +9,11 @@ from src.domain.project_plane.knowledge_preprocessing import (
     MODE_INSTRUCTION,
     MODE_PRICE_LIST,
     KnowledgePreprocessingValidationError,
+    KnowledgeSemanticMergeCandidate,
+    KnowledgeSemanticMergeGroup,
+    SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
     parse_preprocessing_payload,
+    parse_semantic_merge_tightening_payload,
     prompt_version_for_mode,
 )
 
@@ -180,3 +184,101 @@ def test_parse_embedding_text_merge_payload_rejects_full_entries_schema() -> Non
 
     with pytest.raises(KnowledgePreprocessingValidationError):
         parse_embedding_text_merge_payload('{"entries":[]}')
+
+
+def test_semantic_merge_group_payload_is_json_serializable() -> None:
+    group = KnowledgeSemanticMergeGroup(
+        group_id="manager_handoff",
+        candidates=(
+            KnowledgeSemanticMergeCandidate(
+                candidate_id="entry-a",
+                title="Передача менеджеру",
+                answer="Ассистент передаёт вопрос менеджеру.",
+                embedding_text="передача менеджеру handoff человек оператор",
+                questions=("Как позвать менеджера?",),
+                synonyms=("передать человеку",),
+                tags=("handoff",),
+                source_ref_count=2,
+            ),
+        ),
+    )
+
+    payload = group.to_payload()
+
+    assert json.loads(json.dumps(payload, ensure_ascii=False))["group_id"] == (
+        "manager_handoff"
+    )
+
+
+def test_parse_semantic_merge_tightening_payload_accepts_merge_decision() -> None:
+    result = parse_semantic_merge_tightening_payload(
+        {
+            "decisions": [
+                {
+                    "group_id": "manager_handoff",
+                    "action": "merge",
+                    "candidate_ids": ["entry-a", "entry-b"],
+                    "survivor_title": "Передача диалога менеджеру",
+                    "merged_embedding_text": (
+                        "Передача диалога менеджеру, handoff, запрос на человека, "
+                        "ассистент не принимает критические решения."
+                    ),
+                }
+            ],
+            "metrics": {"source": "unit-test"},
+        },
+        mode=MODE_FAQ,
+        model="test-model",
+    )
+
+    decision = result.decisions[0]
+
+    assert result.prompt_version == SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
+    assert result.metrics["source"] == "unit-test"
+    assert decision.is_merge
+    assert decision.candidate_ids == ("entry-a", "entry-b")
+    assert decision.survivor_title == "Передача диалога менеджеру"
+    assert "handoff" in decision.merged_embedding_text
+
+
+def test_parse_semantic_merge_tightening_payload_accepts_keep_separate() -> None:
+    result = parse_semantic_merge_tightening_payload(
+        {
+            "decisions": [
+                {
+                    "group_id": "pricing",
+                    "action": "keep_separate",
+                    "candidate_ids": ["entry-a", "entry-b"],
+                }
+            ]
+        },
+        mode=MODE_FAQ,
+        model="test-model",
+    )
+
+    decision = result.decisions[0]
+
+    assert not decision.is_merge
+    assert decision.survivor_title == ""
+    assert decision.merged_embedding_text == ""
+
+
+def test_parse_semantic_merge_tightening_payload_requires_embedding_for_merge() -> None:
+    with pytest.raises(
+        KnowledgePreprocessingValidationError,
+        match="merged_embedding_text",
+    ):
+        parse_semantic_merge_tightening_payload(
+            {
+                "decisions": [
+                    {
+                        "group_id": "startup",
+                        "action": "merge",
+                        "candidate_ids": ["entry-a", "entry-b"],
+                        "survivor_title": "Что нужно для запуска",
+                    }
+                ]
+            },
+            mode=MODE_FAQ,
+            model="test-model",
+        )

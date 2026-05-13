@@ -17,6 +17,8 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeEmbeddingTextMergeExecutionResult,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
+    KnowledgeSemanticMergeExecutionResult,
+    KnowledgeSemanticMergeGroup,
 )
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.domain.project_plane.model_usage_views import (
@@ -208,6 +210,15 @@ class KnowledgePreprocessorPort(Protocol):
         existing_embedding_text: str,
         incoming_embedding_text: str,
     ) -> KnowledgeEmbeddingTextMergeExecutionResult: ...
+
+    async def tighten_semantic_merges(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        file_name: str,
+        groups: Sequence[KnowledgeSemanticMergeGroup],
+        existing_project_titles: Sequence[str] = (),
+    ) -> KnowledgeSemanticMergeExecutionResult: ...
 
 
 class KnowledgePreprocessorFactoryPort(Protocol):

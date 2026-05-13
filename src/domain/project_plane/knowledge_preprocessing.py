@@ -33,6 +33,11 @@ PREPROCESSING_STATUS_FAILED = "failed"
 PROMPT_VERSION_FAQ = "knowledge_preprocess_faq_v2"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
 PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
+SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v1"
+
+SemanticMergeAction: TypeAlias = Literal["merge", "keep_separate"]
+SEMANTIC_MERGE_ACTION_MERGE = "merge"
+SEMANTIC_MERGE_ACTION_KEEP_SEPARATE = "keep_separate"
 
 
 class KnowledgePreprocessingValidationError(ValueError):
@@ -84,6 +89,70 @@ class KnowledgePreprocessingExecutionResult:
 @dataclass(frozen=True, slots=True)
 class KnowledgeEmbeddingTextMergeExecutionResult:
     embedding_text: str
+    usage: ModelUsageMeasurement | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSemanticMergeCandidate:
+    candidate_id: str
+    title: str
+    answer: str
+    embedding_text: str
+    questions: tuple[str, ...] = field(default_factory=tuple)
+    synonyms: tuple[str, ...] = field(default_factory=tuple)
+    tags: tuple[str, ...] = field(default_factory=tuple)
+    source_ref_count: int = 0
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "candidate_id": self.candidate_id,
+            "title": self.title,
+            "answer": self.answer,
+            "embedding_text": self.embedding_text,
+            "questions": list(self.questions),
+            "synonyms": list(self.synonyms),
+            "tags": list(self.tags),
+            "source_ref_count": self.source_ref_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSemanticMergeGroup:
+    group_id: str
+    candidates: tuple[KnowledgeSemanticMergeCandidate, ...]
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "group_id": self.group_id,
+            "candidates": [candidate.to_payload() for candidate in self.candidates],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSemanticMergeDecision:
+    group_id: str
+    action: SemanticMergeAction
+    candidate_ids: tuple[str, ...]
+    survivor_title: str = ""
+    merged_embedding_text: str = ""
+
+    @property
+    def is_merge(self) -> bool:
+        return self.action == SEMANTIC_MERGE_ACTION_MERGE
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSemanticMergeTighteningResult:
+    mode: KnowledgePreprocessingMode
+    prompt_version: str
+    model: str
+    decisions: tuple[KnowledgeSemanticMergeDecision, ...]
+    metrics: JsonObject = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSemanticMergeExecutionResult:
+    result: KnowledgeSemanticMergeTighteningResult
     usage: ModelUsageMeasurement | None = None
 
 
@@ -191,6 +260,101 @@ def parse_embedding_text_merge_payload(
         return embedding_text[:max_chars].rstrip()
 
     return embedding_text
+
+
+def parse_semantic_merge_tightening_payload(
+    payload: object,
+    *,
+    mode: KnowledgePreprocessingMode,
+    model: str,
+    prompt_version: str = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
+    max_embedding_text_chars: int = 2400,
+) -> KnowledgeSemanticMergeTighteningResult:
+    if isinstance(payload, str):
+        parsed = _loads_json_object(payload)
+    elif isinstance(payload, Mapping):
+        parsed = payload
+    else:
+        raise KnowledgePreprocessingValidationError(
+            "Semantic merge tightening payload must be a JSON object"
+        )
+
+    decisions_payload = parsed.get("decisions")
+    if not isinstance(decisions_payload, list):
+        raise KnowledgePreprocessingValidationError(
+            "Semantic merge tightening payload must contain decisions[]"
+        )
+
+    decisions: list[KnowledgeSemanticMergeDecision] = []
+    for index, item in enumerate(decisions_payload):
+        if not isinstance(item, Mapping):
+            raise KnowledgePreprocessingValidationError(
+                f"Semantic merge decision {index} must be an object"
+            )
+        decisions.append(
+            _parse_semantic_merge_decision(
+                item,
+                index=index,
+                max_embedding_text_chars=max_embedding_text_chars,
+            )
+        )
+
+    metrics = parsed.get("metrics")
+    return KnowledgeSemanticMergeTighteningResult(
+        mode=mode,
+        prompt_version=prompt_version,
+        model=model,
+        decisions=tuple(decisions),
+        metrics=_json_object_from_mapping(metrics)
+        if isinstance(metrics, Mapping)
+        else {},
+    )
+
+
+def _parse_semantic_merge_decision(
+    payload: Mapping[object, object],
+    *,
+    index: int,
+    max_embedding_text_chars: int,
+) -> KnowledgeSemanticMergeDecision:
+    group_id = _required_text(payload, "group_id", index=index)
+    action = _required_semantic_merge_action(payload.get("action"), index=index)
+    candidate_ids = tuple(_string_list(payload.get("candidate_ids")))
+
+    if not candidate_ids:
+        raise KnowledgePreprocessingValidationError(
+            f"Semantic merge decision {index} must contain candidate_ids[]"
+        )
+
+    survivor_title = _optional_text(payload.get("survivor_title"))
+    merged_embedding_text = _optional_text(payload.get("merged_embedding_text"))
+
+    if action == SEMANTIC_MERGE_ACTION_MERGE:
+        if len(candidate_ids) < 2:
+            raise KnowledgePreprocessingValidationError(
+                f"Semantic merge decision {index} must merge at least 2 candidates"
+            )
+        if not survivor_title:
+            raise KnowledgePreprocessingValidationError(
+                f"Semantic merge decision {index} missing survivor_title"
+            )
+        if not merged_embedding_text:
+            raise KnowledgePreprocessingValidationError(
+                f"Semantic merge decision {index} missing merged_embedding_text"
+            )
+
+    if len(merged_embedding_text) > max_embedding_text_chars:
+        merged_embedding_text = merged_embedding_text[
+            :max_embedding_text_chars
+        ].rstrip()
+
+    return KnowledgeSemanticMergeDecision(
+        group_id=group_id,
+        action=action,
+        candidate_ids=candidate_ids,
+        survivor_title=survivor_title,
+        merged_embedding_text=merged_embedding_text,
+    )
 
 
 def _json_object_from_mapping(value: Mapping[object, object]) -> JsonObject:
@@ -333,6 +497,23 @@ def _optional_text(value: object) -> str:
     if isinstance(value, str | int | float):
         return _compact_text(str(value))
     return ""
+
+
+def _required_semantic_merge_action(
+    value: object,
+    *,
+    index: int,
+) -> SemanticMergeAction:
+    action = _optional_text(value)
+    if action in {
+        SEMANTIC_MERGE_ACTION_MERGE,
+        SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+    }:
+        return cast(SemanticMergeAction, action)
+
+    raise KnowledgePreprocessingValidationError(
+        f"Semantic merge decision {index} has unsupported action: {action}"
+    )
 
 
 def _string_list(value: object) -> list[str]:
