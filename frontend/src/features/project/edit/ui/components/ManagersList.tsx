@@ -5,6 +5,7 @@ import { useNotification } from '@/shared/lib/notification/useNotifications';
 import { useProjectManagers } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { getDisplayName } from '@shared/lib/displayNames';
+import { roleLabel } from '@shared/lib/uiLabels';
 import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
@@ -32,13 +33,13 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
     mutationFn: async () => {
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error(newMemberRole === 'manager' ? 'Введите Telegram chat_id менеджера' : 'Введите user_id участника платформы');
+        throw new Error(newMemberRole === 'manager' ? 'Введите Telegram ID менеджера' : 'Введите ID участника платформы');
       }
 
       if (newMemberRole === 'manager') {
         const chatId = Number(normalizedUserId);
         if (!Number.isInteger(chatId)) {
-          throw new Error('Telegram chat_id менеджера должен быть числом');
+          throw new Error('Telegram ID менеджера должен быть числом');
         }
 
         const { error } = await projectsApi.addManager(projectId, chatId);
@@ -123,7 +124,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
             <li key={manager.user_id} className="flex items-center justify-between rounded-lg bg-[var(--surface-secondary)] px-3 py-2 text-sm">
               <span>
                 {getDisplayName(manager, 'Менеджер')}
-                <span className="ml-2 inline-flex min-h-6 items-center rounded-full bg-[var(--accent-muted)] px-2 text-xs font-medium text-[var(--accent-primary)]">({manager.role})</span>
+                <span className="ml-2 inline-flex min-h-6 items-center rounded-full bg-[var(--accent-muted)] px-2 text-xs font-medium text-[var(--accent-primary)]">({roleLabel(manager.role)})</span>
               </span>
               <button
                 onClick={() => removeMutation.mutate(manager.user_id)}
@@ -140,7 +141,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           type="text"
           value={newMemberUserId}
           onChange={(e) => setNewMemberUserId(e.target.value)}
-          placeholder={newMemberRole === 'manager' ? 'Telegram chat_id менеджера' : 'user_id участника'}
+          placeholder={newMemberRole === 'manager' ? 'Telegram ID менеджера' : 'ID участника'}
           className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
         />
         <select
@@ -166,7 +167,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
         <div className="mb-3">
           <h4 className="text-sm font-semibold text-[var(--text-primary)]">Email-приглашение</h4>
           <p className="text-xs text-[var(--text-muted)]">
-            Создаёт ссылку приглашения и отправляет письмо, если SMTP включён. Добавление по Telegram chat_id остаётся выше.
+            Создаёт ссылку приглашения и отправляет письмо, если отправка email настроена. Менеджера также можно добавить по Telegram ID выше.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -198,7 +199,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           >
             {ROLE_OPTIONS.map((role) => (
               <option key={role} value={role}>
-                {role}
+                {roleLabel(role)}
               </option>
             ))}
           </select>

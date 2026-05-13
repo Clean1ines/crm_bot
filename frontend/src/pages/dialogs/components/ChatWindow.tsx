@@ -38,6 +38,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [limit] = useState(50);
   const [offset] = useState(0);
@@ -98,10 +99,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!threadId || !inputText.trim() || isSending) return;
 
     setIsSending(true);
+    setSendError(null);
     try {
       const { error } = await threadsApi.reply(threadId, inputText);
       if (error) {
         console.error("Failed to send reply", error);
+        setSendError("Не удалось отправить ответ. Попробуйте ещё раз.");
       } else {
         setInputText("");
         setTimeout(async () => {
@@ -122,6 +125,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       }
     } catch (err) {
       console.error("Error sending reply", err);
+      setSendError("Не удалось отправить ответ. Попробуйте ещё раз.");
     } finally {
       setIsSending(false);
     }
@@ -165,7 +169,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 </div>
                 <div className="text-xs text-[var(--text-muted)]">
                   {threadId
-                    ? `Диалог ${threadId.slice(0, 8)}`
+                    ? "Открытая переписка"
                     : "Сначала выберите диалог"}
                 </div>
               </div>
@@ -240,15 +244,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">
                       {presentation.content}
                     </div>
-                    {msg.metadata?.latency_ms && (
-                      <div className="mt-1 text-xs text-[var(--text-muted)]">
-                        Latency: {msg.metadata.latency_ms}ms | Tokens:{" "}
-                        {msg.metadata.tokens || 0}
-                      </div>
-                    )}
                     {msg.metadata?.explanation && (
                       <div className="mt-1 text-xs text-[var(--accent-primary)]">
-                        Обоснование: {msg.metadata.explanation}
+                        Почему ассистент так ответил: {msg.metadata.explanation}
                       </div>
                     )}
                   </div>
@@ -284,6 +282,11 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   <span className="hidden sm:inline">Отправить</span>
                 </button>
               </div>
+              {sendError && (
+                <div className="mt-2 text-sm text-[var(--accent-danger-text)]">
+                  {sendError}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -12,6 +12,17 @@ import frontendLogger from '@shared/lib/logger';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
+const parseLoginErrorPayload = (rawText: string): unknown => {
+  const trimmed = rawText.trim();
+  if (!trimmed) return rawText;
+
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return trimmed;
+  }
+};
+
 type TelegramAuthTokenResponse = {
   access_token: string;
 };
@@ -28,7 +39,7 @@ const getAccessTokenFromAuthResponse = (data: unknown): string => {
     return data.access_token;
   }
 
-  throw new Error('Auth response does not contain access token');
+  throw new Error('Не удалось завершить вход. Попробуйте войти ещё раз.');
 };
 
 export const TelegramLoginPage: React.FC = () => {
@@ -69,7 +80,14 @@ export const TelegramLoginPage: React.FC = () => {
     fetch(`${API_BASE_URL}/api/bot/username`)
       .then(async (res) => {
         const txt = await res.text();
-        if (!res.ok) throw new Error(txt);
+        if (!res.ok) {
+          throw new Error(
+            getErrorMessage(
+              parseLoginErrorPayload(txt),
+              'Не удалось получить настройки входа. Попробуйте обновить страницу.',
+            ),
+          );
+        }
         const json = JSON.parse(txt);
         log('BOT_FETCH_OK', json);
         setBotUsername(json.username);
@@ -98,7 +116,12 @@ export const TelegramLoginPage: React.FC = () => {
       .then(async (res) => {
         if (!res.ok) {
           const errText = await res.text();
-          throw new Error(errText);
+          throw new Error(
+            getErrorMessage(
+              parseLoginErrorPayload(errText),
+              'Не удалось войти через Telegram. Попробуйте ещё раз.',
+            ),
+          );
         }
         return res.json();
       })

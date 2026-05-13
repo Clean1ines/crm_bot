@@ -60,7 +60,7 @@ export const ClientChatPage: React.FC = () => {
           const newMessages = [...prev];
           const lastIndex = newMessages.length - 1;
           if (newMessages[lastIndex]?.role === 'assistant') {
-            newMessages[lastIndex] = { ...newMessages[lastIndex], content: 'Ошибка: не удалось получить ответ' };
+            newMessages[lastIndex] = { ...newMessages[lastIndex], content: 'Не удалось получить ответ. Попробуйте отправить сообщение ещё раз.' };
           }
           return newMessages;
         });

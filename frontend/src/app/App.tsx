@@ -88,10 +88,10 @@ const ProjectAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }
     <div className="mx-auto max-w-2xl p-6 sm:p-8">
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-          Раздел недоступен для manager
+          Раздел недоступен для менеджера
         </h1>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
-          В этой панели manager доступны только тикеты, диалоги и клиентская информация, нужные для обработки обращений.
+          В этой панели менеджеру доступны только обращения, диалоги и клиентская информация, нужные для работы с клиентами.
         </p>
         <div className="mt-5">
           <Link
@@ -122,10 +122,10 @@ const WorkspaceAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children
     <div className="mx-auto max-w-2xl p-6 sm:p-8">
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-          Раздел недоступен для manager
+          Раздел недоступен для менеджера
         </h1>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
-          Настройка каналов и токенов доступна только owner и admin проекта.
+          Настройка каналов и токенов доступна только владельцу или администратору проекта.
         </p>
         <div className="mt-5">
           <Link

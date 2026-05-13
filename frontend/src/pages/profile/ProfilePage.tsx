@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
 import { getErrorMessage } from '@shared/api/core/errors';
+import { authProviderLabel } from '@shared/lib/uiLabels';
 import { authApi } from '@shared/api/modules/auth';
 import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
 
@@ -19,6 +20,13 @@ interface AuthMethodsResponse {
   methods: AuthMethod[];
   has_password: boolean;
 }
+
+const authMethodSecondaryText = (method: AuthMethod): string => {
+  if (method.provider === 'email') return method.provider_id;
+  if (method.provider === 'telegram') return 'Telegram подключён';
+  if (method.provider === 'google') return 'Google подключён';
+  return 'Способ входа подключён';
+};
 
 export const ProfilePage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -78,7 +86,7 @@ export const ProfilePage: React.FC = () => {
       setCurrentPassword('');
       setNewPassword('');
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Пароль обновлен');
+      toast.success('Пароль обновлён');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -91,7 +99,7 @@ export const ProfilePage: React.FC = () => {
     onSuccess: async (data) => {
       setEmailVerificationUrl(data.url || data.token || '');
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Ссылка подтверждения подготовлена');
+      toast.success('Ссылка подтверждёния подготовлена');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -128,8 +136,8 @@ export const ProfilePage: React.FC = () => {
                 className="flex items-center justify-between gap-3 rounded-xl bg-[var(--control-bg)] px-4 py-3 shadow-[var(--shadow-sm)]"
               >
                 <div>
-                  <div className="font-medium text-[var(--text-primary)]">{method.provider}</div>
-                  <div className="text-xs text-[var(--text-muted)]">{method.provider_id}</div>
+                  <div className="font-medium text-[var(--text-primary)]">{authProviderLabel(method.provider)}</div>
+                  <div className="text-xs text-[var(--text-muted)]">{authMethodSecondaryText(method)}</div>
                 </div>
                 <button
                   type="button"
@@ -154,7 +162,7 @@ export const ProfilePage: React.FC = () => {
           Статус email:
           {' '}
           <span className={emailMethod?.verified ? 'text-[var(--accent-success-text)]' : 'text-[var(--accent-warning)]'}>
-            {emailMethod?.verified ? 'подтвержден' : 'не подтвержден'}
+            {emailMethod?.verified ? 'подтверждён' : 'не подтверждён'}
           </span>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
@@ -189,11 +197,11 @@ export const ProfilePage: React.FC = () => {
           disabled={requestEmailVerificationMutation.isPending || !emailMethod}
           className="ml-3 mt-5 rounded-lg bg-[var(--control-bg)] min-h-10 px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
-          {requestEmailVerificationMutation.isPending ? 'Подготовка...' : 'Получить ссылку подтверждения'}
+          {requestEmailVerificationMutation.isPending ? 'Подготовка...' : 'Получить ссылку подтверждёния'}
         </button>
         {emailVerificationUrl ? (
           <label className="mt-4 block space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Ссылка подтверждения</span>
+            <span className="text-[var(--text-muted)]">Ссылка подтверждёния</span>
             <textarea
               readOnly
               value={emailVerificationUrl}

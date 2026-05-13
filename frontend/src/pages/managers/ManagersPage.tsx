@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom';
 import { useProjectManagers, type ProjectMember } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { getDisplayName, getSecondaryDisplayText } from '@shared/lib/displayNames';
+import { roleLabel } from '@shared/lib/uiLabels';
 import { membersApi } from '@shared/api/modules/members';
 import { projectsApi } from '@shared/api/modules/projects';
 import { Button } from '@shared/ui';
@@ -38,18 +39,18 @@ export const ManagersPage: React.FC = () => {
   const addMemberMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) {
-        throw new Error('Project is not selected');
+        throw new Error('Сначала выберите проект');
       }
 
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error(newMemberRole === 'manager' ? 'Укажите Telegram chat_id менеджера' : 'Укажите user_id участника');
+        throw new Error(newMemberRole === 'manager' ? 'Укажите Telegram ID менеджера' : 'Укажите ID участника');
       }
 
       if (newMemberRole === 'manager') {
         const chatId = Number(normalizedUserId);
         if (!Number.isInteger(chatId)) {
-          throw new Error('Telegram chat_id менеджера должен быть числом');
+          throw new Error('Telegram ID менеджера должен быть числом');
         }
 
         const { error } = await projectsApi.addManager(projectId, chatId);
@@ -78,7 +79,7 @@ export const ManagersPage: React.FC = () => {
   const inviteMemberMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) {
-        throw new Error('Project is not selected');
+        throw new Error('Сначала выберите проект');
       }
 
       const normalizedEmail = inviteEmail.trim();
@@ -120,7 +121,7 @@ export const ManagersPage: React.FC = () => {
   const removeMemberMutation = useMutation({
     mutationFn: async (memberUserId: string) => {
       if (!projectId) {
-        throw new Error('Project is not selected');
+        throw new Error('Сначала выберите проект');
       }
       await membersApi.remove(projectId, memberUserId);
     },
@@ -143,7 +144,7 @@ export const ManagersPage: React.FC = () => {
       manager.full_name,
       manager.username,
       manager.email,
-      manager.role,
+      roleLabel(manager.role),
     ]
       .filter(Boolean)
       .join(' ')
@@ -203,7 +204,7 @@ export const ManagersPage: React.FC = () => {
           >
             {ROLE_OPTIONS.map((role) => (
               <option key={role} value={role}>
-                {role}
+                {roleLabel(role)}
               </option>
             ))}
           </select>
@@ -223,7 +224,7 @@ export const ManagersPage: React.FC = () => {
         <div className="mb-4">
           <h2 className="text-base font-semibold text-[var(--text-primary)]">Пригласить менеджера по email</h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Создаёт ссылку приглашения и отправляет письмо, если SMTP включён. Добавление по Telegram chat_id остаётся выше.
+            Создаёт ссылку приглашения и отправляет письмо, если отправка email настроена. Менеджера также можно добавить по Telegram ID выше.
           </p>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap">
@@ -255,7 +256,7 @@ export const ManagersPage: React.FC = () => {
           >
             {ROLE_OPTIONS.map((role) => (
               <option key={role} value={role}>
-                {role}
+                {roleLabel(role)}
               </option>
             ))}
           </select>
@@ -284,7 +285,7 @@ export const ManagersPage: React.FC = () => {
           <thead className="shadow-[0_1px_0_var(--divider-soft)] bg-[var(--surface-secondary)]">
             <tr>
               <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Участник</th>
-              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">User ID</th>
+              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Идентификатор</th>
               <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Роль</th>
               <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Действия</th>
             </tr>
@@ -311,7 +312,7 @@ export const ManagersPage: React.FC = () => {
                 <td className="px-4 py-3 lg:px-5">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-[var(--accent-success)]" />
-                    <span className="text-sm text-[var(--text-primary)]">{manager.role}</span>
+                    <span className="text-sm text-[var(--text-primary)]">{roleLabel(manager.role)}</span>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-right lg:px-5">
@@ -373,7 +374,7 @@ export const ManagersPage: React.FC = () => {
 
                 <div className="mt-4 grid gap-2 text-xs">
                   <div className="rounded-xl bg-[var(--surface-card)] p-3">
-                    <div className="text-[var(--text-muted)]">User ID</div>
+                    <div className="text-[var(--text-muted)]">Идентификатор</div>
                     <div className="mt-1 break-all font-mono font-semibold text-[var(--text-primary)]">
                       {manager.user_id}
                     </div>
@@ -444,7 +445,7 @@ export const ManagersPage: React.FC = () => {
             </div>
 
             <div className="flex-1 rounded-xl bg-[var(--surface-secondary)] p-6 text-sm text-[var(--text-muted)]">
-              История ответов пока не подключена к API. Фейковые ответы скрыты, чтобы не вводить менеджера в заблуждение.
+              История ответов пока недоступна в панели. Когда раздел будет готов, здесь появятся реальные ответы менеджера.
             </div>
           </div>
         </>

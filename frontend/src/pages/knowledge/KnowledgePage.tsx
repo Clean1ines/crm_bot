@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 import { getErrorMessage } from '@shared/api/core/errors';
+import { knowledgeDocumentStatusLabel } from '@shared/lib/uiLabels';
 
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
@@ -68,8 +69,6 @@ const confidenceLabel = (score: number): string => {
   return 'Низкая уверенность';
 };
 
-const scoreLabel = (score: number): string => score.toFixed(3);
-
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
 
 const formatUsd = (value: number): string => new Intl.NumberFormat('ru-RU', {
@@ -122,16 +121,8 @@ const sumUsageCost = (breakdown: KnowledgeUsageBreakdown[]): number => (
 );
 
 const usageModelRows = (breakdown: KnowledgeUsageBreakdown[]): string[] => {
-  const totals = new Map<string, number>();
-
-  breakdown.forEach((item) => {
-    const key = `${item.provider}: ${item.model}`;
-    totals.set(key, (totals.get(key) ?? 0) + item.tokens_total);
-  });
-
-  return Array.from(totals.entries())
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .map(([model, tokens]) => `${model} · ${formatNumber(tokens)}`);
+  const events = breakdown.reduce((acc, item) => acc + item.events_count, 0);
+  return events > 0 ? [`Операций: ${formatNumber(events)}`] : [];
 };
 
 
@@ -146,6 +137,29 @@ const metricNumber = (
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+};
+
+const isLikelyEmbeddingModel = (model: string): boolean => {
+  const normalized = model.toLowerCase();
+
+  return (
+    normalized.includes('embedding')
+    || normalized.includes('voyage')
+    || normalized.includes('jina')
+    || normalized.includes('minilm')
+    || normalized.includes('e5')
+    || normalized.includes('bge')
+  );
+};
+
+const processingModelLabel = (doc: Document): string => {
+  const candidates = [
+    metricText(doc.preprocessing_metrics, 'model'),
+    doc.preprocessing_model,
+  ].filter((value): value is string => Boolean(value && value.trim()));
+
+  return candidates.find((model) => !isLikelyEmbeddingModel(model))
+    || 'модель пока определяется';
 };
 
 const metricText = (
@@ -231,29 +245,6 @@ const processingProgressLabel = (doc: Document): string => {
   return 'Подготовка обработки документа';
 };
 
-const isLikelyEmbeddingModel = (model: string): boolean => {
-  const normalized = model.toLowerCase();
-
-  return (
-    normalized.includes('embedding')
-    || normalized.includes('voyage')
-    || normalized.includes('jina')
-    || normalized.includes('minilm')
-    || normalized.includes('e5')
-    || normalized.includes('bge')
-  );
-};
-
-const processingModelLabel = (doc: Document): string => {
-  const candidates = [
-    metricText(doc.preprocessing_metrics, 'model'),
-    doc.preprocessing_model,
-  ].filter((value): value is string => Boolean(value && value.trim()));
-
-  return candidates.find((model) => !isLikelyEmbeddingModel(model))
-    || 'Модель пока определяется';
-};
-
 const compiledEntryCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'semantic_answer_count')
   ?? metricNumber(doc.preprocessing_metrics, 'compiled_entry_count')
@@ -297,16 +288,7 @@ const documentLlmTokenText = (doc: Document): string | null => {
     ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_total');
   if (total === null || total <= 0) return null;
 
-  const input = doc.llm_tokens_input
-    ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_input');
-  const output = doc.llm_tokens_output
-    ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_output');
-
-  if (input !== null || output !== null) {
-    return `${formatNumber(total)} всего · вход ${formatNumber(input ?? 0)} / выход ${formatNumber(output ?? 0)}`;
-  }
-
-  return `${formatNumber(total)} всего`;
+  return `${formatNumber(total)} единиц обработки`;
 };
 
 const documentLlmModels = (doc: Document): string | null => {
@@ -350,16 +332,16 @@ const PreviewResultCard: React.FC<{
     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
       <span className="inline-flex w-fit items-center rounded-full bg-[var(--accent-muted)] px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]">
-        {confidenceLabel(result.score)} · {scoreLabel(result.score)}
+        {confidenceLabel(result.score)}
       </span>
     </div>
     <p className={`text-sm leading-relaxed text-[var(--text-primary)] ${compact ? 'line-clamp-3' : ''}`}>
       {result.answer || result.content}
     </p>
     <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-      <span>Метод: {result.method}</span>
+      <span>Совпадение найдено по базе знаний</span>
       {result.source && <span>Источник: {result.source}</span>}
-      {result.document_status && <span>Статус: {result.document_status}</span>}
+      {result.document_status && <span>Документ: {knowledgeDocumentStatusLabel(result.document_status)}</span>}
     </div>
   </div>
 );
@@ -413,10 +395,10 @@ const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
         </div>
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            Расход моделей за месяц
+            Работа ассистента за месяц
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Сколько токенов потрачено на обработку документов, проверки качества и ответы ассистента. Техническая индексация поиска здесь не учитывается.
+            Сколько работы выполнил ассистент: обработка документов, проверки качества и ответы клиентам.
           </p>
         </div>
       </div>
@@ -449,7 +431,7 @@ const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
       </div>
 
       <div className="mt-4 text-sm text-[var(--text-muted)]">
-        Всего токенов за месяц: {formatNumber(totalTokens)}.
+        Учтённый объём работы за месяц: {formatNumber(totalTokens)}.
       </div>
     </section>
   );
@@ -922,7 +904,7 @@ export const KnowledgePage: React.FC = () => {
                         <div>Собрано смысловых ответов: {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
                       )}
                       {incomingSemanticEntryCount(doc) !== null && (
-                        <div>Новых кандидатов в последнем батче: {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
+                        <div>Новых смысловых ответов на последнем этапе: {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
                       )}
                       {semanticMergeCount(doc) !== null && (
                         <div>
