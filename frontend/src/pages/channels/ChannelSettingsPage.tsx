@@ -1,7 +1,10 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from '@entities/project/api/useProjects';
 import { useProjectStore } from '@entities/project';
+import { getErrorMessage } from '@shared/api/core/errors';
+import { BaseModal } from '@shared/ui';
 
 export const ChannelSettingsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -24,6 +27,7 @@ export const ChannelSettingsPage: React.FC = () => {
   const [managerToken, setManagerToken] = useState('');
   const [showClientToken, setShowClientToken] = useState(false);
   const [showManagerToken, setShowManagerToken] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<'client' | 'manager' | null>(null);
 
   const safeProjects = useMemo(() => (Array.isArray(projects) ? projects : []), [projects]);
   const currentProject = safeProjects.find(p => p.id === selectedProjectId);
@@ -49,65 +53,83 @@ export const ChannelSettingsPage: React.FC = () => {
     }
   }, [projectsLoading, safeProjects, selectedProjectId, setSelectedProjectId, navigate]);
 
+  const closeRevokeModal = () => setRevokeTarget(null);
+
   const handleSaveClientToken = async () => {
     if (!selectedProjectId) {
-      alert('Сначала выберите проект');
+      toast.error('Сначала выберите проект');
       return;
     }
     if (!clientToken.trim()) {
-      alert('Введите токен бота');
+      toast.error('Введите токен клиентского бота');
       return;
     }
     try {
       await updateBotToken({ projectId: selectedProjectId, token: clientToken.trim() });
       setClientToken('');
-      alert('Клиентский бот подключён');
+      toast.success('Клиентский бот подключён');
     } catch (err) {
       console.error('Ошибка сохранения токена:', err);
-      alert('Не удалось подключить бота');
+      toast.error(getErrorMessage(err, 'Не удалось подключить клиентского бота. Проверьте токен и попробуйте снова.'));
     }
   };
 
-  const handleRevokeClientToken = async () => {
-    if (!selectedProjectId) return;
-    if (!window.confirm('Вы уверены, что хотите открепить клиентского бота?')) return;
-    try {
-      await updateBotToken({ projectId: selectedProjectId, token: null });
-      alert('Клиентский бот откреплён');
-    } catch (err) {
-      console.error('Ошибка открепления бота:', err);
-      alert('Не удалось открепить бота');
+  const handleRevokeClientToken = () => {
+    if (!selectedProjectId) {
+      toast.error('Сначала выберите проект');
+      return;
     }
+    setRevokeTarget('client');
   };
 
   const handleSaveManagerToken = async () => {
     if (!selectedProjectId) {
-      alert('Сначала выберите проект');
+      toast.error('Сначала выберите проект');
       return;
     }
     if (!managerToken.trim()) {
-      alert('Введите токен бота');
+      toast.error('Введите токен менеджерского бота');
       return;
     }
     try {
       await updateManagerBotToken({ projectId: selectedProjectId, token: managerToken.trim() });
       setManagerToken('');
-      alert('Менеджерский бот подключён');
+      toast.success('Менеджерский бот подключён');
     } catch (err) {
       console.error('Ошибка сохранения токена:', err);
-      alert('Не удалось подключить бота');
+      toast.error(getErrorMessage(err, 'Не удалось подключить менеджерского бота. Проверьте токен и попробуйте снова.'));
     }
   };
 
-  const handleRevokeManagerToken = async () => {
-    if (!selectedProjectId) return;
-    if (!window.confirm('Вы уверены, что хотите открепить менеджерского бота?')) return;
+  const handleRevokeManagerToken = () => {
+    if (!selectedProjectId) {
+      toast.error('Сначала выберите проект');
+      return;
+    }
+    setRevokeTarget('manager');
+  };
+
+  const handleConfirmRevoke = async () => {
+    if (!selectedProjectId || revokeTarget === null) {
+      closeRevokeModal();
+      return;
+    }
+
     try {
-      await updateManagerBotToken({ projectId: selectedProjectId, token: null });
-      alert('Менеджерский бот откреплён');
+      if (revokeTarget === 'client') {
+        await updateBotToken({ projectId: selectedProjectId, token: null });
+        toast.success('Клиентский бот откреплён');
+      } else {
+        await updateManagerBotToken({ projectId: selectedProjectId, token: null });
+        toast.success('Менеджерский бот откреплён');
+      }
+      closeRevokeModal();
     } catch (err) {
       console.error('Ошибка открепления бота:', err);
-      alert('Не удалось открепить бота');
+      const fallback = revokeTarget === 'client'
+        ? 'Не удалось открепить клиентского бота. Попробуйте ещё раз.'
+        : 'Не удалось открепить менеджерского бота. Попробуйте ещё раз.';
+      toast.error(getErrorMessage(err, fallback));
     }
   };
 
@@ -149,6 +171,12 @@ export const ChannelSettingsPage: React.FC = () => {
 
   const hasClient = !!currentProject.client_bot_username;
   const hasManager = !!currentProject.manager_bot_username;
+  const isRevokingBotToken = revokeTarget === 'client'
+    ? isUpdatingBotToken
+    : revokeTarget === 'manager'
+      ? isUpdatingManagerBotToken
+      : false;
+  const revokeBotLabel = revokeTarget === 'client' ? 'клиентского бота' : 'менеджерского бота';
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
@@ -268,6 +296,28 @@ export const ChannelSettingsPage: React.FC = () => {
           </div>
         )}
       </div>
+      <BaseModal
+        isOpen={revokeTarget !== null}
+        onClose={closeRevokeModal}
+        title="Открепить бота"
+        cancelLabel="Отмена"
+      >
+        <p className="text-sm leading-relaxed text-[var(--text-primary)]">
+          Вы уверены, что хотите открепить {revokeBotLabel}? После этого бот перестанет
+          работать для этого проекта, пока вы не подключите новый токен.
+        </p>
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            onClick={handleConfirmRevoke}
+            disabled={isRevokingBotToken}
+            className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:cursor-wait disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
+          >
+            {isRevokingBotToken ? 'Открепление...' : 'Открепить'}
+          </button>
+        </div>
+      </BaseModal>
+
     </div>
   );
 };

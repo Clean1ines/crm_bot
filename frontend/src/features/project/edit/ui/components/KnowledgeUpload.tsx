@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNotification } from '@/shared/lib/notification/useNotifications';
+import { getErrorMessage } from '@shared/api/core/errors';
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
   knowledgeApi,
@@ -18,13 +19,19 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
     try {
       const response = await knowledgeApi.upload(projectId, file, preprocessingMode);
       if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error);
+        const errorText = await response.text();
+        let errorPayload: unknown = errorText;
+        try {
+          errorPayload = JSON.parse(errorText) as unknown;
+        } catch {
+          errorPayload = errorText;
+        }
+        throw new Error(getErrorMessage(errorPayload, 'Не удалось загрузить файл'));
       }
       showNotification('Файл загружен', 'success');
       setFile(null);
-    } catch {
-      showNotification('Ошибка загрузки', 'error');
+    } catch (error) {
+      showNotification(getErrorMessage(error, 'Не удалось загрузить файл'), 'error');
     } finally {
       setUploading(false);
     }

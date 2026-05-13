@@ -755,7 +755,7 @@ export const RagEvalPage: React.FC = () => {
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось поставить проверку в очередь');
+      toast.error(getErrorMessage(error, 'Не удалось поставить проверку в очередь'));
     },
   });
 
@@ -767,7 +767,7 @@ export const RagEvalPage: React.FC = () => {
       void invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось поставить задачу на паузу');
+      toast.error(getErrorMessage(error, 'Не удалось поставить задачу на паузу'));
     },
   });
 
@@ -779,7 +779,7 @@ export const RagEvalPage: React.FC = () => {
       void invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось продолжить задачу');
+      toast.error(getErrorMessage(error, 'Не удалось продолжить задачу'));
     },
   });
 
@@ -792,7 +792,7 @@ export const RagEvalPage: React.FC = () => {
       void invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось отменить задачу');
+      toast.error(getErrorMessage(error, 'Не удалось отменить задачу'));
     },
   });
 
@@ -811,7 +811,7 @@ export const RagEvalPage: React.FC = () => {
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Не удалось применить предложенные исправления');
+      toast.error(getErrorMessage(error, 'Не удалось применить предложенные исправления'));
     },
   });
 
