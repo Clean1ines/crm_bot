@@ -2,6 +2,7 @@ import type { components } from '../generated/schema';
 import { API_BASE_URL } from '../core/config';
 import { authedJsonRequest } from '../core/http';
 import { handleUnauthorizedResponse, isUnauthorized } from '../core/session';
+import { getErrorMessage } from '../core/errors';
 
 type TelegramAuthData = components['schemas']['TelegramAuthData'];
 
@@ -26,7 +27,7 @@ export const authApi = {
     }
 
     if (!response.ok) {
-      throw data;
+      throw new Error(getErrorMessage(data));
     }
 
     return { data, response };

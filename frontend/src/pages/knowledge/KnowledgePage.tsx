@@ -11,6 +11,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
+import { getErrorMessage } from '@shared/api/core/errors';
 
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
@@ -155,13 +156,24 @@ const metricText = (
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 };
 
-const documentIssueText = (doc: Document): string | null => {
+const rawDocumentIssueText = (doc: Document): string | null => {
   const message = doc.preprocessing_error?.trim() || doc.error?.trim() || '';
+
   return message || null;
 };
 
+const documentIssueText = (doc: Document): string | null => {
+  const message = rawDocumentIssueText(doc);
+  if (!message) return null;
+
+  return getErrorMessage(
+    message,
+    'Документ не удалось обработать. Попробуйте загрузить его заново или обратитесь к администратору проекта.',
+  );
+};
+
 const isDocumentCancelled = (doc: Document): boolean => {
-  const issueText = documentIssueText(doc)?.toLowerCase() || '';
+  const issueText = rawDocumentIssueText(doc)?.toLowerCase() || '';
 
   return (
     doc.status === 'cancelled'

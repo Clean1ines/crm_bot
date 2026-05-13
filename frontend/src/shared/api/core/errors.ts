@@ -6,27 +6,155 @@ declare global {
   }
 }
 
-export const getErrorMessage = (error: unknown): string => {
-  if (error && typeof error === 'object') {
-    if ('detail' in error && typeof error.detail === 'string') return error.detail;
-    if ('error' in error && typeof error.error === 'string') return error.error;
+const DEFAULT_ERROR_MESSAGE = 'Не удалось выполнить действие. Попробуйте ещё раз.';
+const TECHNICAL_ERROR_MESSAGE = 'Внутренняя ошибка сервера. Технические детали скрыты; попробуйте повторить действие или обратитесь к администратору проекта.';
+const VALIDATION_ERROR_MESSAGE = 'Проверьте заполненные поля и попробуйте ещё раз.';
+const NETWORK_ERROR_MESSAGE = 'Не удалось соединиться с сервером. Проверьте подключение и попробуйте ещё раз.';
+const MAX_VISIBLE_ERROR_LENGTH = 280;
 
-    if ('detail' in error && Array.isArray(error.detail)) {
-      const details = error.detail as Array<{ msg?: string }>;
-      const message = details.map((item) => item.msg).filter(Boolean).join(', ');
-      if (message) return message;
-    }
+const FRIENDLY_ERROR_BY_NORMALIZED_MESSAGE: Record<string, string> = {
+  'project is not selected': 'Выберите проект и повторите действие.',
+  'no thread id': 'Не удалось определить диалог. Обновите страницу и попробуйте снова.',
+  'no response body': 'Сервер не вернул ответ. Попробуйте повторить позже.',
+  'auth response does not contain access token': 'Не удалось завершить вход. Попробуйте снова.',
+  'failed to fetch': NETWORK_ERROR_MESSAGE,
+  'networkerror': NETWORK_ERROR_MESSAGE,
+  'network error': NETWORK_ERROR_MESSAGE,
+  'internal server error': TECHNICAL_ERROR_MESSAGE,
+  '[object object]': DEFAULT_ERROR_MESSAGE,
+};
 
-    if ('message' in error && typeof error.message === 'string') return error.message;
+const TECHNICAL_ERROR_PATTERNS = [
+  /\bduplicate key value\b/i,
+  /\bviolates unique constraint\b/i,
+  /\bviolates foreign key constraint\b/i,
+  /\bforeign key constraint\b/i,
+  /\bnot-null constraint\b/i,
+  /\bnull value in column\b/i,
+  /\bDETAIL:\b/i,
+  /\bKey \([^)]+\)=/i,
+  /\bSQLSTATE\b/i,
+  /\b(asyncpg|psycopg|sqlalchemy)\b/i,
+  /\b(IntegrityError|ProgrammingError|OperationalError|DatabaseError)\b/i,
+  /\bTraceback \(most recent call last\):/i,
+  /\bFile "[^"]+", line \d+/i,
+  /\bHTTP 5\d\d\b/i,
+  /\bInternal Server Error\b/i,
+  /\/(home|app|usr|var)\/[^\s]+/i,
+  /\.(py|ts|tsx|js):\d+:\d+/i,
+];
+
+const normalizeWhitespace = (value: string): string => (
+  value.replace(/\s+/g, ' ').trim()
+);
+
+const stripErrorPrefix = (value: string): string => (
+  value.replace(/^Error:\s*/i, '').trim()
+);
+
+const isRecord = (value: unknown): value is Record<string, unknown> => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+);
+
+export const isTechnicalErrorMessage = (message: string): boolean => (
+  TECHNICAL_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+);
+
+export const sanitizeErrorMessage = (
+  message: unknown,
+  fallback = DEFAULT_ERROR_MESSAGE,
+): string => {
+  if (typeof message !== 'string') {
+    return fallback;
   }
 
-  if (error instanceof Error) return error.message;
+  const normalized = stripErrorPrefix(normalizeWhitespace(message));
+  if (!normalized) {
+    return fallback;
+  }
 
-  return 'Произошла неизвестная ошибка';
+  const friendlyOverride = FRIENDLY_ERROR_BY_NORMALIZED_MESSAGE[normalized.toLowerCase()];
+  if (friendlyOverride) {
+    return friendlyOverride;
+  }
+
+  if (isTechnicalErrorMessage(normalized)) {
+    return TECHNICAL_ERROR_MESSAGE;
+  }
+
+  if (normalized.length > MAX_VISIBLE_ERROR_LENGTH) {
+    return `${normalized.slice(0, MAX_VISIBLE_ERROR_LENGTH).trim()}…`;
+  }
+
+  return normalized;
+};
+
+const getValidationDetailMessage = (detail: unknown): string | null => {
+  if (!Array.isArray(detail)) {
+    return null;
+  }
+
+  const message = detail
+    .map((item) => (isRecord(item) && typeof item.msg === 'string' ? item.msg : ''))
+    .filter(Boolean)
+    .join(', ');
+
+  if (!message) {
+    return VALIDATION_ERROR_MESSAGE;
+  }
+
+  if (isTechnicalErrorMessage(message)) {
+    return TECHNICAL_ERROR_MESSAGE;
+  }
+
+  return VALIDATION_ERROR_MESSAGE;
+};
+
+export const getErrorMessage = (
+  error: unknown,
+  fallback = DEFAULT_ERROR_MESSAGE,
+): string => {
+  if (typeof error === 'string') {
+    return sanitizeErrorMessage(error, fallback);
+  }
+
+  if (isRecord(error)) {
+    const detail = error.detail;
+    if (typeof detail === 'string') {
+      return sanitizeErrorMessage(detail, fallback);
+    }
+
+    const validationDetail = getValidationDetailMessage(detail);
+    if (validationDetail) {
+      return validationDetail;
+    }
+
+    const errorText = error.error;
+    if (typeof errorText === 'string') {
+      return sanitizeErrorMessage(errorText, fallback);
+    }
+
+    const message = error.message;
+    if (typeof message === 'string') {
+      return sanitizeErrorMessage(message, fallback);
+    }
+  }
+
+  if (error instanceof Error) {
+    return sanitizeErrorMessage(error.message, fallback);
+  }
+
+  return fallback;
 };
 
 export const showErrorToast = (message: string): void => {
-  const key = `error-${message}`;
+  const safeMessage = sanitizeErrorMessage(message);
+  const key = `error-${safeMessage}`;
+
+  if (typeof window === 'undefined') {
+    toast.error(safeMessage);
+    return;
+  }
 
   if (window.__lastToast === key) return;
 
@@ -35,5 +163,5 @@ export const showErrorToast = (message: string): void => {
     window.__lastToast = null;
   }, 1000);
 
-  toast.error(message);
+  toast.error(safeMessage);
 };
