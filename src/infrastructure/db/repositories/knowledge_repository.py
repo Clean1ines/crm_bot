@@ -1491,10 +1491,31 @@ class KnowledgeRepository:
                     d.preprocessing_prompt_version,
                     d.preprocessing_metrics,
                     COUNT(DISTINCT ke.id)::int AS entry_count,
-                    COUNT(DISTINCT rs.entry_id)::int AS runtime_entry_count
+                    COUNT(DISTINCT rs.entry_id)::int AS runtime_entry_count,
+                    COALESCE(mu.llm_tokens_input, 0)::bigint AS llm_tokens_input,
+                    COALESCE(mu.llm_tokens_output, 0)::bigint AS llm_tokens_output,
+                    COALESCE(mu.llm_tokens_total, 0)::bigint AS llm_tokens_total,
+                    COALESCE(mu.llm_usage_events_count, 0)::int AS llm_usage_events_count,
+                    COALESCE(mu.llm_models, '') AS llm_models
                 FROM knowledge_documents AS d
                 LEFT JOIN knowledge_entries AS ke ON ke.document_id = d.id
                 LEFT JOIN knowledge_retrieval_surface AS rs ON rs.entry_id = ke.id
+                LEFT JOIN (
+                    SELECT
+                        document_id,
+                        COALESCE(SUM(tokens_input), 0)::bigint AS llm_tokens_input,
+                        COALESCE(SUM(tokens_output), 0)::bigint AS llm_tokens_output,
+                        COALESCE(SUM(tokens_total), 0)::bigint AS llm_tokens_total,
+                        COUNT(*)::int AS llm_usage_events_count,
+                        STRING_AGG(
+                            DISTINCT provider || ': ' || model,
+                            ', ' ORDER BY provider || ': ' || model
+                        ) AS llm_models
+                    FROM model_usage_events
+                    WHERE usage_type = 'llm'
+                      AND document_id IS NOT NULL
+                    GROUP BY document_id
+                ) AS mu ON mu.document_id = d.id
                 WHERE d.project_id = $1
                 GROUP BY
                     d.id,
@@ -1510,7 +1531,12 @@ class KnowledgeRepository:
                     d.preprocessing_error,
                     d.preprocessing_model,
                     d.preprocessing_prompt_version,
-                    d.preprocessing_metrics
+                    d.preprocessing_metrics,
+                    mu.llm_tokens_input,
+                    mu.llm_tokens_output,
+                    mu.llm_tokens_total,
+                    mu.llm_usage_events_count,
+                    mu.llm_models
                 ORDER BY d.created_at DESC
                 LIMIT $2 OFFSET $3
                 """,
@@ -1552,6 +1578,11 @@ class KnowledgeRepository:
                 preprocessing_metrics=row["preprocessing_metrics"],
                 structured_entries=int(row["runtime_entry_count"] or 0),
                 structured_chunk_count=int(row["runtime_entry_count"] or 0),
+                llm_tokens_input=int(row["llm_tokens_input"] or 0),
+                llm_tokens_output=int(row["llm_tokens_output"] or 0),
+                llm_tokens_total=int(row["llm_tokens_total"] or 0),
+                llm_usage_events_count=int(row["llm_usage_events_count"] or 0),
+                llm_models=str(row["llm_models"] or ""),
             )
             for row in rows or []
         ]

@@ -3,10 +3,8 @@ import {
   BookOpen,
   Upload,
   FileText,
-  Trash2,
   StopCircle,
   Search,
-  ExternalLink,
   TestTube2,
   Loader2,
 } from 'lucide-react';
@@ -31,19 +29,24 @@ interface Document {
   id: string;
   file_name: string;
   file_size: number;
-  status: 'pending' | 'processing' | 'processed' | 'error';
+  status: 'pending' | 'processing' | 'processed' | 'error' | 'cancelled' | string;
   error?: string | null;
   chunk_count: number;
   created_at: string;
   updated_at?: string | null;
   preprocessing_mode?: KnowledgePreprocessingMode | string | null;
-  preprocessing_status?: 'not_requested' | 'processing' | 'completed' | 'failed' | string | null;
+  preprocessing_status?: 'not_requested' | 'processing' | 'completed' | 'failed' | 'cancelled' | string | null;
   preprocessing_error?: string | null;
   preprocessing_model?: string | null;
   preprocessing_prompt_version?: string | null;
   preprocessing_metrics?: KnowledgeProcessingMetrics | null;
   structured_entries?: number;
   structured_chunk_count?: number;
+  llm_tokens_input?: number;
+  llm_tokens_output?: number;
+  llm_tokens_total?: number;
+  llm_usage_events_count?: number;
+  llm_models?: string | null;
 }
 
 interface UsageSummaryCardProps {
@@ -75,18 +78,60 @@ const formatUsd = (value: number): string => new Intl.NumberFormat('ru-RU', {
   maximumFractionDigits: 4,
 }).format(value);
 
-const sumTokensBySource = (breakdown: KnowledgeUsageBreakdown[], source: string): number => (
-  breakdown
-    .filter((item) => item.source === source)
-    .reduce((acc, item) => acc + item.tokens_total, 0)
+const LLM_USAGE_TYPE = 'llm';
+
+const USER_ANSWER_USAGE_SOURCES = new Set([
+  'client_response',
+  'user_response',
+  'agent_response',
+  'conversation_answer',
+]);
+
+const KNOWLEDGE_UPLOAD_USAGE_SOURCES = new Set([
+  'knowledge_preprocessing',
+  'knowledge_upload',
+]);
+
+const RAG_EVAL_USAGE_SOURCES = new Set([
+  'rag_eval',
+  'rag_eval_dataset',
+  'rag_eval_judge',
+  'rag_search',
+]);
+
+const llmUsageBreakdown = (
+  breakdown: KnowledgeUsageBreakdown[],
+): KnowledgeUsageBreakdown[] => (
+  breakdown.filter((item) => item.usage_type === LLM_USAGE_TYPE)
 );
 
-const providerModelsLabel = (breakdown: KnowledgeUsageBreakdown[]): string => (
-  breakdown
-    .map((item) => `${item.provider}: ${item.model}`)
-    .filter((value, index, items) => items.indexOf(value) === index)
-    .join(', ')
+const usageBySources = (
+  breakdown: KnowledgeUsageBreakdown[],
+  sources: Set<string>,
+): KnowledgeUsageBreakdown[] => (
+  breakdown.filter((item) => sources.has(item.source))
 );
+
+const sumUsageTokens = (breakdown: KnowledgeUsageBreakdown[]): number => (
+  breakdown.reduce((acc, item) => acc + item.tokens_total, 0)
+);
+
+const sumUsageCost = (breakdown: KnowledgeUsageBreakdown[]): number => (
+  breakdown.reduce((acc, item) => acc + item.estimated_cost_usd, 0)
+);
+
+const usageModelRows = (breakdown: KnowledgeUsageBreakdown[]): string[] => {
+  const totals = new Map<string, number>();
+
+  breakdown.forEach((item) => {
+    const key = `${item.provider}: ${item.model}`;
+    totals.set(key, (totals.get(key) ?? 0) + item.tokens_total);
+  });
+
+  return Array.from(totals.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([model, tokens]) => `${model} · ${formatNumber(tokens)}`);
+};
 
 
 const metricNumber = (
@@ -110,10 +155,36 @@ const metricText = (
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 };
 
+const documentIssueText = (doc: Document): string | null => {
+  const message = doc.preprocessing_error?.trim() || doc.error?.trim() || '';
+  return message || null;
+};
+
+const isDocumentCancelled = (doc: Document): boolean => {
+  const issueText = documentIssueText(doc)?.toLowerCase() || '';
+
+  return (
+    doc.status === 'cancelled'
+    || doc.preprocessing_status === 'cancelled'
+    || issueText.includes('остановлено пользователем')
+    || issueText.includes('cancelled')
+    || issueText.includes('canceled')
+  );
+};
+
+const isDocumentFailed = (doc: Document): boolean => (
+  doc.status === 'error'
+  || doc.preprocessing_status === 'failed'
+);
+
 const isDocumentProcessing = (doc: Document): boolean => (
-  doc.status === 'pending'
-  || doc.status === 'processing'
-  || doc.preprocessing_status === 'processing'
+  !isDocumentCancelled(doc)
+  && !isDocumentFailed(doc)
+  && (
+    doc.status === 'pending'
+    || doc.status === 'processing'
+    || doc.preprocessing_status === 'processing'
+  )
 );
 
 const knowledgeProcessingModeLabel = (mode: string | null | undefined): string => (
@@ -148,11 +219,28 @@ const processingProgressLabel = (doc: Document): string => {
   return 'Подготовка обработки документа';
 };
 
-const processingModelLabel = (doc: Document): string => (
-  doc.preprocessing_model
-  || metricText(doc.preprocessing_metrics, 'model')
-  || 'модель пока определяется'
-);
+const isLikelyEmbeddingModel = (model: string): boolean => {
+  const normalized = model.toLowerCase();
+
+  return (
+    normalized.includes('embedding')
+    || normalized.includes('voyage')
+    || normalized.includes('jina')
+    || normalized.includes('minilm')
+    || normalized.includes('e5')
+    || normalized.includes('bge')
+  );
+};
+
+const processingModelLabel = (doc: Document): string => {
+  const candidates = [
+    metricText(doc.preprocessing_metrics, 'model'),
+    doc.preprocessing_model,
+  ].filter((value): value is string => Boolean(value && value.trim()));
+
+  return candidates.find((model) => !isLikelyEmbeddingModel(model))
+    || 'LLM-модель пока определяется';
+};
 
 const compiledEntryCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'semantic_answer_count')
@@ -179,6 +267,39 @@ const technicalChunkProgressText = (doc: Document): string | null => {
   }
   if (total !== null && total > 0) return `0 из ${formatNumber(total)}`;
   return current !== null ? formatNumber(current) : null;
+};
+
+const sourceChunkCount = (doc: Document): number | null => (
+  metricNumber(doc.preprocessing_metrics, 'raw_source_chunk_count')
+  ?? metricNumber(doc.preprocessing_metrics, 'source_chunk_count')
+  ?? (Number.isFinite(doc.chunk_count) ? doc.chunk_count : null)
+);
+
+const incomingSemanticEntryCount = (doc: Document): number | null => (
+  metricNumber(doc.preprocessing_metrics, 'incoming_entry_count')
+  ?? metricNumber(doc.preprocessing_metrics, 'answer_candidate_count')
+);
+
+const documentLlmTokenText = (doc: Document): string | null => {
+  const total = doc.llm_tokens_total
+    ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_total');
+  if (total === null || total <= 0) return null;
+
+  const input = doc.llm_tokens_input
+    ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_input');
+  const output = doc.llm_tokens_output
+    ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_output');
+
+  if (input !== null || output !== null) {
+    return `${formatNumber(total)} всего · вход ${formatNumber(input ?? 0)} / выход ${formatNumber(output ?? 0)}`;
+  }
+
+  return `${formatNumber(total)} всего`;
+};
+
+const documentLlmModels = (doc: Document): string | null => {
+  const models = doc.llm_models?.trim();
+  return models || null;
 };
 
 const formatDurationSeconds = (seconds: number): string => {
@@ -231,10 +352,46 @@ const PreviewResultCard: React.FC<{
   </div>
 );
 
+const UsageScenarioCard: React.FC<{
+  title: string;
+  description: string;
+  breakdown: KnowledgeUsageBreakdown[];
+  emptyText: string;
+}> = ({ title, description, breakdown, emptyText }) => {
+  const tokens = sumUsageTokens(breakdown);
+  const modelRows = usageModelRows(breakdown);
+
+  return (
+    <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+        {title}
+      </div>
+      <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">
+        {formatNumber(tokens)}
+      </div>
+      <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+        {description}
+      </p>
+      <div className="mt-3 space-y-1 text-xs text-[var(--text-muted)]">
+        {modelRows.length > 0 ? (
+          modelRows.map((row) => (
+            <div key={row}>{row}</div>
+          ))
+        ) : (
+          <div>{emptyText}</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
-  const uploadTokens = sumTokensBySource(usage.breakdown, 'knowledge_upload');
-  const ragTokens = sumTokensBySource(usage.breakdown, 'rag_search');
-  const providerModels = providerModelsLabel(usage.breakdown);
+  const llmBreakdown = llmUsageBreakdown(usage.breakdown);
+  const answerBreakdown = usageBySources(llmBreakdown, USER_ANSWER_USAGE_SOURCES);
+  const uploadBreakdown = usageBySources(llmBreakdown, KNOWLEDGE_UPLOAD_USAGE_SOURCES);
+  const ragEvalBreakdown = usageBySources(llmBreakdown, RAG_EVAL_USAGE_SOURCES);
+  const totalTokens = sumUsageTokens(llmBreakdown);
+  const totalCost = sumUsageCost(llmBreakdown);
 
   return (
     <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
@@ -243,49 +400,44 @@ const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
           <BookOpen className="h-5 w-5" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Usage моделей</h2>
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+            LLM-токены за месяц
+          </h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Токены embeddings и preprocessing по базе знаний.
+            Только фактические LLM-вызовы. Embedding-модели и remaining-лимиты здесь не учитываются.
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
-          <div className="text-xs text-[var(--text-muted)]">Embeddings: used / remaining</div>
-          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-            {formatNumber(usage.tokens_month_total)} / {formatNumber(usage.remaining_tokens)}
-          </div>
-        </div>
-        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
-          <div className="text-xs text-[var(--text-muted)]">Today</div>
-          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-            {formatNumber(usage.tokens_today_total)}
-          </div>
-        </div>
-        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
-          <div className="text-xs text-[var(--text-muted)]">This month</div>
-          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-            {formatNumber(usage.tokens_month_total)}
-          </div>
-        </div>
-        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
-          <div className="text-xs text-[var(--text-muted)]">Uploads</div>
-          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-            {formatNumber(uploadTokens)}
-          </div>
-        </div>
-        <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
-          <div className="text-xs text-[var(--text-muted)]">RAG answers</div>
-          <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-            {formatNumber(ragTokens)}
-          </div>
-        </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <UsageScenarioCard
+          title="Общее использование"
+          description={`Все LLM-сценарии за месяц · cost ${formatUsd(totalCost)}`}
+          breakdown={llmBreakdown}
+          emptyText="За месяц нет записанных LLM events"
+        />
+        <UsageScenarioCard
+          title="Ответы пользователям"
+          description="LLM-токены генерации ответов клиентам и диалогов"
+          breakdown={answerBreakdown}
+          emptyText="Пока нет LLM events для ответов пользователям"
+        />
+        <UsageScenarioCard
+          title="Загрузка документов"
+          description="LLM-токены KCD-компиляции и merge_embedding_text"
+          breakdown={uploadBreakdown}
+          emptyText="Пока нет LLM events для загрузки документов"
+        />
+        <UsageScenarioCard
+          title="RAG eval"
+          description="LLM-токены генерации/оценки eval-сценариев"
+          breakdown={ragEvalBreakdown}
+          emptyText="Пока нет LLM events для RAG eval"
+        />
       </div>
 
-      <div className="mt-4 flex flex-col gap-2 text-sm text-[var(--text-muted)] lg:flex-row lg:items-center lg:justify-between">
-        <span>Модели: {providerModels || 'Нет данных'}</span>
-        <span>Estimated cost: {formatUsd(usage.estimated_cost_month_usd)}</span>
+      <div className="mt-4 text-sm text-[var(--text-muted)]">
+        Всего LLM-токенов за месяц: {formatNumber(totalTokens)}.
       </div>
     </section>
   );
@@ -476,7 +628,13 @@ export const KnowledgePage: React.FC = () => {
   const getStatusBadge = (doc: Document) => {
     const status = doc.status;
 
-    if (status === 'error' || doc.preprocessing_status === 'failed') {
+    if (isDocumentCancelled(doc)) {
+      return {
+        label: 'Остановлено',
+        className: 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]',
+      };
+    }
+    if (isDocumentFailed(doc)) {
       return {
         label: 'Ошибка обработки',
         className: 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]',
@@ -516,7 +674,7 @@ export const KnowledgePage: React.FC = () => {
             База знаний
           </h1>
           <p className="text-[var(--text-muted)]">
-            Загрузите документы, чтобы обучить своего ИИ-ассистента
+            Загрузите документы, чтобы собрать проверяемые смысловые ответы для ассистента
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -684,7 +842,7 @@ export const KnowledgePage: React.FC = () => {
             База знаний пуста
           </h3>
           <p className="mt-2 text-[var(--text-muted)]">
-            Загрузите первый документ, чтобы начать обучение
+            Загрузите первый документ, чтобы начать сборку базы знаний
           </p>
         </div>
       ) : (
@@ -701,8 +859,8 @@ export const KnowledgePage: React.FC = () => {
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
                     <FileText className="h-5 w-5" />
                   </div>
-                  <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                    {isDocumentProcessing(doc) && (
+                  {isDocumentProcessing(doc) && (
+                    <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
                       <button
                         type="button"
                         onClick={() => cancelProcessingMutation.mutate(doc.id)}
@@ -712,14 +870,8 @@ export const KnowledgePage: React.FC = () => {
                       >
                         <StopCircle className="h-4 w-4" />
                       </button>
-                    )}
-                    <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                    <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
-                      <ExternalLink className="h-4 w-4" />
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
@@ -752,26 +904,44 @@ export const KnowledgePage: React.FC = () => {
                       </div>
                     )}
                     <div className="space-y-1 text-xs text-[var(--text-muted)]">
-                      <div>Модель: {processingModelLabel(doc)}</div>
+                      <div>LLM-модель компиляции: {processingModelLabel(doc)}</div>
                       <div>Времени прошло: {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
+                      {sourceChunkCount(doc) !== null && (
+                        <div>Исходные source-фрагменты: {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
+                      )}
                       {technicalChunkProgressText(doc) !== null && (
-                        <div>Технические фрагменты: {technicalChunkProgressText(doc)}</div>
+                        <div>Технические фрагменты / LLM-батчи: {technicalChunkProgressText(doc)}</div>
                       )}
                       {compiledEntryCount(doc) !== null && (
                         <div>Собрано смысловых ответов: {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
+                      )}
+                      {incomingSemanticEntryCount(doc) !== null && (
+                        <div>Новых кандидатов в последнем батче: {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
                       )}
                       {semanticMergeCount(doc) !== null && (
                         <div>
                           Объединено смысловых повторов: {formatNumber(semanticMergeCount(doc) ?? 0)}
                         </div>
                       )}
+                      {documentLlmTokenText(doc) !== null && (
+                        <div>LLM-токены документа: {documentLlmTokenText(doc)}</div>
+                      )}
+                      {documentLlmModels(doc) !== null && (
+                        <div>LLM-модели токенов документа: {documentLlmModels(doc)}</div>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {(doc.status === 'error' || doc.preprocessing_status === 'failed') && (
+                {isDocumentCancelled(doc) && (
+                  <div className="mb-4 rounded-xl bg-[var(--accent-warning-bg)] p-3 text-xs leading-relaxed text-[var(--accent-warning)]">
+                    Документ остановлен пользователем. Он не считается завершённой базой знаний; при необходимости загрузите его заново.
+                  </div>
+                )}
+
+                {isDocumentFailed(doc) && !isDocumentCancelled(doc) && (
                   <div className="mb-4 rounded-xl bg-[var(--accent-danger-bg)] p-3 text-xs leading-relaxed text-[var(--accent-danger-text)]">
-                    {doc.preprocessing_error || doc.error || 'Документ не удалось обработать'}
+                    {documentIssueText(doc) || 'Документ не удалось обработать'}
                   </div>
                 )}
 

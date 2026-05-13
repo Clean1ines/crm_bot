@@ -71,6 +71,11 @@ class KnowledgeDocumentView:
     preprocessing_metrics: object | None = None
     structured_entries: int = 0
     structured_chunk_count: int = 0
+    llm_tokens_input: int = 0
+    llm_tokens_output: int = 0
+    llm_tokens_total: int = 0
+    llm_usage_events_count: int = 0
+    llm_models: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,3 +98,8 @@ class KnowledgeDocumentDetailView:
     preprocessing_metrics: object | None = None
     structured_entries: int = 0
     structured_chunk_count: int = 0
+    llm_tokens_input: int = 0
+    llm_tokens_output: int = 0
+    llm_tokens_total: int = 0
+    llm_usage_events_count: int = 0
+    llm_models: str = ""
