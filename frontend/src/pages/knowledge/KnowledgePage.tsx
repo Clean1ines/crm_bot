@@ -4,6 +4,7 @@ import {
   Upload,
   FileText,
   StopCircle,
+  RefreshCw,
   Search,
   TestTube2,
   Loader2,
@@ -211,6 +212,13 @@ const isDocumentProcessing = (doc: Document): boolean => (
     || doc.status === 'processing'
     || doc.preprocessing_status === 'processing'
   )
+);
+
+const isDocumentRetightenable = (doc: Document): boolean => (
+  doc.status === 'processed'
+  && !isDocumentProcessing(doc)
+  && !isDocumentFailed(doc)
+  && !isDocumentCancelled(doc)
 );
 
 const knowledgeProcessingModeLabel = (mode: string | null | undefined): string => (
@@ -562,6 +570,21 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+  const retightenMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.retighten(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success('Перепроверка смысловых дублей поставлена в очередь');
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, 'Не удалось запустить перепроверку дублей'));
+    },
+  });
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -837,6 +860,7 @@ export const KnowledgePage: React.FC = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
+            const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
 
             return (
               <div
@@ -847,17 +871,30 @@ export const KnowledgePage: React.FC = () => {
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
                     <FileText className="h-5 w-5" />
                   </div>
-                  {isDocumentProcessing(doc) && (
+                  {(isDocumentRetightenable(doc) || isDocumentProcessing(doc)) && (
                     <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => cancelProcessingMutation.mutate(doc.id)}
-                        disabled={cancelProcessingMutation.isPending}
-                        title="Остановить обработку"
-                        className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
-                      >
-                        <StopCircle className="h-4 w-4" />
-                      </button>
+                      {isDocumentRetightenable(doc) && (
+                        <button
+                          type="button"
+                          onClick={() => retightenMutation.mutate(doc.id)}
+                          disabled={retightenMutation.isPending}
+                          title={isRetighteningThisDoc ? 'Перепроверка ставится в очередь' : 'Перепроверить смысловые дубли'}
+                          className="rounded-lg p-2 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/10 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-4 w-4 ${isRetighteningThisDoc ? 'animate-spin' : ''}`} />
+                        </button>
+                      )}
+                      {isDocumentProcessing(doc) && (
+                        <button
+                          type="button"
+                          onClick={() => cancelProcessingMutation.mutate(doc.id)}
+                          disabled={cancelProcessingMutation.isPending}
+                          title="Остановить обработку"
+                          className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
+                        >
+                          <StopCircle className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -895,7 +932,7 @@ export const KnowledgePage: React.FC = () => {
                       <div>Модель обработки: {processingModelLabel(doc)}</div>
                       <div>Времени прошло: {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
                       {sourceChunkCount(doc) !== null && (
-                        <div>Исходные source-фрагменты: {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
+                        <div>Технические фрагменты: {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
                       )}
                       {technicalChunkProgressText(doc) !== null && (
                         <div>Шаги обработки документа: {technicalChunkProgressText(doc)}</div>

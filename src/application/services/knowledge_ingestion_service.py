@@ -4,6 +4,7 @@ import time
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 import asyncpg
 
@@ -62,6 +63,7 @@ from src.domain.project_plane.knowledge_compilation import (
     AnswerCandidateStatus,
     AnswerCandidate,
     CanonicalKnowledgeEntry,
+    EmbeddingText,
     KnowledgeEnrichment,
     KnowledgeEntryKind,
     KnowledgeEntryStatus,
@@ -1356,6 +1358,163 @@ def _merge_entry_fields_deterministically(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _RetightenExistingDocumentPlan:
+    entries: tuple[KnowledgePreprocessingEntry, ...]
+    survivor_source_indexes: tuple[int, ...]
+    merged_source_indexes_by_entry: tuple[tuple[int, ...], ...]
+    removed_source_indexes: tuple[int, ...]
+
+
+def _preprocessing_entry_from_canonical_entry(
+    entry: CanonicalKnowledgeEntry,
+) -> KnowledgePreprocessingEntry:
+    source_excerpt = "\n\n".join(
+        source_ref.quote for source_ref in entry.source_refs if source_ref.quote
+    )
+    embedding_text = entry.embedding_text.value if entry.embedding_text else ""
+    return KnowledgePreprocessingEntry(
+        title=entry.title,
+        answer=entry.answer,
+        source_excerpt=source_excerpt,
+        questions=entry.enrichment.questions,
+        synonyms=entry.enrichment.synonyms,
+        tags=entry.enrichment.tags,
+        embedding_text=_clean_optional_text(embedding_text) or entry.answer,
+    )
+
+
+def _retighten_existing_document_plan(
+    *,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    decisions: Sequence[KnowledgeSemanticMergeDecision],
+) -> _RetightenExistingDocumentPlan:
+    updated_entries: list[KnowledgePreprocessingEntry] = list(entries)
+    merged_source_indexes: list[list[int]] = [[index] for index in range(len(entries))]
+    removed_indexes: set[int] = set()
+
+    for decision in decisions:
+        if not decision.is_merge:
+            continue
+
+        candidate_indexes: list[int] = []
+        for candidate_id in decision.candidate_ids:
+            index = _semantic_merge_candidate_index(candidate_id)
+            if index is None or index < 0 or index >= len(entries):
+                continue
+            if index in candidate_indexes or index in removed_indexes:
+                continue
+            candidate_indexes.append(index)
+
+        if len(candidate_indexes) < 2:
+            continue
+
+        ordered_indexes = tuple(sorted(candidate_indexes))
+        survivor_index = _semantic_merge_survivor_index(
+            decision=decision,
+            candidate_indexes=ordered_indexes,
+            entries=entries,
+        )
+
+        merged_entry = updated_entries[survivor_index]
+        for index in ordered_indexes:
+            if index == survivor_index:
+                continue
+            merged_entry = _merge_entry_fields_deterministically(
+                existing_entry=merged_entry,
+                incoming_entry=updated_entries[index],
+                merged_embedding_text=decision.merged_embedding_text,
+            )
+
+        merged_indexes_for_survivor: list[int] = []
+        for index in ordered_indexes:
+            for source_index in merged_source_indexes[index]:
+                if source_index not in merged_indexes_for_survivor:
+                    merged_indexes_for_survivor.append(source_index)
+
+        updated_entries[survivor_index] = _entry_with_semantic_merge_decision(
+            entry=merged_entry,
+            decision=decision,
+        )
+        merged_source_indexes[survivor_index] = merged_indexes_for_survivor
+        removed_indexes.update(
+            index for index in ordered_indexes if index != survivor_index
+        )
+
+    survivor_indexes = tuple(
+        index for index in range(len(updated_entries)) if index not in removed_indexes
+    )
+    return _RetightenExistingDocumentPlan(
+        entries=tuple(updated_entries[index] for index in survivor_indexes),
+        survivor_source_indexes=survivor_indexes,
+        merged_source_indexes_by_entry=tuple(
+            tuple(merged_source_indexes[index]) for index in survivor_indexes
+        ),
+        removed_source_indexes=tuple(sorted(removed_indexes)),
+    )
+
+
+def _merge_source_refs_for_existing_entry_indexes(
+    *,
+    source_indexes: Sequence[int],
+    entries: Sequence[CanonicalKnowledgeEntry],
+) -> tuple[SourceRef, ...]:
+    refs: tuple[SourceRef, ...] = ()
+    for index in source_indexes:
+        if index < 0 or index >= len(entries):
+            continue
+        refs = _merge_compiled_source_refs(refs, entries[index].source_refs)
+    return refs
+
+
+def _retightened_canonical_entry(
+    *,
+    original: CanonicalKnowledgeEntry,
+    entry: KnowledgePreprocessingEntry,
+    source_refs: tuple[SourceRef, ...],
+    merged_from_entry_ids: Sequence[str],
+) -> CanonicalKnowledgeEntry:
+    metadata: dict[str, object] = dict(original.metadata)
+    metadata["semantic_retightening"] = {
+        "strategy": "kcd_stage_k8_existing_document_retighten",
+        "merged_from_entry_ids": tuple(merged_from_entry_ids),
+        "merged_source_entry_count": len(merged_from_entry_ids),
+    }
+
+    embedding_text = (
+        _clean_optional_text(entry.embedding_text)
+        or (original.embedding_text.value if original.embedding_text else "")
+        or entry.answer
+    )
+
+    return CanonicalKnowledgeEntry(
+        id=original.id,
+        project_id=original.project_id,
+        document_id=original.document_id,
+        compiler_run_id=original.compiler_run_id,
+        stable_key=original.stable_key,
+        entry_kind=original.entry_kind,
+        title=entry.title,
+        answer=entry.answer,
+        source_refs=source_refs,
+        enrichment=KnowledgeEnrichment(
+            questions=_text_tuple(entry.questions),
+            synonyms=_text_tuple(entry.synonyms),
+            tags=_text_tuple(entry.tags),
+        ),
+        embedding_text=EmbeddingText(
+            value=embedding_text,
+            version=CANONICAL_EMBEDDING_TEXT_VERSION,
+        ),
+        status=KnowledgeEntryStatus.PUBLISHED,
+        visibility=KnowledgeEntryVisibility.RUNTIME,
+        version=original.version + 1,
+        compiler_version=original.compiler_version,
+        embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
+        metadata=metadata,
+    )
+
+
 def _preprocessing_result_from_entries(
     *,
     mode: KnowledgePreprocessingMode,
@@ -1885,6 +2044,135 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", str(exc))
             raise
+
+    async def retighten_processed_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        file_name: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
+        preprocessor_factory: KnowledgePreprocessorFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        usage_repo = model_usage_repo_factory(self.pool)
+        current_entries = await repo.list_document_runtime_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+
+        metrics: JsonObject = {
+            "stage": "semantic_retighten_existing_document",
+            "source": "kcd_stage_k8_3",
+            "entry_count_before": len(current_entries),
+            "source_compiler_rerun": False,
+        }
+
+        if len(current_entries) < 2:
+            metrics["status"] = "skipped"
+            metrics["reason"] = "document_has_less_than_two_runtime_entries"
+            metrics["entry_count_after"] = len(current_entries)
+            return metrics
+
+        preprocessing_entries = tuple(
+            _preprocessing_entry_from_canonical_entry(entry)
+            for entry in current_entries
+        )
+        groups = _semantic_merge_suspect_groups_from_entries(preprocessing_entries)
+        metrics["candidate_group_count"] = len(groups)
+
+        if not groups:
+            metrics["status"] = "skipped"
+            metrics["reason"] = "no_semantic_merge_suspect_groups"
+            metrics["entry_count_after"] = len(current_entries)
+            return metrics
+
+        preprocessor = preprocessor_factory()
+        existing_project_titles = await _existing_project_titles_for_semantic_merge(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+        )
+        execution = await preprocessor.tighten_semantic_merges(
+            mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
+            file_name=file_name,
+            groups=groups,
+            existing_project_titles=existing_project_titles,
+        )
+        if execution.usage is not None:
+            await usage_repo.record_event(
+                ModelUsageEventCreate.from_measurement(
+                    project_id=project_id,
+                    source="knowledge_preprocessing",
+                    measurement=execution.usage,
+                    document_id=document_id,
+                )
+            )
+
+        plan = _retighten_existing_document_plan(
+            entries=preprocessing_entries,
+            decisions=execution.result.decisions,
+        )
+
+        metrics["decision_count"] = len(execution.result.decisions)
+        metrics["merge_decision_count"] = sum(
+            1 for decision in execution.result.decisions if decision.is_merge
+        )
+        metrics["collapsed_entry_count"] = len(plan.removed_source_indexes)
+        metrics["entry_count_after"] = len(plan.entries)
+        metrics["llm_call_count"] = 1
+        metrics["model"] = execution.result.model
+        metrics["prompt_version"] = execution.result.prompt_version
+
+        if not plan.removed_source_indexes:
+            metrics["status"] = "completed"
+            metrics["reason"] = "llm_kept_suspects_separate"
+            return metrics
+
+        updated_entries: list[CanonicalKnowledgeEntry] = []
+        for output_index, tightened_entry in enumerate(plan.entries):
+            survivor_source_index = plan.survivor_source_indexes[output_index]
+            merged_source_indexes = plan.merged_source_indexes_by_entry[output_index]
+            original = current_entries[survivor_source_index]
+            source_refs = _merge_source_refs_for_existing_entry_indexes(
+                source_indexes=merged_source_indexes,
+                entries=current_entries,
+            )
+            updated_entries.append(
+                _retightened_canonical_entry(
+                    original=original,
+                    entry=tightened_entry,
+                    source_refs=source_refs,
+                    merged_from_entry_ids=tuple(
+                        current_entries[index].id for index in merged_source_indexes
+                    ),
+                )
+            )
+
+        archived_entry_ids = tuple(
+            current_entries[index].id for index in plan.removed_source_indexes
+        )
+        result = await repo.apply_document_semantic_retightening(
+            project_id=project_id,
+            document_id=document_id,
+            updated_entries=tuple(updated_entries),
+            archived_entry_ids=archived_entry_ids,
+            metrics=metrics,
+        )
+
+        logger.info(
+            "Knowledge document semantic retighten completed",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "entry_count_before": len(current_entries),
+                "entry_count_after": len(plan.entries),
+                "collapsed_entry_count": len(plan.removed_source_indexes),
+            },
+        )
+        return result
 
     async def process_document(
         self,
