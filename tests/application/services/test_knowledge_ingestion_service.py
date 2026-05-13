@@ -10,6 +10,7 @@ from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgeEmbeddingTextMergeExecutionResult,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingResult,
@@ -438,7 +439,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
             ),
         ]
     )
-    preprocessor.merge_answer_entry = AsyncMock()
+    preprocessor.merge_embedding_text = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -504,7 +505,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
         "operator transfer",
         "human support",
     )
-    preprocessor.merge_answer_entry.assert_not_awaited()
+    preprocessor.merge_embedding_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -619,9 +620,10 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_answer_entry = AsyncMock(
-        return_value=KnowledgePreprocessingExecutionResult(
-            result=merged_result,
+    preprocessor.merge_embedding_text = AsyncMock(
+        return_value=KnowledgeEmbeddingTextMergeExecutionResult(
+            embedding_text=merged_result.entries[0].embedding_text
+            or merged_result.entries[0].answer,
             usage=None,
         )
     )
@@ -653,7 +655,7 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
         logger=Mock(),
     )
 
-    preprocessor.merge_answer_entry.assert_awaited_once()
+    preprocessor.merge_embedding_text.assert_awaited_once()
     repo.add_canonical_entries.assert_awaited_once()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
     assert len(entries) == 1
@@ -832,7 +834,7 @@ async def test_structured_preprocessing_passes_previous_titles_between_technical
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_answer_entry = AsyncMock()
+    preprocessor.merge_embedding_text = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -979,15 +981,9 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
             ),
         ]
     )
-    preprocessor.merge_answer_entry = AsyncMock(
-        return_value=KnowledgePreprocessingExecutionResult(
-            result=KnowledgePreprocessingResult(
-                mode="faq",
-                prompt_version="knowledge_preprocess_faq_v2",
-                model="llama-test",
-                entries=(merged_entry,),
-                metrics={},
-            ),
+    preprocessor.merge_embedding_text = AsyncMock(
+        return_value=KnowledgeEmbeddingTextMergeExecutionResult(
+            embedding_text=merged_entry.embedding_text or merged_entry.answer,
             usage=None,
         )
     )
@@ -1050,7 +1046,7 @@ async def test_structured_preprocessing_failure_marks_document_error():
     preprocessor.preprocess = AsyncMock(
         side_effect=ValueError("Invalid preprocessing JSON: Extra data")
     )
-    preprocessor.merge_answer_entry = AsyncMock()
+    preprocessor.merge_embedding_text = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 

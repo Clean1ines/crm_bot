@@ -155,3 +155,28 @@ def test_parse_preprocessing_payload_rejects_trailing_text_after_json_object() -
             model="test-model",
             prompt_version="knowledge_preprocess_faq_v2",
         )
+
+
+def test_parse_embedding_text_merge_payload_accepts_minimal_json() -> None:
+    from src.domain.project_plane.knowledge_preprocessing import (
+        parse_embedding_text_merge_payload,
+    )
+
+    assert (
+        parse_embedding_text_merge_payload(
+            '{"embedding_text":"  Возврат средств и условия оплаты.  "}'
+        )
+        == "Возврат средств и условия оплаты."
+    )
+
+
+def test_parse_embedding_text_merge_payload_rejects_full_entries_schema() -> None:
+    import pytest
+
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgePreprocessingValidationError,
+        parse_embedding_text_merge_payload,
+    )
+
+    with pytest.raises(KnowledgePreprocessingValidationError):
+        parse_embedding_text_merge_payload('{"entries":[]}')

@@ -1,5 +1,6 @@
 import hashlib
 import re
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -653,6 +654,7 @@ class _CompiledAnswerEntryDraft:
     title: str
     answer: str
     source_excerpts: tuple[str, ...]
+    source_refs: tuple[SourceRef, ...]
     questions: tuple[str, ...]
     synonyms: tuple[str, ...]
     tags: tuple[str, ...]
@@ -730,6 +732,15 @@ def _preprocessing_entry_to_compiled_draft(
         title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
         answer=_clean_optional_text(entry.answer),
         source_excerpts=_source_excerpts_from_preprocessing_entry(entry),
+        source_refs=tuple(
+            SourceRef(
+                source_index=index,
+                quote=source_excerpt,
+                source_chunk_id=None,
+                confidence=1.0,
+            )
+            for source_excerpt in _source_excerpts_from_preprocessing_entry(entry)
+        ),
         questions=_text_tuple(entry.questions),
         synonyms=_text_tuple(entry.synonyms),
         tags=_text_tuple(entry.tags),
@@ -739,6 +750,46 @@ def _preprocessing_entry_to_compiled_draft(
             "preprocessing_mode": mode,
             "preprocessing_entry_indices": (index,),
         },
+    )
+
+
+def _merge_compiled_source_refs(
+    first: tuple[SourceRef, ...],
+    second: tuple[SourceRef, ...],
+) -> tuple[SourceRef, ...]:
+    refs: list[SourceRef] = []
+    seen: set[tuple[int | None, str, str | None]] = set()
+
+    for source_ref in (*first, *second):
+        key = (
+            source_ref.source_index,
+            source_ref.quote,
+            source_ref.source_chunk_id,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        refs.append(source_ref)
+
+    return tuple(refs)
+
+
+def _source_refs_from_compiled_answer_draft(
+    draft: _CompiledAnswerEntryDraft,
+    *,
+    fallback_source_index: int,
+) -> tuple[SourceRef, ...]:
+    if draft.source_refs:
+        return draft.source_refs
+
+    return tuple(
+        SourceRef(
+            source_index=fallback_source_index,
+            quote=source_excerpt,
+            source_chunk_id=None,
+            confidence=1.0,
+        )
+        for source_excerpt in draft.source_excerpts
     )
 
 
@@ -768,6 +819,10 @@ def _merge_compiled_answer_drafts(
         source_excerpts=_merge_text_tuple_values(
             left.source_excerpts,
             right.source_excerpts,
+        ),
+        source_refs=_merge_compiled_source_refs(
+            left.source_refs,
+            right.source_refs,
         ),
         questions=_merge_text_tuple_values(left.questions, right.questions),
         synonyms=_merge_text_tuple_values(left.synonyms, right.synonyms),
@@ -816,38 +871,77 @@ def _merge_source_excerpt_text(
     return "\n\n".join(excerpts)
 
 
-def _entry_from_llm_merge_with_preserved_evidence(
+KCD_STAGE_K_MERGED_QUESTION_LIMIT = 40
+KCD_STAGE_K_MERGED_SYNONYM_LIMIT = 64
+KCD_STAGE_K_MERGED_TAG_LIMIT = 32
+KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS = 3600
+KCD_STAGE_K_MERGED_SOURCE_EXCERPT_MAX_CHARS = 7000
+KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS = 2400
+
+
+def _limit_compiled_text(value: str, *, max_chars: int) -> str:
+    cleaned = _clean_optional_text(value)
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[:max_chars].rstrip()
+
+
+def _merge_limited_text_tuple_values(
+    *groups: tuple[str, ...],
+    limit: int,
+) -> tuple[str, ...]:
+    return _merge_text_tuple_values(*groups)[:limit]
+
+
+def _merge_entry_fields_deterministically(
     *,
     existing_entry: KnowledgePreprocessingEntry,
     incoming_entry: KnowledgePreprocessingEntry,
-    merged_entry: KnowledgePreprocessingEntry,
+    merged_embedding_text: str,
 ) -> KnowledgePreprocessingEntry:
+    answer = _limit_compiled_text(
+        _merge_answer_text(existing_entry.answer, incoming_entry.answer),
+        max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
+    )
+    source_excerpt = _limit_compiled_text(
+        _merge_source_excerpt_text(existing_entry, incoming_entry),
+        max_chars=KCD_STAGE_K_MERGED_SOURCE_EXCERPT_MAX_CHARS,
+    )
+    embedding_text = _limit_compiled_text(
+        merged_embedding_text,
+        max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
+    )
+
+    if not embedding_text:
+        embedding_text = _limit_compiled_text(
+            _merge_answer_text(
+                existing_entry.embedding_text,
+                incoming_entry.embedding_text,
+            ),
+            max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
+        )
+
     return KnowledgePreprocessingEntry(
-        title=_clean_optional_text(merged_entry.title)
-        or _clean_optional_text(existing_entry.title)
+        title=_clean_optional_text(existing_entry.title)
         or _clean_optional_text(incoming_entry.title),
-        answer=_clean_optional_text(merged_entry.answer),
-        source_excerpt=_merge_source_excerpt_text(
-            existing_entry,
-            incoming_entry,
-            merged_entry,
-        ),
-        questions=_merge_text_tuple_values(
+        answer=answer,
+        source_excerpt=source_excerpt,
+        questions=_merge_limited_text_tuple_values(
             _text_tuple(existing_entry.questions),
             _text_tuple(incoming_entry.questions),
-            _text_tuple(merged_entry.questions),
+            limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
         ),
-        synonyms=_merge_text_tuple_values(
+        synonyms=_merge_limited_text_tuple_values(
             _text_tuple(existing_entry.synonyms),
             _text_tuple(incoming_entry.synonyms),
-            _text_tuple(merged_entry.synonyms),
+            limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
         ),
-        tags=_merge_text_tuple_values(
+        tags=_merge_limited_text_tuple_values(
             _text_tuple(existing_entry.tags),
             _text_tuple(incoming_entry.tags),
-            _text_tuple(merged_entry.tags),
+            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
         ),
-        embedding_text=_clean_optional_text(merged_entry.embedding_text),
+        embedding_text=embedding_text,
     )
 
 
@@ -954,14 +1048,42 @@ def _canonical_entries_from_preprocessing_result(
     compiler_run_id: str,
     result: KnowledgePreprocessingResult,
     source_chunks: Sequence[SourceChunk],
+    source_excerpts_by_entry: Sequence[tuple[str, ...]] | None = None,
 ) -> tuple[CanonicalKnowledgeEntry, ...]:
     drafts = _compiled_answer_drafts_from_preprocessing_result(result)
+    if source_excerpts_by_entry is not None and len(source_excerpts_by_entry) != len(
+        drafts
+    ):
+        raise ValidationError(
+            "Preserved source excerpts must match compiled answer draft count"
+        )
+
     entry_kind = entry_kind_for_preprocessing_mode(result.mode)
     entries: list[CanonicalKnowledgeEntry] = []
 
     for index, draft in enumerate(drafts):
+        preserved_source_excerpts = (
+            source_excerpts_by_entry[index]
+            if source_excerpts_by_entry is not None
+            else ()
+        )
+        source_ref_draft = (
+            _CompiledAnswerEntryDraft(
+                title=draft.title,
+                answer=draft.answer,
+                source_excerpts=preserved_source_excerpts,
+                source_refs=(),
+                questions=draft.questions,
+                synonyms=draft.synonyms,
+                tags=draft.tags,
+                embedding_text=draft.embedding_text,
+                metadata=draft.metadata,
+            )
+            if preserved_source_excerpts
+            else draft
+        )
         source_refs = _source_refs_for_compiled_answer_draft(
-            draft=draft,
+            draft=source_ref_draft,
             source_chunks=source_chunks,
         )
         stable_key_digest = hashlib.sha256(
@@ -1449,11 +1571,13 @@ class KnowledgeIngestionService:
             )
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
+            compiled_entry_source_excerpts: list[tuple[str, ...]] = []
             compiled_entry_keys: list[str] = []
             compiled_entry_index_by_key: dict[str, int] = {}
             usage_event_count = 0
             llm_merge_call_count = 0
             latest_result: KnowledgePreprocessingResult | None = None
+            processing_started_monotonic = time.monotonic()
 
             await repo.update_document_preprocessing_status(
                 document_id,
@@ -1476,13 +1600,20 @@ class KnowledgeIngestionService:
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
                     "technical_compiler_call_count": 0,
+                    "technical_chunk_processed_count": 0,
+                    "technical_chunk_total_count": len(technical_batches),
                     "compiled_entry_count": 0,
+                    "semantic_answer_count": 0,
                     "incoming_entry_count": 0,
                     "previous_title_count": 0,
                     "llm_merge_call_count": 0,
+                    "semantic_answer_merge_count": 0,
+                    "embedding_text_merge_call_count": 0,
                     "usage_event_count": 0,
+                    "elapsed_seconds": 0,
                     "previous_title_carryover": True,
                     "one_meaning_at_a_time_merge": True,
+                    "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
                         "raw_source_chunks_not_persisted_as_runtime_entries"
                     ),
@@ -1521,41 +1652,51 @@ class KnowledgeIngestionService:
                         incoming_entry,
                         index=len(compiled_entries),
                     )
+                    incoming_source_excerpts = (
+                        _source_excerpts_from_preprocessing_entry(incoming_entry)
+                    )
                     if entry_key not in compiled_entry_index_by_key:
                         compiled_entry_index_by_key[entry_key] = len(compiled_entries)
                         compiled_entry_keys.append(entry_key)
                         compiled_entries.append(incoming_entry)
+                        compiled_entry_source_excerpts.append(incoming_source_excerpts)
                         continue
 
                     existing_index = compiled_entry_index_by_key[entry_key]
                     existing_entry = compiled_entries[existing_index]
-                    merge_execution = await preprocessor.merge_answer_entry(
-                        mode=mode,
-                        file_name=file_name,
-                        existing_entry=existing_entry,
-                        incoming_entry=incoming_entry,
+                    embedding_text_merge_execution = (
+                        await preprocessor.merge_embedding_text(
+                            mode=mode,
+                            file_name=file_name,
+                            title=existing_entry.title,
+                            existing_embedding_text=existing_entry.embedding_text,
+                            incoming_embedding_text=incoming_entry.embedding_text,
+                        )
                     )
-                    if merge_execution.usage is not None:
+                    if embedding_text_merge_execution.usage is not None:
                         await usage_repo.record_event(
                             ModelUsageEventCreate.from_measurement(
                                 project_id=project_id,
                                 source="knowledge_preprocessing",
-                                measurement=merge_execution.usage,
+                                measurement=embedding_text_merge_execution.usage,
                                 document_id=document_id,
                             )
                         )
                         usage_event_count += 1
 
-                    if len(merge_execution.result.entries) != 1:
-                        raise ValidationError(
-                            "Knowledge answer merge produced invalid entry count"
-                        )
-
                     compiled_entries[existing_index] = (
-                        _entry_from_llm_merge_with_preserved_evidence(
+                        _merge_entry_fields_deterministically(
                             existing_entry=existing_entry,
                             incoming_entry=incoming_entry,
-                            merged_entry=merge_execution.result.entries[0],
+                            merged_embedding_text=(
+                                embedding_text_merge_execution.embedding_text
+                            ),
+                        )
+                    )
+                    compiled_entry_source_excerpts[existing_index] = (
+                        _merge_text_tuple_values(
+                            compiled_entry_source_excerpts[existing_index],
+                            incoming_source_excerpts,
                         )
                     )
                     llm_merge_call_count += 1
@@ -1574,13 +1715,23 @@ class KnowledgeIngestionService:
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
                     "technical_compiler_call_count": batch_index,
+                    "technical_chunk_processed_count": batch_index,
+                    "technical_chunk_total_count": len(technical_batches),
                     "compiled_entry_count": len(compiled_entries),
+                    "semantic_answer_count": len(compiled_entries),
                     "incoming_entry_count": len(execution.result.entries),
                     "previous_title_count": len(previous_entry_titles),
                     "llm_merge_call_count": llm_merge_call_count,
+                    "semantic_answer_merge_count": llm_merge_call_count,
+                    "embedding_text_merge_call_count": llm_merge_call_count,
                     "usage_event_count": usage_event_count,
+                    "elapsed_seconds": round(
+                        time.monotonic() - processing_started_monotonic,
+                        1,
+                    ),
                     "previous_title_carryover": True,
                     "one_meaning_at_a_time_merge": True,
+                    "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
                         "raw_source_chunks_not_persisted_as_runtime_entries"
                     ),
@@ -1629,6 +1780,7 @@ class KnowledgeIngestionService:
                     ),
                     "llm_merge_call_count": llm_merge_call_count,
                     "compiled_entry_key_count": len(compiled_entry_keys),
+                    "source_refs_preserved_per_semantic_entry": True,
                 },
             )
             canonical_entries = _canonical_entries_from_preprocessing_result(
@@ -1637,6 +1789,7 @@ class KnowledgeIngestionService:
                 compiler_run_id=compiler_run_id,
                 result=result,
                 source_chunks=source_chunks,
+                source_excerpts_by_entry=compiled_entry_source_excerpts,
             )
             if not canonical_entries:
                 raise ValidationError(
@@ -1656,6 +1809,7 @@ class KnowledgeIngestionService:
                         "raw_source_chunks_not_persisted_as_runtime_entries"
                     ),
                     "metadata_preserved": True,
+                    "source_refs_preserved_per_semantic_entry": True,
                 },
             )
 
@@ -1679,6 +1833,13 @@ class KnowledgeIngestionService:
             preprocessing_metrics["technical_compiler_total_count"] = len(
                 technical_batches
             )
+            preprocessing_metrics["technical_chunk_total_count"] = len(
+                technical_batches
+            )
+            preprocessing_metrics["technical_chunk_processed_count"] = len(
+                technical_batches
+            )
+            preprocessing_metrics["semantic_answer_count"] = len(canonical_entries)
             preprocessing_metrics["model"] = active_model
             preprocessing_metrics["prompt_version"] = active_prompt_version
             preprocessing_metrics["stage"] = "completed"
@@ -1687,8 +1848,17 @@ class KnowledgeIngestionService:
             )
             preprocessing_metrics["usage_event_count"] = usage_event_count
             preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
+            preprocessing_metrics["semantic_answer_merge_count"] = llm_merge_call_count
+            preprocessing_metrics["embedding_text_merge_call_count"] = (
+                llm_merge_call_count
+            )
+            preprocessing_metrics["elapsed_seconds"] = round(
+                time.monotonic() - processing_started_monotonic,
+                1,
+            )
             preprocessing_metrics["previous_title_carryover"] = True
             preprocessing_metrics["one_meaning_at_a_time_merge"] = True
+            preprocessing_metrics["source_refs_preserved_per_semantic_entry"] = True
             preprocessing_metrics["row_explosion_guard"] = (
                 "raw_source_chunks_not_persisted_as_runtime_entries"
             )
