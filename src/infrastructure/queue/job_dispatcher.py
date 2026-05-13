@@ -15,6 +15,9 @@ from src.infrastructure.queue.handlers.metrics import (
 from src.infrastructure.queue.handlers.knowledge_upload import (
     handle_process_knowledge_upload,
 )
+from src.infrastructure.queue.handlers.knowledge_retighten import (
+    handle_retighten_knowledge_document,
+)
 from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
 from src.infrastructure.queue.handlers.notify_manager import (
     RedisGetter,
@@ -25,6 +28,7 @@ from src.infrastructure.queue.job_types import (
     TASK_AGGREGATE_METRICS,
     TASK_NOTIFY_MANAGER,
     TASK_PROCESS_KNOWLEDGE_UPLOAD,
+    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
     TASK_RUN_FULL_RAG_EVAL,
     TASK_UPDATE_METRICS,
 )
@@ -72,6 +76,13 @@ class JobDispatcher:
 
         if task_type == TASK_PROCESS_KNOWLEDGE_UPLOAD:
             await handle_process_knowledge_upload(
+                job,
+                db_pool=self.db_pool,
+            )
+            return
+
+        if task_type == TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT:
+            await handle_retighten_knowledge_document(
                 job,
                 db_pool=self.db_pool,
             )

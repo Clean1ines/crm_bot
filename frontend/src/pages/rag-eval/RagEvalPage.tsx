@@ -473,7 +473,7 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <MetricPill label="Всего вопросов" value={total || '—'} />
-        <MetricPill label="Лучшее совпадение" value={`${top1Rate}%`} />
+        <MetricPill label="Первый найденный фрагмент" value={`${top1Rate}%`} />
         <MetricPill label="В трёх лучших совпадениях" value={`${top3Rate}%`} />
         <MetricPill label="В пяти лучших совпадениях" value={`${top5Rate}%`} />
         <MetricPill label="Ответы подтверждены" value={`${answerSupportedRate}%`} />

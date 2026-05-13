@@ -43,7 +43,10 @@ from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.logging.logger import get_logger
-from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
+from src.infrastructure.queue.job_types import (
+    TASK_PROCESS_KNOWLEDGE_UPLOAD,
+    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+)
 from src.interfaces.http.dependencies import (
     get_pool,
     get_project_repo,
@@ -211,6 +214,41 @@ async def knowledge_usage(
         model_usage_repo_factory=make_model_usage_repo,
     )
     return result.to_dict()
+
+
+@router.post("/{document_id}/retighten")
+async def retighten_knowledge_document(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    queue_repo=Depends(get_queue_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Queues semantic merge tightening for an already processed document."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    return await service.retighten_document_semantic_merges(
+        project_id,
+        document_id,
+        authorization,
+        queue_repo=queue_repo,
+        retighten_task_type=TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+        logger=logger,
+    )
 
 
 @router.post("/{document_id}/cancel")

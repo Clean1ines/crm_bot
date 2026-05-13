@@ -33,6 +33,7 @@ from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
 from src.domain.project_plane.embedding_text import (
+    CANONICAL_EMBEDDING_TEXT_VERSION,
     build_canonical_entry_embedding_text,
     build_retrieval_surface_search_text,
 )
@@ -42,6 +43,11 @@ from src.domain.project_plane.knowledge_compilation import (
     CandidateCluster,
     AnswerCandidate,
     CanonicalKnowledgeEntry,
+    EmbeddingText,
+    KnowledgeEnrichment,
+    KnowledgeEntryKind,
+    KnowledgeEntryStatus,
+    KnowledgeEntryVisibility,
     SourceChunk,
     SourceRef,
 )
@@ -155,6 +161,67 @@ def _source_ref_payload(ref: SourceRef) -> dict[str, object]:
 
 def _source_refs_payload(entry: CanonicalKnowledgeEntry) -> list[dict[str, object]]:
     return [_source_ref_payload(ref) for ref in entry.source_refs]
+
+
+def _json_object_from_db(value: object) -> JsonObject:
+    if isinstance(value, Mapping):
+        return {str(key): item for key, item in value.items()}
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        if isinstance(parsed, Mapping):
+            return {str(key): item for key, item in parsed.items()}
+    return {}
+
+
+def _json_list_from_db(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str) and value.strip():
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return parsed
+    return []
+
+
+def _text_tuple_from_json(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        values: Sequence[object] = (value,)
+    elif isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        values = value
+    else:
+        return ()
+
+    result: list[str] = []
+    for item in values:
+        cleaned = " ".join(str(item or "").strip().split())
+        if cleaned and cleaned not in result:
+            result.append(cleaned)
+    return tuple(result)
+
+
+def _source_ref_from_mapping(payload: Mapping[str, object]) -> SourceRef:
+    source_chunk_value = payload.get("source_chunk_id")
+    return SourceRef(
+        source_index=_optional_int(payload.get("source_index")),
+        quote=" ".join(str(payload.get("quote") or "").strip().split()),
+        source_chunk_id=str(source_chunk_value) if source_chunk_value else None,
+        start_offset=_optional_int(payload.get("start_offset")),
+        end_offset=_optional_int(payload.get("end_offset")),
+        confidence=_optional_float(payload.get("confidence")),
+    )
+
+
+def _source_refs_from_db(value: object) -> tuple[SourceRef, ...]:
+    refs: list[SourceRef] = []
+    for item in _json_list_from_db(value):
+        if not isinstance(item, Mapping):
+            continue
+        ref = _source_ref_from_mapping(item)
+        if ref.quote:
+            refs.append(ref)
+    return tuple(refs)
 
 
 def _surface_search_text(entry: CanonicalKnowledgeEntry) -> str:
@@ -410,6 +477,365 @@ class KnowledgeRepository:
                 titles.append(title)
 
         return tuple(titles)
+
+    async def list_document_runtime_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[CanonicalKnowledgeEntry, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    ke.id,
+                    ke.project_id,
+                    ke.document_id,
+                    ke.compiler_run_id,
+                    ke.stable_key,
+                    ke.entry_kind,
+                    ke.title,
+                    ke.answer,
+                    ke.status,
+                    ke.visibility,
+                    ke.version,
+                    ke.compiler_version,
+                    COALESCE(ke.embedding_text, rs.embedding_text, '') AS embedding_text,
+                    COALESCE(
+                        ke.embedding_text_version,
+                        rs.embedding_text_version,
+                        ''
+                    ) AS embedding_text_version,
+                    ke.enrichment,
+                    ke.metadata,
+                    COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'source_index', sr.source_index,
+                                'quote', sr.quote,
+                                'source_chunk_id', sr.source_chunk_id,
+                                'start_offset', sr.start_offset,
+                                'end_offset', sr.end_offset,
+                                'confidence', sr.confidence
+                            )
+                            ORDER BY sr.source_index, sr.quote
+                        ) FILTER (WHERE sr.entry_id IS NOT NULL),
+                        '[]'::jsonb
+                    ) AS source_refs
+                FROM knowledge_entries AS ke
+                LEFT JOIN knowledge_retrieval_surface AS rs ON rs.entry_id = ke.id
+                LEFT JOIN knowledge_entry_source_refs AS sr ON sr.entry_id = ke.id
+                WHERE ke.project_id = $1
+                  AND ke.document_id = $2
+                  AND ke.status = 'published'
+                  AND ke.visibility = 'runtime'
+                GROUP BY
+                    ke.id,
+                    rs.embedding_text,
+                    rs.embedding_text_version
+                ORDER BY ke.created_at ASC, ke.id ASC
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        entries: list[CanonicalKnowledgeEntry] = []
+        for row in rows:
+            enrichment = _json_object_from_db(row["enrichment"])
+            embedding_text = str(row["embedding_text"] or "").strip()
+            embedding_text_version = (
+                str(row["embedding_text_version"] or "").strip()
+                or CANONICAL_EMBEDDING_TEXT_VERSION
+            )
+            source_refs = _source_refs_from_db(row["source_refs"])
+            entries.append(
+                CanonicalKnowledgeEntry(
+                    id=str(row["id"]),
+                    project_id=str(row["project_id"]),
+                    document_id=str(row["document_id"]),
+                    compiler_run_id=str(row["compiler_run_id"] or ""),
+                    stable_key=str(row["stable_key"]),
+                    entry_kind=KnowledgeEntryKind(str(row["entry_kind"])),
+                    title=str(row["title"]),
+                    answer=str(row["answer"]),
+                    source_refs=source_refs,
+                    enrichment=KnowledgeEnrichment(
+                        questions=_text_tuple_from_json(enrichment.get("questions")),
+                        paraphrases=_text_tuple_from_json(
+                            enrichment.get("paraphrases")
+                        ),
+                        synonyms=_text_tuple_from_json(enrichment.get("synonyms")),
+                        typo_queries=_text_tuple_from_json(
+                            enrichment.get("typo_queries")
+                        ),
+                        colloquial_queries=_text_tuple_from_json(
+                            enrichment.get("colloquial_queries")
+                        ),
+                        tags=_text_tuple_from_json(enrichment.get("tags")),
+                        retrieval_guards=_text_tuple_from_json(
+                            enrichment.get("retrieval_guards")
+                        ),
+                    ),
+                    embedding_text=(
+                        EmbeddingText(
+                            value=embedding_text,
+                            version=embedding_text_version,
+                        )
+                        if embedding_text
+                        else None
+                    ),
+                    status=KnowledgeEntryStatus(str(row["status"])),
+                    visibility=KnowledgeEntryVisibility(str(row["visibility"])),
+                    version=int(row["version"]),
+                    compiler_version=str(row["compiler_version"] or ""),
+                    embedding_text_version=embedding_text_version,
+                    metadata=_json_object_from_db(row["metadata"]),
+                )
+            )
+
+        return tuple(entries)
+
+    async def apply_document_semantic_retightening(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        updated_entries: Sequence[CanonicalKnowledgeEntry],
+        archived_entry_ids: Sequence[str],
+        metrics: JsonObject,
+    ) -> JsonObject:
+        embeddings: list[list[float]] = []
+        if updated_entries:
+            embedding_result = await embed_batch(
+                [_entry_embedding_text(entry) for entry in updated_entries]
+            )
+            embeddings = embedding_result.embeddings
+            if embedding_result.usage is not None:
+                await self._usage_repo.record_event(
+                    ModelUsageEventCreate.from_measurement(
+                        project_id=project_id,
+                        source="knowledge_upload",
+                        measurement=embedding_result.usage,
+                        document_id=document_id,
+                    )
+                )
+
+        if len(embeddings) != len(updated_entries):
+            raise RuntimeError("embedding provider returned invalid vector count")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for archived_entry_id in archived_entry_ids:
+                    entry_uuid = ensure_uuid(archived_entry_id)
+                    await conn.execute(
+                        "DELETE FROM knowledge_retrieval_surface WHERE entry_id = $1",
+                        entry_uuid,
+                    )
+                    await conn.execute(
+                        """
+                        UPDATE knowledge_entries
+                        SET status = 'archived',
+                            visibility = 'hidden',
+                            metadata = COALESCE(metadata, '{}'::jsonb) || $4::jsonb,
+                            updated_at = now()
+                        WHERE id = $1
+                          AND project_id = $2
+                          AND document_id = $3
+                        """,
+                        entry_uuid,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        _jsonb_object(
+                            {
+                                "semantic_retightening_archived": True,
+                                "semantic_retightening_reason": (
+                                    "merged_into_survivor_entry"
+                                ),
+                            }
+                        ),
+                    )
+
+                for index, entry in enumerate(updated_entries):
+                    entry_uuid = ensure_uuid(entry.id)
+                    enrichment_payload = _enrichment_payload(entry)
+                    source_refs_payload = _source_refs_payload(entry)
+                    embedding_text = _entry_embedding_text(entry)
+                    embedding_text_version = _entry_embedding_text_version(entry)
+                    metadata = dict(entry.metadata)
+                    metadata["semantic_retightening_metrics"] = dict(metrics)
+
+                    await conn.execute(
+                        """
+                        UPDATE knowledge_entries
+                        SET title = $4,
+                            answer = $5,
+                            status = $6,
+                            visibility = $7,
+                            version = $8,
+                            compiler_version = $9,
+                            embedding_text = $10,
+                            embedding_text_version = $11,
+                            enrichment = $12::jsonb,
+                            metadata = $13::jsonb,
+                            updated_at = now()
+                        WHERE id = $1
+                          AND project_id = $2
+                          AND document_id = $3
+                        """,
+                        entry_uuid,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        entry.title,
+                        entry.answer,
+                        entry.status.value,
+                        entry.visibility.value,
+                        entry.version,
+                        entry.compiler_version,
+                        embedding_text,
+                        embedding_text_version,
+                        _jsonb_object(enrichment_payload),
+                        _jsonb_object(metadata),
+                    )
+
+                    await conn.execute(
+                        "DELETE FROM knowledge_entry_source_refs WHERE entry_id = $1",
+                        entry_uuid,
+                    )
+                    for source_ref in entry.source_refs:
+                        if source_ref.source_chunk_id is None:
+                            continue
+                        await conn.execute(
+                            """
+                            INSERT INTO knowledge_entry_source_refs (
+                                entry_id,
+                                source_chunk_id,
+                                source_index,
+                                quote,
+                                quote_hash,
+                                start_offset,
+                                end_offset,
+                                confidence,
+                                metadata
+                            )
+                            VALUES (
+                                $1,
+                                $2,
+                                $3,
+                                $4,
+                                md5(coalesce($4, '')),
+                                $5,
+                                $6,
+                                $7,
+                                '{}'::jsonb
+                            )
+                            ON CONFLICT DO NOTHING
+                            """,
+                            entry_uuid,
+                            source_ref.source_chunk_id,
+                            source_ref.source_index or 0,
+                            source_ref.quote,
+                            source_ref.start_offset,
+                            source_ref.end_offset,
+                            source_ref.confidence,
+                        )
+
+                    await conn.execute(
+                        "DELETE FROM knowledge_retrieval_surface WHERE entry_id = $1",
+                        entry_uuid,
+                    )
+                    if entry.is_published_runtime_entry:
+                        await conn.execute(
+                            """
+                            INSERT INTO knowledge_retrieval_surface (
+                                project_id,
+                                document_id,
+                                entry_id,
+                                stable_key,
+                                entry_kind,
+                                title,
+                                answer,
+                                embedding_text,
+                                embedding_text_version,
+                                embedding,
+                                search_text,
+                                enrichment,
+                                source_refs,
+                                metadata,
+                                status,
+                                visibility
+                            )
+                            VALUES (
+                                $1,
+                                $2,
+                                $3,
+                                $4,
+                                $5,
+                                $6,
+                                $7,
+                                $8,
+                                $9,
+                                $10::vector,
+                                $11,
+                                $12::jsonb,
+                                $13::jsonb,
+                                $14::jsonb,
+                                $15,
+                                $16
+                            )
+                            ON CONFLICT (entry_id)
+                            DO UPDATE SET
+                                stable_key = EXCLUDED.stable_key,
+                                entry_kind = EXCLUDED.entry_kind,
+                                title = EXCLUDED.title,
+                                answer = EXCLUDED.answer,
+                                embedding_text = EXCLUDED.embedding_text,
+                                embedding_text_version = EXCLUDED.embedding_text_version,
+                                embedding = EXCLUDED.embedding,
+                                search_text = EXCLUDED.search_text,
+                                enrichment = EXCLUDED.enrichment,
+                                source_refs = EXCLUDED.source_refs,
+                                metadata = EXCLUDED.metadata,
+                                status = EXCLUDED.status,
+                                visibility = EXCLUDED.visibility,
+                                updated_at = now()
+                            """,
+                            ensure_uuid(project_id),
+                            ensure_uuid(document_id),
+                            entry_uuid,
+                            entry.stable_key,
+                            entry.entry_kind.value,
+                            entry.title,
+                            entry.answer,
+                            embedding_text,
+                            embedding_text_version,
+                            _pg_vector_text(embeddings[index]),
+                            _surface_search_text(entry),
+                            _jsonb_object(enrichment_payload),
+                            _stage_e_jsonb_array(source_refs_payload),
+                            _jsonb_object(metadata),
+                            entry.status.value,
+                            entry.visibility.value,
+                        )
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_documents
+                    SET preprocessing_metrics = COALESCE(preprocessing_metrics, '{}'::jsonb)
+                        || $3::jsonb,
+                        updated_at = now()
+                    WHERE project_id = $1
+                      AND id = $2
+                    """,
+                    ensure_uuid(project_id),
+                    ensure_uuid(document_id),
+                    _jsonb_object({"semantic_retightening": dict(metrics)}),
+                )
+
+        result: JsonObject = dict(metrics)
+        result["status"] = "completed"
+        result["updated_entry_count"] = len(updated_entries)
+        result["archived_entry_count"] = len(archived_entry_ids)
+        return result
 
     async def search(
         self,

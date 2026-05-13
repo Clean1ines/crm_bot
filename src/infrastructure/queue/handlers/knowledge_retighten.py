@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from typing import cast
-
 from collections.abc import Mapping
+from typing import cast
 
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingValidationError,
+from src.application.ports.knowledge_port import (
+    KnowledgeDbPoolPort,
+    KnowledgeRepositoryPort,
+    ModelUsageRepositoryPort,
 )
-from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
+)
+from src.domain.project_plane.knowledge_preprocessing import (
+    KnowledgePreprocessingValidationError,
 )
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.model_usage_repository import (
@@ -21,16 +24,8 @@ from src.infrastructure.db.repositories.model_usage_repository import (
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
-from src.application.ports.knowledge_port import (
-    KnowledgeDbPoolPort,
-    KnowledgeRepositoryPort,
-    ModelUsageRepositoryPort,
-)
 
 logger = get_logger(__name__)
-EXHAUSTED_KNOWLEDGE_UPLOAD_DETAIL = (
-    "Knowledge upload failed after repeated temporary embedding provider errors"
-)
 
 
 def make_model_usage_repository(
@@ -39,33 +34,41 @@ def make_model_usage_repository(
     return cast(ModelUsageRepositoryPort, ModelUsageRepository(pool))
 
 
+def _payload(job: Mapping[str, object]) -> Mapping[str, object]:
+    payload = job.get("payload") or {}
+    if not isinstance(payload, Mapping):
+        raise PermanentJobError("knowledge retighten payload must be an object")
+    return payload
+
+
+def _required_text(payload: Mapping[str, object], key: str) -> str:
+    value = str(payload.get(key) or "").strip()
+    if not value:
+        raise PermanentJobError(f"knowledge retighten job missing {key}")
+    return value
+
+
 def make_knowledge_repository(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
     return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
 
 
-async def handle_process_knowledge_upload(
+async def handle_retighten_knowledge_document(
     job: Mapping[str, object],
     *,
     db_pool: asyncpg.Pool,
 ) -> None:
-    payload = job.get("payload") or {}
-    if not isinstance(payload, Mapping):
-        raise PermanentJobError("knowledge upload payload must be an object")
-
-    try:
-        dto = KnowledgeUploadJobPayloadDto.from_mapping(payload)
-        mode = dto.normalized_preprocessing_mode()
-    except ValueError as exc:
-        raise PermanentJobError(str(exc)) from exc
+    payload = _payload(job)
+    project_id = _required_text(payload, "project_id")
+    document_id = _required_text(payload, "document_id")
+    file_name = str(payload.get("file_name") or f"retighten:{document_id}")
 
     service = KnowledgeIngestionService(db_pool)
+
     try:
-        await service.process_document(
-            project_id=dto.project_id,
-            document_id=dto.document_id,
-            file_name=dto.file_name,
-            chunks=dto.chunks,
-            mode=mode,
+        await service.retighten_processed_document(
+            project_id=project_id,
+            document_id=document_id,
+            file_name=file_name,
             knowledge_repo_factory=make_knowledge_repository,
             model_usage_repo_factory=make_model_usage_repository,
             preprocessor_factory=GroqKnowledgePreprocessor,
@@ -80,25 +83,3 @@ async def handle_process_knowledge_upload(
                 retry_after_seconds=getattr(exc, "retry_after_seconds", None),
             ) from exc
         raise PermanentJobError(exc.detail) from exc
-
-
-async def mark_process_knowledge_upload_exhausted(
-    job: Mapping[str, object],
-    *,
-    db_pool: asyncpg.Pool,
-) -> None:
-    payload = job.get("payload") or {}
-    if not isinstance(payload, Mapping):
-        return
-
-    try:
-        dto = KnowledgeUploadJobPayloadDto.from_mapping(payload)
-    except ValueError:
-        return
-
-    repo = KnowledgeRepository(db_pool)
-    await repo.update_document_status(
-        dto.document_id,
-        "error",
-        EXHAUSTED_KNOWLEDGE_UPLOAD_DETAIL,
-    )

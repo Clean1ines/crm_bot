@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -58,6 +60,15 @@ class JwtDecoderPort(Protocol):
         secret: str,
         algorithms: list[str],
     ) -> JsonObject: ...
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeDocumentRuntimeEntries:
+    project_id: str
+    document_id: str
+    file_name: str
+    preprocessing_mode: str
+    entries: tuple[CanonicalKnowledgeEntry, ...]
 
 
 class KnowledgeRepositoryPort(Protocol):
@@ -153,6 +164,30 @@ class KnowledgeRepositoryPort(Protocol):
         exclude_document_id: str | None = None,
         limit: int = 300,
     ) -> tuple[str, ...]: ...
+
+    async def list_document_runtime_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[CanonicalKnowledgeEntry, ...]: ...
+
+    async def apply_document_semantic_retightening(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        updated_entries: Sequence[CanonicalKnowledgeEntry],
+        archived_entry_ids: Sequence[str],
+        metrics: JsonObject,
+    ) -> JsonObject: ...
+
+    async def load_document_runtime_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> KnowledgeDocumentRuntimeEntries | None: ...
 
     async def search(
         self,
