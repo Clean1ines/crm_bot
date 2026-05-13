@@ -4,9 +4,11 @@ import {
   Upload,
   FileText,
   Trash2,
+  StopCircle,
   Search,
   ExternalLink,
   TestTube2,
+  Loader2,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -23,13 +25,25 @@ import {
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 
+type KnowledgeProcessingMetrics = Record<string, unknown>;
+
 interface Document {
   id: string;
   file_name: string;
   file_size: number;
   status: 'pending' | 'processing' | 'processed' | 'error';
+  error?: string | null;
   chunk_count: number;
   created_at: string;
+  updated_at?: string | null;
+  preprocessing_mode?: KnowledgePreprocessingMode | string | null;
+  preprocessing_status?: 'not_requested' | 'processing' | 'completed' | 'failed' | string | null;
+  preprocessing_error?: string | null;
+  preprocessing_model?: string | null;
+  preprocessing_prompt_version?: string | null;
+  preprocessing_metrics?: KnowledgeProcessingMetrics | null;
+  structured_entries?: number;
+  structured_chunk_count?: number;
 }
 
 interface UsageSummaryCardProps {
@@ -72,6 +86,74 @@ const providerModelsLabel = (breakdown: KnowledgeUsageBreakdown[]): string => (
     .map((item) => `${item.provider}: ${item.model}`)
     .filter((value, index, items) => items.indexOf(value) === index)
     .join(', ')
+);
+
+
+const metricNumber = (
+  metrics: KnowledgeProcessingMetrics | null | undefined,
+  key: string,
+): number | null => {
+  const value = metrics?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const metricText = (
+  metrics: KnowledgeProcessingMetrics | null | undefined,
+  key: string,
+): string | null => {
+  const value = metrics?.[key];
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+};
+
+const isDocumentProcessing = (doc: Document): boolean => (
+  doc.status === 'pending'
+  || doc.status === 'processing'
+  || doc.preprocessing_status === 'processing'
+);
+
+const knowledgeProcessingModeLabel = (mode: string | null | undefined): string => (
+  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === mode)?.label
+  || mode
+  || 'не указан'
+);
+
+const processingProgressPercent = (doc: Document): number | null => {
+  const current = metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
+  const total = metricNumber(doc.preprocessing_metrics, 'technical_compiler_total_count');
+
+  if (current === null || total === null || total <= 0) return null;
+
+  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+};
+
+const processingProgressLabel = (doc: Document): string => {
+  const metrics = doc.preprocessing_metrics;
+  const current = metricNumber(metrics, 'technical_compiler_call_count');
+  const total = metricNumber(metrics, 'technical_compiler_total_count');
+
+  if (current !== null && total !== null && total > 0) {
+    return `Шаг ${formatNumber(current)} из ${formatNumber(total)}`;
+  }
+
+  if (doc.status === 'pending') return 'Документ ожидает обработки';
+  return 'Подготовка обработки документа';
+};
+
+const processingModelLabel = (doc: Document): string => (
+  doc.preprocessing_model
+  || metricText(doc.preprocessing_metrics, 'model')
+  || 'модель пока определяется'
+);
+
+const compiledEntryCount = (doc: Document): number | null => (
+  metricNumber(doc.preprocessing_metrics, 'compiled_entry_count')
+  ?? metricNumber(doc.preprocessing_metrics, 'canonical_entry_count')
+  ?? (typeof doc.structured_entries === 'number' ? doc.structured_entries : null)
 );
 
 const PreviewResultCard: React.FC<{
@@ -183,14 +265,12 @@ export const KnowledgePage: React.FC = () => {
     enabled: !!projectId,
     refetchInterval: (query) => {
       const docs = Array.isArray(query.state.data) ? query.state.data as Document[] : [];
-      return docs.some((doc) => doc.status === 'pending' || doc.status === 'processing')
-        ? 5000
-        : false;
+      return docs.some(isDocumentProcessing) ? 3000 : false;
     },
   });
 
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
-  const hasProcessingDocuments = documents.some((doc) => doc.status === 'pending' || doc.status === 'processing');
+  const hasProcessingDocuments = documents.some(isDocumentProcessing);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const usageQuery = useQuery({
@@ -262,6 +342,23 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+
+  const cancelProcessingMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.cancel(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success('Обработка документа остановлена');
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Не удалось остановить обработку';
+      toast.error(message);
+    },
+  });
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -313,23 +410,25 @@ export const KnowledgePage: React.FC = () => {
   const previewResult = previewMutation.data;
   const usage = usageQuery.data;
 
-  const getStatusBadge = (status: Document['status']) => {
+  const getStatusBadge = (doc: Document) => {
+    const status = doc.status;
+
+    if (status === 'error' || doc.preprocessing_status === 'failed') {
+      return {
+        label: 'Ошибка обработки',
+        className: 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]',
+      };
+    }
+    if (isDocumentProcessing(doc)) {
+      return {
+        label: 'Обрабатывается',
+        className: 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]',
+      };
+    }
     if (status === 'processed') {
       return {
         label: 'Обработан',
         className: 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]',
-      };
-    }
-    if (status === 'error') {
-      return {
-        label: 'Ошибка',
-        className: 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]',
-      };
-    }
-    if (status === 'processing') {
-      return {
-        label: 'Обрабатывается',
-        className: 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]',
       };
     }
     return {
@@ -410,6 +509,22 @@ export const KnowledgePage: React.FC = () => {
             </span>
           </label>
         </div>
+
+        {hasProcessingDocuments && (
+          <div className="mb-4 rounded-2xl bg-[var(--accent-primary)]/10 p-4 text-sm text-[var(--text-primary)]">
+            <div className="flex items-start gap-3">
+              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[var(--accent-primary)]" />
+              <div>
+                <div className="font-semibold">Документ обрабатывается</div>
+                <p className="mt-1 leading-relaxed text-[var(--text-muted)]">
+                  Система не просто режет файл на куски: она извлекает смысловые ответы,
+                  объединяет повторы и привязывает каждый ответ к фрагментам источника.
+                  Для больших документов это может занять несколько минут.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div
           onClick={triggerUpload}
@@ -512,7 +627,7 @@ export const KnowledgePage: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
-            const statusBadge = getStatusBadge(doc.status);
+            const statusBadge = getStatusBadge(doc);
 
             return (
               <div
@@ -524,6 +639,17 @@ export const KnowledgePage: React.FC = () => {
                     <FileText className="h-5 w-5" />
                   </div>
                   <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                    {isDocumentProcessing(doc) && (
+                      <button
+                        type="button"
+                        onClick={() => cancelProcessingMutation.mutate(doc.id)}
+                        disabled={cancelProcessingMutation.isPending}
+                        title="Остановить обработку"
+                        className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
+                      >
+                        <StopCircle className="h-4 w-4" />
+                      </button>
+                    )}
                     <button className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-secondary)]">
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -540,7 +666,47 @@ export const KnowledgePage: React.FC = () => {
                   <span>{formatSize(doc.file_size)}</span>
                   <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
                   <span>{doc.chunk_count} фрагментов</span>
+                  {doc.preprocessing_mode && (
+                    <>
+                      <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
+                      <span>{knowledgeProcessingModeLabel(doc.preprocessing_mode)}</span>
+                    </>
+                  )}
                 </div>
+
+                {isDocumentProcessing(doc) && (
+                  <div className="mb-4 rounded-xl bg-[var(--accent-primary)]/10 p-3">
+                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--accent-primary)]">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{processingProgressLabel(doc)}</span>
+                    </div>
+                    {processingProgressPercent(doc) !== null && (
+                      <div className="mb-2 h-2 overflow-hidden rounded-full bg-[var(--surface-secondary)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--accent-primary)] transition-all"
+                          style={{ width: `${processingProgressPercent(doc)}%` }}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-1 text-xs text-[var(--text-muted)]">
+                      <div>Модель: {processingModelLabel(doc)}</div>
+                      {compiledEntryCount(doc) !== null && (
+                        <div>Собрано смысловых ответов: {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
+                      )}
+                      {metricNumber(doc.preprocessing_metrics, 'llm_merge_call_count') !== null && (
+                        <div>
+                          Объединено повторов: {formatNumber(metricNumber(doc.preprocessing_metrics, 'llm_merge_call_count') ?? 0)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(doc.status === 'error' || doc.preprocessing_status === 'failed') && (
+                  <div className="mb-4 rounded-xl bg-[var(--accent-danger-bg)] p-3 text-xs leading-relaxed text-[var(--accent-danger-text)]">
+                    {doc.preprocessing_error || doc.error || 'Документ не удалось обработать'}
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between">
                   <span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadge.className}`}>

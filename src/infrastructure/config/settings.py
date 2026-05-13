@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = Field(
         "llama-3.3-70b-versatile", description="Default Groq model for agent"
     )
+    GROQ_KNOWLEDGE_PREPROCESSING_MODEL: str = Field(
+        "llama-3.1-8b-instant",
+        description="Groq model used by knowledge document preprocessing/compiler jobs",
+    )
 
     # Optional Redis (for future use)
     REDIS_URL: str = Field("", description="Redis connection string (optional)")

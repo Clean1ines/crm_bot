@@ -45,6 +45,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
     entry_kind_for_preprocessing_mode,
+    prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.knowledge_compilation import (
@@ -508,6 +509,7 @@ def _source_chunks_from_json_chunks(
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
 KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
 KCD_STAGE_K_COMPILER_VERSION = "kcd_v1_stage_k_answer_compiler"
+KCD_STAGE_K_CANCELLED_ERROR = "Knowledge preprocessing cancelled by operator"
 KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL = 1
 KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 
@@ -1361,6 +1363,11 @@ class KnowledgeIngestionService:
 
         try:
             preprocessor = preprocessor_factory()
+            active_model = preprocessor.model_name
+            active_prompt_version = prompt_version_for_mode(mode)
+            technical_batches = tuple(
+                _technical_chunk_batches_for_answer_compiler(indexable_chunks)
+            )
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
             compiled_entry_keys: list[str] = []
@@ -1369,9 +1376,41 @@ class KnowledgeIngestionService:
             llm_merge_call_count = 0
             latest_result: KnowledgePreprocessingResult | None = None
 
-            for technical_chunks in _technical_chunk_batches_for_answer_compiler(
-                indexable_chunks
-            ):
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_PROCESSING,
+                model=active_model,
+                prompt_version=active_prompt_version,
+                metrics={
+                    "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                    "stage": "technical_compiler_loop",
+                    "status_message": (
+                        "Извлекаем смысловые ответы из документа и "
+                        "привязываем их к источнику"
+                    ),
+                    "model": active_model,
+                    "prompt_version": active_prompt_version,
+                    "source_chunk_count": len(indexable_chunks),
+                    "technical_compiler_total_count": len(technical_batches),
+                    "technical_compiler_call_count": 0,
+                    "compiled_entry_count": 0,
+                    "incoming_entry_count": 0,
+                    "previous_title_count": 0,
+                    "llm_merge_call_count": 0,
+                    "usage_event_count": 0,
+                    "previous_title_carryover": True,
+                    "one_meaning_at_a_time_merge": True,
+                    "row_explosion_guard": (
+                        "raw_source_chunks_not_persisted_as_runtime_entries"
+                    ),
+                },
+            )
+
+            for batch_index, technical_chunks in enumerate(technical_batches, start=1):
+                if await repo.is_document_processing_cancelled(document_id):
+                    raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
+
                 previous_entry_titles = tuple(entry.title for entry in compiled_entries)
                 execution = await preprocessor.preprocess(
                     mode=mode,
@@ -1439,6 +1478,55 @@ class KnowledgeIngestionService:
                     )
                     llm_merge_call_count += 1
 
+                progress_metrics: JsonObject = {
+                    "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                    "stage": "technical_compiler_loop",
+                    "status_message": (
+                        "Извлекаем смысловые ответы из документа и объединяем повторы"
+                    ),
+                    "model": active_model,
+                    "prompt_version": active_prompt_version,
+                    "source_chunk_count": len(indexable_chunks),
+                    "technical_compiler_total_count": len(technical_batches),
+                    "technical_compiler_call_count": batch_index,
+                    "compiled_entry_count": len(compiled_entries),
+                    "incoming_entry_count": len(execution.result.entries),
+                    "previous_title_count": len(previous_entry_titles),
+                    "llm_merge_call_count": llm_merge_call_count,
+                    "usage_event_count": usage_event_count,
+                    "previous_title_carryover": True,
+                    "one_meaning_at_a_time_merge": True,
+                    "row_explosion_guard": (
+                        "raw_source_chunks_not_persisted_as_runtime_entries"
+                    ),
+                }
+                logger.info(
+                    "Knowledge answer compiler technical batch processed",
+                    extra={
+                        "project_id": project_id,
+                        "document_id": document_id,
+                        "batch_index": batch_index,
+                        "batch_count": len(technical_batches),
+                        "source_chunk_count": len(indexable_chunks),
+                        "previous_title_count": len(previous_entry_titles),
+                        "incoming_entry_count": len(execution.result.entries),
+                        "compiled_entry_count": len(compiled_entries),
+                        "llm_merge_call_count": llm_merge_call_count,
+                        "model": active_model,
+                    },
+                )
+                await repo.update_document_preprocessing_status(
+                    document_id,
+                    mode=mode,
+                    status=PREPROCESSING_STATUS_PROCESSING,
+                    model=active_model,
+                    prompt_version=active_prompt_version,
+                    metrics=progress_metrics,
+                )
+
+            if await repo.is_document_processing_cancelled(document_id):
+                raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
+
             if latest_result is None:
                 raise ValidationError("Knowledge preprocessing produced no results")
 
@@ -1499,6 +1587,15 @@ class KnowledgeIngestionService:
             preprocessing_metrics["answer_compiler"] = KCD_STAGE_K_COMPILER_VERSION
             preprocessing_metrics["technical_compiler_call_count"] = len(
                 preprocessing_results
+            )
+            preprocessing_metrics["technical_compiler_total_count"] = len(
+                technical_batches
+            )
+            preprocessing_metrics["model"] = active_model
+            preprocessing_metrics["prompt_version"] = active_prompt_version
+            preprocessing_metrics["stage"] = "completed"
+            preprocessing_metrics["status_message"] = (
+                "Документ обработан: смысловые ответы собраны и опубликованы"
             )
             preprocessing_metrics["usage_event_count"] = usage_event_count
             preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
@@ -1590,7 +1687,7 @@ class KnowledgeIngestionService:
                 status=PREPROCESSING_STATUS_FAILED,
                 error=str(exc)[:1000],
             )
-            await repo.update_document_status(document_id, "processed")
+            await repo.update_document_status(document_id, "error", str(exc)[:500])
             return KnowledgeDocumentProcessingResult(
                 document_id=document_id,
                 preprocessing_status=PREPROCESSING_STATUS_FAILED,

@@ -134,6 +134,16 @@ class KnowledgeRepositoryPort(Protocol):
         metrics: JsonObject | None = None,
     ) -> None: ...
 
+    async def cancel_document_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        reason: str,
+    ) -> bool: ...
+
+    async def is_document_processing_cancelled(self, document_id: str) -> bool: ...
+
     async def search(
         self,
         project_id: str,
@@ -177,6 +187,9 @@ class KnowledgeChunkerFactoryPort(Protocol):
 
 
 class KnowledgePreprocessorPort(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
     async def preprocess(
         self,
         *,

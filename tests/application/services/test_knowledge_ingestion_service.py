@@ -36,6 +36,8 @@ async def test_process_document_marks_plain_upload_processed():
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
     usage_repo = _usage_repo()
 
     service = KnowledgeIngestionService(object())
@@ -94,6 +96,8 @@ async def test_process_document_marks_document_error_on_embedding_failure():
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     service = KnowledgeIngestionService(object())
 
@@ -136,6 +140,8 @@ async def test_process_document_retries_transient_embedding_provider_failure():
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     service = KnowledgeIngestionService(object())
 
@@ -175,6 +181,8 @@ async def test_process_document_marks_document_error_on_permanent_provider_failu
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     service = KnowledgeIngestionService(object())
 
@@ -209,6 +217,8 @@ async def test_process_document_records_preprocessing_usage():
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
     usage_repo = _usage_repo()
     measurement = ModelUsageMeasurement(
         provider="groq",
@@ -228,6 +238,7 @@ async def test_process_document_records_preprocessing_usage():
         metrics={},
     )
     preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
     preprocessor.preprocess = AsyncMock(
         return_value=KnowledgePreprocessingExecutionResult(
             result=preprocessing_result,
@@ -336,6 +347,8 @@ async def test_structured_preprocessing_persists_only_answer_entries():
     repo.add_candidate_clusters = AsyncMock(return_value=2)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     preprocessing_result = KnowledgePreprocessingResult(
         mode="faq",
@@ -389,6 +402,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
         metrics={},
     )
     preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
     preprocessor.preprocess = AsyncMock(
         side_effect=[
             KnowledgePreprocessingExecutionResult(
@@ -487,6 +501,8 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     preprocessing_result = KnowledgePreprocessingResult(
         mode="faq",
@@ -577,6 +593,7 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
     )
 
     preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
     preprocessor.preprocess = AsyncMock(
         side_effect=[
             KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
@@ -645,6 +662,8 @@ async def test_source_sections_named_tests_or_rag_rules_are_not_discarded():
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     preprocessing_result = KnowledgePreprocessingResult(
         mode="faq",
@@ -679,6 +698,7 @@ async def test_source_sections_named_tests_or_rag_rules_are_not_discarded():
         metrics={},
     )
     preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
     preprocessor.preprocess = AsyncMock(
         return_value=KnowledgePreprocessingExecutionResult(
             result=preprocessing_result,
@@ -729,6 +749,8 @@ async def test_structured_preprocessing_passes_previous_titles_between_technical
     repo.add_candidate_clusters = AsyncMock(return_value=2)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     first_result = KnowledgePreprocessingResult(
         mode="faq",
@@ -784,6 +806,7 @@ async def test_structured_preprocessing_passes_previous_titles_between_technical
     )
 
     preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
     preprocessor.preprocess = AsyncMock(
         side_effect=[
             KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
@@ -853,6 +876,8 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
     repo.add_candidate_clusters = AsyncMock(return_value=1)
     repo.update_document_status = AsyncMock()
     repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
 
     first_entry = KnowledgePreprocessingEntry(
         title="Manager handoff",
@@ -910,6 +935,7 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
     )
 
     preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
     preprocessor.preprocess = AsyncMock(
         side_effect=[
             KnowledgePreprocessingExecutionResult(
@@ -982,3 +1008,48 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
         "Assistant transfers contract questions to a human manager.",
     ]
     assert entries[0].metadata["source_ref_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_structured_preprocessing_failure_marks_document_error():
+    repo = Mock()
+    repo.delete_document_chunks = AsyncMock()
+    repo.add_canonical_entries = AsyncMock(return_value=1)
+    repo.add_source_chunks = AsyncMock(return_value=1)
+    repo.create_compiler_run = AsyncMock()
+    repo.complete_compiler_run = AsyncMock()
+    repo.fail_compiler_run = AsyncMock()
+    repo.add_answer_candidates = AsyncMock(return_value=1)
+    repo.add_candidate_clusters = AsyncMock(return_value=1)
+    repo.update_document_status = AsyncMock()
+    repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
+
+    preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
+    preprocessor.preprocess = AsyncMock(
+        side_effect=ValueError("Invalid preprocessing JSON: Extra data")
+    )
+    preprocessor.merge_answer_entry = AsyncMock()
+
+    service = KnowledgeIngestionService(object())
+
+    result = await service.process_document(
+        project_id="project-1",
+        document_id="doc-json-failure",
+        file_name="faq.txt",
+        chunks=[{"content": "Useful knowledge paragraph with enough content."}],
+        mode="faq",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=_usage_repo()),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+
+    assert result.preprocessing_status == "failed"
+    repo.update_document_status.assert_awaited_with(
+        "doc-json-failure",
+        "error",
+        "Invalid preprocessing JSON: Extra data",
+    )

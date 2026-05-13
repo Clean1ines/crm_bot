@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.interfaces.http.app import app
+
 BACKEND_OPENAPI = ROOT / "openapi.json"
 FRONTEND_OPENAPI = ROOT / "frontend" / "openapi.json"
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -131,3 +133,27 @@ def test_price_list_still_rejects_broad_noisy_synonyms() -> None:
             model="test-model",
             prompt_version="knowledge_preprocess_price_list_v2",
         )
+
+
+def test_parse_preprocessing_payload_accepts_first_json_object_with_trailing_text() -> (
+    None
+):
+    raw_payload = json.dumps(
+        {
+            "entries": [_valid_entry()],
+            "metrics": {"source": "unit-test"},
+        },
+        ensure_ascii=False,
+    )
+    llm_response = f'{raw_payload}\n\n{{"ignored": true}}'
+
+    result = parse_preprocessing_payload(
+        llm_response,
+        mode=MODE_FAQ,
+        model="test-model",
+        prompt_version="knowledge_preprocess_faq_v2",
+    )
+
+    assert len(result.entries) == 1
+    assert result.entries[0].title == "Refund policy"
+    assert result.metrics == {"source": "unit-test"}
