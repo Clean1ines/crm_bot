@@ -520,7 +520,7 @@ export const KnowledgePage: React.FC = () => {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.detail?.[0]?.msg || errData?.detail || 'Ошибка загрузки');
+        throw new Error(getErrorMessage(errData, 'Не удалось загрузить документ'));
       }
 
       return await response.json();
@@ -531,8 +531,7 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : 'Ошибка при загрузке документа';
-      toast.error(message);
+      toast.error(getErrorMessage(err, 'Ошибка при загрузке документа'));
     },
   });
 
@@ -543,10 +542,7 @@ export const KnowledgePage: React.FC = () => {
       return data;
     },
     onError: (err: unknown) => {
-      const detail = err && typeof err === 'object' && 'detail' in err
-        ? String((err as { detail?: unknown }).detail)
-        : null;
-      toast.error(detail || 'Не удалось проверить базу знаний');
+      toast.error(getErrorMessage(err, 'Не удалось проверить базу знаний'));
     },
   });
 
@@ -564,8 +560,7 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : 'Не удалось очистить базу знаний';
-      toast.error(message);
+      toast.error(getErrorMessage(err, 'Не удалось очистить базу знаний'));
     },
   });
 
@@ -581,8 +576,7 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : 'Не удалось остановить обработку';
-      toast.error(message);
+      toast.error(getErrorMessage(err, 'Не удалось остановить обработку'));
     },
   });
 
