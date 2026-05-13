@@ -146,6 +146,14 @@ class KnowledgeRepositoryPort(Protocol):
 
     async def is_document_processing_cancelled(self, document_id: str) -> bool: ...
 
+    async def list_runtime_entry_titles(
+        self,
+        *,
+        project_id: str,
+        exclude_document_id: str | None = None,
+        limit: int = 300,
+    ) -> tuple[str, ...]: ...
+
     async def search(
         self,
         project_id: str,

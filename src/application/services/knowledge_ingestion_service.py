@@ -12,6 +12,7 @@ from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
+    KnowledgePreprocessorPort,
     KnowledgeRepositoryFactoryPort,
     KnowledgeRepositoryPort,
 )
@@ -45,6 +46,9 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
+    KnowledgeSemanticMergeCandidate,
+    KnowledgeSemanticMergeDecision,
+    KnowledgeSemanticMergeGroup,
     entry_kind_for_preprocessing_mode,
     prompt_version_for_mode,
 )
@@ -856,6 +860,413 @@ def _compiled_answer_drafts_from_preprocessing_result(
         ordered_keys.append(key)
 
     return tuple(grouped[key] for key in ordered_keys)
+
+
+KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS = 16
+KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE = 8
+KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS = 3
+
+
+def _semantic_merge_candidate_id(index: int) -> str:
+    return f"entry-{index}"
+
+
+def _semantic_merge_candidate_index(candidate_id: str) -> int | None:
+    prefix = "entry-"
+    if not candidate_id.startswith(prefix):
+        return None
+
+    raw_index = candidate_id[len(prefix) :]
+    if not raw_index.isdigit():
+        return None
+
+    return int(raw_index)
+
+
+def _semantic_merge_tokens_from_text(value: str) -> tuple[str, ...]:
+    text = value.lower().replace("ё", "е")
+    tokens = (
+        token
+        for token in re.findall(r"[0-9a-zа-я]+", text)
+        if len(token) >= KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS
+    )
+    return tuple(dict.fromkeys(tokens))
+
+
+def _semantic_merge_entry_text(entry: KnowledgePreprocessingEntry) -> str:
+    return " ".join(
+        part
+        for part in (
+            entry.title,
+            entry.answer,
+            entry.embedding_text,
+            " ".join(_text_tuple(entry.questions)),
+            " ".join(_text_tuple(entry.synonyms)),
+            " ".join(_text_tuple(entry.tags)),
+        )
+        if _clean_optional_text(part)
+    )
+
+
+def _semantic_merge_entry_tokens(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[str, ...]:
+    return _semantic_merge_tokens_from_text(_semantic_merge_entry_text(entry))
+
+
+def _semantic_merge_token_similarity(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+) -> float:
+    left_set = set(left)
+    right_set = set(right)
+
+    if not left_set or not right_set:
+        return 0.0
+
+    return len(left_set & right_set) / len(left_set | right_set)
+
+
+def _semantic_merge_entries_are_suspects(
+    left: KnowledgePreprocessingEntry,
+    right: KnowledgePreprocessingEntry,
+) -> bool:
+    left_title = _normalized_answer_topic_key(left.title)
+    right_title = _normalized_answer_topic_key(right.title)
+
+    if not left_title or not right_title:
+        return False
+
+    if left_title == right_title:
+        return False
+
+    left_title_tokens = _semantic_merge_tokens_from_text(left_title)
+    right_title_tokens = _semantic_merge_tokens_from_text(right_title)
+    title_intersection = set(left_title_tokens) & set(right_title_tokens)
+
+    if left_title in right_title or right_title in left_title:
+        return True
+
+    if (
+        len(title_intersection) >= 2
+        and _semantic_merge_token_similarity(
+            left_title_tokens,
+            right_title_tokens,
+        )
+        >= 0.45
+    ):
+        return True
+
+    left_tokens = _semantic_merge_entry_tokens(left)
+    right_tokens = _semantic_merge_entry_tokens(right)
+    full_intersection = set(left_tokens) & set(right_tokens)
+
+    return (
+        len(full_intersection) >= 5
+        and _semantic_merge_token_similarity(
+            left_tokens,
+            right_tokens,
+        )
+        >= 0.22
+    )
+
+
+def _semantic_merge_candidate_from_entry(
+    *,
+    index: int,
+    entry: KnowledgePreprocessingEntry,
+) -> KnowledgeSemanticMergeCandidate:
+    return KnowledgeSemanticMergeCandidate(
+        candidate_id=_semantic_merge_candidate_id(index),
+        title=_clean_optional_text(entry.title),
+        answer=_clean_optional_text(entry.answer),
+        embedding_text=_clean_optional_text(entry.embedding_text),
+        questions=_text_tuple(entry.questions),
+        synonyms=_text_tuple(entry.synonyms),
+        tags=_text_tuple(entry.tags),
+        source_ref_count=len(_source_excerpts_from_preprocessing_entry(entry)),
+    )
+
+
+def _semantic_merge_suspect_groups_from_entries(
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> tuple[KnowledgeSemanticMergeGroup, ...]:
+    if len(entries) < 2:
+        return ()
+
+    adjacency: dict[int, set[int]] = {index: set() for index in range(len(entries))}
+
+    for left_index, left_entry in enumerate(entries):
+        for right_index in range(left_index + 1, len(entries)):
+            if _semantic_merge_entries_are_suspects(left_entry, entries[right_index]):
+                adjacency[left_index].add(right_index)
+                adjacency[right_index].add(left_index)
+
+    groups: list[KnowledgeSemanticMergeGroup] = []
+    visited: set[int] = set()
+
+    for start_index in range(len(entries)):
+        if start_index in visited or not adjacency[start_index]:
+            continue
+
+        stack = [start_index]
+        component: list[int] = []
+
+        while stack:
+            index = stack.pop()
+            if index in visited:
+                continue
+
+            visited.add(index)
+            component.append(index)
+            stack.extend(sorted(adjacency[index] - visited, reverse=True))
+
+        if len(component) < 2:
+            continue
+
+        component = sorted(component)[:KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE]
+        digest = hashlib.sha256(
+            ",".join(_semantic_merge_candidate_id(index) for index in component).encode(
+                "utf-8"
+            )
+        ).hexdigest()[:12]
+
+        groups.append(
+            KnowledgeSemanticMergeGroup(
+                group_id=f"semantic-merge-{digest}",
+                candidates=tuple(
+                    _semantic_merge_candidate_from_entry(
+                        index=index, entry=entries[index]
+                    )
+                    for index in component
+                ),
+            )
+        )
+
+        if len(groups) >= KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS:
+            break
+
+    return tuple(groups)
+
+
+def _semantic_merge_survivor_index(
+    *,
+    decision: KnowledgeSemanticMergeDecision,
+    candidate_indexes: tuple[int, ...],
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> int:
+    survivor_key = _normalized_answer_topic_key(decision.survivor_title)
+
+    if survivor_key:
+        for index in candidate_indexes:
+            entry_key = _normalized_answer_topic_key(entries[index].title)
+            if entry_key == survivor_key:
+                return index
+
+        for index in candidate_indexes:
+            entry_key = _normalized_answer_topic_key(entries[index].title)
+            if entry_key and (entry_key in survivor_key or survivor_key in entry_key):
+                return index
+
+    return candidate_indexes[0]
+
+
+def _entry_with_semantic_merge_decision(
+    *,
+    entry: KnowledgePreprocessingEntry,
+    decision: KnowledgeSemanticMergeDecision,
+) -> KnowledgePreprocessingEntry:
+    title = _clean_optional_text(decision.survivor_title) or entry.title
+    embedding_text = _limit_compiled_text(
+        decision.merged_embedding_text or entry.embedding_text,
+        max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
+    )
+
+    return KnowledgePreprocessingEntry(
+        title=title,
+        answer=entry.answer,
+        source_excerpt=entry.source_excerpt,
+        questions=entry.questions,
+        synonyms=entry.synonyms,
+        tags=entry.tags,
+        embedding_text=embedding_text,
+    )
+
+
+def _apply_semantic_merge_tightening_decisions(
+    *,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    decisions: Sequence[KnowledgeSemanticMergeDecision],
+    source_excerpts_by_entry: Sequence[tuple[str, ...]] | None = None,
+) -> tuple[tuple[KnowledgePreprocessingEntry, ...], tuple[tuple[str, ...], ...]]:
+    if not entries:
+        return (), ()
+
+    updated_entries: list[KnowledgePreprocessingEntry] = list(entries)
+    updated_source_excerpts: list[tuple[str, ...]] = (
+        list(source_excerpts_by_entry)
+        if source_excerpts_by_entry is not None
+        else [_source_excerpts_from_preprocessing_entry(entry) for entry in entries]
+    )
+
+    if len(updated_source_excerpts) != len(updated_entries):
+        updated_source_excerpts = [
+            _source_excerpts_from_preprocessing_entry(entry) for entry in entries
+        ]
+
+    if not decisions:
+        return tuple(updated_entries), tuple(updated_source_excerpts)
+
+    removed_indexes: set[int] = set()
+
+    for decision in decisions:
+        if not decision.is_merge:
+            continue
+
+        candidate_indexes: list[int] = []
+        for candidate_id in decision.candidate_ids:
+            index = _semantic_merge_candidate_index(candidate_id)
+            if index is None or index < 0 or index >= len(entries):
+                continue
+            if index in candidate_indexes or index in removed_indexes:
+                continue
+            candidate_indexes.append(index)
+
+        if len(candidate_indexes) < 2:
+            continue
+
+        ordered_indexes = tuple(sorted(candidate_indexes))
+        survivor_index = _semantic_merge_survivor_index(
+            decision=decision,
+            candidate_indexes=ordered_indexes,
+            entries=entries,
+        )
+
+        merged_entry = updated_entries[survivor_index]
+        for index in ordered_indexes:
+            if index == survivor_index:
+                continue
+            merged_entry = _merge_entry_fields_deterministically(
+                existing_entry=merged_entry,
+                incoming_entry=updated_entries[index],
+                merged_embedding_text=decision.merged_embedding_text,
+            )
+
+        merged_source_excerpts = _merge_text_tuple_values(
+            *(updated_source_excerpts[index] for index in ordered_indexes)
+        )
+        updated_entries[survivor_index] = _entry_with_semantic_merge_decision(
+            entry=merged_entry,
+            decision=decision,
+        )
+        updated_source_excerpts[survivor_index] = merged_source_excerpts
+        removed_indexes.update(
+            index for index in ordered_indexes if index != survivor_index
+        )
+
+    return (
+        tuple(
+            entry
+            for index, entry in enumerate(updated_entries)
+            if index not in removed_indexes
+        ),
+        tuple(
+            source_excerpts
+            for index, source_excerpts in enumerate(updated_source_excerpts)
+            if index not in removed_indexes
+        ),
+    )
+
+
+async def _existing_project_titles_for_semantic_merge(
+    *,
+    repo: KnowledgeRepositoryPort,
+    project_id: str,
+    document_id: str,
+) -> tuple[str, ...]:
+    try:
+        titles = await repo.list_runtime_entry_titles(
+            project_id=project_id,
+            exclude_document_id=document_id,
+            limit=300,
+        )
+    except (AttributeError, TypeError):
+        return ()
+
+    result: list[str] = []
+    for title in titles:
+        cleaned = _clean_optional_text(title)
+        if cleaned and cleaned not in result:
+            result.append(cleaned)
+
+    return tuple(result)
+
+
+async def _tighten_compiled_entries_with_semantic_merge(
+    *,
+    preprocessor: KnowledgePreprocessorPort,
+    mode: KnowledgePreprocessingMode,
+    file_name: str,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    source_excerpts_by_entry: Sequence[tuple[str, ...]],
+    existing_project_titles: Sequence[str],
+) -> tuple[
+    tuple[KnowledgePreprocessingEntry, ...],
+    tuple[tuple[str, ...], ...],
+    JsonObject,
+]:
+    groups = _semantic_merge_suspect_groups_from_entries(entries)
+    source_excerpts = tuple(source_excerpts_by_entry)
+    if len(source_excerpts) != len(entries):
+        source_excerpts = tuple(
+            _source_excerpts_from_preprocessing_entry(entry) for entry in entries
+        )
+
+    metrics: JsonObject = {
+        "candidate_group_count": len(groups),
+        "entry_count_before": len(entries),
+        "existing_project_title_count": len(existing_project_titles),
+        "strategy": "generic_token_suspect_groups_plus_llm_decision",
+    }
+
+    if not groups:
+        metrics["entry_count_after"] = len(entries)
+        metrics["llm_call_count"] = 0
+        return tuple(entries), source_excerpts, metrics
+
+    try:
+        execution = await preprocessor.tighten_semantic_merges(
+            mode=mode,
+            file_name=file_name,
+            groups=groups,
+            existing_project_titles=existing_project_titles,
+        )
+    except Exception as exc:
+        metrics["skipped"] = True
+        metrics["error_type"] = type(exc).__name__
+        metrics["error"] = str(exc)[:240]
+        metrics["entry_count_after"] = len(entries)
+        metrics["llm_call_count"] = 1
+        return tuple(entries), source_excerpts, metrics
+
+    decisions = execution.result.decisions
+    tightened_entries, tightened_source_excerpts = (
+        _apply_semantic_merge_tightening_decisions(
+            entries=entries,
+            decisions=decisions,
+            source_excerpts_by_entry=source_excerpts,
+        )
+    )
+
+    metrics["decision_count"] = len(decisions)
+    metrics["merge_decision_count"] = sum(
+        1 for decision in decisions if decision.is_merge
+    )
+    metrics["entry_count_after"] = len(tightened_entries)
+    metrics["collapsed_entry_count"] = len(entries) - len(tightened_entries)
+    metrics["llm_call_count"] = 1
+
+    return tightened_entries, tightened_source_excerpts, metrics
 
 
 def _merge_source_excerpt_text(
@@ -1766,6 +2177,26 @@ class KnowledgeIngestionService:
             if latest_result is None:
                 raise ValidationError("Knowledge preprocessing produced no results")
 
+            existing_project_titles = await _existing_project_titles_for_semantic_merge(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+            )
+            (
+                tightened_entries,
+                tightened_source_excerpts,
+                semantic_merge_tightening_metrics,
+            ) = await _tighten_compiled_entries_with_semantic_merge(
+                preprocessor=preprocessor,
+                mode=mode,
+                file_name=file_name,
+                entries=compiled_entries,
+                source_excerpts_by_entry=compiled_entry_source_excerpts,
+                existing_project_titles=existing_project_titles,
+            )
+            compiled_entries = list(tightened_entries)
+            compiled_entry_source_excerpts = list(tightened_source_excerpts)
+
             result = _preprocessing_result_from_entries(
                 mode=mode,
                 template=latest_result,
@@ -1781,6 +2212,7 @@ class KnowledgeIngestionService:
                     "llm_merge_call_count": llm_merge_call_count,
                     "compiled_entry_key_count": len(compiled_entry_keys),
                     "source_refs_preserved_per_semantic_entry": True,
+                    "semantic_merge_tightening": semantic_merge_tightening_metrics,
                 },
             )
             canonical_entries = _canonical_entries_from_preprocessing_result(
