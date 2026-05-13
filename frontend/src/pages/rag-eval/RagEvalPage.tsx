@@ -13,6 +13,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
+import { getErrorMessage } from '@shared/api/core/errors';
 
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
@@ -107,7 +108,7 @@ const progressMessage = (progress: RagEvalProgressPayload, stage: string): strin
   if (stage === 'answer_generation') return 'Система задаёт эти вопросы боту, ищет подходящие фрагменты и оценивает ответы.';
   if (stage === 'paused') return 'Пауза включена. Текущий запрос может завершиться, новые вопросы не начнутся до продолжения.';
   if (stage === 'cancelled') return 'Задача остановлена пользователем.';
-  if (stage === 'failed') return rawMessage || 'Проверка завершилась с ошибкой.';
+  if (stage === 'failed') return getErrorMessage(rawMessage, 'Проверка завершилась с ошибкой. Попробуйте запустить её заново.');
   if (stage === 'completed' || stage === 'done') return 'Отчёт готов.';
   return rawMessage || 'Проверка выполняется.';
 };

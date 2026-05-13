@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
+import { getErrorMessage } from '../../shared/api/core/errors';
 
 import {
   TICKET_NEW_FILTER,
@@ -69,7 +70,7 @@ export const TicketsPage: React.FC = () => {
   if (error) {
     return (
       <div className="p-4 text-sm text-[var(--accent-danger-text)] sm:p-6">
-        Ошибка: {String(error)}
+        Ошибка: {getErrorMessage(error, 'Не удалось загрузить тикеты. Попробуйте обновить страницу.')}
       </div>
     );
   }

@@ -1,25 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { getErrorMessage } from '../../shared/api/core/errors';
 
 import type { Client, Message, ThreadState } from '../../entities/thread/model/types';
 import { threadsApi } from '../../shared/api/modules/threads';
 import { getClientDisplayName } from '../../shared/lib/clients';
 import { getMessagePresentation } from '../../shared/lib/threadMessages';
 
-const getMutationErrorMessage = (error: unknown): string => {
-  if (error && typeof error === 'object') {
-    const detail = 'detail' in error ? error.detail : undefined;
-    if (typeof detail === 'string' && detail.trim()) {
-      return detail;
-    }
-    const message = 'message' in error ? error.message : undefined;
-    if (typeof message === 'string' && message.trim()) {
-      return message;
-    }
-  }
-  return 'Ответ не удалось доставить клиенту.';
-};
+const getMutationErrorMessage = (error: unknown): string => (
+  getErrorMessage(
+    error,
+    'Ответ не удалось доставить клиенту. Попробуйте повторить позже.',
+  )
+);
 
 export const TicketDetailPage: React.FC = () => {
   const { projectId, threadId } = useParams<{ projectId: string; threadId: string }>();
@@ -157,7 +151,7 @@ export const TicketDetailPage: React.FC = () => {
   if (messagesError) {
     return (
       <div className="p-4 text-sm text-[var(--accent-danger-text)] sm:p-6">
-        Ошибка: {String(messagesError)}
+        Ошибка: {getErrorMessage(messagesError, 'Не удалось загрузить историю диалога. Попробуйте обновить страницу.')}
       </div>
     );
   }
