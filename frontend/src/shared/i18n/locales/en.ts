@@ -616,6 +616,7 @@ export const en: TranslationDictionary = {
   'knowledge.retightenReport.groups': 'Groups checked: {count}',
   'knowledge.retightenReport.decisions': 'Decisions: {count}',
   'knowledge.retightenReport.mergeDecisions': 'Merge decisions: {count}',
+  'knowledge.retightenReport.rejectedNoisyMerges': 'Noisy merge decisions rejected: {count}',
   'knowledge.retightenReport.llmCalls': 'LLM calls: {count}',
   'knowledge.retightenReport.cleanupOriginalUnits': 'Text units before cleanup: {count}',
   'knowledge.retightenReport.cleanupRemovedUnits': 'Repeated units removed: {count}',

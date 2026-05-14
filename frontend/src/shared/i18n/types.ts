@@ -618,6 +618,7 @@ export type TranslationKey =
   | 'knowledge.retightenReport.groups'
   | 'knowledge.retightenReport.decisions'
   | 'knowledge.retightenReport.mergeDecisions'
+  | 'knowledge.retightenReport.rejectedNoisyMerges'
   | 'knowledge.retightenReport.llmCalls'
   | 'knowledge.retightenReport.cleanupOriginalUnits'
   | 'knowledge.retightenReport.cleanupRemovedUnits'
