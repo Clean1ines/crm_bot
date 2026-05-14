@@ -8,6 +8,7 @@ Clean Architecture contract:
 
 import json
 import re
+from dataclasses import dataclass
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Protocol
 
@@ -319,6 +320,180 @@ def _trace_contains_query(value: object, query: str) -> bool:
     return False
 
 
+@dataclass(frozen=True, slots=True)
+class _TraceScore:
+    score: float
+    trace: KnowledgeSearchTraceView
+
+
+def _dedupe_matched_fields(fields: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(field for field in fields if field))
+
+
+def _row_is_production_safe(row: _RowLookup) -> bool:
+    entry_kind = str(_optional_row_value(row, "entry_kind") or "").strip().lower()
+    return entry_kind in RUNTIME_ENTRY_KIND_VALUES
+
+
+@dataclass(frozen=True, slots=True)
+class _PreviewTextFields:
+    search_text: str
+    title: str
+    questions: str
+    synonyms: str
+    tags: str
+    embedding_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class _PreviewOverlaps:
+    search: float
+    answer: float
+    title: float
+    questions: float
+    synonyms: float
+    tags: float
+    embedding_text: float
+
+
+@dataclass(frozen=True, slots=True)
+class _PreviewMatchFlags:
+    title: bool
+    question: bool
+    exact_question: bool
+
+
+def _preview_text_fields(row: _RowLookup, *, content: str) -> _PreviewTextFields:
+    search_text = _rank_text_from_value(_optional_row_value(row, "search_text"))
+    return _PreviewTextFields(
+        search_text=search_text or content,
+        title=_rank_text_from_value(_optional_row_value(row, "title")),
+        questions=_rank_text_from_value(_optional_row_value(row, "questions")),
+        synonyms=_rank_text_from_value(_optional_row_value(row, "synonyms")),
+        tags=_rank_text_from_value(_optional_row_value(row, "tags")),
+        embedding_text=_rank_text_from_value(
+            _optional_row_value(row, "embedding_text")
+        ),
+    )
+
+
+def _preview_match_flags(
+    row: _RowLookup,
+    *,
+    query: str,
+    fields: _PreviewTextFields,
+    overlaps: _PreviewOverlaps,
+) -> _PreviewMatchFlags:
+    query_lower = query.lower().strip()
+    title_match = bool(
+        query_lower and (query_lower in fields.title.lower() or overlaps.title >= 0.72)
+    )
+    question_match = bool(
+        query_lower
+        and (query_lower in fields.questions.lower() or overlaps.questions >= 0.72)
+    )
+    return _PreviewMatchFlags(
+        title=title_match,
+        question=question_match,
+        exact_question=_trace_contains_query(
+            _optional_row_value(row, "questions"),
+            query,
+        ),
+    )
+
+
+def _preview_exact_phrase_bonus(query: str, search_text: str) -> float:
+    query_lower = query.lower().strip()
+    return 0.24 if query_lower and query_lower in search_text.lower() else 0.0
+
+
+def _preview_length_penalty(payload_len: int) -> float:
+    if payload_len > 2500:
+        return 0.20
+    if payload_len > 1400:
+        return 0.09
+    return 0.0
+
+
+def _preview_generic_long_penalty(
+    *,
+    payload_len: int,
+    overlaps: _PreviewOverlaps,
+    matches: _PreviewMatchFlags,
+) -> float:
+    strongest_specific_overlap = max(
+        overlaps.search,
+        overlaps.answer,
+        overlaps.questions,
+    )
+    if payload_len <= 1800:
+        return 0.0
+    if strongest_specific_overlap >= 0.35:
+        return 0.0
+    if matches.title or matches.question:
+        return 0.0
+    return 0.18
+
+
+def _preview_matched_fields(
+    *,
+    overlaps: _PreviewOverlaps,
+    matches: _PreviewMatchFlags,
+    lexical_score: float,
+    vector_score: float,
+    exact_score: float,
+    exact_phrase_bonus: float,
+) -> tuple[str, ...]:
+    field_checks = (
+        (matches.title or overlaps.title > 0.0, "title"),
+        (
+            matches.exact_question or matches.question or overlaps.questions > 0.0,
+            "questions",
+        ),
+        (overlaps.synonyms > 0.0, "synonyms"),
+        (overlaps.tags > 0.0, "tags"),
+        (overlaps.answer > 0.0, "answer"),
+        (overlaps.search > 0.0 or lexical_score > 0.0, "search_text"),
+        (overlaps.embedding_text > 0.0, "embedding_text"),
+        (exact_score > 0.0 or exact_phrase_bonus > 0.0, "exact"),
+        (vector_score > 0.0, "embedding"),
+    )
+    return _dedupe_matched_fields(
+        tuple(field for matched, field in field_checks if matched)
+    )
+
+
+def _preview_final_score(
+    *,
+    vector_score: float,
+    lexical_bonus: float,
+    exact_score: float,
+    overlaps: _PreviewOverlaps,
+    rare_token_bonus: float,
+    exact_phrase_bonus: float,
+    matches: _PreviewMatchFlags,
+    length_penalty: float,
+    generic_long_penalty: float,
+) -> float:
+    score = (
+        vector_score * 0.10
+        + lexical_bonus
+        + exact_score * 0.18
+        + overlaps.search * 0.10
+        + overlaps.answer * 0.12
+        + rare_token_bonus
+        + exact_phrase_bonus
+        + (0.78 if matches.exact_question else 0.0)
+        + (0.50 if matches.question else overlaps.questions * 0.38)
+        + (0.56 if matches.title else overlaps.title * 0.30)
+        + overlaps.synonyms * 0.22
+        + overlaps.tags * 0.12
+        - length_penalty
+        - generic_long_penalty
+    )
+    return max(0.0, score)
+
+
 def _rank_text_from_value(value: object) -> str:
     if value is None or isinstance(value, bool):
         return ""
@@ -331,45 +506,79 @@ def _rank_text_from_value(value: object) -> str:
     return str(value)
 
 
-def _search_trace_from_row(row: _RowLookup, *, query: str) -> KnowledgeSearchTraceView:
+def _trace_default_matched_fields(
+    *,
+    title_match: bool,
+    exact_question_match: bool,
+    lexical_score: float,
+    exact_score: float,
+    vector_score: float,
+) -> tuple[str, ...]:
+    field_checks = (
+        (title_match, "title"),
+        (exact_question_match, "questions"),
+        (lexical_score > 0.0, "search_text"),
+        (exact_score > 0.0 and lexical_score <= 0.0, "exact"),
+        (vector_score > 0.0, "embedding"),
+    )
+    return _dedupe_matched_fields(
+        tuple(field for matched, field in field_checks if matched)
+    )
+
+
+def _trace_length_penalty_from_row(row: _RowLookup) -> float:
+    content_len = len(str(_optional_row_value(row, "content") or ""))
+    embedding_len = len(str(_optional_row_value(row, "embedding_text") or ""))
+    payload_len = max(content_len, embedding_len)
+    if payload_len > 2500:
+        return 0.08
+    if payload_len > 1400:
+        return 0.04
+    return 0.0
+
+
+def _search_trace_from_row(
+    row: _RowLookup,
+    *,
+    query: str,
+    matched_fields: Sequence[str] | None = None,
+    final_score: float | None = None,
+    length_penalty: float | None = None,
+) -> KnowledgeSearchTraceView:
     lexical_score = _row_float(row, "lexical_score")
     vector_score = _row_float(row, "vector_score")
     exact_score = _row_float(row, "exact_score")
-    final_score = _row_float(row, "score")
-
     title_match = _trace_contains_query(_optional_row_value(row, "title"), query)
     exact_question_match = _trace_contains_query(
         _optional_row_value(row, "questions"),
         query,
     )
-
-    matched_fields: list[str] = []
-    if title_match:
-        matched_fields.append("title")
-    if exact_question_match:
-        matched_fields.append("questions")
-    if lexical_score > 0:
-        matched_fields.append("search_text")
-    if exact_score > 0 and "search_text" not in matched_fields:
-        matched_fields.append("exact")
-    if vector_score > 0:
-        matched_fields.append("embedding")
-
-    content_len = len(str(_optional_row_value(row, "content") or ""))
-    embedding_len = len(str(_optional_row_value(row, "embedding_text") or ""))
-    payload_len = max(content_len, embedding_len)
-    length_penalty = 0.08 if payload_len > 2500 else 0.04 if payload_len > 1400 else 0.0
+    fields = matched_fields or _trace_default_matched_fields(
+        title_match=title_match,
+        exact_question_match=exact_question_match,
+        lexical_score=lexical_score,
+        exact_score=exact_score,
+        vector_score=vector_score,
+    )
+    is_production_safe = _row_is_production_safe(row)
 
     return KnowledgeSearchTraceView(
-        matched_fields=tuple(dict.fromkeys(matched_fields)),
+        matched_fields=_dedupe_matched_fields(fields),
         lexical_score=lexical_score,
         vector_score=vector_score,
         exact_question_match=exact_question_match,
         title_match=title_match,
-        length_penalty=length_penalty,
-        final_score=final_score,
-        retrieval_surface_role="runtime",
+        length_penalty=(
+            _trace_length_penalty_from_row(row)
+            if length_penalty is None
+            else length_penalty
+        ),
+        final_score=_row_float(row, "score") if final_score is None else final_score,
+        retrieval_surface_role=(
+            "production_runtime" if is_production_safe else "non_production"
+        ),
         displayed_field="answer",
+        is_production_safe=is_production_safe,
     )
 
 
@@ -439,6 +648,95 @@ class KnowledgeRepository:
         if not q:
             return 0.0
         return len(q & t) / len(q)
+
+    def _preview_overlaps(
+        self,
+        *,
+        query: str,
+        content: str,
+        fields: _PreviewTextFields,
+    ) -> _PreviewOverlaps:
+        return _PreviewOverlaps(
+            search=self._keyword_overlap(query, fields.search_text),
+            answer=self._keyword_overlap(query, content),
+            title=self._keyword_overlap(query, fields.title),
+            questions=self._keyword_overlap(query, fields.questions),
+            synonyms=self._keyword_overlap(query, fields.synonyms),
+            tags=self._keyword_overlap(query, fields.tags),
+            embedding_text=self._keyword_overlap(query, fields.embedding_text),
+        )
+
+    def _preview_rare_token_bonus(self, query: str, search_text: str) -> float:
+        query_tokens = self._query_tokens(query)
+        search_tokens = self._query_tokens(search_text)
+        rare_token_hits = sum(
+            1 for token in query_tokens if len(token) >= 5 and token in search_tokens
+        )
+        return min(0.24, rare_token_hits * 0.08)
+
+    def _preview_score_and_trace(
+        self,
+        row: _RowLookup,
+        *,
+        query: str,
+        content: str,
+    ) -> _TraceScore:
+        fields = _preview_text_fields(row, content=content)
+        overlaps = self._preview_overlaps(
+            query=query,
+            content=content,
+            fields=fields,
+        )
+        matches = _preview_match_flags(
+            row,
+            query=query,
+            fields=fields,
+            overlaps=overlaps,
+        )
+        lexical_score = _row_float(row, "lexical_score")
+        vector_score = _row_float(row, "vector_score")
+        exact_score = _row_float(row, "exact_score")
+        exact_phrase_bonus = _preview_exact_phrase_bonus(query, fields.search_text)
+        payload_len = max(len(content), len(fields.embedding_text))
+        length_penalty = _preview_length_penalty(payload_len)
+        generic_long_penalty = _preview_generic_long_penalty(
+            payload_len=payload_len,
+            overlaps=overlaps,
+            matches=matches,
+        )
+        score = _preview_final_score(
+            vector_score=vector_score,
+            lexical_bonus=min(0.30, lexical_score * 4.0),
+            exact_score=exact_score,
+            overlaps=overlaps,
+            rare_token_bonus=self._preview_rare_token_bonus(
+                query,
+                fields.search_text,
+            ),
+            exact_phrase_bonus=exact_phrase_bonus,
+            matches=matches,
+            length_penalty=length_penalty,
+            generic_long_penalty=generic_long_penalty,
+        )
+        matched_fields = _preview_matched_fields(
+            overlaps=overlaps,
+            matches=matches,
+            lexical_score=lexical_score,
+            vector_score=vector_score,
+            exact_score=exact_score,
+            exact_phrase_bonus=exact_phrase_bonus,
+        )
+
+        return _TraceScore(
+            score=score,
+            trace=_search_trace_from_row(
+                row,
+                query=query,
+                matched_fields=matched_fields,
+                final_score=score,
+                length_penalty=length_penalty + generic_long_penalty,
+            ),
+        )
 
     async def cancel_document_processing(
         self,
@@ -1382,19 +1680,20 @@ class KnowledgeRepository:
 
         results: list[KnowledgeSearchResultView] = []
         for row in rows:
+            content = str(row["content"])
+            score_trace = self._preview_score_and_trace(
+                row,
+                query=normalized_query,
+                content=content,
+            )
             source_refs = _source_ref_views_from_payload(
                 _optional_row_value(row, "source_refs")
             )
             results.append(
                 KnowledgeSearchResultView(
                     id=str(row["id"]),
-                    content=str(row["content"]),
-                    score=max(
-                        0.0,
-                        float(row["score"] or 0.0)
-                        + self._keyword_overlap(normalized_query, str(row["content"]))
-                        * 0.05,
-                    ),
+                    content=content,
+                    score=score_trace.score,
                     method="retrieval_surface_lexical",
                     document_id=_optional_row_text(row, "document_id"),
                     source=_optional_row_text(row, "source"),
@@ -1407,7 +1706,7 @@ class KnowledgeRepository:
                     questions=_optional_row_value(row, "questions"),
                     synonyms=_optional_row_value(row, "synonyms"),
                     tags=_optional_row_value(row, "tags"),
-                    trace=_search_trace_from_row(row, query=query),
+                    trace=score_trace.trace,
                 )
             )
 

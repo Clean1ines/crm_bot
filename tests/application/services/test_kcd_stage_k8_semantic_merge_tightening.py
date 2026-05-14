@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.application.services.knowledge_ingestion_service import (
-    KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
+    KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
     _apply_semantic_merge_tightening_decisions,
     _cleanup_semantic_merge_embedding_text,
     _cleanup_semantic_merge_embedding_text_with_metrics,
@@ -129,31 +129,34 @@ def test_stage_k8_keeps_unrelated_entries_out_of_suspect_groups() -> None:
     assert _semantic_merge_suspect_groups_from_entries(entries) == ()
 
 
-def test_stage_k8_semantic_merge_llm_candidate_payload_is_compact() -> None:
+def test_stage_k8_semantic_merge_llm_candidate_payload_is_question_aware_and_bounded() -> (
+    None
+):
+    answer = "Полный пользовательский ответ нужен для сравнения смысла. " * 80
     entry = KnowledgePreprocessingEntry(
-        title="Условия возврата",
-        answer="Полный пользовательский ответ не должен уходить во второй LLM-вызов.",
-        source_excerpt="Источник остаётся в детерминированном merge, а не в prompt payload.",
-        questions=("Как оформить возврат?",),
-        synonyms=("возврат", "refund"),
-        tags=("policy",),
-        embedding_text="Условия возврата " + ("очень длинный embedding text " * 200),
+        title="Возврат книги",
+        answer=answer,
+        source_excerpt="Источник про возврат книги.",
+        questions=("Как вернуть книгу?", "Как оформить возврат книги?"),
+        synonyms=("вернуть книгу", "оформить возврат"),
+        tags=("возврат", "книга"),
+        embedding_text="Возврат книги. Как вернуть книгу. " * 80,
     )
 
     candidate = _semantic_merge_candidate_from_entry(index=3, entry=entry)
 
     assert candidate.candidate_id == "entry-3"
-    assert candidate.title == "Условия возврата"
-    assert candidate.answer == ""
-    assert candidate.questions == ()
-    assert candidate.synonyms == ()
-    assert candidate.tags == ()
-    assert candidate.source_ref_count == 1
-    assert len(candidate.embedding_text) <= (
-        KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS
+    assert candidate.title == "Возврат книги"
+    assert candidate.answer
+    assert (
+        len(candidate.answer) <= KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS
     )
-    assert "Полный пользовательский ответ" not in candidate.embedding_text
-    assert "Источник остаётся" not in candidate.embedding_text
+    assert candidate.answer.startswith("Полный пользовательский ответ нужен")
+    assert candidate.questions == ("Как вернуть книгу?", "Как оформить возврат книги?")
+    assert candidate.synonyms == ("вернуть книгу", "оформить возврат")
+    assert candidate.tags == ("возврат", "книга")
+    assert candidate.embedding_text
+    assert candidate.source_ref_count == 1
 
 
 def test_stage_k8_cleanup_removes_repeated_llm_merge_sentences() -> None:
@@ -203,3 +206,87 @@ def test_stage_k8_rejects_noisy_merge_decision_as_keep_separate() -> None:
     assert filtered[0].action == "keep_separate"
     assert filtered[0].candidate_ids == ("entry-0", "entry-1")
     assert filtered[0].merged_embedding_text == ""
+
+
+# Question-aware pairwise semantic retightening tests
+
+
+def test_semantic_merge_candidates_keep_answer_and_enrichment_payload() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Возврат книги",
+        answer="Возврат книги оформляется через заявку.",
+        source_excerpt="Источник про возврат книги.",
+        questions=("Как вернуть книгу?",),
+        synonyms=("возврат книги",),
+        tags=("возврат",),
+        embedding_text="Возврат книги. Как вернуть книгу.",
+    )
+
+    candidate = _semantic_merge_candidate_from_entry(index=0, entry=entry)
+
+    assert candidate.answer == "Возврат книги оформляется через заявку."
+    assert candidate.questions == ("Как вернуть книгу?",)
+    assert candidate.synonyms == ("возврат книги",)
+    assert candidate.tags == ("возврат",)
+
+
+def test_semantic_merge_suspect_groups_are_pairwise_and_question_aware() -> None:
+    from src.application.services.knowledge_ingestion_service import (
+        _semantic_merge_suspect_groups_from_entries,
+    )
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgePreprocessingEntry,
+    )
+
+    first = KnowledgePreprocessingEntry(
+        title="Возврат книги",
+        answer="Возврат книги оформляется через личный кабинет.",
+        source_excerpt="Источник 1.",
+        questions=("Как оформить возврат книги?",),
+        synonyms=("вернуть книгу",),
+        tags=("возврат",),
+        embedding_text="Как оформить возврат книги. Вернуть книгу.",
+    )
+    second = KnowledgePreprocessingEntry(
+        title="Как вернуть книгу",
+        answer="Книгу можно вернуть через заявку в личном кабинете.",
+        source_excerpt="Источник 2.",
+        questions=("Можно ли вернуть книгу?",),
+        synonyms=("оформить возврат книги",),
+        tags=("возврат",),
+        embedding_text="Можно ли вернуть книгу. Оформить возврат книги.",
+    )
+    unrelated = KnowledgePreprocessingEntry(
+        title="Продление абонемента",
+        answer="Абонемент продлевается отдельной заявкой.",
+        source_excerpt="Источник 3.",
+        questions=("Как продлить абонемент?",),
+        synonyms=("продление абонемента",),
+        tags=("абонемент",),
+        embedding_text="Как продлить абонемент.",
+    )
+
+    groups = _semantic_merge_suspect_groups_from_entries((first, second, unrelated))
+
+    assert groups
+    assert all(len(group.candidates) == 2 for group in groups)
+    candidate_id_sets = {
+        frozenset(candidate.candidate_id for candidate in group.candidates)
+        for group in groups
+    }
+    assert frozenset({"entry-0", "entry-1"}) in candidate_id_sets
+    assert frozenset({"entry-0", "entry-2"}) not in candidate_id_sets
+    assert frozenset({"entry-1", "entry-2"}) not in candidate_id_sets
+
+
+def test_merge_answer_text_removes_repeated_sentence_units() -> None:
+    from src.application.services.knowledge_ingestion_service import _merge_answer_text
+
+    merged = _merge_answer_text(
+        "Документ можно получить ночью. Нужно включить круглосуточный доступ.",
+        "Документ можно получить ночью. Заявка сохраняется в истории.",
+    )
+
+    assert merged.count("Документ можно получить ночью") == 1
+    assert "Нужно включить круглосуточный доступ" in merged
+    assert "Заявка сохраняется в истории" in merged

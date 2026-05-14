@@ -492,3 +492,341 @@ def test_canonical_source_ref_insert_uses_quote_hash_identity() -> None:
     assert "DROP CONSTRAINT IF EXISTS pk_knowledge_entry_source_refs" in (
         migration_source
     )
+
+
+# Retrieval preview trace invariant tests
+
+
+def _preview_trace_repository_for_test():
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
+    )
+
+    return KnowledgeRepository(pool=object())
+
+
+def test_preview_trace_prioritizes_exact_question_over_long_generic_text() -> None:
+    repo = _preview_trace_repository_for_test()
+    query = "Как оформить возврат книги?"
+
+    exact_row: dict[str, object] = {
+        "id": "exact-answer",
+        "entry_kind": "answer",
+        "content": (
+            "Возврат книги оформляется через заявку в личном кабинете. "
+            "Нужно указать номер выдачи и причину возврата."
+        ),
+        "title": "Возврат книги",
+        "questions": [query],
+        "synonyms": ["вернуть книгу", "оформить возврат"],
+        "tags": ["возврат"],
+        "search_text": (
+            "Возврат книги. Как оформить возврат книги? "
+            "Вернуть книгу. Оформить возврат."
+        ),
+        "embedding_text": (
+            "Возврат книги. Ответ: возврат оформляется через заявку "
+            "с номером выдачи и причиной возврата."
+        ),
+        "lexical_score": 0.01,
+    }
+    long_generic_row: dict[str, object] = {
+        "id": "long-generic",
+        "entry_kind": "answer",
+        "content": (
+            "Документ описывает правила разделения тем и общие принципы "
+            "обработки обращений."
+        ),
+        "title": "Общие правила обработки обращений",
+        "questions": [],
+        "synonyms": [],
+        "tags": [],
+        "search_text": "общие правила обращений возврат книга оформление",
+        "embedding_text": "общие правила обработки обращений " * 260,
+        "lexical_score": 0.03,
+    }
+
+    exact = repo._preview_score_and_trace(
+        exact_row,
+        query=query,
+        content=str(exact_row["content"]),
+    )
+    generic = repo._preview_score_and_trace(
+        long_generic_row,
+        query=query,
+        content=str(long_generic_row["content"]),
+    )
+
+    assert exact.score > generic.score
+    assert exact.trace.exact_question_match is True
+    assert "questions" in exact.trace.matched_fields
+    assert generic.trace.length_penalty > 0
+
+
+def test_preview_trace_explains_synonyms_tags_and_answer_matches() -> None:
+    repo = _preview_trace_repository_for_test()
+    query = "Можно ли получить документ ночью?"
+
+    row: dict[str, object] = {
+        "id": "night-document-access",
+        "entry_kind": "answer",
+        "content": (
+            "Документ можно получить ночью, если включён круглосуточный доступ."
+        ),
+        "title": "Круглосуточная выдача документов",
+        "questions": ["Можно ли получить документ после полуночи?"],
+        "synonyms": ["ночью", "после полуночи", "24/7"],
+        "tags": ["ночью", "доступность"],
+        "search_text": (
+            "Круглосуточная выдача документов. Получить документ ночью. "
+            "После полуночи. Доступность."
+        ),
+        "embedding_text": (
+            "Круглосуточная выдача документов. Ответ: документ можно получить "
+            "ночью при включённом круглосуточном доступе."
+        ),
+        "lexical_score": 0.01,
+    }
+
+    scored = repo._preview_score_and_trace(
+        row, query=query, content=str(row["content"])
+    )
+
+    assert scored.score > 0
+    assert "synonyms" in scored.trace.matched_fields
+    assert "tags" in scored.trace.matched_fields
+    assert "answer" in scored.trace.matched_fields
+    assert scored.trace.displayed_field == "answer"
+
+
+def test_preview_trace_marks_internal_artifact_as_not_production_safe() -> None:
+    repo = _preview_trace_repository_for_test()
+    row: dict[str, object] = {
+        "id": "guideline",
+        "entry_kind": "retrieval_guideline",
+        "content": "Служебная инструкция не должна быть пользовательским ответом.",
+        "title": "Retrieval guideline",
+        "questions": [],
+        "synonyms": [],
+        "tags": [],
+        "search_text": "служебная инструкция",
+        "embedding_text": "служебная инструкция",
+        "lexical_score": 0.01,
+    }
+
+    scored = repo._preview_score_and_trace(
+        row,
+        query="Как оформить возврат книги?",
+        content=str(row["content"]),
+    )
+
+    assert scored.trace.is_production_safe is False
+    assert scored.trace.retrieval_surface_role == "non_production"
+
+
+def test_answerable_entry_kinds_exclude_internal_retrieval_artifacts() -> None:
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        ANSWERABLE_KNOWLEDGE_ENTRY_KINDS,
+    )
+
+    forbidden = {
+        "retrieval_guideline",
+        "internal_eval_test",
+        "negative_test",
+        "eval_case",
+        "prompt_debug_artifact",
+        "generated_question",
+        "chunk",
+    }
+
+    assert forbidden.isdisjoint(set(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS))
+
+
+# Semantic retighten archival lifecycle tests
+
+
+class _RetightenFakeEmbeddingResult:
+    def __init__(self, embeddings: list[list[float]]) -> None:
+        self.embeddings = embeddings
+        self.usage = None
+
+
+class _RetightenFakeTransaction:
+    async def __aenter__(self) -> "_RetightenFakeTransaction":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
+        return None
+
+
+class _RetightenFakeConnection:
+    def __init__(self) -> None:
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+
+    def transaction(self) -> _RetightenFakeTransaction:
+        return _RetightenFakeTransaction()
+
+    async def execute(self, sql: str, *args: object) -> str:
+        self.executed.append((sql, args))
+        return "OK"
+
+
+class _RetightenFakeAcquire:
+    def __init__(self, conn: _RetightenFakeConnection) -> None:
+        self._conn = conn
+
+    async def __aenter__(self) -> _RetightenFakeConnection:
+        return self._conn
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: object,
+    ) -> None:
+        return None
+
+
+class _RetightenFakePool:
+    def __init__(self, conn: _RetightenFakeConnection) -> None:
+        self._conn = conn
+
+    def acquire(self) -> _RetightenFakeAcquire:
+        return _RetightenFakeAcquire(self._conn)
+
+
+async def test_apply_semantic_retightening_archives_collapsed_entries_and_republishes_survivor(
+    monkeypatch,
+) -> None:
+    from src.domain.project_plane.embedding_text import (
+        EmbeddingText as _TestEmbeddingText,
+    )
+    from src.domain.project_plane.knowledge_compilation import (
+        CanonicalKnowledgeEntry as _TestCanonicalKnowledgeEntry,
+        KnowledgeEnrichment as _TestKnowledgeEnrichment,
+        KnowledgeEntryKind as _TestKnowledgeEntryKind,
+        SourceRef as _TestSourceRef,
+    )
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository as _TestKnowledgeRepository,
+    )
+
+    async def fake_embed_batch(texts: list[str]) -> _RetightenFakeEmbeddingResult:
+        return _RetightenFakeEmbeddingResult(
+            embeddings=[[0.11, 0.22, 0.33] for _ in texts],
+        )
+
+    monkeypatch.setattr(
+        "src.infrastructure.db.repositories.knowledge_repository.embed_batch",
+        fake_embed_batch,
+    )
+
+    project_id = "11111111-1111-4111-8111-111111111111"
+    document_id = "22222222-2222-4222-8222-222222222222"
+    survivor_id = "33333333-3333-4333-8333-333333333333"
+    archived_id = "44444444-4444-4444-8444-444444444444"
+
+    survivor = _TestCanonicalKnowledgeEntry(
+        id=survivor_id,
+        project_id=project_id,
+        document_id=document_id,
+        compiler_run_id="55555555-5555-4555-8555-555555555555",
+        stable_key="answer:book-return",
+        entry_kind=_TestKnowledgeEntryKind.ANSWER,
+        title="Возврат книги",
+        answer="Возврат книги оформляется через одну заявку без дублирующих фрагментов.",
+        source_refs=(
+            _TestSourceRef(
+                source_index=0,
+                quote="Возврат книги оформляется через заявку.",
+                confidence=1.0,
+            ),
+            _TestSourceRef(
+                source_index=1,
+                quote="Повторный фрагмент уточняет тот же порядок возврата.",
+                confidence=1.0,
+            ),
+        ),
+        enrichment=_TestKnowledgeEnrichment(
+            questions=("Как оформить возврат книги?",),
+            synonyms=("вернуть книгу",),
+            tags=("возврат",),
+        ),
+        embedding_text=_TestEmbeddingText(
+            value="Как оформить возврат книги. Вернуть книгу.",
+            version="test",
+        ),
+        status=KnowledgeEntryStatus.PUBLISHED,
+        visibility=KnowledgeEntryVisibility.RUNTIME,
+        version=2,
+        compiler_version="test",
+        embedding_text_version="test",
+        metadata={"semantic_retightening_survivor": True},
+    )
+
+    conn = _RetightenFakeConnection()
+    repo = _TestKnowledgeRepository(_RetightenFakePool(conn))
+
+    result = await repo.apply_document_semantic_retightening(
+        project_id=project_id,
+        document_id=document_id,
+        updated_entries=(survivor,),
+        archived_entry_ids=(archived_id,),
+        metrics={"collapsed_entry_count": 1},
+    )
+
+    assert result["status"] == "completed"
+    assert result["updated_entry_count"] == 1
+    assert result["archived_entry_count"] == 1
+
+    deleted_surface_entry_ids = [
+        str(args[0])
+        for sql, args in conn.executed
+        if "DELETE FROM knowledge_retrieval_surface WHERE entry_id = $1" in sql
+    ]
+    assert archived_id in deleted_surface_entry_ids
+    assert survivor_id in deleted_surface_entry_ids
+
+    archive_updates = [
+        (sql, args)
+        for sql, args in conn.executed
+        if "UPDATE knowledge_entries" in sql
+        and "status = 'archived'" in sql
+        and "visibility = 'hidden'" in sql
+    ]
+    assert len(archive_updates) == 1
+    assert str(archive_updates[0][1][0]) == archived_id
+
+    surface_upserts = [
+        (sql, args)
+        for sql, args in conn.executed
+        if "INSERT INTO knowledge_retrieval_surface" in sql
+    ]
+    assert len(surface_upserts) == 1
+    assert str(surface_upserts[0][1][2]) == survivor_id
+    assert "Возврат книги" in surface_upserts[0][1]
+    assert (
+        "Возврат книги оформляется через одну заявку без дублирующих фрагментов."
+        in surface_upserts[0][1]
+    )
+
+    document_metric_updates = [
+        (sql, args)
+        for sql, args in conn.executed
+        if "UPDATE knowledge_documents" in sql and "preprocessing_metrics" in sql
+    ]
+    assert len(document_metric_updates) == 1
+
+    metric_sql, metric_args = document_metric_updates[0]
+    metric_payload = "\n".join(str(arg) for arg in metric_args)
+
+    assert "knowledge_documents" in metric_sql
+    assert project_id in metric_payload
+    assert document_id in metric_payload
+    assert "semantic_retightening" in metric_payload
+    assert "collapsed_entry_count" in metric_payload
