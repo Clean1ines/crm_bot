@@ -5,6 +5,7 @@ from src.application.services.knowledge_ingestion_service import (
     _apply_semantic_merge_tightening_decisions,
     _cleanup_semantic_merge_embedding_text,
     _cleanup_semantic_merge_embedding_text_with_metrics,
+    _reject_noisy_semantic_merge_decisions,
     _semantic_merge_candidate_from_entry,
     _semantic_merge_suspect_groups_from_entries,
 )
@@ -178,3 +179,27 @@ def test_stage_k8_cleanup_reports_removed_unit_count() -> None:
     assert result.kept_unit_count == 2
     assert result.removed_unit_count == 1
     assert result.text.count("Бот отвечает ночью") == 1
+
+
+def test_stage_k8_rejects_noisy_merge_decision_as_keep_separate() -> None:
+    decisions = (
+        KnowledgeSemanticMergeDecision(
+            group_id="semantic-merge-noisy",
+            action="merge",
+            candidate_ids=("entry-0", "entry-1"),
+            survivor_title="История диалогов",
+            merged_embedding_text=(
+                "История диалогов доступна в панели. "
+                "История диалогов доступна в панели. "
+                "История диалогов доступна в панели. "
+                "История диалогов доступна в панели. "
+                "Менеджер может смотреть карточку клиента."
+            ),
+        ),
+    )
+
+    filtered = _reject_noisy_semantic_merge_decisions(decisions)
+
+    assert filtered[0].action == "keep_separate"
+    assert filtered[0].candidate_ids == ("entry-0", "entry-1")
+    assert filtered[0].merged_embedding_text == ""

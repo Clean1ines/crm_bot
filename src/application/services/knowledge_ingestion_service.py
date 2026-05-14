@@ -1177,6 +1177,49 @@ def _cleanup_semantic_merge_embedding_text(value: str) -> str:
     return _clean_optional_text(" ".join(kept))
 
 
+KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
+
+
+def _semantic_merge_decision_is_too_noisy(
+    decision: KnowledgeSemanticMergeDecision,
+) -> bool:
+    if not decision.is_merge or not decision.merged_embedding_text:
+        return False
+
+    cleanup = _cleanup_semantic_merge_embedding_text_with_metrics(
+        decision.merged_embedding_text
+    )
+    if cleanup.original_unit_count < 3:
+        return False
+
+    return (
+        cleanup.removed_unit_count / cleanup.original_unit_count
+    ) >= KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO
+
+
+def _reject_noisy_semantic_merge_decisions(
+    decisions: Sequence[KnowledgeSemanticMergeDecision],
+) -> tuple[KnowledgeSemanticMergeDecision, ...]:
+    filtered: list[KnowledgeSemanticMergeDecision] = []
+
+    for decision in decisions:
+        if not _semantic_merge_decision_is_too_noisy(decision):
+            filtered.append(decision)
+            continue
+
+        filtered.append(
+            KnowledgeSemanticMergeDecision(
+                group_id=decision.group_id,
+                action="keep_separate",
+                candidate_ids=decision.candidate_ids,
+                survivor_title="",
+                merged_embedding_text="",
+            )
+        )
+
+    return tuple(filtered)
+
+
 def _entry_with_semantic_merge_decision(
     *,
     entry: KnowledgePreprocessingEntry,
@@ -2277,6 +2320,13 @@ class KnowledgeIngestionService:
             )
             return metrics
 
+        rejected_noisy_merge_decision_count = sum(
+            1
+            for decision in decisions
+            if _semantic_merge_decision_is_too_noisy(decision)
+        )
+        decisions = _reject_noisy_semantic_merge_decisions(decisions)
+
         plan = _retighten_existing_document_plan(
             entries=preprocessing_entries,
             decisions=decisions,
@@ -2294,6 +2344,9 @@ class KnowledgeIngestionService:
         )
         metrics["retighten_cleanup_removed_unit_count"] = sum(
             result.removed_unit_count for result in cleanup_results
+        )
+        metrics["rejected_noisy_merge_decision_count"] = (
+            rejected_noisy_merge_decision_count
         )
         metrics["decision_count"] = len(decisions)
         metrics["merge_decision_count"] = sum(
