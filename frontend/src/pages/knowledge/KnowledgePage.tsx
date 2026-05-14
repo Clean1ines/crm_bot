@@ -310,6 +310,43 @@ const retightenStatusText = (metrics: KnowledgeProcessingMetrics): string | null
   return status || reason;
 };
 
+const metricObjectArray = (
+  metrics: KnowledgeProcessingMetrics | null | undefined,
+  key: string,
+): KnowledgeProcessingMetrics[] => {
+  const value = metrics?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is KnowledgeProcessingMetrics => (
+    item !== null && typeof item === 'object' && !Array.isArray(item)
+  ));
+};
+
+const retightenRejectedExampleRows = (metrics: KnowledgeProcessingMetrics): string[] => (
+  metricObjectArray(metrics, 'rejected_noisy_merge_examples')
+    .map((example) => {
+      const groupId = metricText(example, 'group_id');
+      const title = metricText(example, 'survivor_title');
+      const preview = metricText(example, 'merged_embedding_text_preview');
+      const removed = metricNumber(example, 'cleanup_removed_unit_count');
+
+      const label = title || groupId || t('knowledge.common.unspecified');
+      if (removed !== null && preview) {
+        return t('knowledge.retightenReport.rejectedExampleWithPreview', {
+          label,
+          removed: formatNumber(removed),
+          preview,
+        });
+      }
+      if (removed !== null) {
+        return t('knowledge.retightenReport.rejectedExample', {
+          label,
+          removed: formatNumber(removed),
+        });
+      }
+      return t('knowledge.retightenReport.rejectedExampleWithoutCount', { label });
+    })
+);
+
 const retightenReportRows = (doc: Document): string[] => {
   const metrics = retightenMetrics(doc);
   if (!metrics) return [];
@@ -365,6 +402,10 @@ const retightenReportRows = (doc: Document): string[] => {
     rows.push(t('knowledge.retightenReport.cleanupRemovedUnits', {
       count: formatNumber(cleanupRemovedUnits),
     }));
+  }
+
+  for (const exampleRow of retightenRejectedExampleRows(metrics)) {
+    rows.push(exampleRow);
   }
 
   return rows;
