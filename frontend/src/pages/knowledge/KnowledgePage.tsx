@@ -286,6 +286,72 @@ const semanticMergeCount = (doc: Document): number | null => (
   ?? metricNumber(doc.preprocessing_metrics, 'llm_merge_call_count')
 );
 
+
+const metricObject = (
+  metrics: KnowledgeProcessingMetrics | null | undefined,
+  key: string,
+): KnowledgeProcessingMetrics | null => {
+  const value = metrics?.[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as KnowledgeProcessingMetrics
+    : null;
+};
+
+const retightenMetrics = (doc: Document): KnowledgeProcessingMetrics | null => (
+  metricObject(doc.preprocessing_metrics, 'semantic_retightening')
+);
+
+const retightenStatusText = (metrics: KnowledgeProcessingMetrics): string | null => {
+  const status = metricText(metrics, 'status');
+  const reason = metricText(metrics, 'reason');
+
+  if (!status && !reason) return null;
+  if (status && reason) return `${status}: ${reason}`;
+  return status || reason;
+};
+
+const retightenReportRows = (doc: Document): string[] => {
+  const metrics = retightenMetrics(doc);
+  if (!metrics) return [];
+
+  const rows: string[] = [];
+  const statusText = retightenStatusText(metrics);
+  const before = metricNumber(metrics, 'entry_count_before');
+  const after = metricNumber(metrics, 'entry_count_after');
+  const groups = metricNumber(metrics, 'candidate_group_count');
+  const decisions = metricNumber(metrics, 'decision_count');
+  const mergeDecisions = metricNumber(metrics, 'merge_decision_count');
+  const collapsed = metricNumber(metrics, 'collapsed_entry_count');
+  const llmCalls = metricNumber(metrics, 'llm_call_count');
+
+  if (statusText) {
+    rows.push(t('knowledge.retightenReport.status', { status: statusText }));
+  }
+  if (before !== null && after !== null) {
+    rows.push(t('knowledge.retightenReport.entries', {
+      before: formatNumber(before),
+      after: formatNumber(after),
+    }));
+  }
+  if (collapsed !== null) {
+    rows.push(t('knowledge.retightenReport.collapsed', { count: formatNumber(collapsed) }));
+  }
+  if (groups !== null) {
+    rows.push(t('knowledge.retightenReport.groups', { count: formatNumber(groups) }));
+  }
+  if (decisions !== null) {
+    rows.push(t('knowledge.retightenReport.decisions', { count: formatNumber(decisions) }));
+  }
+  if (mergeDecisions !== null) {
+    rows.push(t('knowledge.retightenReport.mergeDecisions', { count: formatNumber(mergeDecisions) }));
+  }
+  if (llmCalls !== null) {
+    rows.push(t('knowledge.retightenReport.llmCalls', { count: formatNumber(llmCalls) }));
+  }
+
+  return rows;
+};
+
 const technicalChunkProgressText = (doc: Document): string | null => {
   const current = metricNumber(doc.preprocessing_metrics, 'technical_chunk_processed_count')
     ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
@@ -988,6 +1054,24 @@ export const KnowledgePage: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {(() => {
+                  const reportRows = retightenReportRows(doc);
+                  if (reportRows.length === 0) return null;
+
+                  return (
+                    <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+                      <div className="mb-1 font-medium text-[var(--text-primary)]">
+                        {t('knowledge.retightenReport.title')}
+                      </div>
+                      <div className="space-y-1">
+                        {reportRows.map((row) => (
+                          <div key={row}>{row}</div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {isDocumentCancelled(doc) && (
                   <div className="mb-4 rounded-xl bg-[var(--accent-warning-bg)] p-3 text-xs leading-relaxed text-[var(--accent-warning)]">
