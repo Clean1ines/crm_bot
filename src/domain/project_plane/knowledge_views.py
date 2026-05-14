@@ -34,6 +34,19 @@ def source_refs_from_excerpt(source_excerpt: str | None) -> tuple[SourceRefView,
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgeSearchTraceView:
+    matched_fields: tuple[str, ...] = ()
+    lexical_score: float = 0.0
+    vector_score: float = 0.0
+    exact_question_match: bool = False
+    title_match: bool = False
+    length_penalty: float = 0.0
+    final_score: float = 0.0
+    retrieval_surface_role: str = "runtime"
+    displayed_field: str = "answer"
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeSearchResultView:
     id: str
     content: str
@@ -50,6 +63,7 @@ class KnowledgeSearchResultView:
     questions: object | None = None
     synonyms: object | None = None
     tags: object | None = None
+    trace: KnowledgeSearchTraceView | None = None
 
 
 @dataclass(frozen=True, slots=True)

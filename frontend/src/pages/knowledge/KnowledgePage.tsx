@@ -71,6 +71,23 @@ const confidenceLabel = (score: number): string => {
   return t('knowledge.confidence.low');
 };
 
+
+const previewTraceLabel = (value: string): string => {
+  const labels: Record<string, string> = {
+    title: 'title',
+    questions: 'questions',
+    search_text: 'search',
+    exact: 'exact',
+    embedding: 'embedding',
+  };
+
+  return labels[value] || value;
+};
+
+const formatPreviewScore = (value: number): string => (
+  Number.isFinite(value) ? value.toFixed(3) : '0.000'
+);
+
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
@@ -353,6 +370,17 @@ const PreviewResultCard: React.FC<{
       <span>{t('knowledge.preview.matchFound')}</span>
       {result.source && <span>{t('knowledge.preview.sourcePrefix')} {result.source}</span>}
       {result.document_status && <span>{t('knowledge.preview.documentPrefix')} {knowledgeDocumentStatusLabel(result.document_status)}</span>}
+      {result.entry_kind && <span>entry: {result.entry_kind}</span>}
+      {result.trace && (
+        <span>
+          trace: {result.trace.matched_fields.map(previewTraceLabel).join(', ') || 'none'}
+          {' · '}lexical {formatPreviewScore(result.trace.lexical_score)}
+          {' · '}vector {formatPreviewScore(result.trace.vector_score)}
+          {result.trace.title_match ? ' · title match' : ''}
+          {result.trace.exact_question_match ? ' · question match' : ''}
+          {result.trace.length_penalty > 0 ? ` · penalty ${formatPreviewScore(result.trace.length_penalty)}` : ''}
+        </span>
+      )}
     </div>
   </div>
 );
