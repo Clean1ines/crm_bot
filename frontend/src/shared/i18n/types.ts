@@ -619,6 +619,8 @@ export type TranslationKey =
   | 'knowledge.retightenReport.decisions'
   | 'knowledge.retightenReport.mergeDecisions'
   | 'knowledge.retightenReport.llmCalls'
+  | 'knowledge.retightenReport.cleanupOriginalUnits'
+  | 'knowledge.retightenReport.cleanupRemovedUnits'
   | 'knowledge.clearModal.title'
   | 'knowledge.clearModal.confirm'
   | 'knowledge.clearModal.clearing'

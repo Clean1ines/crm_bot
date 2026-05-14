@@ -323,6 +323,8 @@ const retightenReportRows = (doc: Document): string[] => {
   const mergeDecisions = metricNumber(metrics, 'merge_decision_count');
   const collapsed = metricNumber(metrics, 'collapsed_entry_count');
   const llmCalls = metricNumber(metrics, 'llm_call_count');
+  const cleanupOriginalUnits = metricNumber(metrics, 'retighten_cleanup_original_unit_count');
+  const cleanupRemovedUnits = metricNumber(metrics, 'retighten_cleanup_removed_unit_count');
 
   if (statusText) {
     rows.push(t('knowledge.retightenReport.status', { status: statusText }));
@@ -347,6 +349,16 @@ const retightenReportRows = (doc: Document): string[] => {
   }
   if (llmCalls !== null) {
     rows.push(t('knowledge.retightenReport.llmCalls', { count: formatNumber(llmCalls) }));
+  }
+  if (cleanupOriginalUnits !== null) {
+    rows.push(t('knowledge.retightenReport.cleanupOriginalUnits', {
+      count: formatNumber(cleanupOriginalUnits),
+    }));
+  }
+  if (cleanupRemovedUnits !== null) {
+    rows.push(t('knowledge.retightenReport.cleanupRemovedUnits', {
+      count: formatNumber(cleanupRemovedUnits),
+    }));
   }
 
   return rows;

@@ -617,6 +617,8 @@ export const ru: TranslationDictionary = {
   'knowledge.retightenReport.decisions': 'Решений: {count}',
   'knowledge.retightenReport.mergeDecisions': 'Merge-решений: {count}',
   'knowledge.retightenReport.llmCalls': 'LLM-вызовов: {count}',
+  'knowledge.retightenReport.cleanupOriginalUnits': 'Фраз до очистки: {count}',
+  'knowledge.retightenReport.cleanupRemovedUnits': 'Удалено повторов: {count}',
   'knowledge.clearModal.title': 'Очистить базу знаний',
   'knowledge.clearModal.confirm': 'Все документы и связанные фрагменты будут удалены без возможности восстановления.',
   'knowledge.clearModal.clearing': 'Очищаем...',

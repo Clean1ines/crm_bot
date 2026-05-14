@@ -618,6 +618,8 @@ export const de: TranslationDictionary = {
   'knowledge.retightenReport.decisions': 'Entscheidungen: {count}',
   'knowledge.retightenReport.mergeDecisions': 'Merge-Entscheidungen: {count}',
   'knowledge.retightenReport.llmCalls': 'LLM-Aufrufe: {count}',
+  'knowledge.retightenReport.cleanupOriginalUnits': 'Texteinheiten vor Bereinigung: {count}',
+  'knowledge.retightenReport.cleanupRemovedUnits': 'Entfernte Wiederholungen: {count}',
   'knowledge.clearModal.title': 'Wissensbasis leeren',
   'knowledge.clearModal.confirm': 'Alle Dokumente und zugehörigen Fragmente werden dauerhaft entfernt.',
   'knowledge.clearModal.clearing': 'Wird geleert...',
