@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BaseModal } from '@shared/ui';
+import { translate } from '@shared/i18n';
 
 interface CreateProjectModalProps {
   isOpen: boolean;
@@ -25,11 +26,11 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setError('Укажите название проекта');
+      setError(translate('project.create.validation.nameRequired'));
       return;
     }
     if (name.length > 100) {
-      setError('Название проекта не должно быть длиннее 100 символов');
+      setError(translate('project.create.validation.nameTooLong'));
       return;
     }
     setError('');
@@ -39,12 +40,12 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   };
 
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} title="Новый проект">
+    <BaseModal isOpen={isOpen} onClose={onClose} title={translate('project.create.title')}>
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && <p className="text-xs text-[var(--accent-danger)]">{error}</p>}
         <div>
           <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-            Название проекта *
+            {translate('project.create.nameLabel')}
           </label>
           <input
             type="text"
@@ -58,7 +59,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
-            Описание
+            {translate('project.create.descriptionLabel')}
           </label>
           <input
             type="text"
@@ -73,7 +74,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             disabled={isPending}
             className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           >
-            {isPending ? 'Создание...' : 'Создать проект'}
+            {isPending ? translate('common.states.saving') : translate('project.create.submit')}
           </button>
         </div>
       </form>

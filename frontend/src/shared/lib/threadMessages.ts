@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 import type { Client, Message } from '../../entities/thread/model/types';
 import { getClientDisplayName } from './clients';
 
@@ -15,14 +17,14 @@ export const getMessagePresentation = (
   if (message.role === 'user') {
     return {
       content: message.content,
-      label: getClientDisplayName(client, 'Клиент'),
+      label: getClientDisplayName(client, t('ui.sender.client')),
     };
   }
 
   if (message.role === 'assistant') {
     return {
       content: message.content,
-      label: 'AI-ассистент',
+      label: t('ui.sender.assistant'),
     };
   }
 
@@ -36,12 +38,12 @@ export const getMessagePresentation = (
     }
     return {
       content: message.content,
-      label: 'Менеджер',
+      label: t('ui.sender.manager'),
     };
   }
 
   return {
     content: message.content,
-    label: 'Система',
+    label: t('ui.sender.system'),
   };
 };

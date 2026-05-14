@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNotification } from '@/shared/lib/notification/useNotifications';
 import { getErrorMessage } from '@shared/api/core/errors';
+import { translate } from '@shared/i18n';
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
   knowledgeApi,
@@ -26,12 +27,12 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
         } catch {
           errorPayload = errorText;
         }
-        throw new Error(getErrorMessage(errorPayload, 'Не удалось загрузить файл'));
+        throw new Error(getErrorMessage(errorPayload, translate('knowledge.upload.failure')));
       }
-      showNotification('Файл загружен', 'success');
+      showNotification(translate('knowledge.upload.success'), 'success');
       setFile(null);
     } catch (error) {
-      showNotification(getErrorMessage(error, 'Не удалось загрузить файл'), 'error');
+      showNotification(getErrorMessage(error, translate('knowledge.upload.failure')), 'error');
     } finally {
       setUploading(false);
     }
@@ -40,7 +41,9 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
   return (
     <div className="space-y-3">
       <label style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>Режим предобработки</span>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>
+          {translate('knowledge.upload.preprocessingMode')}
+        </span>
         <select
           value={preprocessingMode}
           onChange={(event) => setPreprocessingMode(event.target.value as KnowledgePreprocessingMode)}
@@ -67,7 +70,7 @@ export const KnowledgeUpload: React.FC<{ projectId: string }> = ({ projectId }) 
         disabled={!file || uploading}
         className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
       >
-        {uploading ? 'Загрузка...' : 'Загрузить'}
+        {uploading ? translate('knowledge.upload.uploading') : translate('knowledge.upload.submit')}
       </button>
     </div>
   );

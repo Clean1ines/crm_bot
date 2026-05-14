@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 export type DisplayNameLike = {
   display_name?: string | null;
   full_name?: string | null;
@@ -38,7 +40,7 @@ const joinNameParts = (
 
 export const getDisplayName = (
   entity?: DisplayNameLike | null,
-  fallback = 'Клиент',
+  fallback = t('ui.client.fallback'),
 ): string => {
   return (
     normalizeText(entity?.display_name) ||
@@ -66,7 +68,7 @@ export const getSecondaryDisplayText = (
 
 export const getDisplayInitials = (
   entity?: DisplayNameLike | null,
-  fallback = 'Клиент',
+  fallback = t('ui.client.fallback'),
 ): string => {
   const label = getDisplayName(entity, fallback).replace(/^@/, '');
   const parts = label.split(/\s+/).filter(Boolean);

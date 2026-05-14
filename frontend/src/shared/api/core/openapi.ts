@@ -2,6 +2,7 @@ import createClient from 'openapi-fetch';
 
 import type { paths } from '../generated/schema';
 import { createTimeoutMiddleware } from '../fetchWithTimeout';
+import { t } from '../../i18n';
 import { API_BASE_URL } from './config';
 import { getErrorMessage, showErrorToast } from './errors';
 import { getSessionToken, handleUnauthorizedResponse, isUnauthorized } from './session';
@@ -29,7 +30,7 @@ client.use({
       const hadSession = handleUnauthorizedResponse();
 
       if (hadSession) {
-        showErrorToast('Сессия истекла. Войдите снова.');
+        showErrorToast(t('api.error.sessionExpired'));
       }
 
       return response;
@@ -45,8 +46,11 @@ client.use({
         })
         .catch(() => {
           const message = response.status >= 500 && response.status < 600
-            ? 'Сервер временно недоступен. Пожалуйста, попробуйте позже.'
-            : `Ошибка ${response.status}: ${response.statusText}`;
+            ? t('api.error.serverUnavailable')
+            : t('api.error.httpStatus', {
+                status: response.status,
+                statusText: response.statusText,
+              });
 
           showErrorToast(message);
           return response;

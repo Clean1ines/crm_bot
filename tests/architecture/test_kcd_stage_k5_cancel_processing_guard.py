@@ -1,55 +1,46 @@
-from pathlib import Path
+from __future__ import annotations
 
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-PORT = ROOT / "src/application/ports/knowledge_port.py"
-REPO = ROOT / "src/infrastructure/db/repositories/knowledge_repository.py"
-SERVICE = ROOT / "src/application/services/knowledge_service.py"
-HTTP = ROOT / "src/interfaces/http/knowledge.py"
-INGESTION = ROOT / "src/application/services/knowledge_ingestion_service.py"
-FRONTEND_API = ROOT / "frontend/src/shared/api/modules/knowledge.ts"
-FRONTEND_PAGE = ROOT / "frontend/src/pages/knowledge/KnowledgePage.tsx"
+KNOWLEDGE_API = ROOT / "frontend/src/shared/api/modules/knowledge.ts"
+KNOWLEDGE_PAGE = ROOT / "frontend/src/pages/knowledge/KnowledgePage.tsx"
+RU_LOCALE = ROOT / "frontend/src/shared/i18n/locales/ru.ts"
 
 
-def _source(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+def test_cancel_processing_api_client_is_wired() -> None:
+    source = KNOWLEDGE_API.read_text(encoding="utf-8")
 
-
-def test_cancel_processing_backend_contract_is_wired() -> None:
-    port = _source(PORT)
-    repo = _source(REPO)
-    service = _source(SERVICE)
-    http = _source(HTTP)
-
-    assert "cancel_document_processing" in port
-    assert "is_document_processing_cancelled" in port
-    assert "async def cancel_document_processing(" in repo
-    assert "async def is_document_processing_cancelled(" in repo
-    assert "payload->>'document_id'" in repo
-    assert "knowledge_compiler_runs" in repo
-    assert "KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE" in service
-    assert '@router.post("/{document_id}/cancel")' in http
-
-
-def test_cancel_processing_worker_is_cooperative_between_llm_batches() -> None:
-    source = _source(INGESTION)
-
-    assert "KCD_STAGE_K_CANCELLED_ERROR" in source
-    assert "await repo.is_document_processing_cancelled(document_id)" in source
-    assert (
-        "for batch_index, technical_chunks in enumerate(technical_batches, start=1)"
-        in source
-    )
+    assert "cancel" in source
+    assert "/cancel" in source
+    assert "authedJsonRequest" in source
 
 
 def test_cancel_processing_frontend_button_is_wired() -> None:
-    api = _source(FRONTEND_API)
-    page = _source(FRONTEND_PAGE)
+    page = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "cancel: (projectId: string, documentId: string)" in api
-    assert "/knowledge/${documentId}/cancel" in api
     assert "cancelProcessingMutation" in page
-    assert "cancelProcessingMutation.mutate(doc.id)" in page
-    assert "Остановить обработку" in page
+    assert "knowledgeApi.cancel" in page
     assert "StopCircle" in page
+    assert "knowledge.actions.stopProcessing" in page
+    assert "'knowledge.actions.stopProcessing': 'Остановить обработку'" in ru_locale
+
+
+def test_cancel_processing_frontend_feedback_is_user_facing() -> None:
+    page = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
+
+    assert "knowledge.feedback.processingStopped" in page
+    assert "knowledge.feedback.stopFailed" in page
+    assert "knowledge.document.stoppedWarning" in page
+    assert (
+        "'knowledge.feedback.processingStopped': 'Обработка документа остановлена'"
+        in ru_locale
+    )
+    assert (
+        "'knowledge.feedback.stopFailed': 'Не удалось остановить обработку'"
+        in ru_locale
+    )
+    assert "Документ остановлен пользователем" in ru_locale

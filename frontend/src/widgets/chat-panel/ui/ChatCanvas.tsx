@@ -1,3 +1,4 @@
+import { t } from '../../../shared/i18n';
 import React, { useState, useRef, useEffect } from 'react';
 import { useSendMessage } from '@features/chat/send-message/useSendMessage';
 
@@ -73,7 +74,7 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           className="min-h-11 flex-1 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-          placeholder="Введите сообщение..."
+          placeholder={t('chat.input.placeholder')}
           disabled={isStreaming}
         />
         {availableModels.length > 0 && onModelChange && (
@@ -93,7 +94,7 @@ export const ChatCanvas: React.FC<ChatCanvasProps> = ({
           disabled={isStreaming}
           className="min-h-11 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
         >
-          Отправить
+          {t('chat.input.send')}
         </button>
       </div>
     </div>

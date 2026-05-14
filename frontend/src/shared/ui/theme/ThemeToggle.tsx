@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import React from 'react';
 import { Clock3, Moon, Sun } from 'lucide-react';
 import { useTheme } from './themeContext';
@@ -22,10 +23,10 @@ const labelByMode: Record<ThemeMode, string> = {
 };
 
 const titleByMode: Record<ThemeMode, string> = {
-  auto: 'Авто по времени суток',
-  light: 'Светлая тема',
-  dark: 'Тёмная тема',
-  system: 'Авто по времени суток',
+  auto: t('theme.mode.auto'),
+  light: t('theme.mode.light'),
+  dark: t('theme.mode.dark'),
+  system: t('theme.mode.system'),
 };
 
 const iconByMode: Record<ThemeMode, React.ReactNode> = {
@@ -48,8 +49,8 @@ export const ThemeToggle: React.FC<ThemeToggleProps> = ({ compact = false }) => 
       type="button"
       onClick={handleClick}
       className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-[var(--control-bg)] px-3 text-xs font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] hover:text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-      aria-label={`Тема: ${titleByMode[normalizedMode]}, сейчас отображается ${resolvedTheme === 'dark' ? 'тёмная' : 'светлая'}`}
-      title={`Тема: ${titleByMode[normalizedMode]}. Нажмите, чтобы переключить.`}
+      aria-label={t('theme.toggle.aria', { mode: titleByMode[normalizedMode], resolved: resolvedTheme === 'dark' ? t('theme.resolved.dark') : t('theme.resolved.light') })}
+      title={t('theme.toggle.title', { mode: titleByMode[normalizedMode] })}
     >
       {iconByMode[normalizedMode]}
       {!compact && <span>{labelByMode[normalizedMode]}</span>}

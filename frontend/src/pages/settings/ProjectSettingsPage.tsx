@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -62,7 +63,7 @@ export const ProjectSettingsPage: React.FC = () => {
 
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Сначала выберите проект');
+      if (!projectId) throw new Error(t('projectSettings.error.selectProject'));
       await projectsApi.updateSettings(projectId, {
         brand_name: brandName || undefined,
         tone_of_voice: toneOfVoice || undefined,
@@ -77,15 +78,15 @@ export const ProjectSettingsPage: React.FC = () => {
     onSuccess: async () => {
       await invalidateConfiguration();
       setDraft({});
-      toast.success('Настройки проекта сохранены');
+      toast.success(t('projectSettings.feedback.settingsSaved'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const saveIntegrationMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Сначала выберите проект');
-      if (!integrationProvider.trim()) throw new Error('Укажите поставщика интеграции');
+      if (!projectId) throw new Error(t('projectSettings.error.selectProject'));
+      if (!integrationProvider.trim()) throw new Error(t('projectSettings.error.integrationProviderRequired'));
       await projectsApi.upsertIntegration(projectId, {
         provider: integrationProvider.trim(),
         status: integrationUrl.trim() ? 'enabled' : 'disabled',
@@ -95,14 +96,14 @@ export const ProjectSettingsPage: React.FC = () => {
     onSuccess: async () => {
       await invalidateConfiguration();
       setDraft((current) => ({ ...current, integrationUrl: '' }));
-      toast.success('Интеграция сохранена');
+      toast.success(t('projectSettings.feedback.integrationSaved'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const saveWidgetChannelMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Сначала выберите проект');
+      if (!projectId) throw new Error(t('projectSettings.error.selectProject'));
       await projectsApi.upsertChannel(projectId, {
         kind: 'widget',
         provider: 'web',
@@ -113,19 +114,19 @@ export const ProjectSettingsPage: React.FC = () => {
     onSuccess: async () => {
       await invalidateConfiguration();
       setDraft((current) => ({ ...current, widgetOrigin: undefined }));
-      toast.success('Канал веб-виджета сохранён');
+      toast.success(t('projectSettings.feedback.widgetChannelSaved'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   if (isLoading) {
-    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">Загрузка настроек...</div>;
+    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">{t('projectSettings.loading')}</div>;
   }
 
   if (isError) {
     return (
       <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
-        Не удалось загрузить настройки проекта: {getErrorMessage(error)}
+        {t('projectSettings.loadFailed')}: {getErrorMessage(error)}
       </div>
     );
   }
@@ -133,17 +134,17 @@ export const ProjectSettingsPage: React.FC = () => {
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div>
-        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Настройки проекта</h1>
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">{t('projectSettings.title')}</h1>
         <p className="mt-2 text-sm text-[var(--text-muted)]">
-          Персонализация ассистента, операционные лимиты и внешние подключения проекта.
+          {t('projectSettings.description')}
         </p>
       </div>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Персонализация</h2>
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('projectSettings.personalization.title')}</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Бренд</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.personalization.brand')}</span>
             <input
               value={brandName}
               onChange={(event) => updateDraft({ brandName: event.target.value })}
@@ -151,7 +152,7 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Стиль общения</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.personalization.tone')}</span>
             <input
               value={toneOfVoice}
               onChange={(event) => updateDraft({ toneOfVoice: event.target.value })}
@@ -160,7 +161,7 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Язык по умолчанию</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.personalization.defaultLanguage')}</span>
             <input
               value={defaultLanguage}
               onChange={(event) => updateDraft({ defaultLanguage: event.target.value })}
@@ -169,7 +170,7 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Часовой пояс</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.personalization.timezone')}</span>
             <input
               value={defaultTimezone}
               onChange={(event) => updateDraft({ defaultTimezone: event.target.value })}
@@ -181,10 +182,10 @@ export const ProjectSettingsPage: React.FC = () => {
       </section>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Лимиты</h2>
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('projectSettings.limits.title')}</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Запросов в минуту</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.limits.requestsPerMinute')}</span>
             <input
               type="number"
               value={requestsPerMinute}
@@ -193,11 +194,11 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Модель ассистента</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.limits.assistantModel')}</span>
             <input
               value={fallbackModel}
               onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
-              placeholder="например: быстрая модель для ответов"
+              placeholder={t('projectSettings.limits.modelPlaceholder')}
               className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
@@ -207,21 +208,21 @@ export const ProjectSettingsPage: React.FC = () => {
           disabled={saveSettingsMutation.isPending}
           className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {saveSettingsMutation.isPending ? 'Сохранение...' : 'Сохранить настройки'}
+          {saveSettingsMutation.isPending ? t('common.states.saving') : t('projectSettings.actions.saveSettings')}
         </button>
       </section>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Интеграции</h2>
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('projectSettings.integrations.title')}</h2>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Тип подключения</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.integrations.provider')}</span>
             <div className="flex min-h-10 items-center rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
               {integrationProviderLabel(integrationProvider)}
             </div>
           </div>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Адрес внешнего обработчика</span>
+            <span className="text-[var(--text-muted)]">{t('projectSettings.integrations.webhookUrl')}</span>
             <input
               value={integrationUrl}
               onChange={(event) => updateDraft({ integrationUrl: event.target.value })}
@@ -235,17 +236,17 @@ export const ProjectSettingsPage: React.FC = () => {
           disabled={saveIntegrationMutation.isPending}
           className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {saveIntegrationMutation.isPending ? 'Сохранение...' : 'Сохранить интеграцию'}
+          {saveIntegrationMutation.isPending ? t('common.states.saving') : t('projectSettings.actions.saveIntegration')}
         </button>
       </section>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Каналы проекта</h2>
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('projectSettings.channels.title')}</h2>
         <p className="mb-4 text-sm text-[var(--text-muted)]">
-          Каналы определяют, где клиенты и менеджеры взаимодействуют с проектом: Telegram-боты, платформенный бот или веб-виджет.
+          {t('projectSettings.channels.description')}
         </p>
         <label className="block max-w-xl space-y-1 text-sm">
-          <span className="text-[var(--text-muted)]">Разрешённый сайт для веб-виджета</span>
+          <span className="text-[var(--text-muted)]">{t('projectSettings.channels.widgetAllowedOrigin')}</span>
           <input
             value={widgetOrigin}
             onChange={(event) => updateDraft({ widgetOrigin: event.target.value })}
@@ -258,7 +259,7 @@ export const ProjectSettingsPage: React.FC = () => {
           disabled={saveWidgetChannelMutation.isPending}
           className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {saveWidgetChannelMutation.isPending ? 'Сохранение...' : 'Сохранить канал виджета'}
+          {saveWidgetChannelMutation.isPending ? t('common.states.saving') : t('projectSettings.actions.saveWidgetChannel')}
         </button>
         {channels.length ? (
           <div className="mt-5 overflow-hidden rounded-xl bg-[var(--control-bg)] shadow-[var(--shadow-sm)]">

@@ -25,6 +25,7 @@ import {
   type KnowledgePreviewResult,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
+import { t } from '@shared/i18n';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -65,10 +66,12 @@ const formatSize = (bytes: number) => {
 };
 
 const confidenceLabel = (score: number): string => {
-  if (score >= 0.75) return 'Высокая уверенность';
-  if (score >= 0.45) return 'Средняя уверенность';
-  return 'Низкая уверенность';
+  if (score >= 0.75) return t('knowledge.confidence.high');
+  if (score >= 0.45) return t('knowledge.confidence.medium');
+  return t('knowledge.confidence.low');
 };
+
+const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
 
@@ -123,7 +126,7 @@ const sumUsageCost = (breakdown: KnowledgeUsageBreakdown[]): number => (
 
 const usageModelRows = (breakdown: KnowledgeUsageBreakdown[]): string[] => {
   const events = breakdown.reduce((acc, item) => acc + item.events_count, 0);
-  return events > 0 ? [`Операций: ${formatNumber(events)}`] : [];
+  return events > 0 ? [t('knowledge.metrics.operations', { count: formatNumber(events) })] : [];
 };
 
 
@@ -160,7 +163,7 @@ const processingModelLabel = (doc: Document): string => {
   ].filter((value): value is string => Boolean(value && value.trim()));
 
   return candidates.find((model) => !isLikelyEmbeddingModel(model))
-    || 'модель пока определяется';
+    || t('knowledge.processing.modelPending');
 };
 
 const metricText = (
@@ -183,7 +186,7 @@ const documentIssueText = (doc: Document): string | null => {
 
   return getErrorMessage(
     message,
-    'Документ не удалось обработать. Попробуйте загрузить его заново или обратитесь к администратору проекта.',
+    t('knowledge.document.failureAdvice'),
   );
 };
 
@@ -193,7 +196,7 @@ const isDocumentCancelled = (doc: Document): boolean => {
   return (
     doc.status === 'cancelled'
     || doc.preprocessing_status === 'cancelled'
-    || issueText.includes('остановлено пользователем')
+    || issueText.includes(STOPPED_BY_USER_ISSUE_NEEDLE)
     || issueText.includes('cancelled')
     || issueText.includes('canceled')
   );
@@ -224,7 +227,7 @@ const isDocumentRetightenable = (doc: Document): boolean => (
 const knowledgeProcessingModeLabel = (mode: string | null | undefined): string => (
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === mode)?.label
   || mode
-  || 'не указан'
+  || t('knowledge.common.unspecified')
 );
 
 const processingProgressPercent = (doc: Document): number | null => {
@@ -246,11 +249,11 @@ const processingProgressLabel = (doc: Document): string => {
     ?? metricNumber(metrics, 'technical_compiler_total_count');
 
   if (current !== null && total !== null && total > 0) {
-    return `Шаг ${formatNumber(current)} из ${formatNumber(total)}`;
+    return t('knowledge.progress.stepOf', { current: formatNumber(current), total: formatNumber(total) });
   }
 
-  if (doc.status === 'pending') return 'Документ ожидает обработки';
-  return 'Подготовка обработки документа';
+  if (doc.status === 'pending') return t('knowledge.document.pendingProcessing');
+  return t('knowledge.document.preparingProcessing');
 };
 
 const compiledEntryCount = (doc: Document): number | null => (
@@ -274,9 +277,9 @@ const technicalChunkProgressText = (doc: Document): string | null => {
 
   if (current === null && total === null) return null;
   if (current !== null && total !== null && total > 0) {
-    return `${formatNumber(current)} из ${formatNumber(total)}`;
+    return t('knowledge.progress.of', { current: formatNumber(current), total: formatNumber(total) });
   }
-  if (total !== null && total > 0) return `0 из ${formatNumber(total)}`;
+  if (total !== null && total > 0) return t('knowledge.progress.of', { current: '0', total: formatNumber(total) });
   return current !== null ? formatNumber(current) : null;
 };
 
@@ -296,7 +299,7 @@ const documentLlmTokenText = (doc: Document): string | null => {
     ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_total');
   if (total === null || total <= 0) return null;
 
-  return `${formatNumber(total)} единиц обработки`;
+  return t('knowledge.progress.processingUnits', { total: formatNumber(total) });
 };
 
 const documentLlmModels = (doc: Document): string | null => {
@@ -311,12 +314,12 @@ const formatDurationSeconds = (seconds: number): string => {
   const restSeconds = safeSeconds % 60;
 
   if (hours > 0) {
-    return `${hours} ч ${minutes.toString().padStart(2, '0')} мин ${restSeconds.toString().padStart(2, '0')} сек`;
+    return t('knowledge.duration.hoursMinutesSeconds', { hours, minutes: minutes.toString().padStart(2, '0'), seconds: restSeconds.toString().padStart(2, '0') });
   }
   if (minutes > 0) {
-    return `${minutes} мин ${restSeconds.toString().padStart(2, '0')} сек`;
+    return t('knowledge.duration.minutesSeconds', { minutes, seconds: restSeconds.toString().padStart(2, '0') });
   }
-  return `${restSeconds} сек`;
+  return t('knowledge.duration.seconds', { seconds: restSeconds });
 };
 
 const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
@@ -347,9 +350,9 @@ const PreviewResultCard: React.FC<{
       {result.answer || result.content}
     </p>
     <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-      <span>Совпадение найдено по базе знаний</span>
-      {result.source && <span>Источник: {result.source}</span>}
-      {result.document_status && <span>Документ: {knowledgeDocumentStatusLabel(result.document_status)}</span>}
+      <span>{t('knowledge.preview.matchFound')}</span>
+      {result.source && <span>{t('knowledge.preview.sourcePrefix')} {result.source}</span>}
+      {result.document_status && <span>{t('knowledge.preview.documentPrefix')} {knowledgeDocumentStatusLabel(result.document_status)}</span>}
     </div>
   </div>
 );
@@ -403,43 +406,43 @@ const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
         </div>
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            Работа ассистента за месяц
+            {t('knowledge.usage.title')}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Сколько работы выполнил ассистент: обработка документов, проверки качества и ответы клиентам.
+            {t('knowledge.usage.description')}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <UsageScenarioCard
-          title="Всего за месяц"
-          description={`Все сценарии работы модели · примерная стоимость ${formatUsd(totalCost)}`}
+          title={t('knowledge.usage.totalTitle')}
+          description={t('knowledge.usage.totalDescription', { cost: formatUsd(totalCost) })}
           breakdown={llmBreakdown}
-          emptyText="За месяц пока нет записанного расхода модели"
+          emptyText={t('knowledge.usage.totalEmpty')}
         />
         <UsageScenarioCard
-          title="Ответы клиентам"
-          description="Генерация ответов в клиентских диалогах"
+          title={t('knowledge.usage.clientAnswersTitle')}
+          description={t('knowledge.usage.clientAnswersDescription')}
           breakdown={answerBreakdown}
-          emptyText="За месяц пока нет записанного расхода на ответы клиентам"
+          emptyText={t('knowledge.usage.clientAnswersEmpty')}
         />
         <UsageScenarioCard
-          title="Обработка базы знаний"
-          description="Разбор документов, сборка смысловых ответов и объединение повторов"
+          title={t('knowledge.usage.knowledgeProcessingTitle')}
+          description={t('knowledge.usage.knowledgeProcessingDescription')}
           breakdown={uploadBreakdown}
-          emptyText="За месяц пока нет записанного расхода на обработку базы знаний"
+          emptyText={t('knowledge.usage.knowledgeProcessingEmpty')}
         />
         <UsageScenarioCard
-          title="Проверки качества"
-          description="Тестовые вопросы и автоматическая оценка качества поиска"
+          title={t('knowledge.usage.qualityChecksTitle')}
+          description={t('knowledge.usage.qualityChecksDescription')}
           breakdown={ragEvalBreakdown}
-          emptyText="За месяц пока нет записанного расхода на проверки качества"
+          emptyText={t('knowledge.usage.qualityChecksEmpty')}
         />
       </div>
 
       <div className="mt-4 text-sm text-[var(--text-muted)]">
-        Учтённый объём работы за месяц: {formatNumber(totalTokens)}.
+        {t('knowledge.usage.monthlyVolume', { total: formatNumber(totalTokens) })}
       </div>
     </section>
   );
@@ -510,18 +513,18 @@ export const KnowledgePage: React.FC = () => {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(getErrorMessage(errData, 'Не удалось загрузить документ'));
+        throw new Error(getErrorMessage(errData, t('knowledge.feedback.uploadDocumentFailed')));
       }
 
       return await response.json();
     },
     onSuccess: async () => {
-      toast.success('Документ принят и поставлен в очередь на обработку');
+      toast.success(t('knowledge.feedback.documentQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, 'Ошибка при загрузке документа'));
+      toast.error(getErrorMessage(err, t('knowledge.feedback.uploadError')));
     },
   });
 
@@ -532,7 +535,7 @@ export const KnowledgePage: React.FC = () => {
       return data;
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, 'Не удалось проверить базу знаний'));
+      toast.error(getErrorMessage(err, t('knowledge.feedback.previewFailed')));
     },
   });
 
@@ -545,12 +548,12 @@ export const KnowledgePage: React.FC = () => {
       setIsClearModalOpen(false);
       setPreviewQuestion('');
       previewMutation.reset();
-      toast.success('База знаний очищена');
+      toast.success(t('knowledge.feedback.cleared'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, 'Не удалось очистить базу знаний'));
+      toast.error(getErrorMessage(err, t('knowledge.feedback.clearFailed')));
     },
   });
 
@@ -561,12 +564,12 @@ export const KnowledgePage: React.FC = () => {
       await knowledgeApi.cancel(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success('Обработка документа остановлена');
+      toast.success(t('knowledge.feedback.processingStopped'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, 'Не удалось остановить обработку'));
+      toast.error(getErrorMessage(err, t('knowledge.feedback.stopFailed')));
     },
   });
 
@@ -576,12 +579,12 @@ export const KnowledgePage: React.FC = () => {
       await knowledgeApi.retighten(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success('Перепроверка смысловых дублей поставлена в очередь');
+      toast.success(t('knowledge.feedback.retightenQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, 'Не удалось запустить перепроверку дублей'));
+      toast.error(getErrorMessage(err, t('knowledge.feedback.retightenFailed')));
     },
   });
 
@@ -600,7 +603,7 @@ export const KnowledgePage: React.FC = () => {
     event.preventDefault();
     const question = previewQuestion.trim();
     if (!question) {
-      toast.error('Введите вопрос клиента');
+      toast.error(t('knowledge.feedback.enterClientQuestion'));
       return;
     }
     previewMutation.mutate(question);
@@ -624,7 +627,7 @@ export const KnowledgePage: React.FC = () => {
   if (documentsQuery.isLoading) {
     return (
       <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
-        Загрузка базы знаний...
+        {t('knowledge.loading')}
       </div>
     );
   }
@@ -641,30 +644,30 @@ export const KnowledgePage: React.FC = () => {
 
     if (isDocumentCancelled(doc)) {
       return {
-        label: 'Остановлено',
+        label: t('knowledge.status.stopped'),
         className: 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]',
       };
     }
     if (isDocumentFailed(doc)) {
       return {
-        label: 'Ошибка обработки',
+        label: t('knowledge.status.error'),
         className: 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]',
       };
     }
     if (isDocumentProcessing(doc)) {
       return {
-        label: 'Обрабатывается',
+        label: t('knowledge.status.processing'),
         className: 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]',
       };
     }
     if (status === 'processed') {
       return {
-        label: 'Обработан',
+        label: t('knowledge.status.processed'),
         className: 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]',
       };
     }
     return {
-      label: 'В очереди',
+      label: t('knowledge.status.queued'),
       className: 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]',
     };
   };
@@ -682,10 +685,10 @@ export const KnowledgePage: React.FC = () => {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">
-            База знаний
+            {t('knowledge.title')}
           </h1>
           <p className="text-[var(--text-muted)]">
-            Загрузите документы, чтобы собрать проверяемые смысловые ответы для ассистента
+            {t('knowledge.description')}
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -693,7 +696,7 @@ export const KnowledgePage: React.FC = () => {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               type="text"
-              placeholder="Поиск документов..."
+              placeholder={t('knowledge.search.placeholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
@@ -704,7 +707,7 @@ export const KnowledgePage: React.FC = () => {
             onClick={() => setIsClearModalOpen(true)}
             className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--accent-danger-bg)] px-4 py-2 text-sm font-medium text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--accent-danger-bg)]/80"
           >
-            Очистить базу знаний
+            {t('knowledge.actions.clear')}
           </button>
         </div>
       </div>
@@ -713,16 +716,16 @@ export const KnowledgePage: React.FC = () => {
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              Загрузка документа
+              {t('knowledge.upload.title')}
             </h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Выберите режим предобработки перед загрузкой. Для FAQ и условий бизнеса лучше оставить режим FAQ.
+              {t('knowledge.upload.description')}
             </p>
           </div>
 
           <label className="flex w-full flex-col gap-2 lg:w-80">
             <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-              Режим предобработки
+              {t('knowledge.upload.preprocessingMode')}
             </span>
             <select
               value={preprocessingMode}
@@ -747,11 +750,11 @@ export const KnowledgePage: React.FC = () => {
             <div className="flex items-start gap-3">
               <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[var(--accent-primary)]" />
               <div>
-                <div className="font-semibold">Документ обрабатывается</div>
+                <div className="font-semibold">{t('knowledge.processing.title')}</div>
                 <p className="mt-1 leading-relaxed text-[var(--text-muted)]">
-                  Система не просто режет файл на куски: она извлекает смысловые ответы,
-                  объединяет повторы и привязывает каждый ответ к фрагментам источника.
-                  Для больших документов это может занять несколько минут.
+                  {t('knowledge.processing.descriptionLine1')}
+                  {t('knowledge.processing.descriptionLine2')}
+                  {t('knowledge.processing.descriptionLine3')}
                 </p>
               </div>
             </div>
@@ -774,10 +777,10 @@ export const KnowledgePage: React.FC = () => {
             <Upload className="h-7 w-7 text-[var(--accent-primary)] sm:h-8 sm:w-8" />
           </div>
           <h3 className="text-center text-base font-semibold text-[var(--text-primary)] sm:text-lg">
-            {uploadMutation.isPending ? 'Загрузка...' : 'Нажмите или перетащите файл'}
+            {uploadMutation.isPending ? t('common.states.loading') : t('knowledge.upload.dropzoneText')}
           </h3>
           <p className="mt-1 text-center text-sm text-[var(--text-muted)]">
-            PDF, JSON, Markdown или TXT · {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.label}
+            {t('knowledge.upload.acceptedFormats')} · {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.label}
           </p>
         </div>
       </section>
@@ -791,10 +794,10 @@ export const KnowledgePage: React.FC = () => {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              Тест базы знаний
+              {t('knowledge.preview.title')}
             </h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Введите вопрос клиента и проверьте, какой ответ найдётся без генерации LLM.
+              {t('knowledge.preview.description')}
             </p>
           </div>
         </div>
@@ -803,7 +806,7 @@ export const KnowledgePage: React.FC = () => {
           <textarea
             value={previewQuestion}
             onChange={(event) => setPreviewQuestion(event.target.value)}
-            placeholder="Например: как оформить возврат заказа?"
+            placeholder={t('knowledge.preview.placeholder')}
             rows={3}
             className="min-h-24 flex-1 resize-y rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           />
@@ -812,7 +815,7 @@ export const KnowledgePage: React.FC = () => {
             disabled={previewMutation.isPending}
             className="min-h-11 rounded-xl bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-wait disabled:opacity-60 lg:self-start"
           >
-            {previewMutation.isPending ? 'Проверяем...' : 'Проверить'}
+            {previewMutation.isPending ? t('knowledge.preview.checking') : t('knowledge.preview.check')}
           </button>
         </form>
 
@@ -820,20 +823,20 @@ export const KnowledgePage: React.FC = () => {
           <div className="mt-5 space-y-4">
             {previewResult.is_empty || !previewResult.best_result ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                Ничего не найдено. Попробуйте другой вопрос или загрузите документы в базу знаний.
+                {t('knowledge.preview.noResults')}
               </div>
             ) : (
               <>
-                <PreviewResultCard title="Лучший найденный ответ" result={previewResult.best_result} />
+                <PreviewResultCard title={t('knowledge.preview.bestAnswer')} result={previewResult.best_result} />
                 {previewResult.top_results.length > 1 && (
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                      Топ совпадений
+                      {t('knowledge.preview.topMatches')}
                     </h3>
                     {previewResult.top_results.slice(1).map((result) => (
                       <PreviewResultCard
                         key={result.id}
-                        title="Дополнительное совпадение"
+                        title={t('knowledge.preview.additionalMatch')}
                         result={result}
                         compact
                       />
@@ -850,10 +853,10 @@ export const KnowledgePage: React.FC = () => {
         <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--surface-secondary)] p-6 text-center sm:p-10 lg:p-16">
           <BookOpen className="mb-4 h-12 w-12 text-[var(--border-subtle)] sm:h-16 sm:w-16" />
           <h3 className="text-lg font-semibold text-[var(--text-primary)] sm:text-xl">
-            База знаний пуста
+            {t('knowledge.empty.title')}
           </h3>
           <p className="mt-2 text-[var(--text-muted)]">
-            Загрузите первый документ, чтобы начать сборку базы знаний
+            {t('knowledge.empty.description')}
           </p>
         </div>
       ) : (
@@ -878,7 +881,7 @@ export const KnowledgePage: React.FC = () => {
                           type="button"
                           onClick={() => retightenMutation.mutate(doc.id)}
                           disabled={retightenMutation.isPending}
-                          title={isRetighteningThisDoc ? 'Перепроверка ставится в очередь' : 'Перепроверить смысловые дубли'}
+                          title={isRetighteningThisDoc ? t('knowledge.actions.retightening') : t('knowledge.actions.retightenDuplicates')}
                           className="rounded-lg p-2 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/10 disabled:cursor-wait disabled:opacity-50"
                         >
                           <RefreshCw className={`h-4 w-4 ${isRetighteningThisDoc ? 'animate-spin' : ''}`} />
@@ -889,7 +892,7 @@ export const KnowledgePage: React.FC = () => {
                           type="button"
                           onClick={() => cancelProcessingMutation.mutate(doc.id)}
                           disabled={cancelProcessingMutation.isPending}
-                          title="Остановить обработку"
+                          title={t('knowledge.actions.stopProcessing')}
                           className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
                         >
                           <StopCircle className="h-4 w-4" />
@@ -905,7 +908,7 @@ export const KnowledgePage: React.FC = () => {
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
                   <span>{formatSize(doc.file_size)}</span>
                   <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
-                  <span>{doc.chunk_count} фрагментов</span>
+                  <span>{t('knowledge.document.fragmentsCount', { count: doc.chunk_count })}</span>
                   {doc.preprocessing_mode && (
                     <>
                       <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
@@ -929,30 +932,30 @@ export const KnowledgePage: React.FC = () => {
                       </div>
                     )}
                     <div className="space-y-1 text-xs text-[var(--text-muted)]">
-                      <div>Модель обработки: {processingModelLabel(doc)}</div>
-                      <div>Времени прошло: {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
+                      <div>{t('knowledge.document.processingModelPrefix')} {processingModelLabel(doc)}</div>
+                      <div>{t('knowledge.document.elapsedPrefix')} {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
                       {sourceChunkCount(doc) !== null && (
-                        <div>Технические фрагменты: {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
+                        <div>{t('knowledge.document.sourceChunksPrefix')} {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
                       )}
                       {technicalChunkProgressText(doc) !== null && (
-                        <div>Шаги обработки документа: {technicalChunkProgressText(doc)}</div>
+                        <div>{t('knowledge.document.processingStepsPrefix')} {technicalChunkProgressText(doc)}</div>
                       )}
                       {compiledEntryCount(doc) !== null && (
-                        <div>Собрано смысловых ответов: {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
+                        <div>{t('knowledge.document.compiledAnswersPrefix')} {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
                       )}
                       {incomingSemanticEntryCount(doc) !== null && (
-                        <div>Новых смысловых ответов на последнем этапе: {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
+                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
                       )}
                       {semanticMergeCount(doc) !== null && (
                         <div>
-                          Объединено смысловых повторов: {formatNumber(semanticMergeCount(doc) ?? 0)}
+                          {t('knowledge.document.semanticMergesPrefix')} {formatNumber(semanticMergeCount(doc) ?? 0)}
                         </div>
                       )}
                       {documentLlmTokenText(doc) !== null && (
-                        <div>Токены обработки документа: {documentLlmTokenText(doc)}</div>
+                        <div>{t('knowledge.document.llmTokensPrefix')} {documentLlmTokenText(doc)}</div>
                       )}
                       {documentLlmModels(doc) !== null && (
-                        <div>Модели обработки документа: {documentLlmModels(doc)}</div>
+                        <div>{t('knowledge.document.llmModelsPrefix')} {documentLlmModels(doc)}</div>
                       )}
                     </div>
                   </div>
@@ -960,13 +963,13 @@ export const KnowledgePage: React.FC = () => {
 
                 {isDocumentCancelled(doc) && (
                   <div className="mb-4 rounded-xl bg-[var(--accent-warning-bg)] p-3 text-xs leading-relaxed text-[var(--accent-warning)]">
-                    Документ остановлен пользователем. Он не считается завершённой базой знаний; при необходимости загрузите его заново.
+                    {t('knowledge.document.stoppedWarning')}
                   </div>
                 )}
 
                 {isDocumentFailed(doc) && !isDocumentCancelled(doc) && (
                   <div className="mb-4 rounded-xl bg-[var(--accent-danger-bg)] p-3 text-xs leading-relaxed text-[var(--accent-danger-text)]">
-                    {documentIssueText(doc) || 'Документ не удалось обработать'}
+                    {documentIssueText(doc) || t('knowledge.document.processingFailed')}
                   </div>
                 )}
 
@@ -991,11 +994,11 @@ export const KnowledgePage: React.FC = () => {
             setIsClearModalOpen(false);
           }
         }}
-        title="Очистить базу знаний"
-        cancelLabel="Отмена"
+        title={t('knowledge.actions.clear')}
+        cancelLabel={t('common.actions.cancel')}
       >
         <p className="text-sm leading-relaxed text-[var(--text-primary)]">
-          Все документы и связанные фрагменты будут удалены без возможности восстановления.
+          {t('knowledge.clearModal.confirm')}
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <button
@@ -1004,7 +1007,7 @@ export const KnowledgePage: React.FC = () => {
             disabled={clearMutation.isPending}
             className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
           >
-            {clearMutation.isPending ? 'Очищаем...' : 'Очистить'}
+            {clearMutation.isPending ? t('knowledge.clearModal.clearing') : t('knowledge.clearModal.clear')}
           </button>
         </div>
       </BaseModal>

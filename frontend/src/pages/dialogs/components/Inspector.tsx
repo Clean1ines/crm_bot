@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import * as React from 'react';
 import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../../app/store';
@@ -81,40 +82,40 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
       interaction_mode?: string;
       conversation_summary?: string | null;
     };
-    const clientName = getClientDisplayName(state?.client, 'Клиент');
+    const clientName = getClientDisplayName(state?.client, t('ui.client.fallback'));
     return (
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3">
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Клиент</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.client')}</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{clientName}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Статус</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.status')}</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{threadStatusLabel(state?.status)}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Стадия</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.stage')}</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.lifecycle || '—'}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Сообщений</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.messages')}</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">{state?.total_messages ?? 0}</div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Создан</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.created')}</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">
               {state?.created_at ? new Date(state.created_at).toLocaleString() : '—'}
             </div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Обновлён</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.updated')}</div>
             <div className="text-sm font-medium leading-snug text-[var(--text-primary)]">
               {state?.updated_at ? new Date(state.updated_at).toLocaleString() : '—'}
             </div>
           </div>
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 text-xs text-[var(--text-muted)]">Краткая сводка</div>
+            <div className="mb-1 text-xs text-[var(--text-muted)]">{t('inspector.summary.brief')}</div>
             <div className="whitespace-pre-wrap break-words text-sm leading-snug text-[var(--text-primary)]">
               {state?.conversation_summary || '—'}
             </div>
@@ -127,7 +128,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
   const renderMemory = () => (
     <div className="space-y-2">
       {safeThreadMemory.length === 0 && (
-        <div className="text-sm text-[var(--text-muted)]">Память пока пуста</div>
+        <div className="text-sm text-[var(--text-muted)]">{t('inspector.memory.empty')}</div>
       )}
       {safeThreadMemory.map((entry) => (
         <div key={entry.id} className="rounded-xl bg-[var(--surface-secondary)] p-3 transition-all hover:shadow-md">
@@ -140,20 +141,20 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
                 rows={3}
               />
               <div className="mt-2 flex justify-end gap-2">
-                <button onClick={saveEditMemory} className="flex items-center gap-1 text-sm text-[var(--accent-success)]"><Save className="h-3 w-3" /> Сохранить</button>
-                <button onClick={cancelEditMemory} className="flex items-center gap-1 text-sm text-[var(--accent-danger)]"><X className="h-3 w-3" /> Отмена</button>
+                <button onClick={saveEditMemory} className="flex items-center gap-1 text-sm text-[var(--accent-success)]"><Save className="h-3 w-3" /> {t('common.actions.save')}</button>
+                <button onClick={cancelEditMemory} className="flex items-center gap-1 text-sm text-[var(--accent-danger)]"><X className="h-3 w-3" /> {t('common.actions.cancel')}</button>
               </div>
             </div>
           ) : (
             <div>
               <div className="flex justify-between">
                 <span className="font-mono text-sm text-[var(--text-primary)]">{entry.key}</span>
-                <button onClick={() => startEditMemory(entry)} className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-primary)]"><Edit2 className="h-3 w-3" /> Редактировать</button>
+                <button onClick={() => startEditMemory(entry)} className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-primary)]"><Edit2 className="h-3 w-3" /> {t('common.actions.edit')}</button>
               </div>
               <div className="mt-1 break-all font-mono text-sm text-[var(--text-secondary)]">
                 {typeof entry.value === 'object' ? JSON.stringify(entry.value, null, 2) : String(entry.value)}
               </div>
-              <div className="mt-1 text-xs text-[var(--text-muted)]">Категория: {entry.type}</div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">{t('inspector.memory.categoryPrefix')} {entry.type}</div>
             </div>
           )}
         </div>
@@ -165,7 +166,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
     const policyEvents = safeThreadTimeline.filter(e => e.type === 'policy_decision');
     return (
       <div className="space-y-3">
-        {policyEvents.length === 0 && <div className="text-sm text-[var(--text-muted)]">Нет записей решений</div>}
+        {policyEvents.length === 0 && <div className="text-sm text-[var(--text-muted)]">{t('inspector.decision.empty')}</div>}
         {policyEvents.map((event) => {
           const payload = event.payload && typeof event.payload === 'object'
             ? event.payload as Record<string, unknown>
@@ -181,15 +182,15 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
               <div className="mb-1 text-xs text-[var(--text-muted)]">
                 {new Date(event.ts).toLocaleString()}
               </div>
-              <div className="font-mono text-sm">Решение: {decision}</div>
+              <div className="font-mono text-sm">{t('inspector.decision.decisionPrefix')} {decision}</div>
               <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                Намерение: {intent}, этап: {lifecycle}, действие: {cta}
+                {t('inspector.decision.intentPrefix')} {intent}, {t('inspector.decision.lifecyclePrefix')} {lifecycle}, {t('inspector.decision.actionPrefix')} {cta}
               </div>
               {repeatCount !== undefined && (
-                <div className="mt-1 text-xs text-[var(--text-muted)]">Повторов: {repeatCount}</div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">{t('inspector.decision.repeatCountPrefix')} {repeatCount}</div>
               )}
               {leadStatus !== undefined && (
-                <div className="mt-1 text-xs text-[var(--text-muted)]">Статус лида: {leadStatus}</div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">{t('inspector.decision.leadStatusPrefix')} {leadStatus}</div>
               )}
             </div>
           );
@@ -201,7 +202,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
   const renderTimeline = () => (
     <div className="space-y-3">
       {safeThreadTimeline.length === 0 && (
-        <div className="text-sm text-[var(--text-muted)]">Событий пока нет</div>
+        <div className="text-sm text-[var(--text-muted)]">{t('inspector.timeline.empty')}</div>
       )}
       {safeThreadTimeline.map((event) => {
         const isEscalation = event.type === 'ticket_created';
@@ -225,17 +226,17 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
       })}
       {hasMoreTimeline && (
         <button onClick={loadMoreTimeline} className="text-sm text-[var(--accent-primary)]">
-          Загрузить ещё
+          {t('common.actions.loadMore')}
         </button>
       )}
     </div>
   );
 
   const tabs: Tab[] = [
-    { id: 'summary', label: 'Сводка', component: renderSummary },
-    { id: 'memory', label: 'Память', component: renderMemory },
-    { id: 'decision', label: 'Решение', component: renderDecisionTrace },
-    { id: 'timeline', label: 'События', component: renderTimeline },
+    { id: 'summary', label: t('inspector.tabs.summary'), component: renderSummary },
+    { id: 'memory', label: t('inspector.tabs.memory'), component: renderMemory },
+    { id: 'decision', label: t('inspector.tabs.decision'), component: renderDecisionTrace },
+    { id: 'timeline', label: t('inspector.tabs.timeline'), component: renderTimeline },
   ];
 
   useEffect(() => {
@@ -454,14 +455,14 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
               type="button"
               onClick={onBack}
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
-              aria-label="Назад к диалогу"
+              aria-label={t('inspector.backToDialog')}
             >
               <ChevronLeft className="h-5 w-5" />
             </button>
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold leading-tight text-[var(--text-primary)]">Сводка диалога</h1>
+              <h1 className="truncate text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('inspector.title')}</h1>
               <p className="text-xs text-[var(--text-muted)]">
-                {threadId ? 'Выбранный диалог' : 'Диалог не выбран'}
+                {threadId ? t('inspector.selectedDialog') : t('inspector.noDialogSelected')}
               </p>
             </div>
           </div>
@@ -472,7 +473,7 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
             onClick={() => setShowTabMenu(!showTabMenu)}
             className="flex min-h-8 items-center gap-1 rounded-lg px-2.5 py-1 text-sm text-[var(--text-secondary)] transition-all hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
           >
-            <span>{tabs.find(t => t.id === inspectorActiveTab)?.label || 'Вкладки'}</span>
+            <span>{tabs.find(t => t.id === inspectorActiveTab)?.label || t('inspector.tabs.fallback')}</span>
             <ChevronDown className="h-3 w-3" />
           </button>
           {showTabMenu && (
@@ -502,8 +503,8 @@ export const Inspector: React.FC<InspectorProps> = ({ threadId, projectId, mobil
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-4" key={contentKey}>
-        {isLoadingInspector && <div className="text-center text-[var(--text-muted)]">Загрузка...</div>}
-        {!threadId && <div className="text-center text-[var(--text-muted)]">Выберите диалог</div>}
+        {isLoadingInspector && <div className="text-center text-[var(--text-muted)]">{t('common.states.loading')}</div>}
+        {!threadId && <div className="text-center text-[var(--text-muted)]">{t('dialogs.chat.selectDialog')}</div>}
         {threadId && !isLoadingInspector && tabs.find(t => t.id === inspectorActiveTab)?.component()}
       </div>
     </div>

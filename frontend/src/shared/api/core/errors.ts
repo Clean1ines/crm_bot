@@ -1,22 +1,24 @@
 import toast from 'react-hot-toast';
 
+import { t } from '../../i18n';
+
 declare global {
   interface Window {
     __lastToast: string | null;
   }
 }
 
-const DEFAULT_ERROR_MESSAGE = 'Не удалось выполнить действие. Попробуйте ещё раз.';
-const TECHNICAL_ERROR_MESSAGE = 'Внутренняя ошибка сервера. Технические детали скрыты; попробуйте повторить действие или обратитесь к администратору проекта.';
-const VALIDATION_ERROR_MESSAGE = 'Проверьте заполненные поля и попробуйте ещё раз.';
-const NETWORK_ERROR_MESSAGE = 'Не удалось соединиться с сервером. Проверьте подключение и попробуйте ещё раз.';
+const DEFAULT_ERROR_MESSAGE = t('api.error.default');
+const TECHNICAL_ERROR_MESSAGE = t('api.error.technical');
+const VALIDATION_ERROR_MESSAGE = t('api.error.validation');
+const NETWORK_ERROR_MESSAGE = t('api.error.network');
 const MAX_VISIBLE_ERROR_LENGTH = 280;
 
 const FRIENDLY_ERROR_BY_NORMALIZED_MESSAGE: Record<string, string> = {
-  'project is not selected': 'Выберите проект и повторите действие.',
-  'no thread id': 'Не удалось определить диалог. Обновите страницу и попробуйте снова.',
-  'no response body': 'Сервер не вернул ответ. Попробуйте повторить позже.',
-  'auth response does not contain access token': 'Не удалось завершить вход. Попробуйте снова.',
+  'project is not selected': t('api.error.projectNotSelected'),
+  'no thread id': t('api.error.threadNotDetected'),
+  'no response body': t('api.error.emptyResponse'),
+  'auth response does not contain access token': t('api.error.authMissingToken'),
   'failed to fetch': NETWORK_ERROR_MESSAGE,
   'networkerror': NETWORK_ERROR_MESSAGE,
   'network error': NETWORK_ERROR_MESSAGE,

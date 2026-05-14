@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useCallback, useEffect, useState } from "react";
 import { Search, Circle } from "lucide-react";
 
@@ -52,7 +53,7 @@ export const DialogList: React.FC<DialogListProps> = ({
         });
         if (error) {
           console.error("Failed to fetch threads", error);
-          setLoadError("Не удалось загрузить диалоги");
+          setLoadError(t('dialogs.list.loadFailed'));
           if (reset) {
             setThreads([]);
             setHasMore(false);
@@ -70,7 +71,7 @@ export const DialogList: React.FC<DialogListProps> = ({
         setHasMore(nextThreads.length === limit);
       } catch (err) {
         console.error("Error fetching threads", err);
-        setLoadError("Не удалось загрузить диалоги");
+        setLoadError(t('dialogs.list.loadFailed'));
         if (reset) {
           setThreads([]);
           setHasMore(false);
@@ -126,10 +127,10 @@ export const DialogList: React.FC<DialogListProps> = ({
         {mobile && (
           <div className="mb-4">
             <h1 className="text-lg font-semibold leading-tight text-[var(--text-primary)]">
-              Диалоги
+              {t('dialogs.list.title')}
             </h1>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Выберите диалог, чтобы открыть переписку.
+              {t('dialogs.list.description')}
             </p>
           </div>
         )}
@@ -137,7 +138,7 @@ export const DialogList: React.FC<DialogListProps> = ({
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
             type="text"
-            placeholder="Поиск по имени..."
+            placeholder={t('dialogs.list.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20"
@@ -168,7 +169,7 @@ export const DialogList: React.FC<DialogListProps> = ({
         )}
         {!loadError && !loading && threads.length === 0 && (
           <div className="p-4 text-center text-sm text-[var(--text-muted)]">
-            Диалоги не найдены
+            {t('dialogs.list.empty')}
           </div>
         )}
         {threads.map((thread) => {
@@ -177,7 +178,7 @@ export const DialogList: React.FC<DialogListProps> = ({
           const isActive = selectedThreadId === thread.thread_id;
           const lastMsgRole = getLastMessageRole();
           const bubbleBg = getMessageBackground(lastMsgRole);
-          const clientName = getClientDisplayName(client, "Клиент");
+          const clientName = getClientDisplayName(client, t('ui.client.fallback'));
 
           return (
             <div
@@ -216,7 +217,7 @@ export const DialogList: React.FC<DialogListProps> = ({
                     <span
                       className={`inline-block max-w-full rounded px-1 ${bubbleBg}`}
                     >
-                      {lastMsg?.content || "Нет сообщений"}
+                      {lastMsg?.content || t('dialogs.list.noMessages')}
                     </span>
                   </div>
                 </div>
@@ -229,12 +230,12 @@ export const DialogList: React.FC<DialogListProps> = ({
             onClick={loadMore}
             className="w-full p-2 text-center text-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
           >
-            Загрузить ещё
+            {t('dialogs.list.loadMore')}
           </button>
         )}
         {loading && (
           <div className="p-4 text-center text-[var(--text-muted)]">
-            Загрузка...
+            {t('dialogs.list.loading')}
           </div>
         )}
       </div>

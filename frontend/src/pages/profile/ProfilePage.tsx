@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { t } from '@shared/i18n';
 
 import { getErrorMessage } from '@shared/api/core/errors';
 import { authProviderLabel } from '@shared/lib/uiLabels';
 import { authApi } from '@shared/api/modules/auth';
 import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
+import { isGoogleAuthConfigured } from '@features/auth/google/config';
 
 interface AuthMethod {
   provider: string;
@@ -23,9 +25,9 @@ interface AuthMethodsResponse {
 
 const authMethodSecondaryText = (method: AuthMethod): string => {
   if (method.provider === 'email') return method.provider_id;
-  if (method.provider === 'telegram') return 'Telegram подключён';
-  if (method.provider === 'google') return 'Google подключён';
-  return 'Способ входа подключён';
+  if (method.provider === 'telegram') return t('profile.auth.telegramConnected');
+  if (method.provider === 'google') return t('profile.auth.googleConnected');
+  return t('profile.auth.genericConnected');
 };
 
 export const ProfilePage: React.FC = () => {
@@ -46,19 +48,20 @@ export const ProfilePage: React.FC = () => {
 
   const emailMethod = methodsQuery.data?.methods.find((method) => method.provider === 'email');
   const emailInputValue = email || emailMethod?.provider_id || '';
+  const showGoogleAuth = isGoogleAuthConfigured();
 
   const linkEmailMutation = useMutation({
     mutationFn: async () => {
       const normalizedEmail = emailInputValue.trim();
-      if (!normalizedEmail) throw new Error('Укажите email');
-      if (!password.trim()) throw new Error('Придумайте пароль для email-входа');
+      if (!normalizedEmail) throw new Error(t('profile.email.required'));
+      if (!password.trim()) throw new Error(t('profile.email.passwordRequired'));
       await authApi.linkEmail({ email: normalizedEmail, password });
     },
     onSuccess: async () => {
       setPassword('');
       setEmailVerificationUrl('');
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Email-вход привязан');
+      toast.success(t('profile.email.linked'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -69,14 +72,14 @@ export const ProfilePage: React.FC = () => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Google-вход привязан');
+      toast.success(t('profile.google.linked'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
 
   const changePasswordMutation = useMutation({
     mutationFn: async () => {
-      if (!newPassword.trim()) throw new Error('Укажите новый пароль');
+      if (!newPassword.trim()) throw new Error(t('profile.password.newRequired'));
       await authApi.changePassword({
         new_password: newPassword,
         current_password: currentPassword.trim() || undefined,
@@ -86,7 +89,7 @@ export const ProfilePage: React.FC = () => {
       setCurrentPassword('');
       setNewPassword('');
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Пароль обновлён');
+      toast.success(t('profile.password.updated'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -99,7 +102,7 @@ export const ProfilePage: React.FC = () => {
     onSuccess: async (data) => {
       setEmailVerificationUrl(data.url || data.token || '');
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Ссылка подтверждёния подготовлена');
+      toast.success(t('profile.email.verificationPrepared'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -110,7 +113,7 @@ export const ProfilePage: React.FC = () => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['auth-methods'] });
-      toast.success('Способ входа отвязан');
+      toast.success(t('profile.auth.unlinked'));
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -118,16 +121,16 @@ export const ProfilePage: React.FC = () => {
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div>
-        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Профиль</h1>
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">{t('profile.title')}</h1>
         <p className="mt-2 text-sm text-[var(--text-muted)]">
-          Управление способами входа в аккаунт. Telegram, email и Google можно привязать к одному профилю.
+          {t('profile.description')}
         </p>
       </div>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Подключенные способы входа</h2>
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('profile.methods.title')}</h2>
         {methodsQuery.isLoading ? (
-          <div className="text-sm text-[var(--text-muted)]">Загрузка...</div>
+          <div className="text-sm text-[var(--text-muted)]">{t('common.states.loading')}</div>
         ) : (
           <div className="space-y-2">
             {methodsQuery.data?.methods.map((method) => (
@@ -145,24 +148,24 @@ export const ProfilePage: React.FC = () => {
                   disabled={unlinkMethodMutation.isPending}
                   className="rounded-lg bg-[var(--control-bg)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
                 >
-                  Отвязать
+                  {t('profile.methods.unlink')}
                 </button>
               </div>
             ))}
             {methodsQuery.data?.methods.length === 0 ? (
-              <div className="text-sm text-[var(--text-muted)]">Способы входа еще не привязаны.</div>
+              <div className="text-sm text-[var(--text-muted)]">{t('profile.methods.empty')}</div>
             ) : null}
           </div>
         )}
       </section>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">Email-вход</h2>
+        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('profile.email.title')}</h2>
         <div className="mb-4 rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
-          Статус email:
+          {t('profile.email.status')}
           {' '}
           <span className={emailMethod?.verified ? 'text-[var(--accent-success-text)]' : 'text-[var(--accent-warning)]'}>
-            {emailMethod?.verified ? 'подтверждён' : 'не подтверждён'}
+            {emailMethod?.verified ? t('profile.email.verified') : t('profile.email.notVerified')}
           </span>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
@@ -176,7 +179,7 @@ export const ProfilePage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Новый пароль для email-входа</span>
+            <span className="text-[var(--text-muted)]">{t('profile.email.newPasswordLabel')}</span>
             <input
               type="password"
               value={password}
@@ -190,18 +193,18 @@ export const ProfilePage: React.FC = () => {
           disabled={linkEmailMutation.isPending}
           className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          {linkEmailMutation.isPending ? 'Сохранение...' : 'Привязать email'}
+          {linkEmailMutation.isPending ? t('common.states.saving') : t('profile.email.linkAction')}
         </button>
         <button
           onClick={() => requestEmailVerificationMutation.mutate()}
           disabled={requestEmailVerificationMutation.isPending || !emailMethod}
           className="ml-3 mt-5 rounded-lg bg-[var(--control-bg)] min-h-10 px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
-          {requestEmailVerificationMutation.isPending ? 'Подготовка...' : 'Получить ссылку подтверждёния'}
+          {requestEmailVerificationMutation.isPending ? t('common.states.loading') : t('profile.email.verificationAction')}
         </button>
         {emailVerificationUrl ? (
           <label className="mt-4 block space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Ссылка подтверждёния</span>
+            <span className="text-[var(--text-muted)]">{t('profile.email.verificationLinkLabel')}</span>
             <textarea
               readOnly
               value={emailVerificationUrl}
@@ -211,7 +214,7 @@ export const ProfilePage: React.FC = () => {
         ) : null}
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Текущий пароль</span>
+            <span className="text-[var(--text-muted)]">{t('profile.password.currentLabel')}</span>
             <input
               type="password"
               value={currentPassword}
@@ -220,7 +223,7 @@ export const ProfilePage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Новый пароль</span>
+            <span className="text-[var(--text-muted)]">{t('profile.password.newLabel')}</span>
             <input
               type="password"
               value={newPassword}
@@ -234,26 +237,28 @@ export const ProfilePage: React.FC = () => {
           disabled={changePasswordMutation.isPending}
           className="mt-5 rounded-lg bg-[var(--control-bg)] min-h-10 px-4 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-50"
         >
-          {changePasswordMutation.isPending ? 'Сохранение...' : 'Обновить пароль'}
+          {changePasswordMutation.isPending ? t('common.states.saving') : t('profile.password.updateAction')}
         </button>
       </section>
 
-      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-2 text-lg font-semibold leading-tight text-[var(--text-primary)]">Google-вход</h2>
-        <p className="mb-4 text-sm text-[var(--text-muted)]">
-          Google-вход подключается через официальный сервис Google и проверяется безопасно на сервере.
-        </p>
-        <div className="mb-4">
-          <GoogleAuthButton
-            text="continue_with"
-            onCredential={(idToken) => linkGoogleMutation.mutate(idToken)}
-            onError={(message) => toast.error(message)}
-          />
-        </div>
-        <div className="text-sm text-[var(--text-muted)]">
-          После успешного выбора аккаунта Google способ входа сразу появится в списке подключенных методов.
-        </div>
-      </section>
+      {showGoogleAuth ? (
+        <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+          <h2 className="mb-2 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('profile.google.title')}</h2>
+          <p className="mb-4 text-sm text-[var(--text-muted)]">
+            {t('profile.google.description')}
+          </p>
+          <div className="mb-4">
+            <GoogleAuthButton
+              text="continue_with"
+              onCredential={(idToken) => linkGoogleMutation.mutate(idToken)}
+              onError={(message) => toast.error(message)}
+            />
+          </div>
+          <div className="text-sm text-[var(--text-muted)]">
+            {t('profile.google.afterSuccess')}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 };

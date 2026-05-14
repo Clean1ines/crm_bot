@@ -4,10 +4,12 @@ import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { ChatWidget } from './components/ChatWidget';
 import '../../app/styles/landing.css';
+import { t } from '../../shared/i18n';
 import { getErrorMessage } from '@shared/api/core/errors';
 import { setSessionToken } from '@shared/api/core/session';
 import { authApi } from '@shared/api/modules/auth';
 import { GoogleAuthButton } from '@features/auth/google/GoogleAuthButton';
+import { isGoogleAuthConfigured } from '@features/auth/google/config';
 import frontendLogger from '@shared/lib/logger';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -39,7 +41,7 @@ const getAccessTokenFromAuthResponse = (data: unknown): string => {
     return data.access_token;
   }
 
-  throw new Error('Не удалось завершить вход. Попробуйте войти ещё раз.');
+  throw new Error(t('login.error.finishFailed'));
 };
 
 export const TelegramLoginPage: React.FC = () => {
@@ -69,6 +71,7 @@ export const TelegramLoginPage: React.FC = () => {
   const [resetLink, setResetLink] = useState('');
   const widgetContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const showGoogleAuth = isGoogleAuthConfigured();
 
   const log = (label: string, data?: unknown) => {
     frontendLogger.debug(`TG-FRONT ${label}`, data === undefined ? undefined : { data });
@@ -84,7 +87,7 @@ export const TelegramLoginPage: React.FC = () => {
           throw new Error(
             getErrorMessage(
               parseLoginErrorPayload(txt),
-              'Не удалось получить настройки входа. Попробуйте обновить страницу.',
+              t('login.error.settingsFailed'),
             ),
           );
         }
@@ -119,7 +122,7 @@ export const TelegramLoginPage: React.FC = () => {
           throw new Error(
             getErrorMessage(
               parseLoginErrorPayload(errText),
-              'Не удалось войти через Telegram. Попробуйте ещё раз.',
+              t('login.error.telegramFailed'),
             ),
           );
         }
@@ -151,7 +154,7 @@ export const TelegramLoginPage: React.FC = () => {
     setAuthError('');
     authApi.confirmEmailVerification({ token: verificationToken })
       .then(() => {
-        setVerificationMessage('Email успешно подтвержден. Теперь можно входить этим способом.');
+        setVerificationMessage(t('login.email.verified'));
       })
       .catch((error) => {
         setAuthError(getErrorMessage(error));
@@ -184,7 +187,7 @@ export const TelegramLoginPage: React.FC = () => {
     script.onload = () => log('WIDGET_LOADED');
     script.onerror = () => {
       log('WIDGET_LOAD_ERROR');
-      container.innerHTML = '<p class="text-sm text-[var(--accent-danger-text)]">Ошибка загрузки виджета. Попробуйте позже.</p>';
+      container.innerHTML = `<p class="text-sm text-[var(--accent-danger-text)]">${t('login.telegram.widgetLoadFailed')}</p>`;
     };
     container.appendChild(script);
   }, [showTelegramWidget, botUsername]);
@@ -235,11 +238,11 @@ export const TelegramLoginPage: React.FC = () => {
     setAuthError('');
     setResetMessage('');
     try {
-      if (!email.trim()) throw new Error('Укажите email для сброса пароля');
+      if (!email.trim()) throw new Error(t('login.passwordReset.emailRequired'));
       const result = await authApi.requestPasswordReset({ email: email.trim() });
       const data = result.data as { url?: string | null; token?: string | null };
       setResetLink(data.url || data.token || '');
-      setResetMessage('Ссылка для сброса подготовлена.');
+      setResetMessage(t('login.passwordReset.ready'));
     } catch (error) {
       setAuthError(getErrorMessage(error));
     } finally {
@@ -252,14 +255,14 @@ export const TelegramLoginPage: React.FC = () => {
     setAuthError('');
     setResetMessage('');
     try {
-      if (!resetToken.trim()) throw new Error('Укажите код сброса пароля');
-      if (!resetNewPassword.trim()) throw new Error('Укажите новый пароль');
+      if (!resetToken.trim()) throw new Error(t('login.passwordReset.tokenRequired'));
+      if (!resetNewPassword.trim()) throw new Error(t('login.passwordReset.newPasswordRequired'));
       await authApi.confirmPasswordReset({
         token: resetToken.trim(),
         new_password: resetNewPassword,
       });
       setResetNewPassword('');
-      setResetMessage('Пароль обновлен. Теперь можно войти по email.');
+      setResetMessage(t('login.passwordReset.updated'));
     } catch (error) {
       setAuthError(getErrorMessage(error));
     } finally {
@@ -272,7 +275,7 @@ export const TelegramLoginPage: React.FC = () => {
       <div className="min-h-[100svh] w-full flex items-center justify-center bg-[var(--bg-primary)] px-4 py-10">
         <div className="flex flex-col items-center gap-4">
           <div className="spinner"></div>
-          <span className="text-[var(--text-secondary)] font-medium">Проверяем вход через Telegram...</span>
+          <span className="text-[var(--text-secondary)] font-medium">{t('login.loading.telegram')}</span>
         </div>
       </div>
     );
@@ -295,14 +298,14 @@ export const TelegramLoginPage: React.FC = () => {
                       onClick={() => setAuthMode('login')}
                       className={`min-h-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${authMode === 'login' ? 'bg-[var(--control-bg)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                     >
-                      Войти по email
+                      {t('login.auth.emailLoginTab')}
                     </button>
                     <button
                       type="button"
                       onClick={() => setAuthMode('register')}
                       className={`min-h-10 flex-1 rounded-full px-4 py-2 text-sm font-medium transition ${authMode === 'register' ? 'bg-[var(--control-bg)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
                     >
-                      Регистрация
+                      {t('login.auth.registerTab')}
                     </button>
                   </div>
                   <form className="space-y-3" onSubmit={handleEmailAuth}>
@@ -310,7 +313,7 @@ export const TelegramLoginPage: React.FC = () => {
                       <input
                         value={fullName}
                         onChange={(event) => setFullName(event.target.value)}
-                        placeholder="Имя"
+                        placeholder={t('login.auth.fullNamePlaceholder')}
                         className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                       />
                     ) : null}
@@ -326,7 +329,7 @@ export const TelegramLoginPage: React.FC = () => {
                       type="password"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      placeholder="Пароль"
+                      placeholder={t('login.auth.passwordPlaceholder')}
                       className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                       required
                     />
@@ -336,7 +339,7 @@ export const TelegramLoginPage: React.FC = () => {
                       disabled={isLoading}
                       className="min-h-11 w-full rounded-lg bg-[var(--accent-primary)] px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-60"
                     >
-                      {authMode === 'register' ? 'Создать аккаунт' : 'Войти'}
+                      {authMode === 'register' ? t('login.auth.createAccount') : t('login.auth.loginSubmit')}
                     </button>
                   </form>
                   <button
@@ -345,7 +348,7 @@ export const TelegramLoginPage: React.FC = () => {
                     disabled={isLoading}
                     className="mt-3 min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-60"
                   >
-                    Сбросить пароль по email
+                    {t('login.auth.resetByEmail')}
                   </button>
                   {verificationMessage ? <p className="mt-3 text-sm text-[var(--accent-success-text)]">{verificationMessage}</p> : null}
                   {resetMessage ? <p className="mt-3 text-sm text-[var(--accent-success-text)]">{resetMessage}</p> : null}
@@ -360,14 +363,14 @@ export const TelegramLoginPage: React.FC = () => {
                     <input
                       value={resetToken}
                       onChange={(event) => setResetToken(event.target.value)}
-                      placeholder="Код сброса пароля"
+                      placeholder={t('login.auth.resetTokenPlaceholder')}
                       className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                     />
                     <input
                       type="password"
                       value={resetNewPassword}
                       onChange={(event) => setResetNewPassword(event.target.value)}
-                      placeholder="Новый пароль"
+                      placeholder={t('login.auth.newPasswordPlaceholder')}
                       className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                     />
                     <button
@@ -376,7 +379,7 @@ export const TelegramLoginPage: React.FC = () => {
                       disabled={isLoading}
                       className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-60"
                     >
-                      Подтвердить сброс пароля
+                      {t('login.auth.confirmReset')}
                     </button>
                   </div>
                   <button
@@ -384,7 +387,7 @@ export const TelegramLoginPage: React.FC = () => {
                     onClick={handleTelegramLoginClick}
                     className="mt-3 min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)]"
                   >
-                    Войти через Telegram
+                    {t('login.auth.telegramLogin')}
                   </button>
                   {showTelegramWidget ? (
                     <div
@@ -392,13 +395,15 @@ export const TelegramLoginPage: React.FC = () => {
                       className="mt-3 flex w-full justify-center"
                     />
                   ) : null}
-                  <div className="mt-3 space-y-2">
-                    <GoogleAuthButton
-                      text="continue_with"
-                      onCredential={handleGoogleCredential}
-                      onError={setAuthError}
-                    />
-                  </div>
+                  {showGoogleAuth ? (
+                    <div className="mt-3 space-y-2">
+                      <GoogleAuthButton
+                        text="continue_with"
+                        onCredential={handleGoogleCredential}
+                        onError={setAuthError}
+                      />
+                    </div>
+                  ) : null}
               </div>
             )}
           </div>
