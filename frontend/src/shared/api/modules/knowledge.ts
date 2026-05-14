@@ -32,6 +32,18 @@ export const KNOWLEDGE_PREPROCESSING_MODE_OPTIONS: KnowledgePreprocessingModeOpt
   },
 ];
 
+export type KnowledgeSearchTrace = {
+  matched_fields: string[];
+  lexical_score: number;
+  vector_score: number;
+  exact_question_match: boolean;
+  title_match: boolean;
+  length_penalty: number;
+  final_score: number;
+  retrieval_surface_role: string;
+  displayed_field: string;
+};
+
 export type KnowledgePreviewResult = {
   id: string;
   content: string;
@@ -41,6 +53,13 @@ export type KnowledgePreviewResult = {
   source: string | null;
   document_id: string | null;
   document_status: string | null;
+  entry_kind?: string | null;
+  title?: string | null;
+  source_excerpt?: string | null;
+  questions?: unknown;
+  synonyms?: unknown;
+  tags?: unknown;
+  trace?: KnowledgeSearchTrace | null;
 };
 
 export type KnowledgePreviewResponse = {

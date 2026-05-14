@@ -17,6 +17,7 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentDetailView,
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
+    KnowledgeSearchTraceView,
     SourceRefView,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
@@ -282,6 +283,82 @@ def _first_source_excerpt(source_refs: tuple[SourceRefView, ...]) -> str | None:
         if source_ref.quote:
             return source_ref.quote
     return None
+
+
+def _row_float(row: _RowLookup, key: str) -> float:
+    value = _optional_row_value(row, key)
+    if value is None or isinstance(value, bool):
+        return 0.0
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _trace_text_values(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        return tuple(str(item) for item in value if str(item).strip())
+    return ()
+
+
+def _trace_contains_query(value: object, query: str) -> bool:
+    normalized_query = " ".join(query.lower().replace("ё", "е").split())
+    if not normalized_query:
+        return False
+
+    for item in _trace_text_values(value):
+        normalized_item = " ".join(item.lower().replace("ё", "е").split())
+        if normalized_item == normalized_query or normalized_query in normalized_item:
+            return True
+    return False
+
+
+def _search_trace_from_row(row: _RowLookup, *, query: str) -> KnowledgeSearchTraceView:
+    lexical_score = _row_float(row, "lexical_score")
+    vector_score = _row_float(row, "vector_score")
+    exact_score = _row_float(row, "exact_score")
+    final_score = _row_float(row, "score")
+
+    title_match = _trace_contains_query(_optional_row_value(row, "title"), query)
+    exact_question_match = _trace_contains_query(
+        _optional_row_value(row, "questions"),
+        query,
+    )
+
+    matched_fields: list[str] = []
+    if title_match:
+        matched_fields.append("title")
+    if exact_question_match:
+        matched_fields.append("questions")
+    if lexical_score > 0:
+        matched_fields.append("search_text")
+    if exact_score > 0 and "search_text" not in matched_fields:
+        matched_fields.append("exact")
+    if vector_score > 0:
+        matched_fields.append("embedding")
+
+    content_len = len(str(_optional_row_value(row, "content") or ""))
+    embedding_len = len(str(_optional_row_value(row, "embedding_text") or ""))
+    payload_len = max(content_len, embedding_len)
+    length_penalty = 0.08 if payload_len > 2500 else 0.04 if payload_len > 1400 else 0.0
+
+    return KnowledgeSearchTraceView(
+        matched_fields=tuple(dict.fromkeys(matched_fields)),
+        lexical_score=lexical_score,
+        vector_score=vector_score,
+        exact_question_match=exact_question_match,
+        title_match=title_match,
+        length_penalty=length_penalty,
+        final_score=final_score,
+        retrieval_surface_role="runtime",
+        displayed_field="answer",
+    )
 
 
 def _stage_e_metrics_payload(metrics: CompilationMetrics) -> dict[str, object]:
@@ -1139,6 +1216,7 @@ class KnowledgeRepository:
                     questions=_optional_row_value(row, "questions"),
                     synonyms=_optional_row_value(row, "synonyms"),
                     tags=_optional_row_value(row, "tags"),
+                    trace=_search_trace_from_row(row, query=query),
                 )
             )
 
@@ -1264,6 +1342,7 @@ class KnowledgeRepository:
                     questions=_optional_row_value(row, "questions"),
                     synonyms=_optional_row_value(row, "synonyms"),
                     tags=_optional_row_value(row, "tags"),
+                    trace=_search_trace_from_row(row, query=query),
                 )
             )
 

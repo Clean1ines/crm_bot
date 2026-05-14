@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
+    KnowledgeSearchTraceView,
     SourceRefView,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -130,6 +131,46 @@ class KnowledgePreviewRequestDto:
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgeSearchTraceDto:
+    matched_fields: tuple[str, ...]
+    lexical_score: float
+    vector_score: float
+    exact_question_match: bool
+    title_match: bool
+    length_penalty: float
+    final_score: float
+    retrieval_surface_role: str
+    displayed_field: str
+
+    @classmethod
+    def from_view(cls, trace: KnowledgeSearchTraceView) -> "KnowledgeSearchTraceDto":
+        return cls(
+            matched_fields=trace.matched_fields,
+            lexical_score=trace.lexical_score,
+            vector_score=trace.vector_score,
+            exact_question_match=trace.exact_question_match,
+            title_match=trace.title_match,
+            length_penalty=trace.length_penalty,
+            final_score=trace.final_score,
+            retrieval_surface_role=trace.retrieval_surface_role,
+            displayed_field=trace.displayed_field,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "matched_fields": list(self.matched_fields),
+            "lexical_score": self.lexical_score,
+            "vector_score": self.vector_score,
+            "exact_question_match": self.exact_question_match,
+            "title_match": self.title_match,
+            "length_penalty": self.length_penalty,
+            "final_score": self.final_score,
+            "retrieval_surface_role": self.retrieval_surface_role,
+            "displayed_field": self.displayed_field,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SourceRefDto:
     quote: str
     source_index: int | None = None
@@ -180,6 +221,7 @@ class KnowledgePreviewResultDto:
     questions: object | None = None
     synonyms: object | None = None
     tags: object | None = None
+    trace: KnowledgeSearchTraceDto | None = None
 
     @classmethod
     def from_search_result(
@@ -203,6 +245,11 @@ class KnowledgePreviewResultDto:
             questions=result.questions,
             synonyms=result.synonyms,
             tags=result.tags,
+            trace=(
+                KnowledgeSearchTraceDto.from_view(result.trace)
+                if result.trace is not None
+                else None
+            ),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -229,6 +276,7 @@ class KnowledgePreviewResultDto:
             "questions": self.questions,
             "synonyms": self.synonyms,
             "tags": self.tags,
+            "trace": self.trace.to_dict() if self.trace is not None else None,
         }
         for key, value in optional_fields.items():
             if value is not None:
