@@ -616,6 +616,7 @@ export const ru: TranslationDictionary = {
   'knowledge.retightenReport.groups': 'Проверено групп: {count}',
   'knowledge.retightenReport.decisions': 'Решений: {count}',
   'knowledge.retightenReport.mergeDecisions': 'Merge-решений: {count}',
+  'knowledge.retightenReport.rejectedNoisyMerges': 'Отклонено шумных merge-решений: {count}',
   'knowledge.retightenReport.llmCalls': 'LLM-вызовов: {count}',
   'knowledge.retightenReport.cleanupOriginalUnits': 'Фраз до очистки: {count}',
   'knowledge.retightenReport.cleanupRemovedUnits': 'Удалено повторов: {count}',
