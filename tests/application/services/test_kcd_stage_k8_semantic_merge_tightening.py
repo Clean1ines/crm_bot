@@ -3,6 +3,7 @@ from __future__ import annotations
 from src.application.services.knowledge_ingestion_service import (
     KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
     _apply_semantic_merge_tightening_decisions,
+    _cleanup_semantic_merge_embedding_text,
     _semantic_merge_candidate_from_entry,
     _semantic_merge_suspect_groups_from_entries,
 )
@@ -151,3 +152,17 @@ def test_stage_k8_semantic_merge_llm_candidate_payload_is_compact() -> None:
     )
     assert "Полный пользовательский ответ" not in candidate.embedding_text
     assert "Источник остаётся" not in candidate.embedding_text
+
+
+def test_stage_k8_cleanup_removes_repeated_llm_merge_sentences() -> None:
+    text = (
+        "AI-ассистент отвечает на вопросы клиентов и сохраняет историю диалогов. "
+        "AI-ассистент отвечает на вопросы клиентов и сохраняет историю диалогов. "
+        "Историю диалогов можно смотреть в панели проекта. "
+        "Историю диалогов можно смотреть в панели проекта."
+    )
+
+    cleaned = _cleanup_semantic_merge_embedding_text(text)
+
+    assert cleaned.count("AI-ассистент отвечает") == 1
+    assert cleaned.count("Историю диалогов можно смотреть") == 1

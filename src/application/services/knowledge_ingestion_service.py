@@ -1086,6 +1086,64 @@ def _semantic_merge_survivor_index(
     return candidate_indexes[0]
 
 
+def _semantic_merge_text_fingerprint(value: str) -> str:
+    return " ".join(
+        re.sub(r"[^0-9a-zа-яё]+", " ", value.lower().replace("ё", "е")).split()
+    )
+
+
+def _semantic_merge_text_units(value: str) -> tuple[str, ...]:
+    compact = _clean_optional_text(value)
+    if not compact:
+        return ()
+
+    units = re.split(r"(?<=[.!?])\s+|[\n;]+", compact)
+    return tuple(
+        _clean_optional_text(unit) for unit in units if _clean_optional_text(unit)
+    )
+
+
+def _cleanup_semantic_merge_embedding_text(value: str) -> str:
+    """Remove deterministic exact/near sentence duplicates from LLM merge text.
+
+    The LLM may propose useful merge decisions but still concatenate repeated
+    retrieval wording. Application code owns the production retrieval row, so it
+    must not persist obviously inflated embedding_text verbatim.
+    """
+
+    units = _semantic_merge_text_units(value)
+    if not units:
+        return _clean_optional_text(value)
+
+    kept: list[str] = []
+    fingerprints: list[str] = []
+
+    for unit in units:
+        fingerprint = _semantic_merge_text_fingerprint(unit)
+        if not fingerprint:
+            continue
+
+        is_duplicate = False
+        for existing in fingerprints:
+            if fingerprint == existing:
+                is_duplicate = True
+                break
+            if len(fingerprint) >= 48 and fingerprint in existing:
+                is_duplicate = True
+                break
+            if len(existing) >= 48 and existing in fingerprint:
+                is_duplicate = True
+                break
+
+        if is_duplicate:
+            continue
+
+        fingerprints.append(fingerprint)
+        kept.append(unit)
+
+    return _clean_optional_text(" ".join(kept))
+
+
 def _entry_with_semantic_merge_decision(
     *,
     entry: KnowledgePreprocessingEntry,
@@ -1093,7 +1151,9 @@ def _entry_with_semantic_merge_decision(
 ) -> KnowledgePreprocessingEntry:
     title = _clean_optional_text(decision.survivor_title) or entry.title
     embedding_text = _limit_compiled_text(
-        decision.merged_embedding_text or entry.embedding_text,
+        _cleanup_semantic_merge_embedding_text(
+            decision.merged_embedding_text or entry.embedding_text
+        ),
         max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
     )
 
