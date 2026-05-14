@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -39,18 +40,18 @@ export const ManagersPage: React.FC = () => {
   const addMemberMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) {
-        throw new Error('Сначала выберите проект');
+        throw new Error(t('managers.selectProject'));
       }
 
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error(newMemberRole === 'manager' ? 'Укажите Telegram ID менеджера' : 'Укажите ID участника');
+        throw new Error(newMemberRole === 'manager' ? t('managers.telegramIdRequired') : t('managers.memberIdRequired'));
       }
 
       if (newMemberRole === 'manager') {
         const chatId = Number(normalizedUserId);
         if (!Number.isInteger(chatId)) {
-          throw new Error('Telegram ID менеджера должен быть числом');
+          throw new Error(t('managers.telegramIdMustBeNumber'));
         }
 
         const { error } = await projectsApi.addManager(projectId, chatId);
@@ -69,7 +70,7 @@ export const ManagersPage: React.FC = () => {
       await invalidateMembers();
       setNewMemberUserId('');
       setNewMemberRole('manager');
-      toast.success(newMemberRole === 'manager' ? 'Менеджер добавлен' : 'Участник проекта сохранён');
+      toast.success(newMemberRole === 'manager' ? t('managers.managerAdded') : t('managers.memberSaved'));
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
@@ -79,12 +80,12 @@ export const ManagersPage: React.FC = () => {
   const inviteMemberMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) {
-        throw new Error('Сначала выберите проект');
+        throw new Error(t('managers.selectProject'));
       }
 
       const normalizedEmail = inviteEmail.trim();
       if (!normalizedEmail) {
-        throw new Error('Укажите email менеджера');
+        throw new Error(t('managers.emailRequired'));
       }
 
       const result = await membersApi.createInvitation(projectId, {
@@ -95,7 +96,7 @@ export const ManagersPage: React.FC = () => {
       });
 
       if (!result.data) {
-        throw new Error('Не удалось создать приглашение');
+        throw new Error(t('managers.inviteCreateFailed'));
       }
 
       return result.data;
@@ -109,8 +110,8 @@ export const ManagersPage: React.FC = () => {
       setLastInviteLink(result.invite_link ?? '');
       toast.success(
         result.invite_link
-          ? 'Приглашение создано. Ссылка доступна ниже.'
-          : 'Приглашение отправлено на email.',
+          ? t('managers.inviteCreatedLink')
+          : t('managers.inviteSentEmail'),
       );
     },
     onError: (error) => {
@@ -121,13 +122,13 @@ export const ManagersPage: React.FC = () => {
   const removeMemberMutation = useMutation({
     mutationFn: async (memberUserId: string) => {
       if (!projectId) {
-        throw new Error('Сначала выберите проект');
+        throw new Error(t('managers.selectProject'));
       }
       await membersApi.remove(projectId, memberUserId);
     },
     onSuccess: async () => {
       await invalidateMembers();
-      toast.success('Участник проекта удалён');
+      toast.success(t('managers.memberDeleted'));
     },
     onError: (error) => {
       toast.error(getErrorMessage(error));
@@ -159,13 +160,13 @@ export const ManagersPage: React.FC = () => {
   };
 
   if (isLoading) {
-    return <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">Загрузка участников проекта...</div>;
+    return <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">{t('managers.loading')}</div>;
   }
 
   if (isError) {
     return (
       <div className="p-4 text-center text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
-        Не удалось загрузить участников проекта: {getErrorMessage(error)}
+        {t('managers.loadFailed')}: {getErrorMessage(error)}
       </div>
     );
   }
@@ -174,9 +175,9 @@ export const ManagersPage: React.FC = () => {
     <div className="relative mx-auto max-w-7xl space-y-6 overflow-hidden p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Команда проекта</h1>
+          <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">{t('managers.title')}</h1>
           <p className="text-[var(--text-muted)]">
-            Список участников проекта с ролями владельца, администратора и менеджера.
+            {t('managers.description')}
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap lg:w-auto">
@@ -184,7 +185,7 @@ export const ManagersPage: React.FC = () => {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
             <input
               type="text"
-              placeholder="Поиск по участникам..."
+              placeholder={t('managers.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-64"
@@ -192,7 +193,7 @@ export const ManagersPage: React.FC = () => {
           </div>
           <input
             type="text"
-            placeholder="ID участника"
+            placeholder={t('managers.memberIdPlaceholder')}
             value={newMemberUserId}
             onChange={(e) => setNewMemberUserId(e.target.value)}
             className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 sm:w-52"
@@ -215,16 +216,16 @@ export const ManagersPage: React.FC = () => {
             disabled={addMemberMutation.isPending}
           >
             <Shield className="h-4 w-4" />
-            Добавить
+            {t('managers.add')}
           </Button>
         </div>
       </div>
 
       <div className="rounded-2xl bg-[var(--surface-card)] p-4 shadow-sm sm:p-5">
         <div className="mb-4">
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">Пригласить менеджера по email</h2>
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">{t('managers.inviteEmail.title')}</h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Создаёт ссылку приглашения и отправляет письмо, если отправка email настроена. Менеджера также можно добавить по Telegram ID выше.
+            {t('managers.inviteEmail.description')}
           </p>
         </div>
         <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap">
@@ -237,14 +238,14 @@ export const ManagersPage: React.FC = () => {
           />
           <input
             type="text"
-            placeholder="Имя"
+            placeholder={t('managers.firstNamePlaceholder')}
             value={inviteFirstName}
             onChange={(e) => setInviteFirstName(e.target.value)}
             className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-40"
           />
           <input
             type="text"
-            placeholder="Фамилия"
+            placeholder={t('managers.lastNamePlaceholder')}
             value={inviteLastName}
             onChange={(e) => setInviteLastName(e.target.value)}
             className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-40"
@@ -267,7 +268,7 @@ export const ManagersPage: React.FC = () => {
             disabled={inviteMemberMutation.isPending}
           >
             <Shield className="h-4 w-4" />
-            Пригласить
+            {t('managers.invite')}
           </Button>
         </div>
         {lastInviteLink ? (
@@ -284,10 +285,10 @@ export const ManagersPage: React.FC = () => {
         <table className="w-full border-collapse text-left">
           <thead className="shadow-[0_1px_0_var(--divider-soft)] bg-[var(--surface-secondary)]">
             <tr>
-              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Участник</th>
-              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Идентификатор</th>
-              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Роль</th>
-              <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">Действия</th>
+              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">{t('managers.table.member')}</th>
+              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">{t('managers.table.identifier')}</th>
+              <th className="px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">{t('managers.table.role')}</th>
+              <th className="px-4 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)] lg:px-5">{t('managers.table.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--surface-secondary)]">
@@ -300,10 +301,10 @@ export const ManagersPage: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-medium text-[var(--text-primary)]">
-                        {getDisplayName(manager, 'Менеджер')}
+                        {getDisplayName(manager, t('managers.fallback.manager'))}
                       </div>
                       <div className="text-xs text-[var(--text-muted)]">
-                        {getSecondaryDisplayText(manager) || 'Участник проекта'}
+                        {getSecondaryDisplayText(manager) || t('managers.fallback.member')}
                       </div>
                     </div>
                   </div>
@@ -320,7 +321,7 @@ export const ManagersPage: React.FC = () => {
                     <button
                       onClick={() => openHistory(manager)}
                       className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)]"
-                      title="История ответов"
+                      title={t('managers.historyTitle')}
                     >
                       <History className="h-4 w-4" />
                     </button>
@@ -328,7 +329,7 @@ export const ManagersPage: React.FC = () => {
                       onClick={() => removeMemberMutation.mutate(manager.user_id)}
                       disabled={removeMemberMutation.isPending}
                       className="rounded-lg p-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--accent-danger-bg)] hover:text-[var(--accent-danger-text)] disabled:opacity-50"
-                      title="Удалить участника"
+                      title={t('managers.deleteMemberTitle')}
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -339,7 +340,7 @@ export const ManagersPage: React.FC = () => {
             {filteredManagers.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-sm text-[var(--text-muted)] lg:px-5">
-                  Участники проекта пока не найдены.
+                  {t('managers.empty')}
                 </td>
               </tr>
             )}
@@ -350,7 +351,7 @@ export const ManagersPage: React.FC = () => {
         <div className="grid gap-3 p-3 md:hidden">
           {filteredManagers.length === 0 ? (
             <div className="rounded-2xl bg-[var(--surface-secondary)] px-4 py-10 text-center text-sm text-[var(--text-muted)]">
-              Участники проекта пока не найдены.
+              {t('managers.empty')}
             </div>
           ) : (
             filteredManagers.map((manager) => (
@@ -364,23 +365,23 @@ export const ManagersPage: React.FC = () => {
                   </div>
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate font-semibold text-[var(--text-primary)]">
-                      {getDisplayName(manager, 'Менеджер')}
+                      {getDisplayName(manager, t('managers.fallback.manager'))}
                     </h2>
                     <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">
-                      {getSecondaryDisplayText(manager) || 'Участник проекта'}
+                      {getSecondaryDisplayText(manager) || t('managers.fallback.member')}
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-4 grid gap-2 text-xs">
                   <div className="rounded-xl bg-[var(--surface-card)] p-3">
-                    <div className="text-[var(--text-muted)]">Идентификатор</div>
+                    <div className="text-[var(--text-muted)]">{t('managers.identifier')}</div>
                     <div className="mt-1 break-all font-mono font-semibold text-[var(--text-primary)]">
                       {manager.user_id}
                     </div>
                   </div>
                   <div className="rounded-xl bg-[var(--surface-card)] p-3">
-                    <div className="text-[var(--text-muted)]">Роль</div>
+                    <div className="text-[var(--text-muted)]">{t('managers.role')}</div>
                     <div className="mt-1 flex items-center gap-2 font-semibold text-[var(--text-primary)]">
                       <CheckCircle2 className="h-4 w-4 text-[var(--accent-success)]" />
                       {manager.role}
@@ -392,19 +393,19 @@ export const ManagersPage: React.FC = () => {
                   <button
                     onClick={() => openHistory(manager)}
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-primary)]/10 hover:text-[var(--accent-primary)]"
-                    title="История ответов"
+                    title={t('managers.historyTitle')}
                   >
                     <History className="h-4 w-4" />
-                    История
+                    {t('managers.history')}
                   </button>
                   <button
                     onClick={() => removeMemberMutation.mutate(manager.user_id)}
                     disabled={removeMemberMutation.isPending}
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--surface-card)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-danger-bg)] hover:text-[var(--accent-danger-text)] disabled:opacity-50"
-                    title="Удалить участника"
+                    title={t('managers.deleteMemberTitle')}
                   >
                     <Trash2 className="h-4 w-4" />
-                    Удалить
+                    {t('managers.delete')}
                   </button>
                 </div>
               </article>
@@ -421,7 +422,7 @@ export const ManagersPage: React.FC = () => {
           />
           <div className="fixed right-0 top-0 z-50 flex h-full w-full flex-col bg-[var(--surface-card)] p-4 shadow-[-1px_0_0_var(--divider-soft)] animate-in slide-in-from-right duration-300 sm:w-[450px] sm:p-6">
             <div className="mb-6 flex items-center justify-between sm:mb-8">
-              <h2 className="text-xl font-semibold leading-tight text-[var(--text-primary)]">История ответов</h2>
+              <h2 className="text-xl font-semibold leading-tight text-[var(--text-primary)]">{t('managers.replyHistoryTitle')}</h2>
               <button
                 onClick={() => setIsHistoryOpen(false)}
                 className="rounded-full p-2 transition-colors hover:bg-[var(--surface-secondary)]"
@@ -436,16 +437,16 @@ export const ManagersPage: React.FC = () => {
               </div>
               <div>
                 <div className="font-semibold text-[var(--text-primary)]">
-                  {getDisplayName(selectedManager, 'Менеджер')}
+                  {getDisplayName(selectedManager, t('managers.fallback.manager'))}
                 </div>
                 <div className="text-sm text-[var(--text-muted)]">
-                  {getSecondaryDisplayText(selectedManager) || 'Участник проекта'}
+                  {getSecondaryDisplayText(selectedManager) || t('managers.fallback.member')}
                 </div>
               </div>
             </div>
 
             <div className="flex-1 rounded-xl bg-[var(--surface-secondary)] p-6 text-sm text-[var(--text-muted)]">
-              История ответов пока недоступна в панели. Когда раздел будет готов, здесь появятся реальные ответы менеджера.
+              {t('managers.replyHistoryUnavailable')}
             </div>
           </div>
         </>

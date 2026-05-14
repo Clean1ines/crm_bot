@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useMemo, useState } from 'react';
 import {
   BarChart3,
@@ -80,37 +81,37 @@ const isJobPaused = (job: RagEvalJob | null | undefined): boolean => (
 );
 
 const stageLabel = (stage: string): string => {
-  if (stage === 'queued') return 'Ждёт очереди';
-  if (stage === 'started') return 'Запускаем проверку';
-  if (stage === 'dataset_generation') return 'Готовим вопросы по документу';
-  if (stage === 'answer_generation') return 'Проверяем ответы бота';
-  if (stage === 'running') return 'Идёт проверка';
-  if (stage === 'completed' || stage === 'done') return 'Готово';
-  if (stage === 'cancelled') return 'Остановлено';
-  if (stage === 'paused') return 'На паузе';
-  if (stage === 'failed') return 'Ошибка';
-  return stage || 'Ожидание';
+  if (stage === 'queued') return t('ragEval.stage.queued');
+  if (stage === 'started') return t('ragEval.stage.started');
+  if (stage === 'dataset_generation') return t('ragEval.stage.datasetGeneration');
+  if (stage === 'answer_generation') return t('ragEval.stage.answerGeneration');
+  if (stage === 'running') return t('ragEval.stage.running');
+  if (stage === 'completed' || stage === 'done') return t('ragEval.stage.completed');
+  if (stage === 'cancelled') return t('ragEval.stage.cancelled');
+  if (stage === 'paused') return t('ragEval.stage.paused');
+  if (stage === 'failed') return t('ragEval.stage.failed');
+  return stage || t('ragEval.stage.waiting');
 };
 
 const statusLabel = (status: string): string => {
-  if (status === 'pending') return 'В очереди';
-  if (status === 'processing' || status === 'running') return 'В работе';
-  if (status === 'paused') return 'На паузе';
-  if (status === 'completed' || status === 'done' || status === 'succeeded' || status === 'success') return 'Готово';
-  if (status === 'cancelled') return 'Остановлено';
-  if (status === 'failed') return 'Ошибка';
-  return status || 'Ожидание';
+  if (status === 'pending') return t('ragEval.status.pending');
+  if (status === 'processing' || status === 'running') return t('ragEval.status.running');
+  if (status === 'paused') return t('ragEval.stage.paused');
+  if (status === 'completed' || status === 'done' || status === 'succeeded' || status === 'success') return t('ragEval.stage.completed');
+  if (status === 'cancelled') return t('ragEval.stage.cancelled');
+  if (status === 'failed') return t('ragEval.stage.failed');
+  return status || t('ragEval.stage.waiting');
 };
 
 const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
   const rawMessage = typeof progress.message === 'string' ? progress.message : '';
-  if (stage === 'dataset_generation') return 'Система читает фрагменты документа и составляет контрольные вопросы.';
-  if (stage === 'answer_generation') return 'Система задаёт эти вопросы боту, ищет подходящие фрагменты и оценивает ответы.';
-  if (stage === 'paused') return 'Пауза включена. Текущий запрос может завершиться, новые вопросы не начнутся до продолжения.';
-  if (stage === 'cancelled') return 'Задача остановлена пользователем.';
-  if (stage === 'failed') return getErrorMessage(rawMessage, 'Проверка завершилась с ошибкой. Попробуйте запустить её заново.');
-  if (stage === 'completed' || stage === 'done') return 'Отчёт готов.';
-  return rawMessage || 'Проверка выполняется.';
+  if (stage === 'dataset_generation') return t('ragEval.stageDescription.datasetGeneration');
+  if (stage === 'answer_generation') return t('ragEval.stageDescription.answerGeneration');
+  if (stage === 'paused') return t('ragEval.stageDescription.paused');
+  if (stage === 'cancelled') return t('ragEval.stageDescription.cancelled');
+  if (stage === 'failed') return getErrorMessage(rawMessage, t('ragEval.stageDescription.failed'));
+  if (stage === 'completed' || stage === 'done') return t('ragEval.stageDescription.completed');
+  return rawMessage || t('ragEval.stageDescription.running');
 };
 
 const ReportJsonBlock: React.FC<{ value: unknown }> = ({ value }) => (
@@ -191,31 +192,31 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
 };
 
 const actionTypeLabel = (value: string): string => {
-  if (value === 'attach_question_to_entry') return 'Добавить формулировку клиента';
-  if (value === 'rebuild_entry_embedding') return 'Обновить поисковую версию записи';
-  if (value === 'rerun_eval') return 'Запустить повторную проверку';
-  if (value === 'create_entry_from_failure') return 'Создать новую запись вручную';
-  return value || 'Действие';
+  if (value === 'attach_question_to_entry') return t('ragEval.actionType.attachQuestionToEntry');
+  if (value === 'rebuild_entry_embedding') return t('ragEval.actionType.rebuildEntryEmbedding');
+  if (value === 'rerun_eval') return t('ragEval.actionType.rerunEval');
+  if (value === 'create_entry_from_failure') return t('ragEval.actionType.createEntryFromFailure');
+  return value || t('ragEval.actionType.fallback');
 };
 
 const actionTypeDescription = (value: string): string => {
   if (value === 'attach_question_to_entry') {
-    return 'Система добавит вопрос клиента к уже существующей записи базы знаний, чтобы бот лучше находил её по такой формулировке.';
+    return t('ragEval.actionDescription.attachQuestionToEntry');
   }
 
   if (value === 'rebuild_entry_embedding') {
-    return 'Система обновит поисковую версию записи после изменений, чтобы она корректнее участвовала в поиске.';
+    return t('ragEval.actionDescription.rebuildEntryEmbedding');
   }
 
   if (value === 'rerun_eval') {
-    return 'Система поставит повторную проверку документа в очередь, чтобы проверить результат после исправлений.';
+    return t('ragEval.actionDescription.rerunEval');
   }
 
   if (value === 'create_entry_from_failure') {
-    return 'Это действие требует ручного разбора: система не будет автоматически создавать новую запись базы знаний.';
+    return t('ragEval.actionDescription.createEntryFromFailure');
   }
 
-  return 'Система подготовила действие для улучшения базы знаний.';
+  return t('ragEval.actionDescription.fallback');
 };
 
 const formatResultScore = (score: number): string => {
@@ -224,42 +225,42 @@ const formatResultScore = (score: number): string => {
 };
 
 const riskLabel = (value: string): string => {
-  if (value === 'high') return 'Высокий риск недостоверного ответа';
-  if (value === 'medium') return 'Средний риск недостоверного ответа';
-  if (value === 'low') return 'Низкий риск недостоверного ответа';
-  return 'Риск не определён';
+  if (value === 'high') return t('ragEval.risk.high');
+  if (value === 'medium') return t('ragEval.risk.medium');
+  if (value === 'low') return t('ragEval.risk.low');
+  return t('ragEval.risk.unknown');
 };
 
 const resultProblemLabel = (result: RagEvalActionableResult): string => {
   if (result.wrong_entry_top1 && !result.answer_supported) {
-    return 'Бот опирается не на ту запись базы знаний, поэтому ответ может быть неправильным.';
+    return t('ragEval.problem.wrongEntryAndUnsupported');
   }
 
   if (result.wrong_entry_top1) {
-    return 'Первым найден не тот фрагмент. Поиск нужно направить к правильной записи.';
+    return t('ragEval.problem.wrongEntryTop1');
   }
 
   if (!result.answer_supported) {
-    return 'Ответ не подтверждён найденной базой знаний. Нужно усилить связь вопроса с правильной записью.';
+    return t('ragEval.problem.unsupportedAnswer');
   }
 
   if (result.hallucination_risk === 'high') {
-    return 'Проверка увидела высокий риск недостоверного ответа. Лучше применить предложенные исправления и запустить повторную проверку.';
+    return t('ragEval.problem.highHallucinationRisk');
   }
 
   if (!result.should_answer_passed) {
-    return 'Поведение бота не совпало с ожидаемым: нужно уточнить базу знаний или правила ответа.';
+    return t('ragEval.problem.shouldAnswerFailed');
   }
 
-  return 'Система нашла место, где база знаний может отвечать лучше.';
+  return t('ragEval.problem.fallback');
 };
 
 const readinessLabel = (value: unknown): string => {
   const readiness = String(value || '').trim();
-  if (readiness === 'ready') return 'Готово к использованию';
-  if (readiness === 'needs_review') return 'Нужна ручная проверка';
-  if (readiness === 'not_ready') return 'Не готово к работе';
-  return readiness || 'Нет статуса';
+  if (readiness === 'ready') return t('ragEval.readiness.ready');
+  if (readiness === 'needs_review') return t('ragEval.readiness.needsReview');
+  if (readiness === 'not_ready') return t('ragEval.readiness.notReady');
+  return readiness || t('ragEval.readiness.noStatus');
 };
 
 const MetricPill: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
@@ -277,7 +278,7 @@ const ReportList: React.FC<{ title: string; items: string[] }> = ({ title, items
         {items.map((item) => <li key={item}>{item}</li>)}
       </ul>
     ) : (
-      <p className="mt-2 text-sm text-[var(--text-muted)]">Нет данных.</p>
+      <p className="mt-2 text-sm text-[var(--text-muted)]">{t('ragEval.common.noData')}</p>
     )}
   </div>
 );
@@ -305,13 +306,10 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
         </div>
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            Предложенные исправления базы знаний
+            {t('ragEval.fixes.title')}
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-[var(--text-muted)]">
-            Здесь показаны проблемы, которые проверка нашла в ответах бота. Кнопка применяет
-            только безопасные изменения: добавляет недостающие формулировки к существующим
-            записям, обновляет поисковое представление или запускает повторную проверку.
-            Действия, где нужно вручную создать новую запись, не применяются автоматически.
+            {t('ragEval.fixes.description')}
           </p>
         </div>
       </div>
@@ -319,17 +317,17 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
       {executionSummary && (
         <div className="mb-4 rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4">
           <div className="text-sm font-semibold text-[var(--text-primary)]">
-            Последнее применение исправлений
+            {t('ragEval.fixes.lastExecution')}
           </div>
           <div className="mt-2 grid gap-2 text-sm text-[var(--text-secondary)] sm:grid-cols-2 lg:grid-cols-4">
-            <div>Применено: {formatNumber(executionSummary.applied_actions)}</div>
-            <div>Пропущено: {formatNumber(executionSummary.skipped_actions)}</div>
-            <div>Нужна ручная проверка: {formatNumber(executionSummary.rejected_actions)}</div>
-            <div>Ошибок: {formatNumber(executionSummary.failed_actions)}</div>
+            <div>{t('ragEval.fixes.appliedPrefix')} {formatNumber(executionSummary.applied_actions)}</div>
+            <div>{t('ragEval.fixes.skippedPrefix')} {formatNumber(executionSummary.skipped_actions)}</div>
+            <div>{t('ragEval.fixes.rejectedPrefix')} {formatNumber(executionSummary.rejected_actions)}</div>
+            <div>{t('ragEval.fixes.failedPrefix')} {formatNumber(executionSummary.failed_actions)}</div>
           </div>
           {executionSummary.queued_rerun_job_ids.length > 0 && (
             <p className="mt-2 text-sm text-[var(--text-muted)]">
-              Повторная проверка запущена. Её прогресс появится выше на этой странице.
+              {t('ragEval.fixes.rerunStarted')}
             </p>
           )}
         </div>
@@ -349,35 +347,35 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
                 <div className="min-w-0 space-y-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                      Уверенность проверки: {formatResultScore(result.score)}
+                      {t('ragEval.fixes.scorePrefix')} {formatResultScore(result.score)}
                     </span>
                     <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
                       {riskLabel(result.hallucination_risk)}
                     </span>
                     {result.wrong_entry_top1 && (
                       <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
-                        найден не тот источник
+                        {t('ragEval.fixes.wrongSource')}
                       </span>
                     )}
                     {!result.answer_supported && (
                       <span className="rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-500">
-                        ответ не подтверждён
+                        {t('ragEval.fixes.unsupportedAnswer')}
                       </span>
                     )}
                   </div>
 
                   <div>
                     <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                      Проверочный вопрос
+                      {t('ragEval.fixes.questionTitle')}
                     </div>
                     <div className="mt-1 text-sm font-medium text-[var(--text-primary)]">
-                      {result.question || 'Без текста вопроса'}
+                      {result.question || t('ragEval.fixes.noQuestion')}
                     </div>
                   </div>
 
                   <div className="rounded-lg bg-[var(--surface-elevated)] p-3">
                     <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                      Что не так
+                      {t('ragEval.fixes.problemTitle')}
                     </div>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">
                       {resultProblemLabel(result)}
@@ -386,7 +384,7 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
 
                   <div className="rounded-lg bg-[var(--surface-elevated)] p-3">
                     <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                      Что будет сделано
+                      {t('ragEval.fixes.actionTitle')}
                     </div>
                     {result.proposed_actions.length ? (
                       <ul className="mt-2 space-y-3 text-sm text-[var(--text-secondary)]">
@@ -405,7 +403,7 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
                               </p>
                               {payloadQuestion && (
                                 <div className="mt-2 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-xs text-[var(--text-muted)]">
-                                  Новая формулировка для поиска: “{payloadQuestion}”
+                                  {t('ragEval.fixes.newQuestionPrefix')} “{payloadQuestion}”
                                 </div>
                               )}
                             </li>
@@ -414,7 +412,7 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
                       </ul>
                     ) : (
                       <p className="mt-2 text-sm text-[var(--text-muted)]">
-                        Для этой проблемы нет автоматического исправления. Нужен ручной разбор.
+                        {t('ragEval.fixes.noAutomaticFix')}
                       </p>
                     )}
                   </div>
@@ -427,7 +425,7 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
                   className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isExecuting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                  {isExecuting ? 'Применяю исправления...' : 'Применить предложенные исправления'}
+                  {isExecuting ? t('ragEval.fixes.applying') : t('ragEval.fixes.apply')}
                 </button>
               </div>
             </article>
@@ -440,7 +438,7 @@ const ActionableResultsPanel: React.FC<ActionableResultsPanelProps> = ({
 
 const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ report }) => {
   if (!Object.keys(report).length) {
-    return <p className="text-sm text-[var(--text-muted)]">Отчёт ещё не сформирован.</p>;
+    return <p className="text-sm text-[var(--text-muted)]">{t('ragEval.report.notReady')}</p>;
   }
 
   const metrics = getRecord(parseJsonValue(report.metrics));
@@ -460,9 +458,9 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
     <div className="space-y-4 rounded-2xl bg-[var(--control-bg)] p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h3 className="text-base font-semibold text-[var(--text-primary)]">Человекочитаемый отчёт</h3>
+          <h3 className="text-base font-semibold text-[var(--text-primary)]">{t('ragEval.report.humanTitle')}</h3>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Это итог проверки: насколько база знаний помогает боту находить правильные фрагменты и отвечать без выдуманных фактов.
+            {t('ragEval.report.humanDescription')}
           </p>
         </div>
         <div className="rounded-xl bg-[var(--surface-elevated)] px-4 py-3 text-right shadow-[var(--shadow-card)]">
@@ -472,22 +470,22 @@ const ReportSummaryCard: React.FC<{ report: Record<string, unknown> }> = ({ repo
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <MetricPill label="Всего вопросов" value={total || '—'} />
-        <MetricPill label="Первый найденный фрагмент" value={`${top1Rate}%`} />
-        <MetricPill label="В трёх лучших совпадениях" value={`${top3Rate}%`} />
-        <MetricPill label="В пяти лучших совпадениях" value={`${top5Rate}%`} />
-        <MetricPill label="Ответы подтверждены" value={`${answerSupportedRate}%`} />
-        <MetricPill label="Риск выдуманного ответа" value={highHallucinationRisk} />
-        <MetricPill label="Первый фрагмент оказался неверным" value={wrongChunkTop1} />
+        <MetricPill label={t('ragEval.report.totalQuestions')} value={total || '—'} />
+        <MetricPill label={t('ragEval.report.top1')} value={`${top1Rate}%`} />
+        <MetricPill label={t('ragEval.report.top3')} value={`${top3Rate}%`} />
+        <MetricPill label={t('ragEval.report.top5')} value={`${top5Rate}%`} />
+        <MetricPill label={t('ragEval.report.answerSupported')} value={`${answerSupportedRate}%`} />
+        <MetricPill label={t('ragEval.report.hallucinationRisk')} value={highHallucinationRisk} />
+        <MetricPill label={t('ragEval.report.wrongTop1')} value={wrongChunkTop1} />
       </div>
 
-      <ReportList title="Сильные стороны" items={strengths} />
-      <ReportList title="Проблемы" items={problems} />
-      <ReportList title="Что делать дальше" items={recommendations} />
+      <ReportList title={t('ragEval.report.strengths')} items={strengths} />
+      <ReportList title={t('ragEval.report.problems')} items={problems} />
+      <ReportList title={t('ragEval.report.nextSteps')} items={recommendations} />
 
       {typeof report.markdown === 'string' && report.markdown.trim() && (
         <details className="rounded-xl bg-[var(--surface-elevated)] p-3 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-card)]">
-          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">Показать подробный отчёт</summary>
+          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">{t('ragEval.report.showDetails')}</summary>
           <pre className="mt-3 max-h-[420px] overflow-auto whitespace-pre-wrap text-xs leading-relaxed">{report.markdown}</pre>
         </details>
       )}
@@ -518,9 +516,9 @@ const JobProgressCard: React.FC<{
             <BarChart3 className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс проверки</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.progress.title')}</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Активных или недавних задач для выбранного документа пока нет.
+              {t('ragEval.progress.noRecentJobs')}
             </p>
           </div>
         </div>
@@ -554,14 +552,14 @@ const JobProgressCard: React.FC<{
             {active ? <Loader2 className="h-5 w-5 animate-spin" /> : <BarChart3 className="h-5 w-5" />}
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Прогресс проверки</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.progress.title')}</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Текущая проверка выбранного документа.
+              {t('ragEval.progress.currentDocument')}
             </p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Статус: <span className="font-semibold text-[var(--text-primary)]">{statusLabel(effectiveStatus || job.status)}</span>
+              {t('ragEval.progress.statusPrefix')} <span className="font-semibold text-[var(--text-primary)]">{statusLabel(effectiveStatus || job.status)}</span>
               {' · '}
-              Сейчас: <span className="font-semibold text-[var(--text-primary)]">{stageLabel(stage)}</span>
+              {t('ragEval.progress.nowPrefix')} <span className="font-semibold text-[var(--text-primary)]">{stageLabel(stage)}</span>
             </p>
           </div>
         </div>
@@ -574,7 +572,7 @@ const JobProgressCard: React.FC<{
             className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Pause className="h-4 w-4" />
-            Пауза
+            {t('ragEval.actions.pause')}
           </button>
           <button
             type="button"
@@ -583,7 +581,7 @@ const JobProgressCard: React.FC<{
             className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCcw className="h-4 w-4" />
-            Продолжить
+            {t('ragEval.actions.resume')}
           </button>
           <button
             type="button"
@@ -592,14 +590,14 @@ const JobProgressCard: React.FC<{
             className="inline-flex items-center gap-2 rounded-xl border border-red-500/40 px-3 py-2 text-sm font-medium text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Square className="h-4 w-4" />
-            Отменить
+            {t('ragEval.actions.cancel')}
           </button>
         </div>
       </div>
 
       <div className="mb-4">
         <div className="mb-2 flex items-center justify-between text-sm">
-          <span className="text-[var(--text-muted)]">Выполнено</span>
+          <span className="text-[var(--text-muted)]">{t('ragEval.progress.completed')}</span>
           <span className="font-semibold text-[var(--text-primary)]">{percent}%</span>
         </div>
         <div className="h-3 overflow-hidden rounded-full bg-[var(--control-bg)]">
@@ -615,11 +613,11 @@ const JobProgressCard: React.FC<{
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <StatPill label="Вопросы готовы" value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
-        <StatPill label="Ответы проверены" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
-        <StatPill label="Группы фрагментов" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
-        <StatPill label="Фрагменты" value={sourceChunkCount || '—'} />
-        <StatPill label="Попытки" value={`${job.attempts}/${job.max_attempts}`} />
+        <StatPill label={t('ragEval.stats.questionsReady')} value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
+        <StatPill label={t('ragEval.stats.answersChecked')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
+        <StatPill label={t('ragEval.stats.fragmentGroups')} value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
+        <StatPill label={t('ragEval.stats.fragments')} value={sourceChunkCount || '—'} />
+        <StatPill label={t('ragEval.stats.attempts')} value={`${job.attempts}/${job.max_attempts}`} />
       </div>
 
       {ERROR_VISIBLE_JOB_STATUSES.has(getJobStatus(job)) && job.error && (
@@ -744,18 +742,18 @@ export const RagEvalPage: React.FC = () => {
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      if (!activeDocumentId) throw new Error('Нет обработанного документа для проверки');
+      if (!activeDocumentId) throw new Error(t('ragEval.error.noProcessedDocument'));
 
         return await ragEvalApi.runFullDocumentEval(activeDocumentId);
     },
     onSuccess: async (result) => {
       setLastQueued(result);
       setLastActionExecutionSummary(null);
-      toast.success('Проверка запущена. Прогресс появится на этой странице.');
+      toast.success(t('ragEval.feedback.started'));
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось поставить проверку в очередь'));
+      toast.error(getErrorMessage(error, t('ragEval.error.enqueueFailed')));
     },
   });
 
@@ -763,11 +761,11 @@ export const RagEvalPage: React.FC = () => {
     mutationFn: async (jobId: string) => ragEvalApi.pauseJob(jobId),
     onSuccess: (result) => {
       applyJobMutationResult(result.job);
-      toast.success('Пауза включена');
+      toast.success(t('ragEval.feedback.paused'));
       void invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось поставить задачу на паузу'));
+      toast.error(getErrorMessage(error, t('ragEval.error.pauseFailed')));
     },
   });
 
@@ -775,11 +773,11 @@ export const RagEvalPage: React.FC = () => {
     mutationFn: async (jobId: string) => ragEvalApi.resumeJob(jobId),
     onSuccess: (result) => {
       applyJobMutationResult(result.job);
-      toast.success('Проверка продолжена');
+      toast.success(t('ragEval.feedback.resumed'));
       void invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось продолжить задачу'));
+      toast.error(getErrorMessage(error, t('ragEval.error.resumeFailed')));
     },
   });
 
@@ -788,11 +786,11 @@ export const RagEvalPage: React.FC = () => {
     onSuccess: (result) => {
       setLastQueued(null);
       applyJobMutationResult(result.job);
-      toast.success('Проверка остановлена');
+      toast.success(t('ragEval.feedback.cancelled'));
       void invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось отменить задачу'));
+      toast.error(getErrorMessage(error, t('ragEval.error.cancelFailed')));
     },
   });
 
@@ -802,16 +800,16 @@ export const RagEvalPage: React.FC = () => {
       setLastActionExecutionSummary(summary);
 
       const rerunMessage = summary.queued_rerun_job_ids.length
-        ? ', повторная проверка поставлена в очередь'
+        ? t('ragEval.feedback.rerunQueuedSuffix')
         : '';
 
       toast.success(
-        `Исправления применены: ${summary.applied_actions}; ручная проверка: ${summary.rejected_actions}; ошибок: ${summary.failed_actions}${rerunMessage}`,
+        t('ragEval.feedback.actionsApplied', { applied: summary.applied_actions, rejected: summary.rejected_actions, failed: summary.failed_actions, suffix: rerunMessage }),
       );
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось применить предложенные исправления'));
+      toast.error(getErrorMessage(error, t('ragEval.error.executeActionsFailed')));
     },
   });
 
@@ -834,7 +832,7 @@ export const RagEvalPage: React.FC = () => {
   if (documentsQuery.isLoading) {
     return (
       <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
-        Загрузка документов...
+        {t('ragEval.documents.loading')}
       </div>
     );
   }
@@ -843,11 +841,11 @@ export const RagEvalPage: React.FC = () => {
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div>
         <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">
-          Проверка качества базы знаний
+          {t('ragEval.page.title')}
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-[var(--text-muted)]">
-          Полная проверка документа после обработки базы знаний. Страница показывает, где бот отвечает уверенно,
-          где ему не хватает знаний и какие безопасные исправления можно применить без ручного доступа к базе.
+          {t('ragEval.page.descriptionLine1')}
+          {t('ragEval.page.descriptionLine2')}
         </p>
       </div>
 
@@ -857,16 +855,16 @@ export const RagEvalPage: React.FC = () => {
             <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Запуск полной проверки</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.run.title')}</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Система читает документ, составляет проверочные вопросы и проверяет, насколько бот находит нужные фрагменты.
+              {t('ragEval.run.description')}
             </p>
           </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
           <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Документ</span>
+            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">{t('ragEval.run.documentLabel')}</span>
             <select
               value={activeDocumentId}
               onChange={(event) => {
@@ -877,7 +875,7 @@ export const RagEvalPage: React.FC = () => {
             >
               {processedDocuments.map((doc) => (
                 <option key={doc.id} value={doc.id}>
-                  {doc.file_name} · {doc.chunk_count} фрагментов
+                  {doc.file_name} · {doc.chunk_count} {t('ragEval.document.fragments')}
                 </option>
               ))}
             </select>
@@ -892,7 +890,7 @@ export const RagEvalPage: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 lg:self-end"
           >
             {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Запустить
+            {t('ragEval.run.start')}
           </button>
         </div>
 
@@ -901,7 +899,7 @@ export const RagEvalPage: React.FC = () => {
             <FileText className="h-4 w-4" />
             <span>{activeDocument.file_name}</span>
             <span>·</span>
-            <span>{formatNumber(activeDocument.chunk_count)} фрагментов</span>
+            <span>{formatNumber(activeDocument.chunk_count)} {t('ragEval.document.fragments')}</span>
           </div>
         )}
       </section>
@@ -927,9 +925,9 @@ export const RagEvalPage: React.FC = () => {
             <BarChart3 className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Последний результат проверки</h2>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.lastResult.title')}</h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Здесь остаётся статистика после завершения, отмены или ошибки.
+              {t('ragEval.lastResult.description')}
             </p>
           </div>
         </div>
@@ -937,29 +935,29 @@ export const RagEvalPage: React.FC = () => {
         {statusQuery.isLoading ? (
           <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Загружаю статус...
+            {t('ragEval.lastResult.loadingStatus')}
           </div>
         ) : statusQuery.error ? (
           <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
             <XCircle className="h-4 w-4" />
-            Не удалось загрузить статус проверки.
+            {t('ragEval.lastResult.statusLoadFailed')}
           </div>
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Запуск проверки</h3>
+              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.launch.title')}</h3>
               <div className="rounded-xl bg-[var(--control-bg)] p-4">
-                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Статус запуска</div>
+                <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.launch.status')}</div>
                 <div className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
                   {statusLabel(String(latestRunRecord.status || ''))}
                 </div>
                 <p className="mt-2 text-sm text-[var(--text-muted)]">
-                  Здесь показано состояние последней проверки без служебного JSON.
+                  {t('ragEval.launch.description')}
                 </p>
               </div>
               <details className="mt-4 rounded-xl border border-[var(--border-primary)] p-3">
                 <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
-                  Технические подробности запуска
+                  {t('ragEval.launch.technicalDetails')}
                 </summary>
                 <div className="mt-3">
                   <ReportJsonBlock value={latestRun} />
@@ -967,11 +965,11 @@ export const RagEvalPage: React.FC = () => {
               </details>
             </div>
             <div>
-              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Итоги</h3>
+              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.report.summaryTitle')}</h3>
               <ReportSummaryCard report={latestReport} />
               <details className="mt-4 rounded-xl border border-[var(--border-primary)] p-3">
                 <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
-                  Технические подробности отчёта
+                  {t('ragEval.report.technicalDetails')}
                 </summary>
                 <div className="mt-3">
                   <ReportJsonBlock value={Object.keys(latestReport).length ? latestReport : null} />

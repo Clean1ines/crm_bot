@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { t } from '@shared/i18n';
+
+import { getGoogleClientId } from './config';
 
 declare global {
   interface Window {
@@ -67,8 +70,8 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
   const buttonRef = useRef<HTMLDivElement>(null);
   const onCredentialRef = useRef(onCredential);
   const onErrorRef = useRef(onError);
-  const [status, setStatus] = useState<'ready' | 'missing-client' | 'failed'>('ready');
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  const [status, setStatus] = useState<'ready' | 'failed'>('ready');
+  const clientId = getGoogleClientId();
 
   useEffect(() => {
     onCredentialRef.current = onCredential;
@@ -80,7 +83,6 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
 
     async function renderGoogleButton() {
       if (!clientId) {
-        setStatus('missing-client');
         return;
       }
 
@@ -96,7 +98,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
               void onCredentialRef.current(response.credential);
               return;
             }
-            onErrorRef.current?.('Google не вернул ID token');
+            onErrorRef.current?.(t('googleAuth.error.missingCredential'));
           },
         });
         window.google.accounts.id.renderButton(buttonRef.current, {
@@ -109,7 +111,7 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
       } catch (error) {
         if (!cancelled) {
           setStatus('failed');
-          onErrorRef.current?.(error instanceof Error ? error.message : 'Не удалось загрузить Google вход');
+          onErrorRef.current?.(error instanceof Error ? error.message : t('googleAuth.error.loadFailed'));
         }
       }
     }
@@ -121,18 +123,10 @@ export const GoogleAuthButton: React.FC<GoogleAuthButtonProps> = ({
     };
   }, [clientId, text]);
 
-  if (status === 'missing-client') {
-    return (
-      <div className="rounded-xl bg-[var(--surface-secondary)] px-4 py-3 text-sm text-[var(--text-muted)] shadow-[var(--shadow-sm)]">
-        Google вход станет доступен после настройки `VITE_GOOGLE_CLIENT_ID`.
-      </div>
-    );
-  }
-
   if (status === 'failed') {
     return (
       <div className="rounded-xl bg-[var(--accent-danger-bg)] px-4 py-3 text-sm text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)]">
-        Не удалось загрузить Google Identity Services.
+        {t('googleAuth.error.identityServicesFailed')}
       </div>
     );
   }

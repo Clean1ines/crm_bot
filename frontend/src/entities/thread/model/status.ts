@@ -1,3 +1,5 @@
+import { translate } from '@shared/i18n';
+
 export type ThreadStatus = 'active' | 'waiting_manager' | 'manual' | 'closed';
 export type ThreadStatusFilter =
   | 'active'
@@ -19,19 +21,19 @@ export const THREAD_STATUS_FILTER_OPTIONS: ReadonlyArray<{
   label: string;
   value: ThreadStatusFilter;
 }> = [
-  { label: 'Все', value: null },
-  { label: 'Ассистент', value: AUTO_THREAD_FILTER },
-  { label: 'Менеджер', value: MANAGER_THREAD_FILTER },
+  { label: translate('thread.status.all'), value: null },
+  { label: translate('thread.status.assistant'), value: AUTO_THREAD_FILTER },
+  { label: translate('thread.status.manager'), value: MANAGER_THREAD_FILTER },
 ];
 
 export const TICKET_STATUS_FILTER_OPTIONS: ReadonlyArray<{
   label: string;
   value: TicketVisibleStatusFilter;
 }> = [
-  { label: 'Активные', value: TICKET_NEW_FILTER },
-  { label: 'В работе', value: TICKET_IN_WORK_FILTER },
-  { label: 'Закрытые', value: TICKET_CLOSED_FILTER },
-  { label: 'Все', value: null },
+  { label: translate('thread.status.active'), value: TICKET_NEW_FILTER },
+  { label: translate('thread.status.inWork'), value: TICKET_IN_WORK_FILTER },
+  { label: translate('thread.status.closed'), value: TICKET_CLOSED_FILTER },
+  { label: translate('thread.status.all'), value: null },
 ];
 
 export const isManagerThreadStatus = (status?: string | null): boolean => {

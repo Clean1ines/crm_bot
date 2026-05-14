@@ -21,10 +21,11 @@ import { Layout } from './Layout';
 import { getSessionToken } from '@shared/api/core/session';
 import { getProjectHomePath, isProjectAdminRole } from '@entities/project/model/access';
 import { useProjects } from '@entities/project/api/useProjects';
+import { translate } from '@shared/i18n';
 
 const loadingScreen = (
   <div className="flex items-center justify-center h-screen bg-[#1E1E1E] text-[#E5E2DA]">
-    Загрузка...
+    {translate('app.loading')}
   </div>
 );
 
@@ -88,17 +89,17 @@ const ProjectAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }
     <div className="mx-auto max-w-2xl p-6 sm:p-8">
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-          Раздел недоступен для менеджера
+          {translate('app.access.managerSectionUnavailable.title')}
         </h1>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
-          В этой панели менеджеру доступны только обращения, диалоги и клиентская информация, нужные для работы с клиентами.
+          {translate('app.access.managerSectionUnavailable.description')}
         </p>
         <div className="mt-5">
           <Link
             to={fallbackPath}
             className="inline-flex min-h-10 items-center rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
           >
-            Перейти в рабочий раздел
+            {translate('app.access.managerSectionUnavailable.cta')}
           </Link>
         </div>
       </div>
@@ -122,17 +123,17 @@ const WorkspaceAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children
     <div className="mx-auto max-w-2xl p-6 sm:p-8">
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-card)]">
         <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-          Раздел недоступен для менеджера
+          {translate('app.access.adminOnlyChannels.title')}
         </h1>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
-          Настройка каналов и токенов доступна только владельцу или администратору проекта.
+          {translate('app.access.adminOnlyChannels.description')}
         </p>
         <div className="mt-5">
           <Link
             to={getProjectHomePath(firstProject.id, firstProject.access_role)}
             className="inline-flex min-h-10 items-center rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)]"
           >
-            Вернуться к рабочему разделу
+            {translate('app.access.adminOnlyChannels.cta')}
           </Link>
         </div>
       </div>
@@ -167,12 +168,14 @@ class ErrorBoundary extends React.Component<
       return (
         <div className="min-h-screen w-screen flex items-center justify-center bg-black text-white">
           <div className="text-center p-8">
-            <h2 className="text-2xl font-bold text-[#b8956a] mb-4">Что-то пошло не так</h2>
+            <h2 className="text-2xl font-bold text-[#b8956a] mb-4">
+              {translate('app.error.title')}
+            </h2>
             <button
               onClick={() => window.location.reload()}
               className="px-4 py-2 bg-[#b8956a] text-black rounded hover:bg-[#d4b48a]"
             >
-              Обновить страницу
+              {translate('app.error.reload')}
             </button>
           </div>
         </div>

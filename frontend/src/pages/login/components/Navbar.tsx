@@ -1,3 +1,4 @@
+import { t } from '../../../shared/i18n';
 import React from 'react';
 import { Button } from './Button';
 import logoSrc from '../../../shared/assets/logo.png';
@@ -20,7 +21,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onLoginClick }) => {
         <span className="text-lg font-semibold tracking-tight text-[var(--text-primary)]">OMNICA</span>
       </div>
       <div className="flex items-center gap-3">
-        <Button variant="secondary" onClick={onLoginClick}>Войти</Button>
+        <Button variant="secondary" onClick={onLoginClick}>{t('login.nav.login')}</Button>
       </div>
     </nav>
   );

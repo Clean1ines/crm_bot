@@ -1,3 +1,4 @@
+import { t } from '../../shared/i18n';
 import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects } from '@entities/project';
@@ -29,14 +30,14 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { path: 'dialogs', label: 'Диалоги', icon: <MessageSquare className="w-4 h-4" /> },
-  { path: 'tickets', label: 'Тикеты', icon: <UserCog className="w-4 h-4" /> },
-  { path: 'clients', label: 'Клиенты', icon: <Users className="w-4 h-4" /> },
-  { path: 'knowledge', label: 'Знания', icon: <BookOpen className="w-4 h-4" />, adminOnly: true },
-  { path: 'rag-eval', label: 'Проверка знаний', icon: <BarChart3 className="w-4 h-4" />, adminOnly: true },
-  { path: 'managers', label: 'Менеджеры', icon: <User className="w-4 h-4" />, adminOnly: true },
-  { path: 'channels', label: 'Каналы', icon: <Plug className="w-4 h-4" />, adminOnly: true },
-  { path: 'settings', label: 'Настройки', icon: <Settings className="w-4 h-4" />, adminOnly: true },
+  { path: 'dialogs', label: t('sidebar.nav.dialogs'), icon: <MessageSquare className="w-4 h-4" /> },
+  { path: 'tickets', label: t('sidebar.nav.tickets'), icon: <UserCog className="w-4 h-4" /> },
+  { path: 'clients', label: t('sidebar.nav.clients'), icon: <Users className="w-4 h-4" /> },
+  { path: 'knowledge', label: t('sidebar.nav.knowledge'), icon: <BookOpen className="w-4 h-4" />, adminOnly: true },
+  { path: 'rag-eval', label: t('sidebar.nav.ragEval'), icon: <BarChart3 className="w-4 h-4" />, adminOnly: true },
+  { path: 'managers', label: t('sidebar.nav.managers'), icon: <User className="w-4 h-4" />, adminOnly: true },
+  { path: 'channels', label: t('sidebar.nav.channels'), icon: <Plug className="w-4 h-4" />, adminOnly: true },
+  { path: 'settings', label: t('sidebar.nav.settings'), icon: <Settings className="w-4 h-4" />, adminOnly: true },
 ];
 
 export const AppSidebar: React.FC = () => {
@@ -173,7 +174,7 @@ export const AppSidebar: React.FC = () => {
               className="flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
             >
               <User className="h-4 w-4" />
-              <span className="text-[10px] font-medium">Профиль</span>
+              <span className="text-[10px] font-medium">{t('sidebar.profile.badge')}</span>
             </button>
 
             <div className="flex min-w-[72px] items-center justify-center px-2 py-1.5">
@@ -224,7 +225,7 @@ export const AppSidebar: React.FC = () => {
           onClick={() => setIsProjectSelectOpen(!isProjectSelectOpen)}
           className="w-full flex items-center justify-between bg-[var(--control-bg)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] shadow-sm hover:bg-[var(--control-bg-hover)] transition-all"
         >
-          <span className="truncate">{currentProject?.name || 'Выберите проект'}</span>
+          <span className="truncate">{currentProject?.name || t('sidebar.project.select')}</span>
           <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
         </button>
         {isProjectSelectOpen && (
@@ -256,8 +257,8 @@ export const AppSidebar: React.FC = () => {
             <User className="w-4 h-4" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-medium text-[var(--text-primary)]">Администратор</div>
-            <div className="text-xs text-[var(--text-muted)]">Профиль и вход</div>
+            <div className="text-sm font-medium text-[var(--text-primary)]">{t('sidebar.profile.adminName')}</div>
+            <div className="text-xs text-[var(--text-muted)]">{t('sidebar.profile.description')}</div>
           </div>
         </button>
         {canCreateProject && (
@@ -266,7 +267,7 @@ export const AppSidebar: React.FC = () => {
             className="w-full text-sm text-[var(--accent-primary)] hover:bg-[var(--surface-hover)] px-3 py-1.5 rounded-lg transition-colors flex items-center gap-2 justify-center"
           >
             <PlusCircle className="w-4 h-4" />
-            Новый проект
+            {t('sidebar.project.new')}
           </button>
         )}
 

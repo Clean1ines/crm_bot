@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -57,21 +58,21 @@ export const TicketsPage: React.FC = () => {
   if (!projectId) {
     return (
       <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">
-        Выберите проект
+        {t('manager.tickets.selectProject')}
       </div>
     );
   }
   if (isLoading) {
     return (
       <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">
-        Загрузка тикетов...
+        {t('manager.tickets.loading')}
       </div>
     );
   }
   if (error) {
     return (
       <div className="p-4 text-sm text-[var(--accent-danger-text)] sm:p-6">
-        Ошибка: {getErrorMessage(error, 'Не удалось загрузить тикеты. Попробуйте обновить страницу.')}
+        {t('common.feedback.error')}: {getErrorMessage(error, t('manager.tickets.loadFailed'))}
       </div>
     );
   }
@@ -80,22 +81,22 @@ export const TicketsPage: React.FC = () => {
     statusFilter === null ? ticketThreads : ticketsByStatus[statusFilter];
   const emptyLabel =
     statusFilter === 'waiting_manager'
-      ? 'Нет активных тикетов'
+      ? t('manager.tickets.emptyActive')
       : statusFilter === 'manual'
-        ? 'Нет тикетов в работе'
+        ? t('manager.tickets.emptyInWork')
         : statusFilter === 'closed'
-          ? 'Нет закрытых тикетов'
-          : 'Тикетов пока нет';
+          ? t('manager.tickets.emptyClosed')
+          : t('manager.tickets.emptyAny');
 
   return (
     <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-            Тикеты
+            {t('manager.tickets.title')}
           </h1>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            Переключайте новые, взятые в работу и закрытые обращения.
+            {t('manager.tickets.description')}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -125,7 +126,7 @@ export const TicketsPage: React.FC = () => {
           {filteredTickets.map((ticket: Thread) => {
             const client = ticket.client as unknown as Client;
             const lastMsg = ticket.last_message as unknown as LastMessage | null;
-            const clientName = getClientDisplayName(client, 'Клиент');
+            const clientName = getClientDisplayName(client, t('ui.client.fallback'));
 
             return (
               <div
@@ -136,14 +137,14 @@ export const TicketsPage: React.FC = () => {
                   to={`/projects/${projectId}/tickets/${ticket.thread_id}`}
                   className="font-medium text-[var(--accent-primary)] hover:underline"
                 >
-                  Заявка от {clientName}
+                  {t('manager.tickets.cardTitle', { clientName })}
                 </Link>
                 <p className="mt-1 line-clamp-2 text-sm text-[var(--text-secondary)]">
-                  {lastMsg?.content || 'Нет сообщений'}
+                  {lastMsg?.content || t('manager.tickets.noMessages')}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-muted)]">
-                  <span>Статус: {threadStatusLabel(ticket.status)}</span>
-                  <span>Создан: {new Date(ticket.thread_created_at).toLocaleString()}</span>
+                  <span>{t('manager.ticket.statusPrefix')} {threadStatusLabel(ticket.status)}</span>
+                  <span>{t('manager.ticket.createdPrefix')} {new Date(ticket.thread_created_at).toLocaleString()}</span>
                 </div>
               </div>
             );

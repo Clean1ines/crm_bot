@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -33,13 +34,13 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
     mutationFn: async () => {
       const normalizedUserId = newMemberUserId.trim();
       if (!normalizedUserId) {
-        throw new Error(newMemberRole === 'manager' ? 'Введите Telegram ID менеджера' : 'Введите ID участника платформы');
+        throw new Error(newMemberRole === 'manager' ? t('managers.telegramIdRequired') : t('managers.memberIdRequired'));
       }
 
       if (newMemberRole === 'manager') {
         const chatId = Number(normalizedUserId);
         if (!Number.isInteger(chatId)) {
-          throw new Error('Telegram ID менеджера должен быть числом');
+          throw new Error(t('managers.telegramIdMustBeNumber'));
         }
 
         const { error } = await projectsApi.addManager(projectId, chatId);
@@ -58,7 +59,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
       await invalidateManagers();
       setNewMemberUserId('');
       setNewMemberRole('manager');
-      showNotification(newMemberRole === 'manager' ? 'Менеджер добавлен' : 'Участник проекта сохранён', 'success');
+      showNotification(newMemberRole === 'manager' ? t('managers.managerAdded') : t('managers.memberSaved'), 'success');
     },
     onError: (error) => showNotification(getErrorMessage(error), 'error'),
   });
@@ -67,7 +68,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
     mutationFn: async () => {
       const normalizedEmail = inviteEmail.trim();
       if (!normalizedEmail) {
-        throw new Error('Введите email менеджера');
+        throw new Error(t('managers.emailRequired'));
       }
 
       const result = await membersApi.createInvitation(projectId, {
@@ -78,7 +79,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
       });
 
       if (!result.data) {
-        throw new Error('Не удалось создать приглашение');
+        throw new Error(t('managers.inviteCreateFailed'));
       }
 
       return result.data;
@@ -92,8 +93,8 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
       setLastInviteLink(result.invite_link ?? '');
       showNotification(
         result.invite_link
-          ? 'Приглашение создано. Ссылка доступна ниже.'
-          : 'Приглашение отправлено на email.',
+          ? t('managers.inviteCreatedLink')
+          : t('managers.inviteSentEmail'),
         'success',
       );
     },
@@ -106,31 +107,31 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
     },
     onSuccess: async () => {
       await invalidateManagers();
-      showNotification('Участник проекта удалён', 'success');
+      showNotification(t('managers.memberDeleted'), 'success');
     },
     onError: (error) => showNotification(getErrorMessage(error), 'error'),
   });
 
   if (isLoading) {
-    return <div className="text-sm text-[var(--text-muted)]">Загрузка...</div>;
+    return <div className="text-sm text-[var(--text-muted)]">{t('common.states.loading')}</div>;
   }
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-[var(--text-primary)]">Команда проекта</h3>
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">{t('managers.title')}</h3>
         <ul className="mt-3 space-y-2">
           {managers.map((manager) => (
             <li key={manager.user_id} className="flex items-center justify-between rounded-lg bg-[var(--surface-secondary)] px-3 py-2 text-sm">
               <span>
-                {getDisplayName(manager, 'Менеджер')}
+                {getDisplayName(manager, t('managers.fallback.manager'))}
                 <span className="ml-2 inline-flex min-h-6 items-center rounded-full bg-[var(--accent-muted)] px-2 text-xs font-medium text-[var(--accent-primary)]">({roleLabel(manager.role)})</span>
               </span>
               <button
                 onClick={() => removeMutation.mutate(manager.user_id)}
                 className="text-sm font-medium text-[var(--accent-danger-text)] hover:underline"
               >
-                Удалить
+                {t('managers.delete')}
               </button>
             </li>
           ))}
@@ -141,7 +142,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           type="text"
           value={newMemberUserId}
           onChange={(e) => setNewMemberUserId(e.target.value)}
-          placeholder={newMemberRole === 'manager' ? 'Telegram ID менеджера' : 'ID участника'}
+          placeholder={newMemberRole === 'manager' ? t('managers.telegramIdPlaceholder') : t('managers.memberIdPlaceholder')}
           className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
         />
         <select
@@ -160,14 +161,14 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
           onClick={() => addMutation.mutate()}
           disabled={addMutation.isPending}
         >
-          Добавить
+          {t('managers.add')}
         </Button>
       </div>
       <div className="rounded-2xl bg-[var(--surface-secondary)] p-4">
         <div className="mb-3">
-          <h4 className="text-sm font-semibold text-[var(--text-primary)]">Email-приглашение</h4>
+          <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('managers.inviteEmail.title')}</h4>
           <p className="text-xs text-[var(--text-muted)]">
-            Создаёт ссылку приглашения и отправляет письмо, если отправка email настроена. Менеджера также можно добавить по Telegram ID выше.
+            {t('managers.inviteEmail.description')}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -182,14 +183,14 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
             type="text"
             value={inviteFirstName}
             onChange={(e) => setInviteFirstName(e.target.value)}
-            placeholder="Имя"
+            placeholder={t('managers.firstNamePlaceholder')}
             className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           />
           <input
             type="text"
             value={inviteLastName}
             onChange={(e) => setInviteLastName(e.target.value)}
-            placeholder="Фамилия"
+            placeholder={t('managers.lastNamePlaceholder')}
             className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           />
           <select
@@ -208,7 +209,7 @@ export const ManagersList: React.FC<{ projectId: string }> = ({ projectId }) => 
             onClick={() => inviteMutation.mutate()}
             disabled={inviteMutation.isPending}
           >
-            Пригласить по email
+            {t('managers.inviteByEmail')}
           </Button>
         </div>
         {lastInviteLink ? (

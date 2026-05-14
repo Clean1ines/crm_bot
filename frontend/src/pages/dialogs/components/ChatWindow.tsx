@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useEffect, useRef, useState } from "react";
 import { ChevronLeft, Info, Send } from "lucide-react";
 
@@ -42,7 +43,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [limit] = useState(50);
   const [offset] = useState(0);
-  const clientName = getClientDisplayName(selectedThreadClient, "Клиент");
+  const clientName = getClientDisplayName(selectedThreadClient, t('ui.client.fallback'));
 
   useEffect(() => {
     if (!threadId) {
@@ -64,7 +65,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         );
         if (error) {
           console.error("Failed to load messages", error);
-          setLoadError("Не удалось загрузить сообщения");
+          setLoadError(t('dialogs.chat.loadMessagesFailed'));
           setMessages([]);
           return;
         }
@@ -81,7 +82,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
         }
       } catch (err) {
         console.error("Error loading messages", err);
-        setLoadError("Не удалось загрузить сообщения");
+        setLoadError(t('dialogs.chat.loadMessagesFailed'));
         setMessages([]);
       } finally {
         setLoadingMessages(false);
@@ -104,7 +105,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       const { error } = await threadsApi.reply(threadId, inputText);
       if (error) {
         console.error("Failed to send reply", error);
-        setSendError("Не удалось отправить ответ. Попробуйте ещё раз.");
+        setSendError(t('dialogs.chat.sendFailed'));
       } else {
         setInputText("");
         setTimeout(async () => {
@@ -125,7 +126,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       }
     } catch (err) {
       console.error("Error sending reply", err);
-      setSendError("Не удалось отправить ответ. Попробуйте ещё раз.");
+      setSendError(t('dialogs.chat.sendFailed'));
     } finally {
       setIsSending(false);
     }
@@ -158,19 +159,19 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   type="button"
                   onClick={onBack}
                   className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
-                  aria-label="Назад к списку диалогов"
+                  aria-label={t('dialogs.chat.backToList')}
                 >
                   <ChevronLeft className="h-5 w-5" />
                 </button>
               )}
               <div className="min-w-0">
                 <div className="truncate font-medium text-[var(--text-primary)]">
-                  {threadId ? clientName : "Выберите диалог"}
+                  {threadId ? clientName : t('dialogs.chat.selectDialog')}
                 </div>
                 <div className="text-xs text-[var(--text-muted)]">
                   {threadId
-                    ? "Открытая переписка"
-                    : "Сначала выберите диалог"}
+                    ? t('dialogs.chat.openConversation')
+                    : t('dialogs.chat.selectDialogFirst')}
                 </div>
               </div>
             </div>
@@ -183,7 +184,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   className="inline-flex min-h-9 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg bg-[var(--surface-hover)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--accent-primary)] disabled:opacity-50"
                 >
                   <Info className="h-4 w-4" />
-                  Сводка
+                  {t('dialogs.chat.summary')}
                 </button>
               )}
             </div>
@@ -192,7 +193,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 sm:space-y-6 sm:p-4">
             {isLoadingMessages && (
               <div className="text-center text-[var(--text-muted)]">
-                Загрузка сообщений...
+                {t('dialogs.chat.loadingMessages')}
               </div>
             )}
             {loadError && (
@@ -205,7 +206,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               threadId &&
               messages.length === 0 && (
                 <div className="text-center text-sm text-[var(--text-muted)]">
-                  Сообщений пока нет
+                  {t('dialogs.chat.noMessages')}
                 </div>
               )}
             {messages.map((msg, idx) => {
@@ -246,7 +247,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                     </div>
                     {msg.metadata?.explanation && (
                       <div className="mt-1 text-xs text-[var(--accent-primary)]">
-                        Почему ассистент так ответил: {msg.metadata.explanation}
+                        {t('dialogs.chat.explanationPrefix')} {msg.metadata.explanation}
                       </div>
                     )}
                   </div>
@@ -268,7 +269,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                       void handleSend();
                     }
                   }}
-                  placeholder="Введите ответ..."
+                  placeholder={t('dialogs.chat.replyPlaceholder')}
                   className="min-h-11 flex-1 resize-none rounded-lg bg-[var(--control-bg)] p-2 text-sm leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/20"
                   rows={mobile ? 1 : 2}
                   disabled={isSending}
@@ -279,7 +280,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                   className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--accent-primary)] px-3 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--accent-hover)] hover:shadow-sm disabled:opacity-50 sm:px-4"
                 >
                   <Send className="h-4 w-4" />
-                  <span className="hidden sm:inline">Отправить</span>
+                  <span className="hidden sm:inline">{t('dialogs.chat.send')}</span>
                 </button>
               </div>
               {sendError && (

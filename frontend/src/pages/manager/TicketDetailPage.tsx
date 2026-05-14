@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
@@ -12,7 +13,7 @@ import { getMessagePresentation } from '../../shared/lib/threadMessages';
 const getMutationErrorMessage = (error: unknown): string => (
   getErrorMessage(
     error,
-    'Ответ не удалось доставить клиенту. Попробуйте повторить позже.',
+    t('manager.ticket.replyDeliveryFailed'),
   )
 );
 
@@ -28,7 +29,7 @@ export const TicketDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['ticket_messages', threadId],
     queryFn: async () => {
-      if (!threadId) throw new Error('Диалог не выбран');
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
 
       const { data, error } = await threadsApi.getMessages(threadId);
       if (error) throw error;
@@ -81,13 +82,13 @@ export const TicketDetailPage: React.FC = () => {
 
   const ticketClient =
     (ticketInfo?.client as Client | undefined) ?? ticketState?.client ?? null;
-  const clientName = getClientDisplayName(ticketClient, 'Клиент');
+  const clientName = getClientDisplayName(ticketClient, t('ui.client.fallback'));
   const ticketStatus = ticketInfo?.status || ticketState?.status || 'waiting_manager';
   const isClosed = ticketStatus === 'closed';
 
   const claimMutation = useMutation({
     mutationFn: async () => {
-      if (!threadId) throw new Error('Диалог не выбран');
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
       const { error } = await threadsApi.claim(threadId);
       if (error) throw error;
     },
@@ -100,7 +101,7 @@ export const TicketDetailPage: React.FC = () => {
 
   const closeMutation = useMutation({
     mutationFn: async () => {
-      if (!threadId) throw new Error('Диалог не выбран');
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
       const { error } = await threadsApi.close(threadId);
       if (error) throw error;
     },
@@ -122,7 +123,7 @@ export const TicketDetailPage: React.FC = () => {
 
   const replyMutation = useMutation({
     mutationFn: async (message: string) => {
-      if (!threadId) throw new Error('Диалог не выбран');
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
       const { error } = await threadsApi.reply(threadId, message);
       if (error) throw error;
     },
@@ -142,17 +143,17 @@ export const TicketDetailPage: React.FC = () => {
   if (!threadId) {
     return (
       <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">
-        Не удалось открыть обращение
+        {t('manager.ticket.openFailed')}
       </div>
     );
   }
   if (messagesLoading) {
-    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">Загрузка...</div>;
+    return <div className="p-4 text-sm text-[var(--text-muted)] sm:p-6">{t('common.states.loading')}</div>;
   }
   if (messagesError) {
     return (
       <div className="p-4 text-sm text-[var(--accent-danger-text)] sm:p-6">
-        Ошибка: {getErrorMessage(messagesError, 'Не удалось загрузить историю диалога. Попробуйте обновить страницу.')}
+        {t('common.feedback.error')}: {getErrorMessage(messagesError, t('manager.ticket.messagesLoadFailed'))}
       </div>
     );
   }
@@ -162,13 +163,13 @@ export const TicketDetailPage: React.FC = () => {
       <div className="mb-6 flex flex-col gap-4 rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)]">
-            Тикет от {clientName}
+            {t('manager.ticket.title', { clientName })}
           </h1>
           <div className="mt-2 flex flex-wrap gap-4 text-sm text-[var(--text-secondary)]">
             <span>
-              Статус: <span className="font-medium">{threadStatusLabel(ticketStatus)}</span>
+              {t('manager.ticket.statusPrefix')} <span className="font-medium">{threadStatusLabel(ticketStatus)}</span>
             </span>
-            <span>Создан: {ticketCreatedAt}</span>
+            <span>{t('manager.ticket.createdPrefix')} {ticketCreatedAt}</span>
           </div>
         </div>
         <button
@@ -177,13 +178,13 @@ export const TicketDetailPage: React.FC = () => {
           disabled={closeMutation.isPending || isClosed}
           className="min-h-10 rounded-lg border border-[var(--divider-soft)] bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {closeMutation.isPending ? 'Закрытие...' : 'Закрыть тикет'}
+          {closeMutation.isPending ? t('manager.ticket.closing') : t('manager.ticket.close')}
         </button>
       </div>
 
       <div className="mb-6 max-h-96 overflow-y-auto rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
-        <h2 className="mb-3 font-medium text-[var(--text-primary)]">История диалога</h2>
-        {messages.length === 0 && <p className="text-[var(--text-muted)]">Нет сообщений</p>}
+        <h2 className="mb-3 font-medium text-[var(--text-primary)]">{t('manager.ticket.historyTitle')}</h2>
+        {messages.length === 0 && <p className="text-[var(--text-muted)]">{t('manager.ticket.noMessages')}</p>}
         <div className="space-y-3">
           {messages.map((msg) => {
             const presentation = getMessagePresentation(msg, ticketClient);
@@ -222,7 +223,7 @@ export const TicketDetailPage: React.FC = () => {
           onChange={(e) => setReplyText(e.target.value)}
           className="min-h-28 w-full rounded-lg bg-[var(--control-bg)] p-3 text-sm leading-relaxed text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           rows={4}
-          placeholder="Введите ответ..."
+          placeholder={t('manager.ticket.replyPlaceholder')}
           disabled={isClosed}
         />
         <button
@@ -231,7 +232,7 @@ export const TicketDetailPage: React.FC = () => {
           disabled={isClosed || replyMutation.isPending || !replyText.trim()}
           className="mt-3 min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {replyMutation.isPending ? 'Отправка...' : 'Отправить ответ'}
+          {replyMutation.isPending ? t('manager.ticket.sending') : t('manager.ticket.sendReply')}
         </button>
         {replyMutation.isError && (
           <div className="mt-3 rounded-lg bg-[var(--accent-danger-bg)] p-3 text-sm text-[var(--accent-danger-text)]">

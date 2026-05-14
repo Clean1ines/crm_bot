@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useMemo, useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -57,26 +58,26 @@ export const ChannelSettingsPage: React.FC = () => {
 
   const handleSaveClientToken = async () => {
     if (!selectedProjectId) {
-      toast.error('Сначала выберите проект');
+      toast.error(t('channels.error.selectProject'));
       return;
     }
     if (!clientToken.trim()) {
-      toast.error('Введите токен клиентского бота');
+      toast.error(t('channels.error.clientTokenRequired'));
       return;
     }
     try {
       await updateBotToken({ projectId: selectedProjectId, token: clientToken.trim() });
       setClientToken('');
-      toast.success('Клиентский бот подключён');
+      toast.success(t('channels.client.connected'));
     } catch (err) {
-      console.error('Ошибка сохранения токена:', err);
-      toast.error(getErrorMessage(err, 'Не удалось подключить клиентского бота. Проверьте токен и попробуйте снова.'));
+      console.error('Failed to save bot token:', err);
+      toast.error(getErrorMessage(err, t('channels.error.clientConnectFailed')));
     }
   };
 
   const handleRevokeClientToken = () => {
     if (!selectedProjectId) {
-      toast.error('Сначала выберите проект');
+      toast.error(t('channels.error.selectProject'));
       return;
     }
     setRevokeTarget('client');
@@ -84,26 +85,26 @@ export const ChannelSettingsPage: React.FC = () => {
 
   const handleSaveManagerToken = async () => {
     if (!selectedProjectId) {
-      toast.error('Сначала выберите проект');
+      toast.error(t('channels.error.selectProject'));
       return;
     }
     if (!managerToken.trim()) {
-      toast.error('Введите токен менеджерского бота');
+      toast.error(t('channels.error.managerTokenRequired'));
       return;
     }
     try {
       await updateManagerBotToken({ projectId: selectedProjectId, token: managerToken.trim() });
       setManagerToken('');
-      toast.success('Менеджерский бот подключён');
+      toast.success(t('channels.manager.connected'));
     } catch (err) {
-      console.error('Ошибка сохранения токена:', err);
-      toast.error(getErrorMessage(err, 'Не удалось подключить менеджерского бота. Проверьте токен и попробуйте снова.'));
+      console.error('Failed to save bot token:', err);
+      toast.error(getErrorMessage(err, t('channels.error.managerConnectFailed')));
     }
   };
 
   const handleRevokeManagerToken = () => {
     if (!selectedProjectId) {
-      toast.error('Сначала выберите проект');
+      toast.error(t('channels.error.selectProject'));
       return;
     }
     setRevokeTarget('manager');
@@ -118,17 +119,17 @@ export const ChannelSettingsPage: React.FC = () => {
     try {
       if (revokeTarget === 'client') {
         await updateBotToken({ projectId: selectedProjectId, token: null });
-        toast.success('Клиентский бот откреплён');
+        toast.success(t('channels.client.revoked'));
       } else {
         await updateManagerBotToken({ projectId: selectedProjectId, token: null });
-        toast.success('Менеджерский бот откреплён');
+        toast.success(t('channels.manager.revoked'));
       }
       closeRevokeModal();
     } catch (err) {
-      console.error('Ошибка открепления бота:', err);
+      console.error('Failed to revoke bot token:', err);
       const fallback = revokeTarget === 'client'
-        ? 'Не удалось открепить клиентского бота. Попробуйте ещё раз.'
-        : 'Не удалось открепить менеджерского бота. Попробуйте ещё раз.';
+        ? t('channels.error.clientRevokeFailed')
+        : t('channels.error.managerRevokeFailed');
       toast.error(getErrorMessage(err, fallback));
     }
   };
@@ -136,7 +137,7 @@ export const ChannelSettingsPage: React.FC = () => {
   if (projectsLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-[var(--text-muted)]">Загрузка проектов...</div>
+        <div className="text-[var(--text-muted)]">{t('channels.projects.loading')}</div>
       </div>
     );
   }
@@ -145,7 +146,7 @@ export const ChannelSettingsPage: React.FC = () => {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
         <div className="rounded-lg bg-[var(--accent-danger-bg)] p-4 text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)]">
-          Не удалось загрузить проекты.
+          {t('channels.projects.loadFailed')}
         </div>
       </div>
     );
@@ -154,7 +155,7 @@ export const ChannelSettingsPage: React.FC = () => {
   if (!currentProject && safeProjects.length === 0) {
     return (
       <div className="p-4 text-center sm:p-6 lg:p-8">
-        <p>Нет проектов. Создайте первый проект через боковое меню.</p>
+        <p>{t('channels.projects.empty')}</p>
       </div>
     );
   }
@@ -163,7 +164,7 @@ export const ChannelSettingsPage: React.FC = () => {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
         <div className="rounded-lg bg-[var(--accent-warning-bg)] p-4 text-[var(--accent-warning)] shadow-[var(--shadow-sm)]">
-          Проект не выбран. Выберите проект в боковом меню.
+          {t('channels.projects.notSelected')}
         </div>
       </div>
     );
@@ -176,41 +177,41 @@ export const ChannelSettingsPage: React.FC = () => {
     : revokeTarget === 'manager'
       ? isUpdatingManagerBotToken
       : false;
-  const revokeBotLabel = revokeTarget === 'client' ? 'клиентского бота' : 'менеджерского бота';
+  const revokeBotLabel = revokeTarget === 'client' ? t('channels.client.botLabelAccusative') : t('channels.manager.botLabelAccusative');
 
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">Каналы</h1>
+        <h1 className="text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">{t('channels.title')}</h1>
         <p className="text-[var(--text-muted)] mt-2">
-          Настройте Telegram ботов для работы с клиентами и менеджерами
+          {t('channels.description')}
         </p>
       </div>
 
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-3 text-lg font-semibold leading-tight text-[var(--text-primary)]">Клиентский бот</h2>
+        <h2 className="mb-3 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('channels.client.title')}</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
-          Бот, который будет общаться с клиентами.
+          {t('channels.client.description')}
         </p>
 
         {hasClient ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-[var(--accent-success-bg)] p-3 text-sm text-[var(--accent-success-text)] shadow-[var(--shadow-sm)]">
-              <strong>✓ Бот подключён</strong> – @{currentProject.client_bot_username}
+              <strong>{t('channels.bot.connected')}</strong> – @{currentProject.client_bot_username}
             </div>
             <button
               onClick={handleRevokeClientToken}
               disabled={isUpdatingBotToken}
               className="min-h-10 rounded-lg bg-[var(--accent-danger)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-50"
             >
-              {isUpdatingBotToken ? 'Открепление...' : 'Открепить бота'}
+              {isUpdatingBotToken ? t('channels.bot.revoking') : t('channels.bot.revoke')}
             </button>
           </div>
         ) : (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">
-                Токен бота
+                {t('channels.bot.tokenLabel')}
               </label>
               <div className="flex gap-2">
                 <input
@@ -224,11 +225,11 @@ export const ChannelSettingsPage: React.FC = () => {
                   onClick={() => setShowClientToken(!showClientToken)}
                   className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)]"
                 >
-                  {showClientToken ? 'Скрыть' : 'Показать'}
+                  {showClientToken ? t('common.actions.hide') : t('common.actions.show')}
                 </button>
               </div>
               <p className="text-xs text-[var(--text-muted)] mt-1">
-                Получите токен у <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">@BotFather</a> в Telegram
+                {t('channels.bot.tokenHelpPrefix')} <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">@BotFather</a> {t('channels.bot.tokenHelpSuffix')}
               </p>
             </div>
             <button
@@ -236,36 +237,36 @@ export const ChannelSettingsPage: React.FC = () => {
               disabled={isUpdatingBotToken || !clientToken.trim()}
               className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isUpdatingBotToken ? 'Подключение...' : 'Подключить бота'}
+              {isUpdatingBotToken ? t('channels.bot.connecting') : t('channels.bot.connect')}
             </button>
           </div>
         )}
       </div>
 
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-3 text-lg font-semibold leading-tight text-[var(--text-primary)]">Менеджерский бот</h2>
+        <h2 className="mb-3 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('channels.manager.title')}</h2>
         <p className="text-sm text-[var(--text-muted)] mb-4">
-          Бот, который будет уведомлять менеджеров об эскалациях.
+          {t('channels.manager.description')}
         </p>
 
         {hasManager ? (
           <div className="space-y-4">
             <div className="rounded-lg bg-[var(--accent-success-bg)] p-3 text-sm text-[var(--accent-success-text)] shadow-[var(--shadow-sm)]">
-              <strong>✓ Бот подключён</strong> – @{currentProject.manager_bot_username}
+              <strong>{t('channels.bot.connected')}</strong> – @{currentProject.manager_bot_username}
             </div>
             <button
               onClick={handleRevokeManagerToken}
               disabled={isUpdatingManagerBotToken}
               className="min-h-10 rounded-lg bg-[var(--accent-danger)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-50"
             >
-              {isUpdatingManagerBotToken ? 'Открепление...' : 'Открепить бота'}
+              {isUpdatingManagerBotToken ? t('channels.bot.revoking') : t('channels.bot.revoke')}
             </button>
           </div>
         ) : (
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-[var(--text-primary)] mb-1">
-                Токен бота
+                {t('channels.bot.tokenLabel')}
               </label>
               <div className="flex gap-2">
                 <input
@@ -279,11 +280,11 @@ export const ChannelSettingsPage: React.FC = () => {
                   onClick={() => setShowManagerToken(!showManagerToken)}
                   className="min-h-10 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-secondary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)]"
                 >
-                  {showManagerToken ? 'Скрыть' : 'Показать'}
+                  {showManagerToken ? t('common.actions.hide') : t('common.actions.show')}
                 </button>
               </div>
               <p className="text-xs text-[var(--text-muted)] mt-1">
-                Получите токен у <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">@BotFather</a> в Telegram
+                {t('channels.bot.tokenHelpPrefix')} <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-primary)] hover:underline">@BotFather</a> {t('channels.bot.tokenHelpSuffix')}
               </p>
             </div>
             <button
@@ -291,7 +292,7 @@ export const ChannelSettingsPage: React.FC = () => {
               disabled={isUpdatingManagerBotToken || !managerToken.trim()}
               className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isUpdatingManagerBotToken ? 'Подключение...' : 'Подключить бота'}
+              {isUpdatingManagerBotToken ? t('channels.bot.connecting') : t('channels.bot.connect')}
             </button>
           </div>
         )}
@@ -299,12 +300,11 @@ export const ChannelSettingsPage: React.FC = () => {
       <BaseModal
         isOpen={revokeTarget !== null}
         onClose={closeRevokeModal}
-        title="Открепить бота"
-        cancelLabel="Отмена"
+        title={t('channels.revokeModal.title')}
+        cancelLabel={t('common.actions.cancel')}
       >
         <p className="text-sm leading-relaxed text-[var(--text-primary)]">
-          Вы уверены, что хотите открепить {revokeBotLabel}? После этого бот перестанет
-          работать для этого проекта, пока вы не подключите новый токен.
+          {t('channels.revokeModal.confirm', { bot: revokeBotLabel })}
         </p>
         <div className="mt-5 flex justify-end">
           <button
@@ -313,7 +313,7 @@ export const ChannelSettingsPage: React.FC = () => {
             disabled={isRevokingBotToken}
             className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:cursor-wait disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
           >
-            {isRevokingBotToken ? 'Открепление...' : 'Открепить'}
+            {isRevokingBotToken ? t('channels.bot.revoking') : t('channels.bot.revokeShort')}
           </button>
         </div>
       </BaseModal>

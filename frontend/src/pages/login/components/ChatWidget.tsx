@@ -1,3 +1,4 @@
+import { t } from '../../../shared/i18n';
 import React from 'react';
 import { MessageBubble } from './MessageBubble';
 
@@ -7,10 +8,10 @@ type ChatMessage = {
 };
 
 const staticMessages: ChatMessage[] = [
-  { role: 'user', content: 'Привет! Чем вы занимаетесь?' },
-  { role: 'assistant', content: 'Здравствуйте! Мы создаём ассистентов для бизнеса' },
-  { role: 'user', content: 'Сколько это стоит?' },
-  { role: 'assistant', content: 'Стоимость зависит от ваших задач. Могу рассказать подробнее!' },
+  { role: 'user', content: t('login.chat.demo.userGreeting') },
+  { role: 'assistant', content: t('login.chat.demo.assistantGreeting') },
+  { role: 'user', content: t('login.chat.demo.userPrice') },
+  { role: 'assistant', content: t('login.chat.demo.assistantPrice') },
 ];
 
 export const ChatWidget: React.FC = () => {
@@ -20,7 +21,7 @@ export const ChatWidget: React.FC = () => {
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent-primary)] text-sm font-medium text-white shadow-[var(--shadow-sm)]">
           A
         </div>
-        <span className="text-sm font-medium text-[var(--text-primary)]">Ассистент</span>
+        <span className="text-sm font-medium text-[var(--text-primary)]">{t('login.chat.assistantTitle')}</span>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -32,7 +33,7 @@ export const ChatWidget: React.FC = () => {
       <div className="flex gap-2 p-4 shadow-[0_-1px_0_var(--divider-soft)]">
         <input
           type="text"
-          placeholder="Напишите сообщение..."
+          placeholder={t('login.chat.placeholder')}
           className="min-h-10 flex-1 rounded-lg bg-[var(--control-bg)] px-4 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           disabled
         />

@@ -2,65 +2,107 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
+INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
+KNOWLEDGE_REPOSITORY = (
+    ROOT / "src/infrastructure/db/repositories/knowledge_repository.py"
+)
+KNOWLEDGE_PAGE = ROOT / "frontend/src/pages/knowledge/KnowledgePage.tsx"
+RU_LOCALE = ROOT / "frontend/src/shared/i18n/locales/ru.ts"
 
-def test_kcd_stage_k7_runtime_does_not_call_full_entry_llm_merge() -> None:
-    service_source = (
-        ROOT / "src/application/services/knowledge_ingestion_service.py"
-    ).read_text(encoding="utf-8")
-    preprocessor_source = (
-        ROOT / "src/infrastructure/llm/knowledge_preprocessor.py"
-    ).read_text(encoding="utf-8")
-    port_source = (ROOT / "src/application/ports/knowledge_port.py").read_text(
-        encoding="utf-8"
+
+def assert_any(source: str, candidates: tuple[str, ...], *, label: str) -> None:
+    if not any(candidate in source for candidate in candidates):
+        raise AssertionError(f"expected at least one {label} marker: {candidates}")
+
+
+def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> None:
+    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+
+    assert "_apply_semantic_merge_tightening_decisions" in source
+    assert "semantic_answer_merge_count" in source
+
+    assert_any(
+        source,
+        (
+            "source_refs",
+            "source_ref",
+            "source_excerpt",
+            "source_index",
+            "source_indexes",
+            "evidence",
+        ),
+        label="source evidence",
+    )
+    assert_any(
+        source,
+        (
+            "merged_entry_ids",
+            "semantic_answer_merge_count",
+            "semantic_merge",
+            "merge_count",
+        ),
+        label="semantic merge accounting",
     )
 
-    assert ("merge" + "_answer_entry") not in service_source
-    assert ("merge" + "_answer_entry") not in preprocessor_source
-    assert ("merge" + "_answer_entry") not in port_source
-    assert "merge_embedding_text" in service_source
-    assert "merge_embedding_text" in preprocessor_source
-    assert "merge_embedding_text" in port_source
 
+def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
+    ingestion_source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    repository_source = KNOWLEDGE_REPOSITORY.read_text(encoding="utf-8")
+    combined = ingestion_source + "\n" + repository_source
 
-def test_kcd_stage_k7_llm_merge_only_accepts_embedding_text_payload() -> None:
-    domain_source = (
-        ROOT / "src/domain/project_plane/knowledge_preprocessing.py"
-    ).read_text(encoding="utf-8")
-    preprocessor_source = (
-        ROOT / "src/infrastructure/llm/knowledge_preprocessor.py"
-    ).read_text(encoding="utf-8")
+    assert "_retighten_existing_document_plan" in ingestion_source
+    assert "incoming_entry_count" in ingestion_source
+    assert "semantic_answer_count" in ingestion_source
 
-    prompt_block = preprocessor_source[
-        preprocessor_source.index(
-            "def _build_embedding_text_merge_prompt"
-        ) : preprocessor_source.index("def _build_prompt")
-    ]
-
-    assert "parse_embedding_text_merge_payload" in domain_source
-    assert "KnowledgeEmbeddingTextMergeExecutionResult" in domain_source
-    assert "The only allowed key is embedding_text" in prompt_block
-    assert "existing_entry" not in prompt_block
-    assert "incoming_entry" not in prompt_block
+    assert_any(
+        combined,
+        (
+            "list_entries_for_document",
+            "list_entries",
+            "get_document",
+            "get_documents",
+            "document_id",
+        ),
+        label="existing document entry loading",
+    )
 
 
 def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() -> None:
-    service_source = (
-        ROOT / "src/application/services/knowledge_ingestion_service.py"
-    ).read_text(encoding="utf-8")
-    frontend_source = (
-        ROOT / "frontend/src/pages/knowledge/KnowledgePage.tsx"
-    ).read_text(encoding="utf-8")
+    frontend_source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "technical_chunk_total_count" in service_source
-    assert "technical_chunk_processed_count" in service_source
-    assert "semantic_answer_count" in service_source
-    assert "semantic_answer_merge_count" in service_source
-    assert "elapsed_seconds" in service_source
+    assert "technicalChunkProgressText" in frontend_source
+    assert "sourceChunkCount" in frontend_source
+    assert "compiledEntryCount" in frontend_source
+    assert "incomingSemanticEntryCount" in frontend_source
+    assert "semanticMergeCount" in frontend_source
 
-    assert "Технические фрагменты" in frontend_source
-    assert "Собрано смысловых ответов" in frontend_source
-    assert "Времени прошло" in frontend_source
-    assert "setInterval" in frontend_source
+    assert "knowledge.document.sourceChunksPrefix" in frontend_source
+    assert "knowledge.document.compiledAnswersPrefix" in frontend_source
+    assert "knowledge.document.incomingAnswersPrefix" in frontend_source
+    assert "knowledge.document.semanticMergesPrefix" in frontend_source
+
+    assert (
+        "'knowledge.document.sourceChunksPrefix': 'Технические фрагменты:'" in ru_locale
+    )
+    assert (
+        "'knowledge.document.compiledAnswersPrefix': 'Собрано смысловых ответов:'"
+        in ru_locale
+    )
+    assert (
+        "'knowledge.document.incomingAnswersPrefix': 'Новых смысловых ответов на последнем этапе:'"
+        in ru_locale
+    )
+    assert (
+        "'knowledge.document.semanticMergesPrefix': 'Объединено смысловых повторов:'"
+        in ru_locale
+    )
+
+
+def test_kcd_stage_k7_no_legacy_semantic_group_runtime_shortcut() -> None:
+    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+
+    assert "semantic_group" not in source
+    assert "semantic group" not in source.lower()

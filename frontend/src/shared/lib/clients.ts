@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 import {
   getDisplayInitials,
   getDisplayName,
@@ -9,7 +11,7 @@ type ClientLike = DisplayNameLike & {
   chat_id?: number | string | null;
 };
 
-export const getClientDisplayName = (client?: ClientLike | null, fallback = 'Клиент'): string => {
+export const getClientDisplayName = (client?: ClientLike | null, fallback = t('ui.client.fallback')): string => {
   return getDisplayName(client, fallback);
 };
 
@@ -18,5 +20,5 @@ export const getClientSecondaryText = (client?: ClientLike | null): string | nul
 };
 
 export const getClientInitials = (client?: ClientLike | null): string => {
-  return getDisplayInitials(client, 'Клиент');
+  return getDisplayInitials(client, t('ui.client.fallback'));
 };

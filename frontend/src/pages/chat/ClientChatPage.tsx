@@ -1,3 +1,4 @@
+import { t } from '../../shared/i18n';
 import React, { useState, useRef, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { streamFetch } from '@shared/api/core/stream';
@@ -60,7 +61,7 @@ export const ClientChatPage: React.FC = () => {
           const newMessages = [...prev];
           const lastIndex = newMessages.length - 1;
           if (newMessages[lastIndex]?.role === 'assistant') {
-            newMessages[lastIndex] = { ...newMessages[lastIndex], content: 'Не удалось получить ответ. Попробуйте отправить сообщение ещё раз.' };
+            newMessages[lastIndex] = { ...newMessages[lastIndex], content: t('chat.error.responseFailed') };
           }
           return newMessages;
         });
@@ -88,7 +89,7 @@ export const ClientChatPage: React.FC = () => {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           className="min-h-11 flex-1 rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-          placeholder="Введите сообщение..."
+          placeholder={t('chat.input.placeholder')}
           disabled={isStreaming}
         />
         <button
@@ -96,7 +97,7 @@ export const ClientChatPage: React.FC = () => {
           disabled={isStreaming}
           className="min-h-11 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-50"
         >
-          Отправить
+          {t('chat.input.send')}
         </button>
       </div>
     </div>

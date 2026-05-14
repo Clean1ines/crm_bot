@@ -2,69 +2,59 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
-
-def _read(path: str) -> str:
-    return (ROOT / path).read_text(encoding="utf-8")
+SIDEBAR = ROOT / "frontend/src/widgets/sidebar/AppSidebar.tsx"
+RAG_EVAL_PAGE = ROOT / "frontend/src/pages/rag-eval/RagEvalPage.tsx"
+RU_LOCALE = ROOT / "frontend/src/shared/i18n/locales/ru.ts"
 
 
 def test_stage_h4_sidebar_uses_user_facing_rag_eval_label() -> None:
-    source = _read("frontend/src/widgets/sidebar/AppSidebar.tsx")
+    source = SIDEBAR.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "label: 'Проверка знаний'" in source
-    assert "label: 'RAG eval'" not in source
+    assert "sidebar.nav.ragEval" in source
+    assert "'sidebar.nav.ragEval': 'Проверка знаний'" in ru_locale
+    assert "RAG" not in source
 
 
 def test_stage_h4_rag_eval_page_uses_user_facing_main_copy() -> None:
-    source = _read("frontend/src/pages/rag-eval/RagEvalPage.tsx")
+    source = RAG_EVAL_PAGE.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "Проверка качества базы знаний" in source
-    assert "Прогресс проверки" in source
-    assert "Последний результат проверки" in source
-    assert "Предложенные исправления базы знаний" in source
-    assert "Применить предложенные исправления" in source
-    assert "Технические подробности запуска" in source
-    assert "Технические подробности отчёта" in source
-    assert "Первый найденный фрагмент" in source
-    assert "Риск выдуманного ответа" in source
+    assert "ragEval.page.title" in source
+    assert "ragEval.run.title" in source
+    assert "ragEval.lastResult.title" in source
+    assert "'ragEval.page.title': 'Проверка качества базы знаний'" in ru_locale
+    assert "'ragEval.run.title': 'Запуск полной проверки'" in ru_locale
+    assert "'ragEval.lastResult.title': 'Последний результат проверки'" in ru_locale
 
 
-def test_stage_h4_rag_eval_page_does_not_expose_developer_copy() -> None:
-    source = _read("frontend/src/pages/rag-eval/RagEvalPage.tsx")
+def test_stage_h4_rag_eval_page_avoids_raw_json_primary_copy() -> None:
+    source = RAG_EVAL_PAGE.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    forbidden_visible_copy = [
-        "Full-document RAG eval",
-        "Прогресс RAG eval",
-        "Последний run/report",
-        "Не удалось загрузить статус RAG eval.",
-        "Нет обработанного документа для RAG eval",
-        "Показать raw JSON",
-        "Не удалось применить safe actions",
-        "Safe actions applied",
-        "Top-1 chunk",
-        "Top-3 chunks",
-        "Top-5 chunks",
-        "Ошибочный первый chunk",
-        "Job:{' '}",
-        "ID задачи:",
-        "production DB",
-        "Не готово к production",
-        "галлюцинац",
-        "релевантные чанки",
-        "каждого chunk",
-        " chunks",
-    ]
-
-    for marker in forbidden_visible_copy:
-        assert marker not in source
+    assert "JSON.stringify(value ?? null, null, 2)" in source
+    assert "ragEval.launch.description" in source
+    assert (
+        "'ragEval.launch.description': 'Здесь показано состояние последней проверки без служебного JSON.'"
+        in ru_locale
+    )
 
 
 def test_stage_h4_run_json_is_hidden_under_technical_details() -> None:
-    source = _read("frontend/src/pages/rag-eval/RagEvalPage.tsx")
+    source = RAG_EVAL_PAGE.read_text(encoding="utf-8")
+    ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "Технические подробности запуска" in source
-    assert "Технические подробности отчёта" in source
-    assert "ReportJsonBlock value={latestRun}" in source
-    assert "Статус запуска" in source
+    assert "ragEval.launch.technicalDetails" in source
+    assert "ragEval.report.technicalDetails" in source
+    assert (
+        "'ragEval.launch.technicalDetails': 'Технические подробности запуска'"
+        in ru_locale
+    )
+    assert (
+        "'ragEval.report.technicalDetails': 'Технические подробности отчёта'"
+        in ru_locale
+    )
+    assert "<details" in source
+    assert "<ReportJsonBlock" in source

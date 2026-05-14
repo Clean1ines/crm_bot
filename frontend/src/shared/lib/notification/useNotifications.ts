@@ -2,6 +2,7 @@
 import { useCallback } from 'react';
 import { create } from 'zustand';
 import { TimeoutError } from '@shared/api';
+import { t } from '../../i18n';
 
 interface Notification {
   id: number;
@@ -35,11 +36,14 @@ export const useNotification = () => {
   }, [addNotification]);
 
   // #ADDED: Helper for API errors with timeout handling
-  const showApiError = useCallback((error: unknown, defaultMessage: string = 'Ошибка запроса') => {
+  const showApiError = useCallback((error: unknown, defaultMessage: string = t('notification.api.default')) => {
     if (error instanceof TimeoutError) {
-      showNotification('⏱️ Превышено время ожидания ответа сервера (30s)', 'error');
+      showNotification(t('notification.api.timeout'), 'error');
     } else if (error instanceof Error) {
-      showNotification(`${defaultMessage}: ${error.message}`, 'error');
+      showNotification(t('notification.api.withMessage', {
+        defaultMessage,
+        message: error.message,
+      }), 'error');
     } else {
       showNotification(defaultMessage, 'error');
     }

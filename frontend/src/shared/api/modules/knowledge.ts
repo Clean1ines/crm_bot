@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import { authedJsonRequest, authedMultipartRequest } from '../core/http';
 
 export type KnowledgePreprocessingMode = 'plain' | 'faq' | 'price_list' | 'instruction';
@@ -11,23 +12,23 @@ export type KnowledgePreprocessingModeOption = {
 export const KNOWLEDGE_PREPROCESSING_MODE_OPTIONS: KnowledgePreprocessingModeOption[] = [
   {
     value: 'faq',
-    label: 'FAQ / база знаний',
-    description: 'Собирает из документа проверяемые ответы для вопросов клиентов, условий и FAQ.',
+    label: t('knowledge.preprocessing.faq.label'),
+    description: t('knowledge.preprocessing.faq.description'),
   },
   {
     value: 'price_list',
-    label: 'Прайс / каталог',
-    description: 'Собирает цены, услуги, тарифы и каталоги в ответы с привязкой к источнику.',
+    label: t('knowledge.preprocessing.priceList.label'),
+    description: t('knowledge.preprocessing.priceList.description'),
   },
   {
     value: 'instruction',
-    label: 'Инструкции / правила',
-    description: 'Собирает регламенты, политики и процедуры в ясные ответы с опорой на документ.',
+    label: t('knowledge.preprocessing.instruction.label'),
+    description: t('knowledge.preprocessing.instruction.description'),
   },
   {
     value: 'plain',
-    label: 'Быстрая загрузка',
-    description: 'Сохраняет документ без улучшенной смысловой сборки. Подходит только для быстрых черновых загрузок.',
+    label: t('knowledge.preprocessing.plain.label'),
+    description: t('knowledge.preprocessing.plain.description'),
   },
 ];
 
