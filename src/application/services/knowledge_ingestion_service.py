@@ -1103,6 +1103,39 @@ def _semantic_merge_text_units(value: str) -> tuple[str, ...]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _SemanticMergeCleanupResult:
+    text: str
+    original_unit_count: int
+    kept_unit_count: int
+
+    @property
+    def removed_unit_count(self) -> int:
+        return max(0, self.original_unit_count - self.kept_unit_count)
+
+
+def _cleanup_semantic_merge_embedding_text_with_metrics(
+    value: str,
+) -> _SemanticMergeCleanupResult:
+    units = _semantic_merge_text_units(value)
+    if not units:
+        cleaned = _clean_optional_text(value)
+        count = 1 if cleaned else 0
+        return _SemanticMergeCleanupResult(
+            text=cleaned,
+            original_unit_count=count,
+            kept_unit_count=count,
+        )
+
+    cleaned_text = _cleanup_semantic_merge_embedding_text(value)
+    kept_units = _semantic_merge_text_units(cleaned_text)
+    return _SemanticMergeCleanupResult(
+        text=cleaned_text,
+        original_unit_count=len(units),
+        kept_unit_count=len(kept_units),
+    )
+
+
 def _cleanup_semantic_merge_embedding_text(value: str) -> str:
     """Remove deterministic exact/near sentence duplicates from LLM merge text.
 
@@ -2249,6 +2282,19 @@ class KnowledgeIngestionService:
             decisions=decisions,
         )
 
+        cleanup_results = tuple(
+            _cleanup_semantic_merge_embedding_text_with_metrics(
+                decision.merged_embedding_text
+            )
+            for decision in decisions
+            if decision.is_merge and decision.merged_embedding_text
+        )
+        metrics["retighten_cleanup_original_unit_count"] = sum(
+            result.original_unit_count for result in cleanup_results
+        )
+        metrics["retighten_cleanup_removed_unit_count"] = sum(
+            result.removed_unit_count for result in cleanup_results
+        )
         metrics["decision_count"] = len(decisions)
         metrics["merge_decision_count"] = sum(
             1 for decision in decisions if decision.is_merge

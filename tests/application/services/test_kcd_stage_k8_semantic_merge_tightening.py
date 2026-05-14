@@ -4,6 +4,7 @@ from src.application.services.knowledge_ingestion_service import (
     KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
     _apply_semantic_merge_tightening_decisions,
     _cleanup_semantic_merge_embedding_text,
+    _cleanup_semantic_merge_embedding_text_with_metrics,
     _semantic_merge_candidate_from_entry,
     _semantic_merge_suspect_groups_from_entries,
 )
@@ -166,3 +167,14 @@ def test_stage_k8_cleanup_removes_repeated_llm_merge_sentences() -> None:
 
     assert cleaned.count("AI-ассистент отвечает") == 1
     assert cleaned.count("Историю диалогов можно смотреть") == 1
+
+
+def test_stage_k8_cleanup_reports_removed_unit_count() -> None:
+    result = _cleanup_semantic_merge_embedding_text_with_metrics(
+        "Бот отвечает ночью. Бот отвечает ночью. История диалогов доступна."
+    )
+
+    assert result.original_unit_count == 3
+    assert result.kept_unit_count == 2
+    assert result.removed_unit_count == 1
+    assert result.text.count("Бот отвечает ночью") == 1
