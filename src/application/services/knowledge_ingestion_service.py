@@ -2325,6 +2325,28 @@ class KnowledgeIngestionService:
             for decision in decisions
             if _semantic_merge_decision_is_too_noisy(decision)
         )
+        rejected_noisy_merge_examples: tuple[JsonObject, ...] = tuple(
+            cast(
+                JsonObject,
+                {
+                    "group_id": decision.group_id,
+                    "candidate_ids": tuple(decision.candidate_ids),
+                    "survivor_title": decision.survivor_title,
+                    "merged_embedding_text_preview": _limit_compiled_text(
+                        decision.merged_embedding_text,
+                        max_chars=240,
+                    ),
+                    "cleanup_original_unit_count": (
+                        cleanup := _cleanup_semantic_merge_embedding_text_with_metrics(
+                            decision.merged_embedding_text
+                        )
+                    ).original_unit_count,
+                    "cleanup_removed_unit_count": cleanup.removed_unit_count,
+                },
+            )
+            for decision in decisions
+            if _semantic_merge_decision_is_too_noisy(decision)
+        )[:5]
         decisions = _reject_noisy_semantic_merge_decisions(decisions)
 
         plan = _retighten_existing_document_plan(
@@ -2348,6 +2370,10 @@ class KnowledgeIngestionService:
         metrics["rejected_noisy_merge_decision_count"] = (
             rejected_noisy_merge_decision_count
         )
+        if rejected_noisy_merge_examples:
+            metrics["rejected_noisy_merge_examples"] = list(
+                rejected_noisy_merge_examples
+            )
         metrics["decision_count"] = len(decisions)
         metrics["merge_decision_count"] = sum(
             1 for decision in decisions if decision.is_merge
