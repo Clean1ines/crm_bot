@@ -319,6 +319,18 @@ def _trace_contains_query(value: object, query: str) -> bool:
     return False
 
 
+def _rank_text_from_value(value: object) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        return " ".join(_rank_text_from_value(item) for item in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        return " ".join(_rank_text_from_value(item) for item in value)
+    return str(value)
+
+
 def _search_trace_from_row(row: _RowLookup, *, query: str) -> KnowledgeSearchTraceView:
     lexical_score = _row_float(row, "lexical_score")
     vector_score = _row_float(row, "vector_score")
@@ -1181,13 +1193,66 @@ class KnowledgeRepository:
             )
             lexical_bonus = min(0.35, lexical_score * 4.0)
 
+            title_text = _rank_text_from_value(_optional_row_value(row, "title"))
+            questions_text = _rank_text_from_value(
+                _optional_row_value(row, "questions")
+            )
+            synonyms_text = _rank_text_from_value(_optional_row_value(row, "synonyms"))
+            tags_text = _rank_text_from_value(_optional_row_value(row, "tags"))
+
+            title_lower = title_text.lower()
+            questions_lower = questions_text.lower()
+
+            title_overlap = self._keyword_overlap(query, title_text)
+            questions_overlap = self._keyword_overlap(query, questions_text)
+            synonyms_overlap = self._keyword_overlap(query, synonyms_text)
+            tags_overlap = self._keyword_overlap(query, tags_text)
+
+            title_match = bool(
+                query_lower and (query_lower in title_lower or title_overlap >= 0.72)
+            )
+            question_match = bool(
+                query_lower
+                and (query_lower in questions_lower or questions_overlap >= 0.72)
+            )
+
+            question_bonus = 0.58 if question_match else questions_overlap * 0.34
+            title_bonus = 0.48 if title_match else title_overlap * 0.24
+            synonym_bonus = synonyms_overlap * 0.18
+            tag_bonus = tags_overlap * 0.10
+
+            payload_len = max(
+                len(content),
+                len(str(_optional_row_value(row, "embedding_text") or "")),
+            )
+            length_penalty = 0.0
+            if payload_len > 2500:
+                length_penalty = 0.18
+            elif payload_len > 1400:
+                length_penalty = 0.08
+
+            generic_long_penalty = (
+                0.16
+                if payload_len > 1800
+                and token_overlap < 0.35
+                and not title_match
+                and not question_match
+                else 0.0
+            )
+
             score = (
-                vector_score * 0.48
+                vector_score * 0.26
                 + lexical_bonus
-                + exact_score * 0.20
-                + token_overlap * 0.32
+                + exact_score * 0.18
+                + token_overlap * 0.24
                 + rare_token_bonus
                 + exact_phrase_bonus
+                + question_bonus
+                + title_bonus
+                + synonym_bonus
+                + tag_bonus
+                - length_penalty
+                - generic_long_penalty
             )
 
             method = "hybrid"
