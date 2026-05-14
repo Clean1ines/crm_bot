@@ -44,6 +44,7 @@ class KnowledgeSearchTraceView:
     final_score: float = 0.0
     retrieval_surface_role: str = "runtime"
     displayed_field: str = "answer"
+    is_production_safe: bool = True
 
 
 @dataclass(frozen=True, slots=True)

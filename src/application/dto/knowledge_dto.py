@@ -141,6 +141,7 @@ class KnowledgeSearchTraceDto:
     final_score: float
     retrieval_surface_role: str
     displayed_field: str
+    is_production_safe: bool
 
     @classmethod
     def from_view(cls, trace: KnowledgeSearchTraceView) -> "KnowledgeSearchTraceDto":
@@ -154,6 +155,7 @@ class KnowledgeSearchTraceDto:
             final_score=trace.final_score,
             retrieval_surface_role=trace.retrieval_surface_role,
             displayed_field=trace.displayed_field,
+            is_production_safe=trace.is_production_safe,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -167,6 +169,7 @@ class KnowledgeSearchTraceDto:
             "final_score": self.final_score,
             "retrieval_surface_role": self.retrieval_surface_role,
             "displayed_field": self.displayed_field,
+            "is_production_safe": self.is_production_safe,
         }
 
 

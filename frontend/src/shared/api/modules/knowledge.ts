@@ -42,6 +42,7 @@ export type KnowledgeSearchTrace = {
   final_score: number;
   retrieval_surface_role: string;
   displayed_field: string;
+  is_production_safe: boolean;
 };
 
 export type KnowledgePreviewResult = {

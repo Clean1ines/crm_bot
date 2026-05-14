@@ -717,7 +717,7 @@ def _merge_answer_text(left: str, right: str) -> str:
     if left_normalized and left_normalized in right_normalized:
         return right_clean
 
-    return f"{left_clean}\n\n{right_clean}"
+    return _cleanup_semantic_merge_embedding_text(f"{left_clean}\n\n{right_clean}")
 
 
 def _source_excerpts_from_preprocessing_entry(
@@ -864,9 +864,13 @@ def _compiled_answer_drafts_from_preprocessing_result(
     return tuple(grouped[key] for key in ordered_keys)
 
 
-KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS = 16
-KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE = 8
-KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS = 1400
+KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS = 24
+KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE = 2
+KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS = 900
+KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS = 1000
+KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_QUESTION_LIMIT = 8
+KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_SYNONYM_LIMIT = 12
+KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_TAG_LIMIT = 8
 KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS = 3
 
 
@@ -930,48 +934,95 @@ def _semantic_merge_token_similarity(
     return len(left_set & right_set) / len(left_set | right_set)
 
 
+def _semantic_merge_question_intent_text(entry: KnowledgePreprocessingEntry) -> str:
+    explicit_intent = " ".join(
+        part
+        for part in (
+            " ".join(_text_tuple(entry.questions)),
+            " ".join(_text_tuple(entry.synonyms)),
+            " ".join(_text_tuple(entry.tags)),
+        )
+        if _clean_optional_text(part)
+    )
+    if explicit_intent:
+        return " ".join(
+            part
+            for part in (entry.title, explicit_intent)
+            if _clean_optional_text(part)
+        )
+
+    return " ".join(
+        part
+        for part in (
+            entry.title,
+            _limit_compiled_text(
+                entry.answer,
+                max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
+            ),
+        )
+        if _clean_optional_text(part)
+    )
+
+
+def _semantic_merge_question_intent_tokens(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[str, ...]:
+    return _semantic_merge_tokens_from_text(_semantic_merge_question_intent_text(entry))
+
+
+def _semantic_merge_entry_pair_score(
+    left: KnowledgePreprocessingEntry,
+    right: KnowledgePreprocessingEntry,
+) -> float:
+    left_title = _normalized_answer_topic_key(left.title)
+    right_title = _normalized_answer_topic_key(right.title)
+
+    if left_title and right_title and left_title == right_title:
+        return 1.0
+    if (
+        left_title
+        and right_title
+        and (left_title in right_title or right_title in left_title)
+    ):
+        return 0.92
+
+    title_score = _semantic_merge_token_similarity(
+        _semantic_merge_tokens_from_text(left_title),
+        _semantic_merge_tokens_from_text(right_title),
+    )
+    question_score = _semantic_merge_token_similarity(
+        _semantic_merge_question_intent_tokens(left),
+        _semantic_merge_question_intent_tokens(right),
+    )
+    full_score = _semantic_merge_token_similarity(
+        _semantic_merge_entry_tokens(left),
+        _semantic_merge_entry_tokens(right),
+    )
+
+    return max(title_score, question_score * 1.15, full_score)
+
+
 def _semantic_merge_entries_are_suspects(
     left: KnowledgePreprocessingEntry,
     right: KnowledgePreprocessingEntry,
 ) -> bool:
-    left_title = _normalized_answer_topic_key(left.title)
-    right_title = _normalized_answer_topic_key(right.title)
+    return _semantic_merge_entry_pair_score(left, right) >= 0.24
 
-    if not left_title or not right_title:
-        return False
 
-    if left_title == right_title:
-        return False
-
-    left_title_tokens = _semantic_merge_tokens_from_text(left_title)
-    right_title_tokens = _semantic_merge_tokens_from_text(right_title)
-    title_intersection = set(left_title_tokens) & set(right_title_tokens)
-
-    if left_title in right_title or right_title in left_title:
-        return True
-
-    if (
-        len(title_intersection) >= 2
-        and _semantic_merge_token_similarity(
-            left_title_tokens,
-            right_title_tokens,
-        )
-        >= 0.45
-    ):
-        return True
-
-    left_tokens = _semantic_merge_entry_tokens(left)
-    right_tokens = _semantic_merge_entry_tokens(right)
-    full_intersection = set(left_tokens) & set(right_tokens)
-
-    return (
-        len(full_intersection) >= 5
-        and _semantic_merge_token_similarity(
-            left_tokens,
-            right_tokens,
-        )
-        >= 0.22
-    )
+def _semantic_merge_limited_text_tuple(
+    value: object,
+    *,
+    limit: int,
+    max_chars: int = 140,
+) -> tuple[str, ...]:
+    result: list[str] = []
+    for item in _text_tuple(value):
+        cleaned = _limit_compiled_text(item, max_chars=max_chars)
+        if cleaned and cleaned not in result:
+            result.append(cleaned)
+        if len(result) >= limit:
+            break
+    return tuple(result)
 
 
 def _semantic_merge_candidate_from_entry(
@@ -979,27 +1030,70 @@ def _semantic_merge_candidate_from_entry(
     index: int,
     entry: KnowledgePreprocessingEntry,
 ) -> KnowledgeSemanticMergeCandidate:
-    """Build a compact LLM payload for semantic retightening decisions.
+    """Build a compact but answer-intent-aware retightening payload.
 
-    The retightening model only needs a stable candidate id, title and compact
-    embedding text to decide whether entries represent the same answer meaning.
-    Full answers, questions, synonyms, tags and source excerpts are merged
-    deterministically by application code after the decision, so sending them
-    here only duplicates tokens and can exceed provider TPM limits.
+    Retightening must decide whether entries answer the same user question.
+    Therefore the payload must include compact answer and enrichment fields.
+    Dropping questions/synonyms/tags makes the LLM compare vague topic text
+    instead of answer intent.
     """
 
     return KnowledgeSemanticMergeCandidate(
         candidate_id=_semantic_merge_candidate_id(index),
         title=_clean_optional_text(entry.title),
-        answer="",
+        answer=_limit_compiled_text(
+            _clean_optional_text(entry.answer),
+            max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
+        ),
         embedding_text=_limit_compiled_text(
             _clean_optional_text(entry.embedding_text),
             max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
         ),
-        questions=(),
-        synonyms=(),
-        tags=(),
+        questions=_semantic_merge_limited_text_tuple(
+            entry.questions,
+            limit=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_QUESTION_LIMIT,
+        ),
+        synonyms=_semantic_merge_limited_text_tuple(
+            entry.synonyms,
+            limit=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_SYNONYM_LIMIT,
+        ),
+        tags=_semantic_merge_limited_text_tuple(
+            entry.tags,
+            limit=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_TAG_LIMIT,
+        ),
         source_ref_count=len(_source_excerpts_from_preprocessing_entry(entry)),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _SemanticMergeSuspectPair:
+    left_index: int
+    right_index: int
+    score: float
+
+
+def _semantic_merge_suspect_pairs_from_entries(
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> tuple[_SemanticMergeSuspectPair, ...]:
+    pairs: list[_SemanticMergeSuspectPair] = []
+
+    for left_index, left_entry in enumerate(entries):
+        for right_index in range(left_index + 1, len(entries)):
+            score = _semantic_merge_entry_pair_score(left_entry, entries[right_index])
+            if score >= 0.24:
+                pairs.append(
+                    _SemanticMergeSuspectPair(
+                        left_index=left_index,
+                        right_index=right_index,
+                        score=score,
+                    )
+                )
+
+    return tuple(
+        sorted(
+            pairs,
+            key=lambda pair: (-pair.score, pair.left_index, pair.right_index),
+        )
     )
 
 
@@ -1009,57 +1103,28 @@ def _semantic_merge_suspect_groups_from_entries(
     if len(entries) < 2:
         return ()
 
-    adjacency: dict[int, set[int]] = {index: set() for index in range(len(entries))}
-
-    for left_index, left_entry in enumerate(entries):
-        for right_index in range(left_index + 1, len(entries)):
-            if _semantic_merge_entries_are_suspects(left_entry, entries[right_index]):
-                adjacency[left_index].add(right_index)
-                adjacency[right_index].add(left_index)
-
     groups: list[KnowledgeSemanticMergeGroup] = []
-    visited: set[int] = set()
-
-    for start_index in range(len(entries)):
-        if start_index in visited or not adjacency[start_index]:
-            continue
-
-        stack = [start_index]
-        component: list[int] = []
-
-        while stack:
-            index = stack.pop()
-            if index in visited:
-                continue
-
-            visited.add(index)
-            component.append(index)
-            stack.extend(sorted(adjacency[index] - visited, reverse=True))
-
-        if len(component) < 2:
-            continue
-
-        component = sorted(component)[:KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE]
+    for pair in _semantic_merge_suspect_pairs_from_entries(entries)[
+        :KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS
+    ]:
+        component = (pair.left_index, pair.right_index)
         digest = hashlib.sha256(
             ",".join(_semantic_merge_candidate_id(index) for index in component).encode(
                 "utf-8"
             )
         ).hexdigest()[:12]
-
         groups.append(
             KnowledgeSemanticMergeGroup(
-                group_id=f"semantic-merge-{digest}",
+                group_id=f"semantic-merge-pair-{digest}",
                 candidates=tuple(
                     _semantic_merge_candidate_from_entry(
-                        index=index, entry=entries[index]
+                        index=index,
+                        entry=entries[index],
                     )
                     for index in component
                 ),
             )
         )
-
-        if len(groups) >= KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS:
-            break
 
     return tuple(groups)
 

@@ -76,7 +76,11 @@ const previewTraceLabel = (value: string): string => {
   const labels: Record<string, string> = {
     title: 'title',
     questions: 'questions',
+    synonyms: 'synonyms',
+    tags: 'tags',
+    answer: 'answer',
     search_text: 'search',
+    embedding_text: 'embedding text',
     exact: 'exact',
     embedding: 'embedding',
   };
@@ -501,6 +505,9 @@ const PreviewResultCard: React.FC<{
           trace: {result.trace.matched_fields.map(previewTraceLabel).join(', ') || 'none'}
           {' · '}lexical {formatPreviewScore(result.trace.lexical_score)}
           {' · '}vector {formatPreviewScore(result.trace.vector_score)}
+          {' · '}final {formatPreviewScore(result.trace.final_score)}
+          {' · '}field {result.trace.displayed_field}
+          {' · '}{result.trace.is_production_safe ? 'production-safe' : 'not production-safe'}
           {result.trace.title_match ? ' · title match' : ''}
           {result.trace.exact_question_match ? ' · question match' : ''}
           {result.trace.length_penalty > 0 ? ` · penalty ${formatPreviewScore(result.trace.length_penalty)}` : ''}
