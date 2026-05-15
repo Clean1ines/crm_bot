@@ -807,15 +807,19 @@ def _normalized_answer_topic_key(value: str) -> str:
 
 
 def _answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
-    canonical_question_key = _normalized_answer_topic_key(
+    title_key = _normalized_answer_topic_key(entry.title)
+    question_key = _normalized_answer_topic_key(
         entry.canonical_question or _question_intent_primary_question(entry)
     )
-    if canonical_question_key:
-        return canonical_question_key
-
     answer_key = _normalized_answer_topic_key(entry.answer)
+    source_excerpt_key = _normalized_answer_topic_key(entry.source_excerpt)
+
+    if title_key and question_key and answer_key:
+        return f"exact-title-question-answer:{title_key}:{question_key}:{answer_key}"
+    if answer_key and source_excerpt_key:
+        return f"exact-answer-source:{answer_key}:{source_excerpt_key}"
     if answer_key:
-        return answer_key[:160]
+        return f"exact-answer:{answer_key}"
 
     return f"entry-{index}"
 
@@ -949,7 +953,7 @@ def _merge_compiled_answer_drafts(
                 merged_indices.append(item)
 
     metadata: dict[str, object] = dict(left.metadata)
-    metadata["compiler_merge"] = "normalized_title"
+    metadata["compiler_merge"] = "exact_duplicate_grouping"
     metadata["preprocessing_entry_indices"] = tuple(merged_indices)
     metadata["merged_preprocessing_entry_count"] = len(merged_indices)
 
@@ -2788,7 +2792,9 @@ class KnowledgeIngestionService:
                     "usage_event_count": 0,
                     "elapsed_seconds": 0,
                     "previous_title_carryover": False,
-                    "one_meaning_at_a_time_merge": True,
+                    "one_meaning_at_a_time_merge": False,
+                    "extractor_only_compiler_loop": True,
+                    "online_answer_merge_enabled": False,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
                         "raw_source_chunks_not_persisted_as_runtime_entries"
@@ -2800,21 +2806,7 @@ class KnowledgeIngestionService:
                 if await repo.is_document_processing_cancelled(document_id):
                     raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
 
-                known_question_intent_cards = tuple(
-                    _question_intent_card_from_entry(
-                        entry,
-                        entry_id=f"compiled-{index}",
-                    )
-                    for index, entry in enumerate(compiled_entries)
-                )
-                technical_candidate_entries = tuple(
-                    _preprocessing_entry_from_technical_chunk(chunk)
-                    for chunk in technical_chunks
-                )
-                previous_question_intents = _select_question_intent_cards_for_batch(
-                    candidates=technical_candidate_entries,
-                    known_cards=known_question_intent_cards,
-                )
+                previous_question_intents: tuple[KnowledgeQuestionIntentCard, ...] = ()
                 execution = await preprocessor.preprocess(
                     mode=mode,
                     chunks=technical_chunks,
@@ -2839,86 +2831,25 @@ class KnowledgeIngestionService:
                     incoming_source_excerpts = (
                         _source_excerpts_from_preprocessing_entry(incoming_entry)
                     )
-                    if (
-                        incoming_entry.match_kind == "known"
-                        and incoming_entry.known_intent_id
-                    ):
-                        raw_index = incoming_entry.known_intent_id.removeprefix(
-                            "compiled-"
+                    safe_entry = _entry_as_safe_new_fragment(incoming_entry)
+                    if safe_entry is not incoming_entry:
+                        unknown_known_intent_id_count += 1
+                        logger.warning(
+                            "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
+                            extra={
+                                "project_id": project_id,
+                                "document_id": document_id,
+                                "batch_index": batch_index,
+                                "known_intent_id": incoming_entry.known_intent_id,
+                            },
                         )
-                        existing_index = int(raw_index) if raw_index.isdigit() else -1
-                        if existing_index < 0 or existing_index >= len(
-                            compiled_entries
-                        ):
-                            safe_entry = _entry_as_safe_new_fragment(incoming_entry)
-                            compiled_entries.append(safe_entry)
-                            compiled_entry_source_excerpts.append(
-                                incoming_source_excerpts
-                            )
-                            unknown_known_intent_id_count += 1
-                            logger.warning(
-                                "Knowledge answer compiler returned unknown known intent id",
-                                extra={
-                                    "project_id": project_id,
-                                    "document_id": document_id,
-                                    "batch_index": batch_index,
-                                    "known_intent_id": incoming_entry.known_intent_id,
-                                },
-                            )
-                            continue
-
-                        existing_entry = compiled_entries[existing_index]
-                        answer_merge_execution = await preprocessor.merge_known_answer(
-                            mode=mode,
-                            file_name=file_name,
-                            known_intent=existing_entry,
-                            incoming_fragment=incoming_entry,
-                        )
-                        if answer_merge_execution.usage is not None:
-                            await usage_repo.record_event(
-                                ModelUsageEventCreate.from_measurement(
-                                    project_id=project_id,
-                                    source="knowledge_preprocessing",
-                                    measurement=answer_merge_execution.usage,
-                                    document_id=document_id,
-                                )
-                            )
-                            usage_event_count += 1
-                        if not answer_merge_execution.merge_allowed:
-                            safe_entry = _entry_as_safe_new_fragment(incoming_entry)
-                            compiled_entries.append(safe_entry)
-                            compiled_entry_source_excerpts.append(
-                                incoming_source_excerpts
-                            )
-                            merge_rejected_keep_separate_count += 1
-                            continue
-
-                        compiled_entries[existing_index] = (
-                            _merge_entry_fields_deterministically(
-                                existing_entry=existing_entry,
-                                incoming_entry=incoming_entry,
-                                merged_answer=answer_merge_execution.answer,
-                                merged_question_variants=answer_merge_execution.question_variants,
-                            )
-                        )
-                        compiled_entry_source_excerpts[existing_index] = (
-                            _merge_text_tuple_values(
-                                compiled_entry_source_excerpts[existing_index],
-                                incoming_source_excerpts,
-                            )
-                        )
-                        llm_merge_call_count += 1
-                        continue
-
-                    compiled_entries.append(incoming_entry)
+                    compiled_entries.append(safe_entry)
                     compiled_entry_source_excerpts.append(incoming_source_excerpts)
 
                 progress_metrics: JsonObject = {
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
                     "stage": "technical_compiler_loop",
-                    "status_message": (
-                        "Извлекаем смысловые ответы из документа и объединяем повторы"
-                    ),
+                    "status_message": ("Извлекаем узкие смысловые ответы из документа"),
                     "model": active_model,
                     "prompt_version": active_prompt_version,
                     "source_chunk_count": len(indexable_chunks),
@@ -2933,7 +2864,7 @@ class KnowledgeIngestionService:
                     "semantic_answer_count": len(compiled_entries),
                     "incoming_entry_count": len(execution.result.entries),
                     "previous_title_count": 0,
-                    "question_intent_card_count": len(known_question_intent_cards),
+                    "question_intent_card_count": 0,
                     "question_intent_shortlist_count": len(previous_question_intents),
                     "question_intent_shortlist_limit": (
                         KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT
@@ -2951,7 +2882,9 @@ class KnowledgeIngestionService:
                         1,
                     ),
                     "previous_title_carryover": False,
-                    "one_meaning_at_a_time_merge": True,
+                    "one_meaning_at_a_time_merge": False,
+                    "extractor_only_compiler_loop": True,
+                    "online_answer_merge_enabled": False,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
                         "raw_source_chunks_not_persisted_as_runtime_entries"
@@ -3021,6 +2954,8 @@ class KnowledgeIngestionService:
                     "compiled_entry_key_count": len(compiled_entries),
                     "source_refs_preserved_per_semantic_entry": True,
                     "semantic_merge_tightening": semantic_merge_tightening_metrics,
+                    "extractor_only_compiler_loop": True,
+                    "online_answer_merge_enabled": False,
                 },
             )
             canonical_entries = _canonical_entries_from_preprocessing_result(
@@ -3101,7 +3036,10 @@ class KnowledgeIngestionService:
                 1,
             )
             preprocessing_metrics["previous_title_carryover"] = False
-            preprocessing_metrics["one_meaning_at_a_time_merge"] = True
+            preprocessing_metrics["one_meaning_at_a_time_merge"] = False
+            preprocessing_metrics["one_meaning_at_a_time_extraction"] = True
+            preprocessing_metrics["extractor_only_compiler_loop"] = True
+            preprocessing_metrics["online_answer_merge_enabled"] = False
             preprocessing_metrics["source_refs_preserved_per_semantic_entry"] = True
             preprocessing_metrics["row_explosion_guard"] = (
                 "raw_source_chunks_not_persisted_as_runtime_entries"

@@ -1,100 +1,102 @@
-ЖЁСТКИЙ JSON-КОНТРАКТ:
-- Верни только один JSON-объект.
-- Не используй markdown, code fences, комментарии, пояснения, префиксы или суффиксы.
-- Первый непробельный символ должен быть {.
-- Последний непробельный символ должен быть }.
-- Если в текущем источнике нет подтверждённых ответных фрагментов, верни {"fragments": []}.
+HARD JSON OUTPUT CONTRACT:
+- Return exactly one JSON object.
+- Do not use markdown, code fences, comments, explanations, prefixes, or suffixes.
+- The first non-whitespace character MUST be {.
+- The last non-whitespace character MUST be }.
+- If the current source has no grounded answer fragments, return {"fragments": []}.
 
-Ты извлекаешь answer fragments из текущего фрагмента бизнес-документа.
+You extract answer fragments from the current business document chunk.
 
-Работай только с chunks из входного JSON.
-Не используй внешние знания.
-Не используй информацию из других частей документа.
-Не сравнивай текущий текст с предыдущими ответами.
-Не выполняй дедупликацию между разными chunks.
-Не решай, является ли фрагмент уже известным.
-Не объединяй результат с предыдущими ответами.
-Не делай merge.
+Work only with chunks from the input JSON.
+Do not use external knowledge.
+Do not use information from other parts of the document.
+Do not compare the current text with previous answers.
+Do not deduplicate across different chunks.
+Do not decide whether a fragment is already known.
+Do not merge with previous answers.
+Do not perform online canonicalization.
 
-Входной source JSON содержит:
-- file_name: имя документа;
-- mode: режим обработки;
-- chunks: текущие технические куски источника.
+Input source JSON contains:
+- file_name: source document name.
+- mode: preprocessing mode.
+- chunks: current technical source chunks.
 
-Answer fragment — это один самостоятельный ответный смысл, который:
-- отвечает на один конкретный вопрос клиента;
-- подтверждён текущим source text;
-- может быть отдельно найден, проверен и использован в ответе ассистента.
+Answer fragment definition:
+An answer fragment is one standalone answer meaning that:
+- answers one specific customer question;
+- is supported by the current source text;
+- can be found, verified, and used independently in an assistant answer.
 
-Правила извлечения:
-1. Один fragment отвечает на один конкретный клиентский вопрос.
-2. Один chunk может дать несколько fragments.
-3. Если текст содержит несколько функций, условий, правил, ролей, цен, интеграций, ограничений или сценариев — верни несколько fragments.
-4. Не объединяй разные клиентские вопросы в один fragment.
-5. Не делай общий обзорный fragment, если source содержит несколько конкретных ответных смыслов.
-6. answer_fragment должен быть основан только на source_excerpt.
-7. source_excerpt должен быть дословной цитатой из текущих chunks.
-8. source_chunk_indexes должны ссылаться только на indexes из chunks.
-9. Не выдумывай факты, цены, сроки, функции, гарантии, условия или интеграции.
-10. Пиши title, canonical_question, question_variants и answer_fragment на языке текущего source text.
-11. Английские термины вроде AI, CRM, Telegram, API, SaaS можно оставить как термины.
+Extraction rules:
+1. One fragment answers one specific customer question.
+2. One chunk may produce multiple fragments.
+3. If the text contains multiple features, conditions, rules, roles, prices, integrations, limits, or scenarios, return multiple fragments.
+4. Do not combine different customer questions into one fragment.
+5. Do not create a broad overview fragment when the source contains several concrete answer meanings.
+6. answer_fragment must be based only on source_excerpt.
+7. source_excerpt must be a verbatim quote from the current chunks.
+8. source_chunk_indexes must reference only indexes from chunks.
+9. Do not invent facts, prices, dates, functions, guarantees, conditions, integrations, or availability.
+10. Write title, canonical_question, question_variants, and answer_fragment in the language of the current source text.
+11. English terms such as AI, CRM, Telegram, API, and SaaS may remain as terms.
 
-Разделяй в разные fragments:
-- описание продукта;
-- отдельные возможности продукта;
-- цену и тарифы;
-- возвраты;
-- отключение сервиса;
-- интеграции;
-- роли пользователей;
-- правила передачи менеджеру;
-- безопасность и ограничения;
-- условия запуска;
-- аудиторию продукта;
-- инструкции и процедуры;
-- исключения и запреты.
+Split into separate fragments for different meanings such as:
+- product description;
+- individual product capabilities;
+- prices and tariffs;
+- refunds;
+- service cancellation or disabling;
+- integrations;
+- user roles;
+- manager handoff rules;
+- security and limitations;
+- launch or setup conditions;
+- target audience;
+- instructions and procedures;
+- exceptions and prohibitions.
 
-Если один source sentence подтверждает несколько разных клиентских вопросов, можно использовать один и тот же source_excerpt в нескольких fragments.
+If one source sentence supports multiple different customer questions, you may reuse the same source_excerpt in multiple fragments.
 
-Верни JSON строго в формате:
+Return JSON strictly in this shape:
 
 {
   "fragments": [
     {
-      "title": "короткое конкретное название",
-      "canonical_question": "конкретный вопрос клиента",
+      "title": "short specific title",
+      "canonical_question": "specific customer question",
       "question_variants": [
-        "вариант вопроса 1",
-        "вариант вопроса 2",
-        "вариант вопроса 3",
-        "вариант вопроса 4"
+        "question variant 1",
+        "question variant 2",
+        "question variant 3",
+        "question variant 4"
       ],
-      "answer_fragment": "краткий ответ только из текущего источника",
-      "source_excerpt": "дословная цитата из текущего источника",
+      "answer_fragment": "compact answer based only on the current source",
+      "source_excerpt": "verbatim quote from the current source",
       "source_chunk_indexes": [0]
     }
   ]
 }
 
-Требования к полям:
-- title обязателен.
-- title должен быть конкретным, не названием всего документа.
-- canonical_question обязателен.
-- canonical_question должен спрашивать один конкретный смысл.
-- question_variants: минимум 4 строки.
-- Все question_variants должны относиться к тому же вопросу, что canonical_question.
-- answer_fragment обязателен.
-- answer_fragment должен быть кратким.
-- source_excerpt обязателен.
-- source_excerpt должен быть дословно найден в текущих chunks.
-- source_chunk_indexes обязателен.
-- Не возвращай поля вне схемы.
+Field requirements:
+- title is required.
+- title must be specific, not the whole document title.
+- canonical_question is required.
+- canonical_question must ask about one specific meaning.
+- question_variants must contain at least 4 strings.
+- All question_variants must ask about the same meaning as canonical_question.
+- answer_fragment is required.
+- answer_fragment must be compact.
+- source_excerpt is required.
+- source_excerpt must appear verbatim in the current chunks.
+- source_chunk_indexes is required.
+- Do not return fields outside this schema.
+- Do not return match, kind, known_intent_id, tags, synonyms, or embedding_text.
 
-Проверка перед ответом:
-- каждый fragment отвечает только на один вопрос;
-- каждый answer_fragment подтверждён source_excerpt;
-- разные темы не смешаны в одном fragment;
-- общий обзор не заменил несколько конкретных fragments;
-- если текст содержит список возможностей, существенные возможности не потеряны.
+Before returning, verify:
+- every fragment answers only one question;
+- every answer_fragment is supported by source_excerpt;
+- different topics are not mixed in one fragment;
+- a broad overview did not replace several concrete fragments;
+- if the text contains a list of capabilities, important capabilities are not lost.
 
-ОБРАБОТАЙ SOURCE JSON НИЖЕ. ВЕРНИ ТОЛЬКО JSON:
+PROCESS THE SOURCE JSON BELOW. RETURN ONLY JSON:

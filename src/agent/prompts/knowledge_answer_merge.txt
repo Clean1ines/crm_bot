@@ -1,49 +1,66 @@
-ЖЁСТКИЙ JSON-КОНТРАКТ:
-- Верни только один JSON-объект.
-- Не используй markdown, code fences, комментарии или пояснения.
-- Если объединять нельзя, верни {"merge_allowed": false, "answer": "", "question_variants": []}.
+HARD JSON OUTPUT CONTRACT:
+- Return exactly one JSON object.
+- Do not use markdown, code fences, comments, explanations, prefixes, or suffixes.
+- The first non-whitespace character MUST be {.
+- The last non-whitespace character MUST be }.
+- If merging is not allowed, return {"merge_allowed": false, "answer": "", "question_variants": []}.
 
-Ты сравниваешь два уже извлечённых узких answer fragments.
+This prompt is not part of the online compiler loop. Use it only for offline or pairwise retightening of already extracted narrow answer fragments.
 
-Задача:
-Определи, отвечают ли fragment_a и fragment_b на один и тот же конкретный клиентский вопрос.
+You compare two already extracted narrow answer fragments.
 
-Разреши merge только если:
-- оба fragment отвечают на одну и ту же клиентскую потребность;
-- различия являются повтором, перефразировкой или прямым уточнением того же ответа;
-- итоговый ответ можно дать как один ответ без смешивания разных тем.
+Task:
+Decide whether fragment_a and fragment_b answer the same specific customer question.
 
-Запрети merge если:
-- fragments относятся к одной общей теме, но отвечают на разные вопросы;
-- один fragment про цену, а другой про возврат, отключение, интеграцию, роль, аудиторию, безопасность, запуск или передачу менеджеру;
-- один fragment является обзором, а другой описывает отдельную возможность;
-- объединение сделает ответ слишком широким;
-- есть сомнение.
+Allow merge only if:
+- both fragments answer the same customer need;
+- differences are repetition, paraphrase, or a direct clarification of the same answer;
+- the final answer can be one answer without mixing separate topics.
 
-Если merge_allowed=true:
-- верни один короткий replacement answer;
-- не дублируй одинаковые факты;
-- не выдумывай новые факты;
-- сохрани ограничения, условия, цены, сроки и запреты;
-- question_variants должны относиться к тому же одному вопросу.
+Reject merge if:
+- fragments are related to one broad topic but answer different questions;
+- one fragment is about price and the other is about refunds, cancellation, integration, roles, audience, security, launch, manager handoff, or another separate topic;
+- one fragment is an overview and the other describes an individual capability;
+- merging would make the answer broad;
+- there is any doubt.
 
-Формат:
+If merge_allowed=true:
+- return one compact replacement answer;
+- do not duplicate facts;
+- do not invent facts;
+- preserve limitations, conditions, prices, dates, prohibitions, and important rules;
+- question_variants must all ask about the same single question.
+
+Return ONLY this JSON shape when merge is allowed:
+
 {
   "merge_allowed": true,
-  "answer": "единый обновлённый ответ",
+  "answer": "single compact replacement answer",
   "question_variants": [
-    "вариант вопроса 1",
-    "вариант вопроса 2",
-    "вариант вопроса 3",
-    "вариант вопроса 4"
+    "question variant 1",
+    "question variant 2",
+    "question variant 3",
+    "question variant 4"
   ]
 }
 
-Или:
+Or return ONLY this JSON shape when merge is not allowed:
+
 {
   "merge_allowed": false,
   "answer": "",
   "question_variants": []
 }
 
-ОБРАБОТАЙ SOURCE JSON НИЖЕ. ВЕРНИ ТОЛЬКО JSON:
+Field rules:
+- merge_allowed must be true or false.
+- answer must be non-empty only when merge_allowed=true.
+- question_variants must contain only questions for the same answer intent.
+- Do not output source_excerpt.
+- Do not output tags.
+- Do not output synonyms.
+- Do not output embedding_text.
+- Do not output tags, synonyms, or embedding_text.
+- Keep the answer compact and production-ready.
+
+PROCESS THE SOURCE JSON BELOW. RETURN ONLY JSON:
