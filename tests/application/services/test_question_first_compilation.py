@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from src.application.services.knowledge_ingestion_service import (
     _question_intent_card_from_entry,
     _select_question_intent_cards_for_batch,
@@ -71,8 +72,55 @@ def test_question_intent_selector_prefers_same_information_need_over_shared_topi
         limit=2,
     )
 
-    assert selected[-1].title == "Стоимость"
+    assert selected[0].title == "Стоимость"
     assert all(card.title != "Передача менеджеру" for card in selected)
+
+
+def test_question_intent_selector_returns_highest_score_first_without_title_or_tags_identity() -> (
+    None
+):
+    price = _entry(
+        "Display title unrelated to price",
+        answer="Базовый тариф стоит 100 рублей в месяц.",
+        questions=("Сколько стоит сервис?", "Какая цена тарифа?"),
+        tags=("shared",),
+    )
+    support = _entry(
+        "Стоимость",
+        answer="Менеджер отвечает на сложные вопросы в рабочее время.",
+        questions=("Как связаться с менеджером?", "Когда отвечает поддержка?"),
+        tags=("shared", "цена"),
+    )
+    onboarding = _entry(
+        "Тарифы",
+        answer="Для подключения нужно оставить заявку.",
+        questions=("Как подключиться?", "Как оставить заявку?"),
+        tags=("цена",),
+    )
+    cards = tuple(
+        _question_intent_card_from_entry(entry, entry_id=f"entry-{index}")
+        for index, entry in enumerate((support, onboarding, price))
+    )
+    incoming = _entry(
+        "Поддержка",
+        answer="Премиум тариф стоит 500 рублей в месяц.",
+        questions=("Сколько стоит премиум тариф?", "Какая цена тарифа?"),
+        tags=("shared", "support"),
+    )
+
+    selected = _select_question_intent_cards_for_batch(
+        candidates=(incoming,),
+        known_cards=cards,
+        limit=3,
+    )
+
+    assert selected[0].entry_id == "entry-2"
+    assert selected[0].primary_question == "Сколько стоит сервис?"
+    assert selected[0].question_samples == (
+        "Сколько стоит сервис?",
+        "Какая цена тарифа?",
+    )
+    assert selected[0].answer_digest == "Базовый тариф стоит 100 рублей в месяц."
 
 
 def test_question_first_prompt_uses_intent_cards_not_titles_as_identity_source() -> (
@@ -90,16 +138,31 @@ def test_question_first_prompt_uses_intent_cards_not_titles_as_identity_source()
         mode="faq",
         chunks=[{"content": "Refund policy: manager checks the order."}],
         file_name="faq.txt",
-        previous_entry_titles=("Возврат средств",),
         previous_question_intents=(card,),
     )
 
+    payload = json.loads(
+        prompt.rsplit("NOW PROCESS THIS SOURCE JSON. Return ONLY the JSON result:", 1)[
+            1
+        ]
+    )
+    known_intent = payload["known_question_intents"][0]
+
     assert "known_question_intents" in prompt
-    assert "previous_answer_titles is fallback naming context only" in prompt
-    assert "reuse the exact previous title" in prompt
-    assert "Same answer intent means the same stable user information need" in prompt
-    assert "Never append old answer text plus new answer text" in prompt
-    assert "Можно вернуть деньги?" in prompt
+    assert "previous_answer_titles" not in payload
+    assert "previous_entry_titles" not in payload
+    assert "title" not in known_intent
+    assert "tags" not in known_intent
+    assert "synonyms" not in known_intent
+    assert "embedding_text" not in known_intent
+    assert known_intent["canonical_question"] == "Можно вернуть деньги?"
+    assert known_intent["question_variants"] == [
+        "Можно вернуть деньги?",
+        "Есть возврат?",
+    ]
+    assert known_intent["answer_digest"] == (
+        "Возврат оформляется через менеджера после проверки заказа."
+    )
 
 
 def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text() -> (
@@ -111,11 +174,11 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
         file_name="faq.txt",
     )
 
-    assert "One entry = one answer intent / one stable user information need" in prompt
-    assert "Split a multi-topic source fragment into multiple entries" in prompt
-    assert "replacement canonical answer A+B once" in prompt
-    assert "never append A + rephrased A + B" in prompt
-    assert "not the full source_excerpt" in prompt
+    assert "One output fragment = one answer intent contribution" in prompt
+    assert "One source chunk may contain many answer intents" in prompt
+    assert "A+A' once" in prompt
+    assert "Do not output tags, synonyms, or embedding_text" in prompt
+    assert "answer_fragment" in prompt
 
 
 def test_semantic_merge_prompt_requires_replacement_not_append_and_keeps_related_intents() -> (
