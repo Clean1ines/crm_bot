@@ -117,7 +117,6 @@ def _knowledge_processing_actions(
                 id="retry_failed_batches",
                 label="Повторить проблемные части",
                 kind="primary",
-                enabled=False,
             )
         )
     if raw_answer_count > published_answer_count:
@@ -472,6 +471,44 @@ class KnowledgeService:
             "Knowledge document processing cancelled",
             extra={"project_id": project_id, "document_id": document_id},
         )
+
+    async def retry_document_failed_batches(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        retry_failed_batches_task_type: str,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        job_id = await queue_repo.enqueue(
+            retry_failed_batches_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_failed_batch_retry",
+            },
+            max_attempts=3,
+        )
+
+        logger.info(
+            "Knowledge failed batch retry queued",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "job_id": job_id,
+            },
+        )
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "document_id": document_id,
+        }
 
     async def retighten_document_semantic_merges(
         self,

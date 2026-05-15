@@ -96,6 +96,13 @@ class KnowledgeRepositoryPort(Protocol):
         chunks: Sequence[SourceChunk],
     ) -> int: ...
 
+    async def list_document_source_chunks(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SourceChunk, ...]: ...
+
     async def add_canonical_entries(
         self,
         *,
@@ -151,6 +158,14 @@ class KnowledgeRepositoryPort(Protocol):
         error_type: str,
         error_message: str,
     ) -> None: ...
+
+    async def delete_raw_answer_candidates_for_batch(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batch_id: str,
+    ) -> int: ...
 
     async def add_answer_candidates(
         self,
@@ -242,6 +257,13 @@ class KnowledgeRepositoryPort(Protocol):
         project_id: str,
         document_id: str,
     ) -> tuple[KnowledgeCompilerBatchView, ...]: ...
+
+    async def list_document_raw_answer_candidates(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[AnswerCandidate, ...]: ...
 
     async def get_document_answer_candidate_summary(
         self,

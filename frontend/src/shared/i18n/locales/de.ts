@@ -565,6 +565,8 @@ export const de: TranslationDictionary = {
   'knowledge.feedback.stopFailed': 'Verarbeitung konnte nicht gestoppt werden',
   'knowledge.feedback.retightenQueued': 'Erneute Prüfung semantischer Duplikate wurde eingereiht',
   'knowledge.feedback.retightenFailed': 'Duplikatprüfung konnte nicht gestartet werden',
+  'knowledge.feedback.retryFailedBatchesQueued': 'Wiederholung fehlgeschlagener Teile wurde eingereiht',
+  'knowledge.feedback.retryFailedBatchesFailed': 'Fehlgeschlagene Teile konnten nicht wiederholt werden',
   'knowledge.feedback.enterClientQuestion': 'Geben Sie eine Kundenfrage ein',
   'knowledge.loading': 'Wissensbasis wird geladen...',
   'knowledge.status.stopped': 'Gestoppt',

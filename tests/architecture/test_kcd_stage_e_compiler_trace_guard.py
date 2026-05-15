@@ -85,5 +85,7 @@ def test_knowledge_progress_report_exposes_durable_batch_state() -> None:
     assert "processing_report" in service_source
     assert "list_document_compiler_batches" in service_source
     assert "get_document_answer_candidate_summary" in service_source
+    assert "retry_document_failed_batches" in service_source
     assert '@router.get("/{document_id}/progress")' in http_source
+    assert '@router.post("/{document_id}/retry-failed-batches")' in http_source
     assert "result.to_dict()" in http_source

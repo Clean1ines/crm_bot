@@ -50,6 +50,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingResult,
     KnowledgePreprocessingValidationError,
     KnowledgeQuestionIntentCard,
+    normalize_preprocessing_mode,
     KnowledgeSemanticMergeCandidate,
     KnowledgeSemanticMergeDecision,
     KnowledgeSemanticMergeGroup,
@@ -594,6 +595,28 @@ def _source_chunks_from_json_chunks(
     return tuple(source_chunks)
 
 
+def _json_chunks_from_source_chunks(
+    source_chunks: Sequence[SourceChunk],
+) -> list[JsonObject]:
+    chunks: list[JsonObject] = []
+    for source_chunk in source_chunks:
+        chunk: JsonObject = {
+            "id": source_chunk.id,
+            "index": source_chunk.source_index,
+            "content": source_chunk.content,
+        }
+        if source_chunk.page is not None:
+            chunk["page"] = source_chunk.page
+        if source_chunk.section_title:
+            chunk["section_title"] = source_chunk.section_title
+        if source_chunk.start_offset is not None:
+            chunk["start_offset"] = source_chunk.start_offset
+        if source_chunk.end_offset is not None:
+            chunk["end_offset"] = source_chunk.end_offset
+        chunks.append(chunk)
+    return chunks
+
+
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
 KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
 KCD_STAGE_K_COMPILER_VERSION = "kcd_v1_stage_k_answer_compiler"
@@ -952,6 +975,91 @@ def _raw_answer_candidates_from_preprocessing_entries(
         )
 
     return tuple(candidates)
+
+
+def _metadata_text_tuple(metadata: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = metadata.get(key)
+    if isinstance(value, str):
+        values: Sequence[object] = (value,)
+    elif isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        values = value
+    else:
+        return ()
+
+    result: list[str] = []
+    for item in values:
+        text = _clean_optional_text(str(item or ""))
+        if text and text not in result:
+            result.append(text)
+    return tuple(result)
+
+
+def _canonical_entries_from_raw_answer_candidates(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    mode: KnowledgePreprocessingMode,
+    candidates: Sequence[AnswerCandidate],
+) -> tuple[CanonicalKnowledgeEntry, ...]:
+    entry_kind = entry_kind_for_preprocessing_mode(mode)
+    entries: list[CanonicalKnowledgeEntry] = []
+
+    for index, candidate in enumerate(candidates):
+        answer = _clean_optional_text(candidate.candidate_answer)
+        if not answer:
+            continue
+
+        candidate_metadata = dict(candidate.metadata)
+        canonical_question = _clean_optional_text(
+            str(candidate_metadata.get("canonical_question") or "")
+        )
+        question_variants = _metadata_text_tuple(
+            candidate_metadata, "question_variants"
+        )
+        questions = (
+            _merge_text_tuple_values((canonical_question,), question_variants)
+            if canonical_question
+            else question_variants
+        )
+        stable_key_digest = hashlib.sha256(
+            f"{document_id}:stage_k_raw:{entry_kind.value}:{candidate.id}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        stable_key = f"{document_id}:stage_k_retry:{stable_key_digest[:24]}"
+        metadata: dict[str, object] = dict(candidate_metadata)
+        metadata["source_candidate_id"] = candidate.id
+        metadata["compiler_index"] = index
+        metadata["compiler_stage"] = "stage_k_answer_compiler_retry"
+
+        entry = CanonicalKnowledgeEntry(
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key)),
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            stable_key=stable_key,
+            entry_kind=entry_kind,
+            title=_clean_optional_text(candidate.title) or f"Answer entry {index + 1}",
+            answer=answer,
+            source_refs=candidate.source_refs,
+            enrichment=KnowledgeEnrichment(
+                questions=questions,
+                synonyms=(),
+                tags=(),
+            ),
+            embedding_text=None,
+            status=KnowledgeEntryStatus.PUBLISHED,
+            visibility=KnowledgeEntryVisibility.RUNTIME,
+            version=1,
+            compiler_version=KCD_STAGE_K_COMPILER_VERSION,
+            embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
+            metadata=metadata,
+        )
+        entry.assert_publishable()
+        entries.append(entry)
+
+    return tuple(entries)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2790,6 +2898,256 @@ class KnowledgeIngestionService:
             },
         )
         return result
+
+    async def retry_failed_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
+        preprocessor_factory: KnowledgePreprocessorFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        usage_repo = model_usage_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+
+        mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_PLAIN:
+            raise ValidationError(
+                "Plain knowledge documents do not have compiler batches"
+            )
+
+        source_chunks = await repo.list_document_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not source_chunks:
+            raise ValidationError("Knowledge document has no saved source chunks")
+
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        failed_batches = tuple(batch for batch in batches if batch.status == "failed")
+        if not failed_batches:
+            return {
+                "status": "skipped",
+                "reason": "no_failed_batches",
+                "document_id": document_id,
+            }
+
+        source_json_chunks = _json_chunks_from_source_chunks(source_chunks)
+        technical_batches = tuple(
+            _technical_chunk_batches_for_answer_compiler(source_json_chunks)
+        )
+        preprocessor = preprocessor_factory()
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_PROCESSING,
+            model=preprocessor.model_name,
+            prompt_version=prompt_version_for_mode(mode),
+            metrics={
+                "stage": "retry_failed_batches",
+                "failed_batch_count_before": len(failed_batches),
+            },
+        )
+        await repo.update_document_status(document_id, "processing")
+        usage_event_count = 0
+        retried_batch_count = 0
+
+        for batch in failed_batches:
+            if batch.batch_index < 1 or batch.batch_index > len(technical_batches):
+                await repo.fail_compiler_batch(
+                    batch.id,
+                    error_type="ValidationError",
+                    error_message="Saved compiler batch index is outside reconstructed technical batch range",
+                )
+                continue
+
+            technical_chunks = technical_batches[batch.batch_index - 1]
+            await repo.mark_compiler_batch_processing(
+                batch.id,
+                attempt_count=batch.attempt_count + 1,
+            )
+            try:
+                execution = await preprocessor.preprocess(
+                    mode=mode,
+                    chunks=technical_chunks,
+                    file_name=document.file_name,
+                    previous_question_intents=(),
+                )
+                if execution.usage is not None:
+                    await usage_repo.record_event(
+                        ModelUsageEventCreate.from_measurement(
+                            project_id=project_id,
+                            source="knowledge_preprocessing",
+                            measurement=execution.usage,
+                            document_id=document_id,
+                        )
+                    )
+                    usage_event_count += 1
+
+                safe_entries = tuple(
+                    _entry_as_safe_new_fragment(entry)
+                    for entry in execution.result.entries
+                )
+                raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
+                    project_id=project_id,
+                    document_id=document_id,
+                    compiler_run_id=batch.compiler_run_id,
+                    batch_id=batch.id,
+                    batch_index=batch.batch_index,
+                    entries=safe_entries,
+                    source_chunks=source_chunks,
+                    mode=mode,
+                )
+                await repo.delete_raw_answer_candidates_for_batch(
+                    project_id=project_id,
+                    document_id=document_id,
+                    batch_id=batch.id,
+                )
+                await repo.add_answer_candidates(
+                    project_id=project_id,
+                    document_id=document_id,
+                    candidates=raw_candidates,
+                )
+                usage = execution.usage
+                await repo.complete_compiler_batch(
+                    batch.id,
+                    model=execution.result.model,
+                    prompt_version=execution.result.prompt_version,
+                    tokens_input=usage.tokens_input if usage is not None else 0,
+                    tokens_output=usage.tokens_output
+                    if usage is not None and usage.tokens_output is not None
+                    else 0,
+                    tokens_total=usage.tokens_total if usage is not None else 0,
+                )
+                retried_batch_count += 1
+            except Exception as exc:
+                error_message = str(exc)[:500] or type(exc).__name__
+                await repo.fail_compiler_batch(
+                    batch.id,
+                    error_type=type(exc).__name__,
+                    error_message=error_message,
+                )
+                await repo.update_document_preprocessing_status(
+                    document_id,
+                    mode=mode,
+                    status=PREPROCESSING_STATUS_FAILED,
+                    error=error_message,
+                    model=preprocessor.model_name,
+                    prompt_version=prompt_version_for_mode(mode),
+                    metrics={
+                        "stage": "retry_failed_batches",
+                        "status_message": (
+                            "Повтор проблемной части завершился ошибкой"
+                        ),
+                        "error_type": type(exc).__name__,
+                        "retried_batch_count": retried_batch_count,
+                        "failed_batch_count_before": len(failed_batches),
+                        "usage_event_count": usage_event_count,
+                    },
+                )
+                await repo.update_document_status(document_id, "error", error_message)
+                raise
+
+        updated_batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        remaining_failed_count = sum(
+            1 for batch in updated_batches if batch.status == "failed"
+        )
+        all_batches_completed = bool(updated_batches) and all(
+            batch.status == "completed" for batch in updated_batches
+        )
+        raw_candidates = await repo.list_document_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        canonical_entries: tuple[CanonicalKnowledgeEntry, ...] = ()
+
+        if all_batches_completed:
+            canonical_entries = _canonical_entries_from_raw_answer_candidates(
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=updated_batches[0].compiler_run_id,
+                mode=mode,
+                candidates=raw_candidates,
+            )
+            if not canonical_entries:
+                raise ValidationError(
+                    "Knowledge retry produced no grounded answer entries"
+                )
+            await _persist_stage_e_compiler_outputs(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=updated_batches[0].compiler_run_id,
+                source_chunks=source_chunks,
+                entries=canonical_entries,
+            )
+
+        metrics: JsonObject = {
+            "stage": "retry_failed_batches",
+            "retried_batch_count": retried_batch_count,
+            "failed_batch_count_before": len(failed_batches),
+            "remaining_failed_batch_count": remaining_failed_count,
+            "usage_event_count": usage_event_count,
+            "raw_answer_count": len(raw_candidates),
+            "canonical_entry_count": len(canonical_entries),
+        }
+        if all_batches_completed:
+            metrics["status_message"] = (
+                "Проблемные части повторены, ответы опубликованы"
+            )
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_COMPLETED,
+                model=preprocessor.model_name,
+                prompt_version=prompt_version_for_mode(mode),
+                metrics=metrics,
+            )
+            await repo.update_document_status(document_id, "processed")
+        else:
+            metrics["status_message"] = (
+                "Часть проблемных частей всё ещё требует повтора"
+            )
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_FAILED,
+                model=preprocessor.model_name,
+                prompt_version=prompt_version_for_mode(mode),
+                metrics=metrics,
+            )
+            await repo.update_document_status(
+                document_id,
+                "error",
+                "Some compiler batches still failed after retry",
+            )
+        logger.info(
+            "Knowledge failed compiler batches retried",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "retried_batch_count": retried_batch_count,
+                "remaining_failed_batch_count": remaining_failed_count,
+            },
+        )
+        return {
+            "status": "completed" if all_batches_completed else "partial",
+            "document_id": document_id,
+            "retried_batch_count": retried_batch_count,
+            "remaining_failed_batch_count": remaining_failed_count,
+            "usage_event_count": usage_event_count,
+        }
 
     async def process_document(
         self,
