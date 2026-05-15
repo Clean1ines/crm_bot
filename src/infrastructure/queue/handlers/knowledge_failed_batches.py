@@ -41,7 +41,9 @@ def make_knowledge_repository(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryP
 def _payload(job: Mapping[str, object]) -> Mapping[str, object]:
     payload = job.get("payload") or {}
     if not isinstance(payload, Mapping):
-        raise PermanentJobError("knowledge failed batch retry payload must be an object")
+        raise PermanentJobError(
+            "knowledge failed batch retry payload must be an object"
+        )
     return payload
 
 
