@@ -18,6 +18,19 @@ def test_stage_e_migration_persists_compiler_trace() -> None:
     assert "CREATE TABLE IF NOT EXISTS knowledge_answer_candidates" in migration
     assert "CREATE TABLE IF NOT EXISTS knowledge_candidate_clusters" in migration
     assert "CREATE TABLE IF NOT EXISTS knowledge_candidate_cluster_members" in migration
+
+    batch_migration = Path(
+        "migrations/061_create_knowledge_compiler_batches.sql"
+    ).read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS knowledge_compiler_batches" in batch_migration
+    assert (
+        "compiler_run_id TEXT NOT NULL REFERENCES knowledge_compiler_runs"
+        in batch_migration
+    )
+    assert (
+        "status IN ('pending', 'processing', 'completed', 'failed', 'skipped', 'cancelled')"
+        in batch_migration
+    )
     assert "expected_chunk_ids" not in migration
     assert "retrieved_chunk_ids" not in migration
 
@@ -28,6 +41,10 @@ def test_knowledge_port_exposes_stage_e_trace_methods() -> None:
     assert "create_compiler_run" in source
     assert "complete_compiler_run" in source
     assert "fail_compiler_run" in source
+    assert "create_compiler_batches" in source
+    assert "mark_compiler_batch_processing" in source
+    assert "complete_compiler_batch" in source
+    assert "fail_compiler_batch" in source
     assert "add_answer_candidates" in source
     assert "add_candidate_clusters" in source
 
@@ -37,6 +54,8 @@ def test_repository_persists_stage_e_trace_tables() -> None:
 
     assert "INSERT INTO knowledge_compiler_runs" in source
     assert "INSERT INTO knowledge_compilation_metrics" in source
+    assert "INSERT INTO knowledge_compiler_batches" in source
+    assert "UPDATE knowledge_compiler_batches" in source
     assert "INSERT INTO knowledge_answer_candidates" in source
     assert "INSERT INTO knowledge_candidate_clusters" in source
     assert "INSERT INTO knowledge_candidate_cluster_members" in source
@@ -47,6 +66,9 @@ def test_ingestion_creates_compiler_run_before_outputs() -> None:
     source = inspect.getsource(knowledge_ingestion_service.KnowledgeIngestionService)
 
     assert "repo.create_compiler_run" in source
+    assert "repo.create_compiler_batches" in source
+    assert "repo.mark_compiler_batch_processing" in source
+    assert "repo.complete_compiler_batch" in source
     assert "_persist_stage_e_compiler_outputs" in Path(
         "src/application/services/knowledge_ingestion_service.py"
     ).read_text(encoding="utf-8")

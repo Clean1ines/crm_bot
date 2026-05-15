@@ -44,6 +44,7 @@ from src.domain.project_plane.knowledge_compilation import (
     CompilationMetrics,
     CandidateCluster,
     AnswerCandidate,
+    CompilerBatch,
     CanonicalKnowledgeEntry,
     EmbeddingText,
     KnowledgeEnrichment,
@@ -1766,6 +1767,188 @@ class KnowledgeRepository:
                     metrics=run.metrics,
                     metrics_payload=metrics_payload,
                 )
+
+    async def create_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batches: Sequence[CompilerBatch],
+    ) -> int:
+        if not batches:
+            return 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for batch in batches:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_compiler_batches (
+                            id,
+                            project_id,
+                            document_id,
+                            compiler_run_id,
+                            batch_index,
+                            batch_count,
+                            source_chunk_ids,
+                            source_chunk_indexes,
+                            status,
+                            attempt_count,
+                            model,
+                            prompt_version,
+                            tokens_input,
+                            tokens_output,
+                            tokens_total,
+                            error_type,
+                            error_message,
+                            metadata
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            $6,
+                            $7::jsonb,
+                            $8::jsonb,
+                            $9,
+                            $10,
+                            $11,
+                            $12,
+                            $13,
+                            $14,
+                            $15,
+                            $16,
+                            $17,
+                            $18::jsonb
+                        )
+                        ON CONFLICT (id)
+                        DO UPDATE SET
+                            batch_index = EXCLUDED.batch_index,
+                            batch_count = EXCLUDED.batch_count,
+                            source_chunk_ids = EXCLUDED.source_chunk_ids,
+                            source_chunk_indexes = EXCLUDED.source_chunk_indexes,
+                            status = EXCLUDED.status,
+                            attempt_count = EXCLUDED.attempt_count,
+                            model = EXCLUDED.model,
+                            prompt_version = EXCLUDED.prompt_version,
+                            tokens_input = EXCLUDED.tokens_input,
+                            tokens_output = EXCLUDED.tokens_output,
+                            tokens_total = EXCLUDED.tokens_total,
+                            error_type = EXCLUDED.error_type,
+                            error_message = EXCLUDED.error_message,
+                            metadata = EXCLUDED.metadata,
+                            updated_at = now()
+                        """,
+                        batch.id,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        batch.compiler_run_id,
+                        batch.batch_index,
+                        batch.batch_count,
+                        _stage_e_jsonb_array(
+                            [
+                                {"source_chunk_id": source_chunk_id}
+                                for source_chunk_id in batch.source_chunk_ids
+                            ]
+                        ),
+                        json.dumps(
+                            list(batch.source_chunk_indexes), ensure_ascii=False
+                        ),
+                        batch.status.value,
+                        batch.attempt_count,
+                        batch.model,
+                        batch.prompt_version,
+                        batch.tokens_input,
+                        batch.tokens_output,
+                        batch.tokens_total,
+                        batch.error_type,
+                        batch.error_message,
+                        _jsonb_object(batch.metadata),
+                    )
+
+        return len(batches)
+
+    async def mark_compiler_batch_processing(
+        self,
+        batch_id: str,
+        *,
+        attempt_count: int,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_batches
+                SET status = 'processing',
+                    attempt_count = $2,
+                    started_at = COALESCE(started_at, now()),
+                    finished_at = NULL,
+                    error_type = '',
+                    error_message = '',
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                batch_id,
+                attempt_count,
+            )
+
+    async def complete_compiler_batch(
+        self,
+        batch_id: str,
+        *,
+        model: str,
+        prompt_version: str,
+        tokens_input: int,
+        tokens_output: int,
+        tokens_total: int,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_batches
+                SET status = 'completed',
+                    model = $2,
+                    prompt_version = $3,
+                    tokens_input = $4,
+                    tokens_output = $5,
+                    tokens_total = $6,
+                    error_type = '',
+                    error_message = '',
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                batch_id,
+                model,
+                prompt_version,
+                tokens_input,
+                tokens_output,
+                tokens_total,
+            )
+
+    async def fail_compiler_batch(
+        self,
+        batch_id: str,
+        *,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_batches
+                SET status = 'failed',
+                    error_type = $2,
+                    error_message = $3,
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                batch_id,
+                error_type,
+                error_message,
+            )
 
     async def complete_compiler_run(
         self,
