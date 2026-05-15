@@ -23,11 +23,14 @@ import {
   type KnowledgeUsageResponse,
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
+  type KnowledgeProcessingReport,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
+
+type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingReport>;
 
 interface Document {
   id: string;
@@ -640,6 +643,38 @@ export const KnowledgePage: React.FC = () => {
 
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
+  const reportableDocuments = documents.filter((doc) => (
+    isDocumentProcessing(doc) || isDocumentFailed(doc) || isDocumentCancelled(doc) || Boolean(doc.structured_entries)
+  ));
+  const reportableDocumentIds = reportableDocuments.map((doc) => doc.id).sort();
+  const processingReportsQuery = useQuery({
+    queryKey: ['knowledge-processing-reports', projectId, reportableDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || reportableDocumentIds.length === 0) return {};
+
+      const reports = await Promise.all(
+        reportableDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.progress(projectId, documentId);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return reports.reduce<KnowledgeProcessingReportByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && reportableDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const processingReports = processingReportsQuery.data || {};
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
 
@@ -682,6 +717,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.documentQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.uploadError')));
@@ -711,6 +747,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.cleared'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.clearFailed')));
@@ -727,6 +764,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.processingStopped'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.stopFailed')));
@@ -742,6 +780,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.retightenQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.retightenFailed')));
@@ -1024,6 +1063,7 @@ export const KnowledgePage: React.FC = () => {
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
+            const processingReport = processingReports[doc.id];
 
             return (
               <div
@@ -1076,6 +1116,46 @@ export const KnowledgePage: React.FC = () => {
                     </>
                   )}
                 </div>
+
+                {processingReport && (
+                  <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+                    <div className="mb-1 font-semibold text-[var(--text-primary)]">
+                      {processingReport.title}
+                    </div>
+                    <p className="leading-relaxed">{processingReport.message}</p>
+                    {processingReport.steps.length > 0 && (
+                      <div className="mt-3 space-y-1.5">
+                        {processingReport.steps.map((step) => (
+                          <div key={step.id} className="flex items-start justify-between gap-3">
+                            <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
+                            <span className="text-right">
+                              {step.total > 0
+                                ? `${formatNumber(step.current)} / ${formatNumber(step.total)}`
+                                : step.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {processingReport.actions.length > 0 && (
+                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+                        <div className="mb-1 font-medium text-[var(--text-primary)]">
+                          {t('knowledge.processReport.nextActions')}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {processingReport.actions.map((action) => (
+                            <span
+                              key={action.id}
+                              className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
+                            >
+                              {action.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {isDocumentProcessing(doc) && (
                   <div className="mb-4 rounded-xl bg-[var(--accent-primary)]/10 p-3">
