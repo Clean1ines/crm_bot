@@ -43,9 +43,11 @@ class EvidenceNeed:
     def is_satisfied_by(self, item: EvidenceItem) -> bool:
         if item.source_type not in self.source_types:
             return False
+        if not item.is_authoritative:
+            return False
         if self.requires_live_freshness:
             return item.freshness in {EvidenceFreshness.LIVE, EvidenceFreshness.CURRENT}
-        return item.is_authoritative
+        return True
 
 
 @dataclass(frozen=True, slots=True)
