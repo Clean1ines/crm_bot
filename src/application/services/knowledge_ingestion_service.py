@@ -62,6 +62,8 @@ from src.domain.project_plane.knowledge_compilation import (
     CompilerRunStatus,
     CompilerRun,
     CompilationMetrics,
+    CompilerBatch,
+    CompilerBatchStatus,
     CandidateClusterStatus,
     CandidateCluster,
     AnswerCandidateStatus,
@@ -801,6 +803,155 @@ def _canonical_source_ref(
         end_offset=source_chunk.end_offset,
         confidence=1.0,
     )
+
+
+def _source_chunk_for_technical_chunk(
+    *,
+    technical_chunk: JsonObject,
+    source_chunks: Sequence[SourceChunk],
+) -> SourceChunk | None:
+    if not source_chunks:
+        return None
+
+    raw_index = _source_chunk_optional_int(technical_chunk.get("index"))
+    if raw_index is not None:
+        for source_chunk in source_chunks:
+            if source_chunk.source_index == raw_index:
+                return source_chunk
+
+    content = _chunk_content(technical_chunk)
+    if content:
+        for source_chunk in source_chunks:
+            if content in source_chunk.content or source_chunk.content in content:
+                return source_chunk
+
+    return None
+
+
+def _compiler_batch_id(*, compiler_run_id: str, batch_index: int) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{compiler_run_id}:technical-batch:{batch_index}",
+        )
+    )
+
+
+def _compiler_batches_from_technical_batches(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    technical_batches: Sequence[Sequence[JsonObject]],
+    source_chunks: Sequence[SourceChunk],
+) -> tuple[CompilerBatch, ...]:
+    batch_count = len(technical_batches)
+    batches: list[CompilerBatch] = []
+
+    for batch_index, technical_batch in enumerate(technical_batches, start=1):
+        batch_source_chunks: list[SourceChunk] = []
+        for technical_chunk in technical_batch:
+            source_chunk = _source_chunk_for_technical_chunk(
+                technical_chunk=technical_chunk,
+                source_chunks=source_chunks,
+            )
+            if source_chunk is not None and source_chunk not in batch_source_chunks:
+                batch_source_chunks.append(source_chunk)
+
+        batches.append(
+            CompilerBatch(
+                id=_compiler_batch_id(
+                    compiler_run_id=compiler_run_id,
+                    batch_index=batch_index,
+                ),
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                batch_index=batch_index,
+                batch_count=batch_count,
+                source_chunk_ids=tuple(chunk.id for chunk in batch_source_chunks),
+                source_chunk_indexes=tuple(
+                    chunk.source_index for chunk in batch_source_chunks
+                ),
+                status=CompilerBatchStatus.PENDING,
+                metadata={
+                    "stage": "stage_k_technical_compiler_loop",
+                    "technical_chunk_count": len(technical_batch),
+                },
+            )
+        )
+
+    return tuple(batches)
+
+
+def _raw_answer_candidate_id(
+    *,
+    compiler_run_id: str,
+    batch_index: int,
+    fragment_index: int,
+) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{compiler_run_id}:batch:{batch_index}:fragment:{fragment_index}",
+        )
+    )
+
+
+def _raw_answer_candidates_from_preprocessing_entries(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    batch_id: str,
+    batch_index: int,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    source_chunks: Sequence[SourceChunk],
+    mode: KnowledgePreprocessingMode,
+) -> tuple[AnswerCandidate, ...]:
+    candidates: list[AnswerCandidate] = []
+
+    for fragment_index, entry in enumerate(entries, start=1):
+        draft = _preprocessing_entry_to_compiled_draft(
+            entry,
+            mode=mode,
+            index=fragment_index - 1,
+        )
+        if not draft.answer:
+            continue
+
+        candidates.append(
+            AnswerCandidate(
+                id=_raw_answer_candidate_id(
+                    compiler_run_id=compiler_run_id,
+                    batch_index=batch_index,
+                    fragment_index=fragment_index,
+                ),
+                document_id=document_id,
+                project_id=project_id,
+                compiler_run_id=compiler_run_id,
+                topic_key=_answer_topic_key(entry, index=fragment_index - 1),
+                title=draft.title,
+                candidate_answer=draft.answer,
+                source_refs=_source_refs_for_compiled_answer_draft(
+                    draft=draft,
+                    source_chunks=source_chunks,
+                ),
+                confidence=1.0 if draft.source_excerpts else None,
+                status=AnswerCandidateStatus.EXTRACTED,
+                metadata={
+                    "stage": "stage_k_raw_extraction",
+                    "batch_id": batch_id,
+                    "batch_index": batch_index,
+                    "fragment_index": fragment_index,
+                    "canonical_question": entry.canonical_question,
+                    "question_variants": list(entry.questions),
+                    "source_chunk_indexes": list(entry.source_chunk_indexes),
+                },
+            )
+        )
+
+    return tuple(candidates)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2734,6 +2885,18 @@ class KnowledgeIngestionService:
             technical_batches = tuple(
                 _technical_chunk_batches_for_answer_compiler(indexable_chunks)
             )
+            compiler_batches = _compiler_batches_from_technical_batches(
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                technical_batches=technical_batches,
+                source_chunks=source_chunks,
+            )
+            await repo.create_compiler_batches(
+                project_id=project_id,
+                document_id=document_id,
+                batches=compiler_batches,
+            )
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
             usage_event_count = 0
@@ -2790,44 +2953,87 @@ class KnowledgeIngestionService:
             )
 
             for batch_index, technical_chunks in enumerate(technical_batches, start=1):
+                compiler_batch = compiler_batches[batch_index - 1]
                 if await repo.is_document_processing_cancelled(document_id):
                     raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
 
-                previous_question_intents: tuple[KnowledgeQuestionIntentCard, ...] = ()
-                execution = await preprocessor.preprocess(
-                    mode=mode,
-                    chunks=technical_chunks,
-                    file_name=file_name,
-                    previous_question_intents=previous_question_intents,
+                await repo.mark_compiler_batch_processing(
+                    compiler_batch.id,
+                    attempt_count=compiler_batch.attempt_count + 1,
                 )
-                if execution.usage is not None:
-                    await usage_repo.record_event(
-                        ModelUsageEventCreate.from_measurement(
-                            project_id=project_id,
-                            source="knowledge_preprocessing",
-                            measurement=execution.usage,
-                            document_id=document_id,
-                        )
+
+                previous_question_intents: tuple[KnowledgeQuestionIntentCard, ...] = ()
+                try:
+                    execution = await preprocessor.preprocess(
+                        mode=mode,
+                        chunks=technical_chunks,
+                        file_name=file_name,
+                        previous_question_intents=previous_question_intents,
                     )
-                    usage_event_count += 1
-
-                latest_result = execution.result
-                preprocessing_results.append(execution.result)
-
-                for incoming_entry in execution.result.entries:
-                    safe_entry = _entry_as_safe_new_fragment(incoming_entry)
-                    if safe_entry is not incoming_entry:
-                        unknown_known_intent_id_count += 1
-                        logger.warning(
-                            "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
-                            extra={
-                                "project_id": project_id,
-                                "document_id": document_id,
-                                "batch_index": batch_index,
-                                "known_intent_id": incoming_entry.known_intent_id,
-                            },
+                    if execution.usage is not None:
+                        await usage_repo.record_event(
+                            ModelUsageEventCreate.from_measurement(
+                                project_id=project_id,
+                                source="knowledge_preprocessing",
+                                measurement=execution.usage,
+                                document_id=document_id,
+                            )
                         )
-                    compiled_entries.append(safe_entry)
+                        usage_event_count += 1
+
+                    latest_result = execution.result
+                    preprocessing_results.append(execution.result)
+
+                    safe_entries: list[KnowledgePreprocessingEntry] = []
+                    for incoming_entry in execution.result.entries:
+                        safe_entry = _entry_as_safe_new_fragment(incoming_entry)
+                        if safe_entry is not incoming_entry:
+                            unknown_known_intent_id_count += 1
+                            logger.warning(
+                                "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
+                                extra={
+                                    "project_id": project_id,
+                                    "document_id": document_id,
+                                    "batch_index": batch_index,
+                                    "known_intent_id": incoming_entry.known_intent_id,
+                                },
+                            )
+                        safe_entries.append(safe_entry)
+                        compiled_entries.append(safe_entry)
+
+                    raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
+                        project_id=project_id,
+                        document_id=document_id,
+                        compiler_run_id=compiler_run_id,
+                        batch_id=compiler_batch.id,
+                        batch_index=batch_index,
+                        entries=safe_entries,
+                        source_chunks=source_chunks,
+                        mode=mode,
+                    )
+                    await repo.add_answer_candidates(
+                        project_id=project_id,
+                        document_id=document_id,
+                        candidates=raw_candidates,
+                    )
+                    usage = execution.usage
+                    await repo.complete_compiler_batch(
+                        compiler_batch.id,
+                        model=execution.result.model,
+                        prompt_version=execution.result.prompt_version,
+                        tokens_input=usage.tokens_input if usage is not None else 0,
+                        tokens_output=usage.tokens_output
+                        if usage is not None and usage.tokens_output is not None
+                        else 0,
+                        tokens_total=usage.tokens_total if usage is not None else 0,
+                    )
+                except Exception as exc:
+                    await repo.fail_compiler_batch(
+                        compiler_batch.id,
+                        error_type=type(exc).__name__,
+                        error_message=str(exc)[:500] or type(exc).__name__,
+                    )
+                    raise
 
                 progress_metrics: JsonObject = {
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
