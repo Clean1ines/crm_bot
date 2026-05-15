@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -465,19 +466,20 @@ def _log_llm_response(
         logger.warning("Knowledge LLM returned empty JSON response", extra=base_extra)
         return
 
-    for chunk_index, start in enumerate(
-        range(0, len(content), KCD_LLM_RESPONSE_LOG_CHUNK_CHARS),
-        start=1,
-    ):
-        chunk = content[start : start + KCD_LLM_RESPONSE_LOG_CHUNK_CHARS]
-        logger.info(
-            "Knowledge LLM raw JSON response",
-            extra={
-                **base_extra,
-                "chunk_index": chunk_index,
-                "raw_response_chunk": chunk,
-            },
-        )
+    response_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    chunk_count = max(
+        1,
+        (len(content) + KCD_LLM_RESPONSE_LOG_CHUNK_CHARS - 1)
+        // KCD_LLM_RESPONSE_LOG_CHUNK_CHARS,
+    )
+    logger.info(
+        "Knowledge LLM JSON response received",
+        extra={
+            **base_extra,
+            "response_sha256": response_hash,
+            "response_chunk_count": chunk_count,
+        },
+    )
 
 
 def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
