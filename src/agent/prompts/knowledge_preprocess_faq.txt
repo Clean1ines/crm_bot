@@ -14,6 +14,16 @@ Mode: FAQ.
 
 Convert uploaded FAQ-like text into grounded structured searchable knowledge entries.
 
+Question-first contract:
+- One entry = one answer intent / one stable user information need, not one literal question and not one broad topic.
+- Split a multi-topic source fragment into multiple entries.
+- Merge only paraphrases that answer the same user need. Shared words like assistant, business, manager, request, client, CRM or bot are not enough.
+- Keep related but different intents separate: product audience, benefits, handoff to manager, price, onboarding, CRM/integrations, refunds, night availability, dialog history, assistant behavior rules, and internal retrieval/eval guidelines must not be mixed.
+- If the source adds grounded fact B to an existing answer A, output the replacement canonical answer A+B once; never append A + rephrased A + B.
+- The answer must be compact canonical wording with repeated facts removed.
+- questions, synonyms and tags are identity/retrieval signals for the same answer intent and must be preserved/generated.
+- embedding_text is only a compact retrieval helper after compilation; do not use it as the main identity signal and do not dump the full raw source into it.
+
 Return ONLY valid JSON with this exact shape:
 {
   "entries": [
@@ -24,7 +34,7 @@ Return ONLY valid JSON with this exact shape:
       "questions": ["3-8 realistic customer questions this entry can answer"],
       "synonyms": ["5-12 grounded intent phrases, colloquial variants and short search phrases"],
       "tags": ["2-8 compact topical tags"],
-      "embedding_text": "dense searchable text combining title, answer, source_excerpt, questions, synonyms and tags"
+      "embedding_text": "compact searchable helper with title, canonical answer, questions, synonyms and tags"
     }
   ]
 }
@@ -41,7 +51,7 @@ Rules:
 - questions must include realistic ways a customer might ask the same thing.
 - synonyms must include short search phrases, wording variants and colloquial intent phrases grounded in the source.
 - tags must be compact topic labels, not generic filler.
-- embedding_text MUST include title, answer, source_excerpt, questions, synonyms and tags.
+- embedding_text should include title, answer, questions, synonyms and tags in compact form; include only short source terms needed for recall, not the full source_excerpt.
 - If a chunk is not useful, skip it.
 - Keep entries compact.
 - Do not output markdown.

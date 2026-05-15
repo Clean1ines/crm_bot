@@ -22,6 +22,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
+    KnowledgeQuestionIntentCard,
     KnowledgeSemanticMergeExecutionResult,
     KnowledgeSemanticMergeGroup,
     KnowledgeSemanticMergeTighteningResult,
@@ -90,6 +91,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         chunks: list[JsonObject],
         file_name: str,
         previous_entry_titles: Sequence[str] = (),
+        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult:
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(
@@ -97,6 +99,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             chunks=chunks,
             file_name=file_name,
             previous_entry_titles=previous_entry_titles,
+            previous_question_intents=previous_question_intents,
         )
 
         try:
@@ -376,10 +379,13 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "Purpose:\n"
             "- You receive groups of already grounded canonical-entry candidates.\n"
             "- Each group is only a suspect duplicate group, not a command to merge.\n"
-            "- Decide whether candidates in each group are truly the same answer meaning.\n"
-            "- Treat answer meaning as: which user questions/intents the candidate can answer, plus the grounded answer facts.\n"
-            "- Merge only when the same user question should retrieve one consolidated answer.\n"
-            "- Keep separate when candidates answer different user intents, constraints, audiences, or operations.\n"
+            "- same answer intent / stable user information need is the only valid merge target.\n"
+            "- Decide whether candidates in each group are truly that same answer intent.\n"
+            "- Treat answer intent as: primary user question, realistic question samples, compact answer digest, tags, and grounded answer facts.\n"
+            "- Do not use embedding_text as the primary identity signal; it is only retrieval helper text.\n"
+            "- Merge only when the same user information need should retrieve one consolidated canonical answer.\n"
+            "- Keep separate when candidates are related but answer different intents, constraints, audiences, operations, policies, or stages.\n"
+            "- Shared words such as assistant, business, manager, request, client, CRM or bot are never enough to merge.\n"
             "- Groups are pairwise by design: compare the two candidates directly, not by broad topic similarity.\n\n"
             "Schema:\n"
             "{\n"
@@ -396,15 +402,18 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "Rules for action=merge:\n"
             "- candidate_ids MUST contain all candidates being collapsed.\n"
             "- survivor_title MUST be exactly one concise canonical title.\n"
-            "- merged_embedding_text MUST synthesize one compact retrieval text for the shared user question/intent.\n"
+            "- merged_embedding_text MUST be a compact replacement canonical retrieval text for the shared user question/intent.\n"
             "- Do NOT concatenate candidate answers or candidate embedding_text values.\n"
+            "- Do NOT append old answer + new answer; return one compressed replacement.\n"
+            "- If candidates are A and A+B for the same intent, return A+B once, not A+A+B.\n"
             "- It MUST be shorter than the combined candidate answer + embedding_text unless preserving distinct grounded constraints requires otherwise.\n"
             "- Preserve grounded facts, limitations, product terms, handoff rules, prices, dates, and negative constraints exactly once.\n"
             "- Remove exact and near-duplicate phrases, repeated sentences, repeated examples, repeated benefits, and repeated intent variants.\n"
             "- If one candidate only adds a minor clarification to the same answer, fold that clarification into the canonical wording once.\n"
             "- Do not invent facts.\n\n"
             "Rules for action=keep_separate:\n"
-            "- Use when candidates are related but not the same answer meaning.\n"
+            "- Use when candidates are related but not the same answer intent / stable information need.\n"
+            "- In particular, keep separate price vs onboarding, refund vs handoff, audience vs product description, CRM integration vs generic product, availability vs dialog history.\n"
             "- candidate_ids MUST contain the candidates considered for that decision.\n"
             "- survivor_title and merged_embedding_text MAY be empty.\n\n"
             "Project-level title context:\n"
@@ -426,6 +435,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         chunks: list[JsonObject],
         file_name: str,
         previous_entry_titles: Sequence[str] = (),
+        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> str:
         instruction = _load_mode_prompt(mode)
         previous_titles = [
@@ -433,10 +443,14 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             for title in previous_entry_titles
             if str(title).strip()
         ][:80]
+        known_question_intents = [
+            card.to_payload() for card in previous_question_intents
+        ][:8]
         source_payload = {
             "file_name": file_name,
             "mode": mode,
             "previous_answer_titles": previous_titles,
+            "known_question_intents": known_question_intents,
             "chunks": [
                 {
                     "index": index,
@@ -447,13 +461,26 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         }
         carryover_instruction = (
             "CROSS-CHUNK COMPILER CONTEXT:\n"
-            "- previous_answer_titles contains answer meanings already extracted "
-            "from earlier technical source chunks.\n"
-            "- Before creating a new entry, check whether the current source "
-            "expands or refines one of those meanings.\n"
-            "- If it is the same meaning, reuse the exact previous title and "
-            "expand the answer using only grounded source text.\n"
-            "- If it is a new meaning, create a new stable topic-like title.\n"
+            "- known_question_intents is the authoritative compact shortlist of "
+            "answer intents already extracted from earlier technical source chunks.\n"
+            "- previous_answer_titles is fallback naming context only.\n"
+            "- Do not use titles as the primary identity signal.\n"
+            "- Decide identity by primary_question, question_samples, answer_digest, "
+            "tags, compact canonical answer, and grounded source evidence.\n"
+            "- Same answer intent means the same stable user information need, even "
+            "when users phrase the question differently.\n"
+            "- Related topics with shared words are not the same intent; keep them "
+            "separate. Price, onboarding, refund, handoff, product audience, CRM "
+            "integrations, night availability, dialog history, benefits, and assistant "
+            "behavior rules are separate unless the source explicitly answers one "
+            "stable information need.\n"
+            "- If the current source adds grounded fact B to an existing answer A, "
+            "return the full replacement canonical answer A+B without repeating A.\n"
+            "- Never append old answer text plus new answer text.\n"
+            "- If one source chunk contains several information needs, split it into "
+            "multiple entries.\n"
+            "- Preserve or generate questions, synonyms, and tags for every entry; they "
+            "must not be empty when the source has a usable answer intent.\n"
             "- Do not output standalone generated questions as entries.\n"
         )
         return (
