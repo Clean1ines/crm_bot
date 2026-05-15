@@ -566,6 +566,8 @@ export type TranslationKey =
   | 'knowledge.feedback.stopFailed'
   | 'knowledge.feedback.retightenQueued'
   | 'knowledge.feedback.retightenFailed'
+  | 'knowledge.feedback.retryFailedBatchesQueued'
+  | 'knowledge.feedback.retryFailedBatchesFailed'
   | 'knowledge.feedback.enterClientQuestion'
   | 'knowledge.loading'
   | 'knowledge.status.stopped'

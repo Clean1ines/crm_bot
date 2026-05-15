@@ -787,6 +787,22 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+  const retryFailedBatchesMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.retryFailedBatches(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success(t('knowledge.feedback.retryFailedBatchesQueued'));
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, t('knowledge.feedback.retryFailedBatchesFailed')));
+    },
+  });
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1143,14 +1159,34 @@ export const KnowledgePage: React.FC = () => {
                           {t('knowledge.processReport.nextActions')}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {processingReport.actions.map((action) => (
-                            <span
-                              key={action.id}
-                              className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-                            >
-                              {action.label}
-                            </span>
-                          ))}
+                          {processingReport.actions.map((action) => {
+                            const canRetry = action.id === 'retry_failed_batches' && action.enabled;
+                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
+                              && retryFailedBatchesMutation.variables === doc.id;
+
+                            if (canRetry) {
+                              return (
+                                <button
+                                  key={action.id}
+                                  type="button"
+                                  onClick={() => retryFailedBatchesMutation.mutate(doc.id)}
+                                  disabled={retryFailedBatchesMutation.isPending}
+                                  className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+                                >
+                                  {isRetryingThisDoc ? t('common.states.loading') : action.label}
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <span
+                                key={action.id}
+                                className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
+                              >
+                                {action.label}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

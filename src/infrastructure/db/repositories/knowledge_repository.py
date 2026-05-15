@@ -46,6 +46,7 @@ from src.domain.project_plane.knowledge_compilation import (
     CompilationMetrics,
     CandidateCluster,
     AnswerCandidate,
+    AnswerCandidateStatus,
     CompilerBatch,
     CanonicalKnowledgeEntry,
     EmbeddingText,
@@ -2072,6 +2073,32 @@ class KnowledgeRepository:
             _jsonb_object(metrics_payload),
         )
 
+    async def delete_raw_answer_candidates_for_batch(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batch_id: str,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM knowledge_answer_candidates
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND metadata->>'stage' = 'stage_k_raw_extraction'
+                  AND metadata->>'batch_id' = $3
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+                batch_id,
+            )
+
+        try:
+            return int(str(result).split()[-1])
+        except (IndexError, ValueError):
+            return 0
+
     async def add_answer_candidates(
         self,
         *,
@@ -2460,6 +2487,59 @@ class KnowledgeRepository:
 
         return len(entries)
 
+    async def list_document_source_chunks(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SourceChunk, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    document_id,
+                    source_index,
+                    content,
+                    page,
+                    section_title,
+                    start_offset,
+                    end_offset,
+                    checksum,
+                    metadata,
+                    created_at
+                FROM knowledge_source_chunks
+                WHERE project_id = $1
+                  AND document_id = $2
+                ORDER BY source_index
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        return tuple(
+            SourceChunk(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                document_id=str(row["document_id"]),
+                source_index=int(row["source_index"]),
+                content=str(row["content"]),
+                page=int(row["page"]) if row["page"] is not None else None,
+                section_title=str(row["section_title"] or ""),
+                start_offset=int(row["start_offset"])
+                if row["start_offset"] is not None
+                else None,
+                end_offset=int(row["end_offset"])
+                if row["end_offset"] is not None
+                else None,
+                checksum=str(row["checksum"] or ""),
+                metadata=_json_object_from_db(row["metadata"]),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        )
+
     async def add_source_chunks(
         self,
         *,
@@ -2832,6 +2912,60 @@ class KnowledgeRepository:
                 started_at=_normalize_timestamp(row["started_at"]),
                 finished_at=_normalize_timestamp(row["finished_at"]),
                 updated_at=_normalize_timestamp(row["updated_at"]),
+            )
+            for row in rows
+        )
+
+    async def list_document_raw_answer_candidates(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[AnswerCandidate, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    document_id,
+                    compiler_run_id,
+                    topic_key,
+                    title,
+                    candidate_answer,
+                    source_refs,
+                    confidence,
+                    status,
+                    rejection_reason,
+                    metadata,
+                    created_at
+                FROM knowledge_answer_candidates
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND metadata->>'stage' = 'stage_k_raw_extraction'
+                ORDER BY (metadata->>'batch_index')::int,
+                         (metadata->>'fragment_index')::int,
+                         created_at
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        return tuple(
+            AnswerCandidate(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                document_id=str(row["document_id"]),
+                compiler_run_id=str(row["compiler_run_id"]),
+                topic_key=str(row["topic_key"]),
+                title=str(row["title"] or ""),
+                candidate_answer=str(row["candidate_answer"] or ""),
+                source_refs=_source_refs_from_db(row["source_refs"]),
+                confidence=_optional_float(row["confidence"]),
+                status=AnswerCandidateStatus(str(row["status"])),
+                rejection_reason=str(row["rejection_reason"] or ""),
+                metadata=_json_object_from_db(row["metadata"]),
+                created_at=row["created_at"],
             )
             for row in rows
         )

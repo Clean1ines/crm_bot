@@ -162,6 +162,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/{document_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Knowledge Processing Progress
+         * @description Returns a user-facing progress report for knowledge document processing.
+         */
+        get: operations["knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}/retighten": {
         parameters: {
             query?: never;
@@ -176,6 +196,26 @@ export interface paths {
          * @description Queues semantic merge tightening for an already processed document.
          */
         post: operations["retighten_knowledge_document_api_projects__project_id__knowledge__document_id__retighten_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/retry-failed-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Knowledge Failed Batches
+         * @description Queues retry for failed durable compiler batches of a document.
+         */
+        post: operations["retry_knowledge_failed_batches_api_projects__project_id__knowledge__document_id__retry_failed_batches_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2080,7 +2120,75 @@ export interface operations {
             };
         };
     };
+    knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     retighten_knowledge_document_api_projects__project_id__knowledge__document_id__retighten_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_knowledge_failed_batches_api_projects__project_id__knowledge__document_id__retry_failed_batches_post: {
         parameters: {
             query?: never;
             header?: {
