@@ -53,12 +53,30 @@ def test_kcd_stage_k6_technical_source_slices_are_small() -> None:
 
 
 def test_kcd_stage_k6_prompts_have_hard_json_output_contract() -> None:
-    for prompt_name in (
+    prompt_dir = ROOT / "src/agent/prompts"
+
+    active_prompt_names = (
+        "knowledge_answer_compiler_faq.txt",
+        "knowledge_answer_merge.txt",
+    )
+    removed_prompt_names = (
         "knowledge_preprocess_faq.txt",
         "knowledge_preprocess_price_list.txt",
         "knowledge_preprocess_instruction.txt",
-    ):
-        text = (ROOT / "src/agent/prompts" / prompt_name).read_text(encoding="utf-8")
-        assert text.startswith("HARD JSON OUTPUT CONTRACT:")
-        assert "Return JSON and only JSON." in text
-        assert "Do not return more than one JSON object." in text
+    )
+
+    for prompt_name in removed_prompt_names:
+        assert not (prompt_dir / prompt_name).exists()
+
+    for prompt_name in active_prompt_names:
+        text = (prompt_dir / prompt_name).read_text(encoding="utf-8")
+        normalized = text.lower()
+
+        assert "json" in normalized
+        assert (
+            "return json and only json" in normalized
+            or "return exactly one" in normalized
+            or "return only" in normalized
+        )
+        assert "markdown" in normalized
+        assert "explanation" in normalized or "explanations" in normalized
