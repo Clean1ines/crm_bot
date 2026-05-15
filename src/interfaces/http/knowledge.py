@@ -45,6 +45,7 @@ from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreproces
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_types import (
     TASK_PROCESS_KNOWLEDGE_UPLOAD,
+    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
     TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
     TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
 )
@@ -282,6 +283,41 @@ async def retighten_knowledge_document(
         authorization,
         queue_repo=queue_repo,
         retighten_task_type=TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+        logger=logger,
+    )
+
+
+@router.post("/{document_id}/publish-ready")
+async def publish_knowledge_ready_answers(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    queue_repo=Depends(get_queue_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Queues publishing of already extracted answer drafts for a document."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    return await service.publish_document_ready_answers(
+        project_id,
+        document_id,
+        authorization,
+        queue_repo=queue_repo,
+        publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
         logger=logger,
     )
 

@@ -566,6 +566,8 @@ export const en: TranslationDictionary = {
   'knowledge.feedback.retightenFailed': 'Could not start duplicate recheck',
   'knowledge.feedback.retryFailedBatchesQueued': 'Retry for failed parts queued',
   'knowledge.feedback.retryFailedBatchesFailed': 'Could not retry failed parts',
+  'knowledge.feedback.publishReadyQueued': 'Publishing ready answers queued',
+  'knowledge.feedback.publishReadyFailed': 'Could not publish ready answers',
   'knowledge.feedback.enterClientQuestion': 'Enter a client question',
   'knowledge.loading': 'Loading knowledge base...',
   'knowledge.status.stopped': 'Stopped',

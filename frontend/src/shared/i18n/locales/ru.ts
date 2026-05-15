@@ -566,6 +566,8 @@ export const ru: TranslationDictionary = {
   'knowledge.feedback.retightenFailed': 'Не удалось запустить перепроверку дублей',
   'knowledge.feedback.retryFailedBatchesQueued': 'Повтор проблемных частей поставлен в очередь',
   'knowledge.feedback.retryFailedBatchesFailed': 'Не удалось повторить проблемные части',
+  'knowledge.feedback.publishReadyQueued': 'Публикация готовых ответов поставлена в очередь',
+  'knowledge.feedback.publishReadyFailed': 'Не удалось опубликовать готовые ответы',
   'knowledge.feedback.enterClientQuestion': 'Введите вопрос клиента',
   'knowledge.loading': 'Загрузка базы знаний...',
   'knowledge.status.stopped': 'Остановлено',

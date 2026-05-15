@@ -21,6 +21,9 @@ from src.infrastructure.queue.handlers.knowledge_retighten import (
 from src.infrastructure.queue.handlers.knowledge_failed_batches import (
     handle_retry_knowledge_failed_batches,
 )
+from src.infrastructure.queue.handlers.knowledge_publish_ready import (
+    handle_publish_knowledge_ready_answers,
+)
 from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
 from src.infrastructure.queue.handlers.notify_manager import (
     RedisGetter,
@@ -31,6 +34,7 @@ from src.infrastructure.queue.job_types import (
     TASK_AGGREGATE_METRICS,
     TASK_NOTIFY_MANAGER,
     TASK_PROCESS_KNOWLEDGE_UPLOAD,
+    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
     TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
     TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
     TASK_RUN_FULL_RAG_EVAL,
@@ -87,6 +91,13 @@ class JobDispatcher:
 
         if task_type == TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT:
             await handle_retighten_knowledge_document(
+                job,
+                db_pool=self.db_pool,
+            )
+            return
+
+        if task_type == TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS:
+            await handle_publish_knowledge_ready_answers(
                 job,
                 db_pool=self.db_pool,
             )

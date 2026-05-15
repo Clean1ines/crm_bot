@@ -77,6 +77,13 @@ def _knowledge_processing_message(
     raw_answer_count: int,
     published_answer_count: int,
 ) -> str:
+    if batch_failed > 0 and published_answer_count > 0:
+        return (
+            f"Опубликовано ответов: {published_answer_count}. "
+            f"Обработано {batch_completed} из {batch_total} частей. "
+            f"Черновиков сохранено: {raw_answer_count}. "
+            "Проблемные части можно повторить позже."
+        )
     if batch_failed > 0:
         return (
             f"Обработано {batch_completed} из {batch_total} частей. "
@@ -125,7 +132,7 @@ def _knowledge_processing_actions(
                 id="publish_ready",
                 label="Опубликовать готовые ответы",
                 kind="primary",
-                enabled=False,
+                enabled=not is_processing,
             )
         )
     if published_answer_count > 0:
@@ -418,9 +425,13 @@ class KnowledgeService:
             "tokens_total": sum(batch.tokens_total for batch in batches),
         }
 
-        title = _knowledge_processing_title(
-            document_status=document.status,
-            preprocessing_status=document.preprocessing_status or "",
+        title = (
+            "Опубликовано частично: есть проблемные части"
+            if batch_failed > 0 and published_answer_count > 0
+            else _knowledge_processing_title(
+                document_status=document.status,
+                preprocessing_status=document.preprocessing_status or "",
+            )
         )
         message = _knowledge_processing_message(
             batch_total=batch_total,
@@ -471,6 +482,44 @@ class KnowledgeService:
             "Knowledge document processing cancelled",
             extra={"project_id": project_id, "document_id": document_id},
         )
+
+    async def publish_document_ready_answers(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        publish_ready_task_type: str,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        job_id = await queue_repo.enqueue(
+            publish_ready_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_ready_answer_publish",
+            },
+            max_attempts=3,
+        )
+
+        logger.info(
+            "Knowledge ready answer publish queued",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "job_id": job_id,
+            },
+        )
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "document_id": document_id,
+        }
 
     async def retry_document_failed_batches(
         self,

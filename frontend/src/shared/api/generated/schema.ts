@@ -202,6 +202,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/{document_id}/publish-ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Knowledge Ready Answers
+         * @description Queues publishing of already extracted answer drafts for a document.
+         */
+        post: operations["publish_knowledge_ready_answers_api_projects__project_id__knowledge__document_id__publish_ready_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}/retry-failed-batches": {
         parameters: {
             query?: never;
@@ -2155,6 +2175,40 @@ export interface operations {
         };
     };
     retighten_knowledge_document_api_projects__project_id__knowledge__document_id__retighten_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_knowledge_ready_answers_api_projects__project_id__knowledge__document_id__publish_ready_post: {
         parameters: {
             query?: never;
             header?: {
