@@ -70,6 +70,34 @@ export type KnowledgePreviewResponse = {
   is_empty: boolean;
 };
 
+
+export type KnowledgeProcessingStep = {
+  id: string;
+  label: string;
+  status: string;
+  current: number;
+  total: number;
+  message: string;
+};
+
+export type KnowledgeProcessingAction = {
+  id: string;
+  label: string;
+  kind: string;
+  enabled: boolean;
+};
+
+export type KnowledgeProcessingReport = {
+  document_id: string;
+  status: string;
+  title: string;
+  message: string;
+  recoverable: boolean;
+  steps: KnowledgeProcessingStep[];
+  actions: KnowledgeProcessingAction[];
+  metrics: Record<string, unknown>;
+};
+
 export type KnowledgeUsageBreakdown = {
   provider: string;
   model: string;
@@ -119,6 +147,14 @@ export const knowledgeApi = {
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retighten`, {
       method: 'POST',
     }),
+
+  progress: (projectId: string, documentId: string) =>
+    authedJsonRequest<KnowledgeProcessingReport>(
+      `/api/projects/${projectId}/knowledge/${documentId}/progress`,
+      {
+        method: 'GET',
+      },
+    ),
 
   preview: (projectId: string, question: string, limit = 5) =>
     authedJsonRequest<KnowledgePreviewResponse, { question: string; limit: number }>(

@@ -323,3 +323,63 @@ class KnowledgePreviewResponseDto:
             "top_results": [result.to_dict() for result in self.top_results],
             "is_empty": self.is_empty,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeProcessingStepDto:
+    id: str
+    label: str
+    status: str
+    current: int = 0
+    total: int = 0
+    message: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "status": self.status,
+            "current": self.current,
+            "total": self.total,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeProcessingActionDto:
+    id: str
+    label: str
+    kind: str
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "kind": self.kind,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeProcessingReportDto:
+    document_id: str
+    status: str
+    title: str
+    message: str
+    recoverable: bool
+    steps: tuple[KnowledgeProcessingStepDto, ...]
+    actions: tuple[KnowledgeProcessingActionDto, ...]
+    metrics: JsonObject
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "document_id": self.document_id,
+            "status": self.status,
+            "title": self.title,
+            "message": self.message,
+            "recoverable": self.recoverable,
+            "steps": [step.to_dict() for step in self.steps],
+            "actions": [action.to_dict() for action in self.actions],
+            "metrics": self.metrics,
+        }
