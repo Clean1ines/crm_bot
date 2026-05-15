@@ -140,7 +140,7 @@ def test_extractor_prompt_omits_known_intents_from_source_payload() -> None:
     )
 
     payload = json.loads(
-        prompt.rsplit("PROCESS THE SOURCE JSON BELOW. RETURN ONLY JSON:", 1)[1]
+        prompt.rsplit("ОБРАБОТАЙ SOURCE JSON НИЖЕ. ВЕРНИ ТОЛЬКО JSON:", 1)[1]
     )
 
     assert "known_question_intents" not in prompt
@@ -162,10 +162,10 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
         file_name="faq.txt",
     )
 
-    assert "One fragment answers one specific customer question" in prompt
-    assert "One chunk may produce multiple fragments" in prompt
-    assert "Do not merge with previous answers" in prompt
-    assert "Do not return match, kind, known_intent_id" in prompt
+    assert "Один fragment отвечает на один конкретный клиентский вопрос" in prompt
+    assert "Один chunk может дать несколько fragments" in prompt
+    assert "Не объединяй результат с предыдущими ответами" in prompt
+    assert "Не возвращай match, kind, known_intent_id" in prompt
     assert "answer_fragment" in prompt
 
 

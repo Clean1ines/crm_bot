@@ -79,9 +79,9 @@ def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
     assert "NOW PROCESS THIS SOURCE JSON" not in build_prompt_source
 
     assert "known_question_intents" not in prompt_source
-    assert "Do not compare the current text with previous answers" in prompt_source
-    assert "Do not merge with previous answers" in prompt_source
-    assert "Do not return match, kind, known_intent_id" in prompt_source
+    assert "Не сравнивай текущий текст с предыдущими ответами" in prompt_source
+    assert "Не объединяй результат с предыдущими ответами" in prompt_source
+    assert "Не возвращай match, kind, known_intent_id" in prompt_source
 
 
 def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
@@ -92,7 +92,7 @@ def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
     assert "merge_known_answer" in source
     assert "parse_answer_merge_payload" in source
     assert "EMBEDDING TEXT MERGE TASK" not in source
-    assert "Do not output tags, synonyms, or embedding_text" in prompt_source
+    assert "Не возвращай tags" in prompt_source
 
 
 def test_stage_k_ingestion_records_extractor_only_compiler_metrics() -> None:
@@ -111,3 +111,18 @@ def test_stage_k_ingestion_records_extractor_only_compiler_metrics() -> None:
     assert "compiled_entry_count" in source
     assert "status_message" in source
     assert "model" in source
+
+
+def test_runtime_prompts_preserve_user_language() -> None:
+    prompts_dir = FAQ_COMPILER_PROMPT.parent
+    response_prompt = _source(prompts_dir / "response_prompt.txt")
+    intent_prompt = _source(prompts_dir / "intent_prompt.txt")
+    interpretation_prompt = _source(prompts_dir / "interpretation_block.txt")
+    merge_prompt = _source(prompts_dir / "knowledge_answer_merge.txt")
+
+    assert "Если клиент пишет по-русски, отвечай по-русски" in response_prompt
+    assert "Не переходи на английский" in response_prompt
+    assert "Верни только JSON" in intent_prompt
+    assert "Значения enum оставляй строго на английском" in intent_prompt
+    assert "ПРАВИЛА ИНТЕРПРЕТАЦИИ ПАМЯТИ" in interpretation_prompt
+    assert "Не переводи русский источник на английский" in merge_prompt

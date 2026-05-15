@@ -814,10 +814,10 @@ def _answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
     answer_key = _normalized_answer_topic_key(entry.answer)
     source_excerpt_key = _normalized_answer_topic_key(entry.source_excerpt)
 
-    if title_key and question_key and answer_key:
-        return f"exact-title-question-answer:{title_key}:{question_key}:{answer_key}"
     if answer_key and source_excerpt_key:
         return f"exact-answer-source:{answer_key}:{source_excerpt_key}"
+    if title_key and question_key and answer_key:
+        return f"exact-title-question-answer:{title_key}:{question_key}:{answer_key}"
     if answer_key:
         return f"exact-answer:{answer_key}"
 
