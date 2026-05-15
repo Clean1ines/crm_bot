@@ -526,7 +526,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
 
 
 @pytest.mark.asyncio
-async def test_structured_preprocessing_merges_repeated_answer_meanings():
+async def test_structured_preprocessing_keeps_extracted_answer_meanings_separate():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_canonical_entries = AsyncMock(return_value=1)
@@ -676,19 +676,19 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
         logger=Mock(),
     )
 
-    preprocessor.merge_known_answer.assert_awaited_once()
+    preprocessor.merge_known_answer.assert_not_awaited()
     repo.add_canonical_entries.assert_awaited_once()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert len(entries) == 1
-    entry = entries[0]
-    assert entry.title == "Manager handoff"
-    assert "payment questions" in entry.answer
-    assert "contract questions" in entry.answer
-    assert len(entry.source_refs) == 2
-    assert "Who handles payment questions?" in entry.enrichment.questions
-    assert "Who handles contract questions?" in entry.enrichment.questions
-    assert "payment" in entry.enrichment.tags
-    assert "contract" in entry.enrichment.tags
+    assert len(entries) == 2
+    assert [entry.title for entry in entries] == ["Manager handoff", "Manager handoff"]
+    assert "payment questions" in entries[0].answer
+    assert "contract questions" in entries[1].answer
+    assert len(entries[0].source_refs) == 1
+    assert len(entries[1].source_refs) == 1
+    assert "Who handles payment questions?" in entries[0].enrichment.questions
+    assert "Who handles contract questions?" in entries[1].enrichment.questions
+    assert "payment" in entries[0].enrichment.tags
+    assert "contract" in entries[1].enrichment.tags
 
 
 @pytest.mark.asyncio
@@ -779,7 +779,7 @@ async def test_source_sections_named_tests_or_rag_rules_are_not_discarded():
 
 
 @pytest.mark.asyncio
-async def test_structured_preprocessing_passes_known_question_intents_between_technical_chunks():
+async def test_structured_preprocessing_does_not_pass_known_question_intents_between_technical_chunks():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_canonical_entries = AsyncMock(return_value=2)
@@ -893,11 +893,7 @@ async def test_structured_preprocessing_passes_known_question_intents_between_te
     assert "previous_entry_titles" not in first_call
     assert "previous_entry_titles" not in second_call
     assert first_call["previous_question_intents"] == ()
-    assert second_call["previous_question_intents"][0].entry_id == "compiled-0"
-    assert (
-        second_call["previous_question_intents"][0].primary_question
-        == "Can I talk to a manager?"
-    )
+    assert second_call["previous_question_intents"] == ()
     assert len(first_call["chunks"]) == 1
     assert len(second_call["chunks"]) == 1
 
@@ -912,7 +908,7 @@ async def test_structured_preprocessing_passes_known_question_intents_between_te
 
 
 @pytest.mark.asyncio
-async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts():
+async def test_structured_preprocessing_known_fragments_stay_separate_with_source_excerpts():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_canonical_entries = AsyncMock(return_value=1)
@@ -1047,14 +1043,15 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
         logger=Mock(),
     )
 
+    preprocessor.merge_known_answer.assert_not_awaited()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert len(entries) == 1
-    source_quotes = [source_ref.quote for source_ref in entries[0].source_refs]
+    assert len(entries) == 2
+    source_quotes = [entry.source_refs[0].quote for entry in entries]
     assert source_quotes == [
         "Assistant transfers payment questions to a human manager.",
         "Assistant transfers contract questions to a human manager.",
     ]
-    assert entries[0].metadata["source_ref_count"] == 2
+    assert [entry.metadata["source_ref_count"] for entry in entries] == [1, 1]
 
 
 @pytest.mark.asyncio
@@ -1171,45 +1168,35 @@ async def test_faq_compilation_mixed_known_update_and_new_intents_keeps_entries_
         logger=Mock(),
     )
 
-    preprocessor.merge_known_answer.assert_awaited_once()
-    merge_kwargs = preprocessor.merge_known_answer.await_args.kwargs
-    assert (
-        merge_kwargs["known_intent"].answer
-        == "Базовое подключение стоит 100 рублей в месяц."
-    )
-    assert merge_kwargs["incoming_fragment"].answer == (
-        "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-    )
+    preprocessor.merge_known_answer.assert_not_awaited()
 
     second_call = preprocessor.preprocess.await_args_list[1].kwargs
     assert "previous_entry_titles" not in second_call
-    assert second_call["previous_question_intents"][0].entry_id == "compiled-0"
-    assert (
-        second_call["previous_question_intents"][0].primary_question
-        == "Сколько стоит сервис?"
-    )
+    assert second_call["previous_question_intents"] == ()
 
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert len(entries) == 4
-    entries_by_title = {entry.title: entry for entry in entries}
-    assert set(entries_by_title) == {
-        "Стоимость сервиса",
-        "Тарифы",
-        "Индивидуальная цена",
-        "Поддержка 24/7",
-    }
-    assert entries_by_title["Стоимость сервиса"].answer == (
+    assert len(entries) == 5
+    entries_by_answer = {entry.answer: entry for entry in entries}
+    assert [entry.title for entry in entries].count("Стоимость сервиса") == 2
+    assert "Тарифы" in {entry.title for entry in entries}
+    assert "Индивидуальная цена" in {entry.title for entry in entries}
+    assert "Поддержка 24/7" in {entry.title for entry in entries}
+    assert "Базовое подключение стоит 100 рублей в месяц." in entries_by_answer
+    assert (
         "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
+        in entries_by_answer
     )
     assert (
-        "круглосуточную поддержку" not in entries_by_title["Стоимость сервиса"].answer
+        "круглосуточную поддержку"
+        not in entries_by_answer[
+            "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
+        ].answer
     )
-    assert entries_by_title["Поддержка 24/7"].answer == (
+    assert (
         "Премиум тариф включает круглосуточную поддержку менеджера."
+        in entries_by_answer
     )
-    assert entries_by_title["Индивидуальная цена"].answer == (
-        "Для крупных клиентов цену рассчитывают индивидуально."
-    )
+    assert "Для крупных клиентов цену рассчитывают индивидуально." in entries_by_answer
 
 
 @pytest.mark.asyncio
@@ -1351,7 +1338,7 @@ async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entr
         logger=Mock(),
     )
 
-    preprocessor.merge_known_answer.assert_awaited_once()
+    preprocessor.merge_known_answer.assert_not_awaited()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
     assert [entry.title for entry in entries] == ["Стоимость сервиса", "Поддержка 24/7"]
     assert entries[0].answer == "Базовое подключение стоит 100 рублей в месяц."
@@ -1362,8 +1349,9 @@ async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entr
     final_metrics = repo.update_document_preprocessing_status.await_args_list[
         -1
     ].kwargs["metrics"]
-    assert final_metrics["unknown_known_intent_id_count"] == 0
-    assert final_metrics["merge_rejected_keep_separate_count"] == 1
+    assert final_metrics["unknown_known_intent_id_count"] == 1
+    assert final_metrics["merge_rejected_keep_separate_count"] == 0
+    assert final_metrics["online_answer_merge_enabled"] is False
 
 
 @pytest.mark.asyncio

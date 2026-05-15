@@ -123,9 +123,7 @@ def test_question_intent_selector_returns_highest_score_first_without_title_or_t
     assert selected[0].answer_digest == "Базовый тариф стоит 100 рублей в месяц."
 
 
-def test_question_first_prompt_uses_intent_cards_not_titles_as_identity_source() -> (
-    None
-):
+def test_extractor_prompt_omits_known_intents_from_source_payload() -> None:
     existing = _entry(
         "Возврат средств",
         answer="Возврат оформляется через менеджера после проверки заказа.",
@@ -142,27 +140,17 @@ def test_question_first_prompt_uses_intent_cards_not_titles_as_identity_source()
     )
 
     payload = json.loads(
-        prompt.rsplit("NOW PROCESS THIS SOURCE JSON. Return ONLY the JSON result:", 1)[
-            1
-        ]
+        prompt.rsplit("PROCESS THE SOURCE JSON BELOW. RETURN ONLY JSON:", 1)[1]
     )
-    known_intent = payload["known_question_intents"][0]
 
-    assert "known_question_intents" in prompt
+    assert "known_question_intents" not in prompt
     assert "previous_answer_titles" not in payload
     assert "previous_entry_titles" not in payload
-    assert "title" not in known_intent
-    assert "tags" not in known_intent
-    assert "synonyms" not in known_intent
-    assert "embedding_text" not in known_intent
-    assert known_intent["canonical_question"] == "Можно вернуть деньги?"
-    assert known_intent["question_variants"] == [
-        "Можно вернуть деньги?",
-        "Есть возврат?",
-    ]
-    assert known_intent["answer_digest"] == (
-        "Возврат оформляется через менеджера после проверки заказа."
-    )
+    assert payload == {
+        "file_name": "faq.txt",
+        "mode": "faq",
+        "chunks": [{"index": 0, "content": "Refund policy: manager checks the order."}],
+    }
 
 
 def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text() -> (
@@ -174,10 +162,10 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
         file_name="faq.txt",
     )
 
-    assert "One output fragment = one answer intent contribution" in prompt
-    assert "One source chunk may contain many answer intents" in prompt
-    assert "A+A' once" in prompt
-    assert "Do not output tags, synonyms, or embedding_text" in prompt
+    assert "One fragment answers one specific customer question" in prompt
+    assert "One chunk may produce multiple fragments" in prompt
+    assert "Do not merge with previous answers" in prompt
+    assert "Do not return match, kind, known_intent_id" in prompt
     assert "answer_fragment" in prompt
 
 
