@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[2]
 INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
 KNOWLEDGE_PORT = ROOT / "src/application/ports/knowledge_port.py"
 KNOWLEDGE_PREPROCESSOR = ROOT / "src/infrastructure/llm/knowledge_preprocessor.py"
+KNOWLEDGE_PREPROCESSOR_SHARED_PROMPT = (
+    ROOT / "src/agent/prompts/knowledge_preprocess_shared_contract.txt"
+)
 
 
 def _source(path: Path) -> str:
@@ -66,12 +69,18 @@ def test_stage_k_preprocessor_port_requires_carryover_and_one_meaning_merge() ->
 
 
 def test_stage_k_groq_preprocessor_prompt_has_cross_chunk_carryover_contract() -> None:
-    source = _source(KNOWLEDGE_PREPROCESSOR)
+    preprocessor_source = _source(KNOWLEDGE_PREPROCESSOR)
+    build_prompt_source = _function_source(KNOWLEDGE_PREPROCESSOR, "_build_prompt")
+    prompt_source = _source(KNOWLEDGE_PREPROCESSOR_SHARED_PROMPT)
 
-    assert '"previous_answer_titles": previous_titles' in source
-    assert "CROSS-CHUNK COMPILER CONTEXT" in source
-    assert "reuse the exact previous title" in source
-    assert "Do not output standalone generated questions as entries" in source
+    assert '"previous_answer_titles": previous_titles' in preprocessor_source
+    assert "PREPROCESSING_SHARED_CONTRACT_PROMPT_FILE" in preprocessor_source
+    assert "CROSS-CHUNK COMPILER CONTEXT" not in build_prompt_source
+    assert "NOW PROCESS THIS SOURCE JSON" not in build_prompt_source
+
+    assert "CROSS-CHUNK COMPILER CONTEXT" in prompt_source
+    assert "reuse the exact previous title" in prompt_source
+    assert "Do not output standalone generated questions as entries" in prompt_source
 
 
 def test_stage_k_groq_preprocessor_has_one_meaning_merge_contract() -> None:

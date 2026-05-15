@@ -30,10 +30,10 @@ PREPROCESSING_STATUS_PROCESSING = "processing"
 PREPROCESSING_STATUS_COMPLETED = "completed"
 PREPROCESSING_STATUS_FAILED = "failed"
 
-PROMPT_VERSION_FAQ = "knowledge_preprocess_faq_v2"
+PROMPT_VERSION_FAQ = "knowledge_preprocess_faq_v3"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
 PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
-SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v1"
+SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v2"
 
 SemanticMergeAction: TypeAlias = Literal["merge", "keep_separate"]
 SEMANTIC_MERGE_ACTION_MERGE = "merge"
@@ -90,6 +90,26 @@ class KnowledgePreprocessingExecutionResult:
 class KnowledgeEmbeddingTextMergeExecutionResult:
     embedding_text: str
     usage: ModelUsageMeasurement | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeQuestionIntentCard:
+    entry_id: str
+    title: str
+    primary_question: str
+    question_samples: tuple[str, ...] = field(default_factory=tuple)
+    answer_digest: str = ""
+    tags: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "entry_id": self.entry_id,
+            "title": self.title,
+            "primary_question": self.primary_question,
+            "question_samples": list(self.question_samples),
+            "answer_digest": self.answer_digest,
+            "tags": list(self.tags),
+        }
 
 
 @dataclass(frozen=True, slots=True)
