@@ -78,9 +78,10 @@ def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
     assert "knowledge_answer_compiler_faq.txt" in preprocessor_source
     assert "NOW PROCESS THIS SOURCE JSON" not in build_prompt_source
 
-    assert "known_question_intents" in prompt_source
-    assert "Do not output title for match.kind" in prompt_source
-    assert "Do not output tags, synonyms, or embedding_text" in prompt_source
+    assert "known_question_intents" not in prompt_source
+    assert "Do not compare the current text with previous answers" in prompt_source
+    assert "Do not merge with previous answers" in prompt_source
+    assert "Do not return match, kind, known_intent_id" in prompt_source
 
 
 def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
@@ -94,13 +95,15 @@ def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
     assert "Do not output tags, synonyms, or embedding_text" in prompt_source
 
 
-def test_stage_k_ingestion_records_compiler_loop_and_merge_metrics() -> None:
+def test_stage_k_ingestion_records_extractor_only_compiler_metrics() -> None:
     source = _source(INGESTION_SERVICE)
 
     assert "technical_compiler_call_count" in source
     assert "previous_title_carryover" in source
     assert "False" in source
     assert "one_meaning_at_a_time_merge" in source
+    assert "extractor_only_compiler_loop" in source
+    assert "online_answer_merge_enabled" in source
     assert "llm_merge_call_count" in source
     assert "KCD_STAGE_K_COMPILER_VERSION" in source
     assert "Knowledge answer compiler technical batch processed" in source
