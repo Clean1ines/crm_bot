@@ -15,6 +15,7 @@ from src.domain.runtime.evidence import (
     EvidenceSourceType,
 )
 from src.domain.runtime.evidence_plan import (
+    EvidenceNeed,
     EvidenceNeedKind,
     EvidencePlan,
     EvidencePlanStatus,
@@ -194,6 +195,21 @@ def test_disambiguation_intent_requires_clarification_even_without_named_slots()
     assert decision.missing_needs[0].kind == EvidenceNeedKind.CLARIFICATION
     assert decision.reason == "commercial_query_requires_clarification"
     assert not decision.answer_may_proceed
+
+
+def test_live_evidence_need_requires_authoritative_source_even_when_fresh() -> None:
+    need = EvidenceNeed(
+        kind=EvidenceNeedKind.LIVE_OPERATIONAL,
+        source_types=(EvidenceSourceType.LLM_REASONING,),
+        requires_live_freshness=True,
+    )
+    live_llm_reasoning = _evidence(
+        EvidenceSourceType.LLM_REASONING,
+        content="The model claims the live availability is yes.",
+        freshness=EvidenceFreshness.LIVE,
+    )
+
+    assert not need.is_satisfied_by(live_llm_reasoning)
 
 
 def test_conflicting_authoritative_evidence_can_require_human_review() -> None:
