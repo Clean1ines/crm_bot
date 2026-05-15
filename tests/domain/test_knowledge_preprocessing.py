@@ -40,7 +40,7 @@ def _valid_entry() -> dict[str, object]:
 
 
 def test_preprocessing_prompt_versions_are_current() -> None:
-    assert prompt_version_for_mode(MODE_FAQ) == "knowledge_preprocess_faq_v3"
+    assert prompt_version_for_mode(MODE_FAQ) == "knowledge_answer_compiler_faq_v1"
     assert (
         prompt_version_for_mode(MODE_PRICE_LIST) == "knowledge_preprocess_price_list_v2"
     )
@@ -113,8 +113,8 @@ def test_parse_preprocessing_payload_accepts_dense_query_surface() -> None:
     assert len(entry.synonyms) == 5
     assert len(entry.tags) == 2
     assert "Can I get a refund?" in entry.embedding_text
-    assert "return payment" in entry.embedding_text
-    assert "billing" in entry.embedding_text
+    assert "Refund requests are reviewed" in entry.embedding_text
+    assert "billing" not in entry.embedding_text
 
 
 def test_price_list_still_rejects_broad_noisy_synonyms() -> None:
@@ -161,29 +161,30 @@ def test_parse_preprocessing_payload_rejects_trailing_text_after_json_object() -
         )
 
 
-def test_parse_embedding_text_merge_payload_accepts_minimal_json() -> None:
+def test_parse_answer_merge_payload_accepts_minimal_json() -> None:
     from src.domain.project_plane.knowledge_preprocessing import (
-        parse_embedding_text_merge_payload,
+        parse_answer_merge_payload,
     )
 
-    assert (
-        parse_embedding_text_merge_payload(
-            '{"embedding_text":"  Возврат средств и условия оплаты.  "}'
-        )
-        == "Возврат средств и условия оплаты."
+    merge_allowed, answer, question_variants = parse_answer_merge_payload(
+        '{"merge_allowed":true,"answer":"A+B once","question_variants":["Q?"]}'
     )
 
+    assert merge_allowed is True
+    assert answer == "A+B once"
+    assert question_variants == ("Q?",)
 
-def test_parse_embedding_text_merge_payload_rejects_full_entries_schema() -> None:
+
+def test_parse_answer_merge_payload_rejects_full_entries_schema() -> None:
     import pytest
 
     from src.domain.project_plane.knowledge_preprocessing import (
         KnowledgePreprocessingValidationError,
-        parse_embedding_text_merge_payload,
+        parse_answer_merge_payload,
     )
 
     with pytest.raises(KnowledgePreprocessingValidationError):
-        parse_embedding_text_merge_payload('{"entries":[]}')
+        parse_answer_merge_payload('{"entries":[]}')
 
 
 def test_semantic_merge_group_payload_is_json_serializable() -> None:

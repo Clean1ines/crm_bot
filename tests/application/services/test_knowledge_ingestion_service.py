@@ -10,7 +10,7 @@ from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgeEmbeddingTextMergeExecutionResult,
+    KnowledgeAnswerMergeExecutionResult,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingResult,
@@ -21,6 +21,23 @@ from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 def _usage_repo() -> Mock:
     repo = Mock()
     repo.record_event = AsyncMock()
+    return repo
+
+
+def _knowledge_repo(*, canonical_count: int) -> Mock:
+    repo = Mock()
+    repo.delete_document_chunks = AsyncMock()
+    repo.add_canonical_entries = AsyncMock(return_value=canonical_count)
+    repo.add_source_chunks = AsyncMock(return_value=2)
+    repo.create_compiler_run = AsyncMock()
+    repo.complete_compiler_run = AsyncMock()
+    repo.fail_compiler_run = AsyncMock()
+    repo.add_answer_candidates = AsyncMock(return_value=canonical_count)
+    repo.add_candidate_clusters = AsyncMock(return_value=canonical_count)
+    repo.update_document_status = AsyncMock()
+    repo.update_document_preprocessing_status = AsyncMock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
     return repo
 
 
@@ -439,7 +456,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
             ),
         ]
     )
-    preprocessor.merge_embedding_text = AsyncMock()
+    preprocessor.merge_known_answer = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -505,7 +522,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
         "operator transfer",
         "human support",
     )
-    preprocessor.merge_embedding_text.assert_not_awaited()
+    preprocessor.merge_known_answer.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -564,6 +581,9 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
                     "operator contract",
                 ),
                 tags=("handoff", "contract"),
+                canonical_question="Can I talk to a manager?",
+                match_kind="known",
+                known_intent_id="compiled-0",
             ),
         ),
         metrics={},
@@ -620,10 +640,11 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_embedding_text = AsyncMock(
-        return_value=KnowledgeEmbeddingTextMergeExecutionResult(
-            embedding_text=merged_result.entries[0].embedding_text
-            or merged_result.entries[0].answer,
+    preprocessor.merge_known_answer = AsyncMock(
+        return_value=KnowledgeAnswerMergeExecutionResult(
+            merge_allowed=True,
+            answer=merged_result.entries[0].answer,
+            question_variants=merged_result.entries[0].questions,
             usage=None,
         )
     )
@@ -655,7 +676,7 @@ async def test_structured_preprocessing_merges_repeated_answer_meanings():
         logger=Mock(),
     )
 
-    preprocessor.merge_embedding_text.assert_awaited_once()
+    preprocessor.merge_known_answer.assert_awaited_once()
     repo.add_canonical_entries.assert_awaited_once()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
     assert len(entries) == 1
@@ -758,7 +779,7 @@ async def test_source_sections_named_tests_or_rag_rules_are_not_discarded():
 
 
 @pytest.mark.asyncio
-async def test_structured_preprocessing_passes_previous_titles_between_technical_chunks():
+async def test_structured_preprocessing_passes_known_question_intents_between_technical_chunks():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
     repo.add_canonical_entries = AsyncMock(return_value=2)
@@ -834,7 +855,7 @@ async def test_structured_preprocessing_passes_previous_titles_between_technical
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_embedding_text = AsyncMock()
+    preprocessor.merge_known_answer = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -869,8 +890,14 @@ async def test_structured_preprocessing_passes_previous_titles_between_technical
     first_call = preprocessor.preprocess.await_args_list[0].kwargs
     second_call = preprocessor.preprocess.await_args_list[1].kwargs
 
-    assert first_call["previous_entry_titles"] == ()
-    assert second_call["previous_entry_titles"] == ("Manager handoff",)
+    assert "previous_entry_titles" not in first_call
+    assert "previous_entry_titles" not in second_call
+    assert first_call["previous_question_intents"] == ()
+    assert second_call["previous_question_intents"][0].entry_id == "compiled-0"
+    assert (
+        second_call["previous_question_intents"][0].primary_question
+        == "Can I talk to a manager?"
+    )
     assert len(first_call["chunks"]) == 1
     assert len(second_call["chunks"]) == 1
 
@@ -935,6 +962,9 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
             "operator contract",
         ),
         tags=("handoff", "contract"),
+        canonical_question="Can I talk to a manager?",
+        match_kind="known",
+        known_intent_id="compiled-0",
     )
     merged_entry = KnowledgePreprocessingEntry(
         title="Manager handoff",
@@ -981,9 +1011,11 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
             ),
         ]
     )
-    preprocessor.merge_embedding_text = AsyncMock(
-        return_value=KnowledgeEmbeddingTextMergeExecutionResult(
-            embedding_text=merged_entry.embedding_text or merged_entry.answer,
+    preprocessor.merge_known_answer = AsyncMock(
+        return_value=KnowledgeAnswerMergeExecutionResult(
+            merge_allowed=True,
+            answer=merged_entry.answer,
+            question_variants=merged_entry.questions,
             usage=None,
         )
     )
@@ -1026,6 +1058,161 @@ async def test_structured_preprocessing_llm_merge_preserves_both_source_excerpts
 
 
 @pytest.mark.asyncio
+async def test_faq_compilation_mixed_known_update_and_new_intents_keeps_entries_separate():
+    repo = _knowledge_repo(canonical_count=4)
+
+    first_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Стоимость сервиса",
+                answer="Базовое подключение стоит 100 рублей в месяц.",
+                source_excerpt="Базовое подключение стоит 100 рублей в месяц.",
+                questions=("Сколько стоит сервис?", "Какая цена подключения?"),
+                synonyms=("Сколько стоит сервис?", "Какая цена подключения?"),
+                canonical_question="Сколько стоит сервис?",
+            ),
+        ),
+        metrics={},
+    )
+    second_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Стоимость сервиса",
+                answer=(
+                    "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
+                ),
+                source_excerpt=(
+                    "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
+                ),
+                questions=("Сколько стоит сервис?", "Какие цены по тарифам?"),
+                synonyms=("Сколько стоит сервис?", "Какие цены по тарифам?"),
+                canonical_question="Сколько стоит сервис?",
+                match_kind="known",
+                known_intent_id="compiled-0",
+            ),
+            KnowledgePreprocessingEntry(
+                title="Тарифы",
+                answer="Есть базовый и премиум тарифы.",
+                source_excerpt="Есть базовый и премиум тарифы.",
+                questions=("Какие есть тарифы?", "Чем отличаются планы?"),
+                synonyms=("Какие есть тарифы?", "Чем отличаются планы?"),
+                canonical_question="Какие есть тарифы?",
+            ),
+            KnowledgePreprocessingEntry(
+                title="Индивидуальная цена",
+                answer="Для крупных клиентов цену рассчитывают индивидуально.",
+                source_excerpt="Для крупных клиентов цену рассчитывают индивидуально.",
+                questions=(
+                    "Можно индивидуальную цену?",
+                    "Есть расчет для крупных клиентов?",
+                ),
+                synonyms=(
+                    "Можно индивидуальную цену?",
+                    "Есть расчет для крупных клиентов?",
+                ),
+                canonical_question="Можно ли получить индивидуальную цену?",
+            ),
+            KnowledgePreprocessingEntry(
+                title="Поддержка 24/7",
+                answer="Премиум тариф включает круглосуточную поддержку менеджера.",
+                source_excerpt="Премиум тариф включает круглосуточную поддержку менеджера.",
+                questions=("Есть поддержка 24/7?", "Менеджер отвечает круглосуточно?"),
+                synonyms=("Есть поддержка 24/7?", "Менеджер отвечает круглосуточно?"),
+                canonical_question="Есть ли круглосуточная поддержка менеджера?",
+            ),
+        ),
+        metrics={},
+    )
+
+    preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
+    preprocessor.preprocess = AsyncMock(
+        side_effect=[
+            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
+            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
+        ]
+    )
+    preprocessor.merge_known_answer = AsyncMock(
+        return_value=KnowledgeAnswerMergeExecutionResult(
+            merge_allowed=True,
+            answer="Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей.",
+            question_variants=("Сколько стоит сервис?", "Какие цены по тарифам?"),
+            usage=None,
+        )
+    )
+
+    service = KnowledgeIngestionService(object())
+
+    await service.process_document(
+        project_id="project-1",
+        document_id="doc-mixed-known-new",
+        file_name="faq.md",
+        chunks=[
+            {"content": "Базовое подключение стоит 100 рублей в месяц."},
+            {
+                "content": (
+                    "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей. "
+                    "Есть базовый и премиум тарифы. Для крупных клиентов цену "
+                    "рассчитывают индивидуально. Премиум тариф включает "
+                    "круглосуточную поддержку менеджера."
+                )
+            },
+        ],
+        mode="faq",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=_usage_repo()),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+
+    preprocessor.merge_known_answer.assert_awaited_once()
+    merge_kwargs = preprocessor.merge_known_answer.await_args.kwargs
+    assert (
+        merge_kwargs["known_intent"].answer
+        == "Базовое подключение стоит 100 рублей в месяц."
+    )
+    assert merge_kwargs["incoming_fragment"].answer == (
+        "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
+    )
+
+    second_call = preprocessor.preprocess.await_args_list[1].kwargs
+    assert "previous_entry_titles" not in second_call
+    assert second_call["previous_question_intents"][0].entry_id == "compiled-0"
+    assert (
+        second_call["previous_question_intents"][0].primary_question
+        == "Сколько стоит сервис?"
+    )
+
+    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
+    assert len(entries) == 4
+    entries_by_title = {entry.title: entry for entry in entries}
+    assert set(entries_by_title) == {
+        "Стоимость сервиса",
+        "Тарифы",
+        "Индивидуальная цена",
+        "Поддержка 24/7",
+    }
+    assert entries_by_title["Стоимость сервиса"].answer == (
+        "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
+    )
+    assert (
+        "круглосуточную поддержку" not in entries_by_title["Стоимость сервиса"].answer
+    )
+    assert entries_by_title["Поддержка 24/7"].answer == (
+        "Премиум тариф включает круглосуточную поддержку менеджера."
+    )
+    assert entries_by_title["Индивидуальная цена"].answer == (
+        "Для крупных клиентов цену рассчитывают индивидуально."
+    )
+
+
+@pytest.mark.asyncio
 async def test_structured_preprocessing_failure_marks_document_error():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
@@ -1046,7 +1233,7 @@ async def test_structured_preprocessing_failure_marks_document_error():
     preprocessor.preprocess = AsyncMock(
         side_effect=ValueError("Invalid preprocessing JSON: Extra data")
     )
-    preprocessor.merge_embedding_text = AsyncMock()
+    preprocessor.merge_known_answer = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
