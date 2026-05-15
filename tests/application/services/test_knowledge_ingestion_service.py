@@ -1213,6 +1213,160 @@ async def test_faq_compilation_mixed_known_update_and_new_intents_keeps_entries_
 
 
 @pytest.mark.asyncio
+async def test_faq_compilation_unknown_known_intent_id_keeps_fragment_separate_with_metric():
+    repo = _knowledge_repo(canonical_count=2)
+    first_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Стоимость сервиса",
+                answer="Базовое подключение стоит 100 рублей в месяц.",
+                source_excerpt="Базовое подключение стоит 100 рублей в месяц.",
+                questions=("Сколько стоит сервис?",),
+                synonyms=("Сколько стоит сервис?",),
+                canonical_question="Сколько стоит сервис?",
+            ),
+        ),
+        metrics={},
+    )
+    unknown_known_fragment = KnowledgePreprocessingEntry(
+        title="Сроки запуска",
+        answer="Запуск занимает два рабочих дня.",
+        source_excerpt="Запуск занимает два рабочих дня.",
+        questions=("Сколько длится запуск?",),
+        synonyms=("Сколько длится запуск?",),
+        canonical_question="Сколько длится запуск?",
+        match_kind="known",
+        known_intent_id="compiled-404",
+    )
+    second_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(unknown_known_fragment,),
+        metrics={},
+    )
+    preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
+    preprocessor.preprocess = AsyncMock(
+        side_effect=[
+            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
+            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
+        ]
+    )
+    preprocessor.merge_known_answer = AsyncMock()
+
+    await KnowledgeIngestionService(object()).process_document(
+        project_id="project-1",
+        document_id="doc-unknown-known",
+        file_name="faq.md",
+        chunks=[
+            {"content": "Базовое подключение стоит 100 рублей в месяц."},
+            {"content": "Запуск занимает два рабочих дня."},
+        ],
+        mode="faq",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=_usage_repo()),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+
+    preprocessor.merge_known_answer.assert_not_awaited()
+    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
+    assert [entry.title for entry in entries] == ["Стоимость сервиса", "Сроки запуска"]
+    final_metrics = repo.update_document_preprocessing_status.await_args_list[
+        -1
+    ].kwargs["metrics"]
+    assert final_metrics["unknown_known_intent_id_count"] == 1
+    assert final_metrics["merge_rejected_keep_separate_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entry():
+    repo = _knowledge_repo(canonical_count=2)
+    first_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Стоимость сервиса",
+                answer="Базовое подключение стоит 100 рублей в месяц.",
+                source_excerpt="Базовое подключение стоит 100 рублей в месяц.",
+                questions=("Сколько стоит сервис?",),
+                synonyms=("Сколько стоит сервис?",),
+                canonical_question="Сколько стоит сервис?",
+            ),
+        ),
+        metrics={},
+    )
+    rejected_known_fragment = KnowledgePreprocessingEntry(
+        title="Поддержка 24/7",
+        answer="Премиум тариф включает круглосуточную поддержку менеджера.",
+        source_excerpt="Премиум тариф включает круглосуточную поддержку менеджера.",
+        questions=("Есть поддержка 24/7?",),
+        synonyms=("Есть поддержка 24/7?",),
+        canonical_question="Есть ли круглосуточная поддержка менеджера?",
+        match_kind="known",
+        known_intent_id="compiled-0",
+    )
+    second_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(rejected_known_fragment,),
+        metrics={},
+    )
+    preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
+    preprocessor.preprocess = AsyncMock(
+        side_effect=[
+            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
+            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
+        ]
+    )
+    preprocessor.merge_known_answer = AsyncMock(
+        return_value=KnowledgeAnswerMergeExecutionResult(
+            merge_allowed=False,
+            answer="",
+            question_variants=(),
+            usage=None,
+        )
+    )
+
+    await KnowledgeIngestionService(object()).process_document(
+        project_id="project-1",
+        document_id="doc-merge-rejected",
+        file_name="faq.md",
+        chunks=[
+            {"content": "Базовое подключение стоит 100 рублей в месяц."},
+            {"content": "Премиум тариф включает круглосуточную поддержку менеджера."},
+        ],
+        mode="faq",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=_usage_repo()),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+
+    preprocessor.merge_known_answer.assert_awaited_once()
+    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
+    assert [entry.title for entry in entries] == ["Стоимость сервиса", "Поддержка 24/7"]
+    assert entries[0].answer == "Базовое подключение стоит 100 рублей в месяц."
+    assert (
+        entries[1].answer
+        == "Премиум тариф включает круглосуточную поддержку менеджера."
+    )
+    final_metrics = repo.update_document_preprocessing_status.await_args_list[
+        -1
+    ].kwargs["metrics"]
+    assert final_metrics["unknown_known_intent_id_count"] == 0
+    assert final_metrics["merge_rejected_keep_separate_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_structured_preprocessing_failure_marks_document_error():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
