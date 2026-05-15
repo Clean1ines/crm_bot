@@ -24,6 +24,7 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
+  type KnowledgeAnswerDraftsResponse,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
@@ -31,6 +32,7 @@ import { t } from '@shared/i18n';
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
 type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingReport>;
+type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
 
 interface Document {
   id: string;
@@ -675,6 +677,42 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const processingReports = processingReportsQuery.data || {};
+  const draftPreviewDocumentIds = Object.values(processingReports)
+    .filter((report) => {
+      const draftCount = metricNumber(report.metrics, 'draft_answer_count') ?? 0;
+      const publishedCount = metricNumber(report.metrics, 'published_answer_count') ?? 0;
+      return draftCount > publishedCount;
+    })
+    .map((report) => report.document_id)
+    .sort();
+  const answerDraftsQuery = useQuery({
+    queryKey: ['knowledge-answer-drafts', projectId, draftPreviewDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || draftPreviewDocumentIds.length === 0) return {};
+
+      const drafts = await Promise.all(
+        draftPreviewDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.fragments(projectId, documentId, 3);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return drafts.reduce<KnowledgeAnswerDraftsByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && draftPreviewDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const answerDrafts = answerDraftsQuery.data || {};
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
 
@@ -1169,6 +1207,29 @@ export const KnowledgePage: React.FC = () => {
                         ))}
                       </div>
                     )}
+                    {answerDrafts[doc.id]?.drafts.length > 0 && (
+                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+                        <div className="mb-1 font-medium text-[var(--text-primary)]">
+                          {t('knowledge.drafts.title', { count: formatNumber(answerDrafts[doc.id].total_count) })}
+                        </div>
+                        <div className="space-y-2">
+                          {answerDrafts[doc.id].drafts.map((draft) => (
+                            <div key={draft.id} className="rounded-lg bg-[var(--control-bg)] p-2">
+                              <div className="font-medium text-[var(--text-primary)]">
+                                {draft.canonical_question || draft.title}
+                              </div>
+                              <p className="mt-1 line-clamp-2 leading-relaxed">{draft.answer}</p>
+                              {draft.source_refs[0]?.quote && (
+                                <p className="mt-1 line-clamp-1 text-[var(--text-muted)]">
+                                  {t('knowledge.drafts.sourcePrefix')} {draft.source_refs[0].quote}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {processingReport.actions.length > 0 && (
                       <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
                         <div className="mb-1 font-medium text-[var(--text-primary)]">

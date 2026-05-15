@@ -614,6 +614,8 @@ export const en: TranslationDictionary = {
   'knowledge.document.stoppedWarning': 'The document was stopped by the user. It is not considered a completed knowledge base; upload it again if needed.',
   'knowledge.document.processingFailed': 'The document could not be processed',
   'knowledge.processReport.nextActions': 'Next actions',
+  'knowledge.drafts.title': 'Saved drafts: {count}',
+  'knowledge.drafts.sourcePrefix': 'Source:',
   'knowledge.retightenReport.title': 'Duplicate recheck report',
   'knowledge.retightenReport.status': 'Status: {status}',
   'knowledge.retightenReport.entries': 'Entries: {before} → {after}',

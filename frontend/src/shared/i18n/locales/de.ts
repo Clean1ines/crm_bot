@@ -615,6 +615,8 @@ export const de: TranslationDictionary = {
   'knowledge.document.stoppedWarning': 'Das Dokument wurde vom Nutzer gestoppt. Es gilt nicht als abgeschlossene Wissensbasis; laden Sie es bei Bedarf erneut hoch.',
   'knowledge.document.processingFailed': 'Das Dokument konnte nicht verarbeitet werden',
   'knowledge.processReport.nextActions': 'Nächste Schritte',
+  'knowledge.drafts.title': 'Gespeicherte Entwürfe: {count}',
+  'knowledge.drafts.sourcePrefix': 'Quelle:',
   'knowledge.retightenReport.title': 'Bericht zur Duplikatprüfung',
   'knowledge.retightenReport.status': 'Status: {status}',
   'knowledge.retightenReport.entries': 'Einträge: {before} → {after}',
