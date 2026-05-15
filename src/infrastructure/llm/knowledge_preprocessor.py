@@ -16,9 +16,9 @@ from src.application.ports.knowledge_port import KnowledgePreprocessorPort
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
-    MODE_INSTRUCTION,
-    MODE_PRICE_LIST,
-    KnowledgeEmbeddingTextMergeExecutionResult,
+    ANSWER_MERGE_PROMPT_VERSION,
+    KnowledgeAnswerMergeExecutionResult,
+    KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
@@ -27,7 +27,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeSemanticMergeGroup,
     KnowledgeSemanticMergeTighteningResult,
     SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
-    parse_embedding_text_merge_payload,
+    parse_answer_merge_payload,
     parse_preprocessing_payload,
     parse_semantic_merge_tightening_payload,
     prompt_version_for_mode,
@@ -49,12 +49,8 @@ STRICT_JSON_SYSTEM_MESSAGE = (
 KCD_LLM_RESPONSE_LOG_CHUNK_CHARS = 3500
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
-MODE_PROMPT_FILES = {
-    MODE_FAQ: "knowledge_preprocess_faq.txt",
-    MODE_PRICE_LIST: "knowledge_preprocess_price_list.txt",
-    MODE_INSTRUCTION: "knowledge_preprocess_instruction.txt",
-}
-PREPROCESSING_SHARED_CONTRACT_PROMPT_FILE = "knowledge_preprocess_shared_contract.txt"
+FAQ_COMPILER_PROMPT_FILE = "knowledge_answer_compiler_faq.txt"
+ANSWER_MERGE_PROMPT_FILE = "knowledge_answer_merge.txt"
 
 
 def _usage_int(value: object) -> int | None:
@@ -91,7 +87,6 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_entry_titles: Sequence[str] = (),
         previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult:
         prompt_version = prompt_version_for_mode(mode)
@@ -99,7 +94,6 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             mode=mode,
             chunks=chunks,
             file_name=file_name,
-            previous_entry_titles=previous_entry_titles,
             previous_question_intents=previous_question_intents,
         )
 
@@ -157,22 +151,20 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    async def merge_embedding_text(
+    async def merge_known_answer(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        title: str,
-        existing_embedding_text: str,
-        incoming_embedding_text: str,
-    ) -> KnowledgeEmbeddingTextMergeExecutionResult:
-        prompt_version = prompt_version_for_mode(mode)
-        prompt = self._build_embedding_text_merge_prompt(
+        known_intent: KnowledgePreprocessingEntry,
+        incoming_fragment: KnowledgePreprocessingEntry,
+    ) -> KnowledgeAnswerMergeExecutionResult:
+        prompt_version = ANSWER_MERGE_PROMPT_VERSION
+        prompt = self._build_answer_merge_prompt(
             mode=mode,
             file_name=file_name,
-            title=title,
-            existing_embedding_text=existing_embedding_text,
-            incoming_embedding_text=incoming_embedding_text,
+            known_intent=known_intent,
+            incoming_fragment=incoming_fragment,
         )
 
         try:
@@ -183,21 +175,25 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=900,
+                max_tokens=1600,
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
-                task="merge_embedding_text",
+                task="answer_merge",
                 mode=mode,
                 model=self._model,
                 prompt_version=prompt_version,
                 content=content,
                 response=response,
             )
-            embedding_text = parse_embedding_text_merge_payload(content)
-            return KnowledgeEmbeddingTextMergeExecutionResult(
-                embedding_text=embedding_text,
+            merge_allowed, answer, question_variants = parse_answer_merge_payload(
+                content
+            )
+            return KnowledgeAnswerMergeExecutionResult(
+                merge_allowed=merge_allowed,
+                answer=answer,
+                question_variants=question_variants,
                 usage=_response_usage_measurement(
                     response=response,
                     model=self._model,
@@ -217,7 +213,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             KnowledgePreprocessingValidationError,
         ) as exc:
             logger.warning(
-                "Knowledge embedding text merge failed",
+                "Knowledge answer merge failed",
                 extra={
                     "mode": mode,
                     "model": self._model,
@@ -314,45 +310,35 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    def _build_embedding_text_merge_prompt(
+    def _build_answer_merge_prompt(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        title: str,
-        existing_embedding_text: str,
-        incoming_embedding_text: str,
+        known_intent: KnowledgePreprocessingEntry,
+        incoming_fragment: KnowledgePreprocessingEntry,
     ) -> str:
-        compact_existing = " ".join(existing_embedding_text.split())[:2400]
-        compact_incoming = " ".join(incoming_embedding_text.split())[:1600]
+        instruction = _load_answer_merge_prompt()
         merge_payload = {
             "file_name": file_name,
             "mode": mode,
-            "title": title,
-            "existing_embedding_text": compact_existing,
-            "incoming_embedding_text": compact_incoming,
+            "known_intent": {
+                "intent_id": incoming_fragment.known_intent_id,
+                "canonical_question": known_intent.canonical_question
+                or _first_question(known_intent),
+                "question_variants": list(known_intent.questions),
+                "answer": known_intent.answer,
+            },
+            "incoming_fragment": {
+                "canonical_question": incoming_fragment.canonical_question
+                or _first_question(incoming_fragment),
+                "question_variants": list(incoming_fragment.questions),
+                "answer_fragment": incoming_fragment.answer,
+                "source_excerpt": incoming_fragment.source_excerpt,
+                "source_chunk_indexes": list(incoming_fragment.source_chunk_indexes),
+            },
         }
-
-        return (
-            "EMBEDDING TEXT MERGE TASK:\n"
-            "Return exactly one JSON object and nothing else.\n\n"
-            "Schema:\n"
-            '{"embedding_text": "..."}\n\n'
-            "Rules:\n"
-            "- Merge only existing_embedding_text and incoming_embedding_text.\n"
-            "- Return one dense Russian/English retrieval text for semantic search.\n"
-            "- Preserve grounded facts, limitations, conditions, product terms, prices, dates, escalation rules, and user-facing wording from both inputs.\n"
-            "- Remove exact duplicates and near-duplicate phrases.\n"
-            "- Do not invent facts.\n"
-            "- Do not return title, answer, source_excerpt, questions, synonyms, tags, entries, markdown, or explanation.\n"
-            "- Keep the result detailed but compact.\n\n"
-            "STRICT OUTPUT CONTRACT:\n"
-            "- Return exactly one JSON object.\n"
-            "- The only allowed key is embedding_text.\n"
-            "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n\n"
-            "NOW MERGE THIS JSON. Return ONLY the JSON result:\n"
-            f"{json.dumps(merge_payload, ensure_ascii=False)}"
-        )
+        return f"{instruction}\n{json.dumps(merge_payload, ensure_ascii=False)}"
 
     def _build_semantic_merge_tightening_prompt(
         self,
@@ -435,22 +421,15 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_entry_titles: Sequence[str] = (),
         previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> str:
         instruction = _load_mode_prompt(mode)
-        previous_titles = [
-            " ".join(str(title).strip().split())
-            for title in previous_entry_titles
-            if str(title).strip()
-        ][:80]
         known_question_intents = [
             card.to_payload() for card in previous_question_intents
         ][:8]
         source_payload = {
             "file_name": file_name,
             "mode": mode,
-            "previous_answer_titles": previous_titles,
             "known_question_intents": known_question_intents,
             "chunks": [
                 {
@@ -460,12 +439,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 for index, chunk in enumerate(chunks[: self._max_chunks])
             ],
         }
-        shared_contract = _load_shared_preprocessing_contract_prompt()
-        return (
-            f"{instruction}\n\n"
-            f"{shared_contract}\n"
-            f"{json.dumps(source_payload, ensure_ascii=False)}"
-        )
+        return f"{instruction}\n{json.dumps(source_payload, ensure_ascii=False)}"
 
 
 def _log_llm_response(
@@ -510,21 +484,20 @@ def _log_llm_response(
         )
 
 
-def _load_shared_preprocessing_contract_prompt() -> str:
-    return (
-        (PROMPTS_DIR / PREPROCESSING_SHARED_CONTRACT_PROMPT_FILE)
-        .read_text(encoding="utf-8")
-        .strip()
-    )
-
-
 def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
-    prompt_file = MODE_PROMPT_FILES.get(mode)
-    if not prompt_file:
-        raise KnowledgePreprocessingValidationError(f"No prompt for mode: {mode}")
+    if mode != MODE_FAQ:
+        raise KnowledgePreprocessingValidationError(
+            f"Knowledge answer compiler is only available for FAQ mode, got: {mode}"
+        )
+    return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
 
-    path = PROMPTS_DIR / prompt_file
-    return path.read_text(encoding="utf-8")
+
+def _load_answer_merge_prompt() -> str:
+    return (PROMPTS_DIR / ANSWER_MERGE_PROMPT_FILE).read_text(encoding="utf-8")
+
+
+def _first_question(entry: KnowledgePreprocessingEntry) -> str:
+    return next((question for question in entry.questions if question), entry.title)
 
 
 def _response_usage_measurement(

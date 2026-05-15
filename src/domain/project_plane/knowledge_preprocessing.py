@@ -30,7 +30,8 @@ PREPROCESSING_STATUS_PROCESSING = "processing"
 PREPROCESSING_STATUS_COMPLETED = "completed"
 PREPROCESSING_STATUS_FAILED = "failed"
 
-PROMPT_VERSION_FAQ = "knowledge_preprocess_faq_v3"
+PROMPT_VERSION_FAQ = "knowledge_answer_compiler_faq_v1"
+ANSWER_MERGE_PROMPT_VERSION = "knowledge_answer_merge_v1"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
 PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
 SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v2"
@@ -53,6 +54,10 @@ class KnowledgePreprocessingEntry:
     synonyms: tuple[str, ...] = field(default_factory=tuple)
     tags: tuple[str, ...] = field(default_factory=tuple)
     embedding_text: str = ""
+    canonical_question: str = ""
+    match_kind: Literal["new", "known"] = "new"
+    known_intent_id: str = ""
+    source_chunk_indexes: tuple[int, ...] = field(default_factory=tuple)
 
     def to_chunk(self, *, entry_kind: KnowledgeEntryKind) -> JsonObject:
         return {
@@ -87,8 +92,10 @@ class KnowledgePreprocessingExecutionResult:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeEmbeddingTextMergeExecutionResult:
-    embedding_text: str
+class KnowledgeAnswerMergeExecutionResult:
+    merge_allowed: bool
+    answer: str
+    question_variants: tuple[str, ...] = field(default_factory=tuple)
     usage: ModelUsageMeasurement | None = None
 
 
@@ -103,12 +110,10 @@ class KnowledgeQuestionIntentCard:
 
     def to_payload(self) -> JsonObject:
         return {
-            "entry_id": self.entry_id,
-            "title": self.title,
-            "primary_question": self.primary_question,
-            "question_samples": list(self.question_samples),
+            "intent_id": self.entry_id,
+            "canonical_question": self.primary_question,
+            "question_variants": list(self.question_samples),
             "answer_digest": self.answer_digest,
-            "tags": list(self.tags),
         }
 
 
@@ -215,28 +220,28 @@ def parse_preprocessing_payload(
     model: str,
     prompt_version: str,
 ) -> KnowledgePreprocessingResult:
-    if isinstance(payload, str):
-        parsed = _loads_json_object(payload)
-    elif isinstance(payload, Mapping):
-        parsed = payload
-    else:
-        raise KnowledgePreprocessingValidationError(
-            "Preprocessing payload must be a JSON object"
-        )
-
-    entries_payload = parsed.get("entries")
+    parsed = _coerce_json_object(payload, "Preprocessing")
+    entries_payload = parsed.get("fragments")
+    legacy_entries_schema = False
+    if entries_payload is None:
+        entries_payload = parsed.get("entries")
+        legacy_entries_schema = True
     if not isinstance(entries_payload, list):
         raise KnowledgePreprocessingValidationError(
-            "Preprocessing payload must contain entries[]"
+            "Preprocessing payload must contain fragments[]"
         )
 
     entries: list[KnowledgePreprocessingEntry] = []
     for index, item in enumerate(entries_payload):
         if not isinstance(item, Mapping):
             raise KnowledgePreprocessingValidationError(
-                f"Entry {index} must be an object"
+                f"Fragment {index} must be an object"
             )
-        entries.append(_parse_entry(item, mode=mode, index=index))
+        entries.append(
+            _parse_entry(
+                item, mode=mode, index=index, legacy_schema=legacy_entries_schema
+            )
+        )
 
     metrics = parsed.get("metrics")
     return KnowledgePreprocessingResult(
@@ -250,36 +255,22 @@ def parse_preprocessing_payload(
     )
 
 
-def parse_embedding_text_merge_payload(
-    payload: object,
-    *,
-    max_chars: int = 2400,
-) -> str:
-    if isinstance(payload, str):
-        parsed = _loads_json_object(payload)
-    elif isinstance(payload, Mapping):
-        parsed = payload
-    else:
+def parse_answer_merge_payload(payload: object) -> tuple[bool, str, tuple[str, ...]]:
+    parsed = _coerce_json_object(payload, "Answer merge")
+    merge_allowed = parsed.get("merge_allowed")
+    if not isinstance(merge_allowed, bool):
         raise KnowledgePreprocessingValidationError(
-            "Embedding text merge payload must be a JSON object"
+            "Answer merge payload must contain boolean merge_allowed"
         )
-
-    raw_embedding_text = parsed.get("embedding_text")
-    if not isinstance(raw_embedding_text, str):
+    answer = _optional_text(parsed.get("answer"))
+    question_variants = tuple(_string_list(parsed.get("question_variants")))
+    if not merge_allowed:
+        return False, "", ()
+    if not answer:
         raise KnowledgePreprocessingValidationError(
-            "Embedding text merge payload must contain embedding_text"
+            "Answer merge payload must contain answer when merge_allowed=true"
         )
-
-    embedding_text = _compact_text(raw_embedding_text)
-    if not embedding_text:
-        raise KnowledgePreprocessingValidationError(
-            "Embedding text merge payload contains empty embedding_text"
-        )
-
-    if len(embedding_text) > max_chars:
-        return embedding_text[:max_chars].rstrip()
-
-    return embedding_text
+    return True, answer, question_variants
 
 
 def parse_semantic_merge_tightening_payload(
@@ -384,13 +375,21 @@ def _json_object_from_mapping(value: Mapping[object, object]) -> JsonObject:
 def build_embedding_text(entry: KnowledgePreprocessingEntry) -> str:
     parts = [
         entry.title,
-        entry.answer,
-        entry.source_excerpt,
+        entry.canonical_question,
         " ".join(entry.questions),
-        " ".join(entry.synonyms),
-        " ".join(entry.tags),
+        entry.answer,
     ]
     return _compact_text(" ".join(part for part in parts if part))
+
+
+def _coerce_json_object(payload: object, label: str) -> Mapping[str, object]:
+    if isinstance(payload, str):
+        return _loads_json_object(payload)
+    if isinstance(payload, Mapping):
+        return payload
+    raise KnowledgePreprocessingValidationError(
+        f"{label} payload must be a JSON object"
+    )
 
 
 def _loads_json_object(text: str) -> Mapping[str, object]:
@@ -422,14 +421,40 @@ def _parse_entry(
     *,
     mode: KnowledgePreprocessingMode,
     index: int,
+    legacy_schema: bool = False,
 ) -> KnowledgePreprocessingEntry:
-    title = _required_text(payload, "title", index=index)
-    answer = _required_text(payload, "answer", index=index)
+    match_payload = payload.get("match")
+    match_kind = "new"
+    known_intent_id = ""
+    if isinstance(match_payload, Mapping):
+        raw_match_kind = _optional_text(match_payload.get("kind"))
+        if raw_match_kind in {"new", "known"}:
+            match_kind = raw_match_kind
+        known_intent_id = _optional_text(match_payload.get("known_intent_id"))
+    variants = _string_list(payload.get("question_variants"))
+    if not variants:
+        variants = _string_list(payload.get("questions"))
+    canonical_question = _optional_text(payload.get("canonical_question"))
+    if not canonical_question and variants:
+        canonical_question = variants[0]
+    title = _optional_text(payload.get("title")) or canonical_question
+    if not canonical_question:
+        canonical_question = title
+    answer = _optional_text(payload.get("answer_fragment")) or _required_text(
+        payload, "answer", index=index
+    )
     source_excerpt = _required_text(payload, "source_excerpt", index=index)
 
-    questions = tuple(_string_list(payload.get("questions")))
-    synonyms = tuple(_string_list(payload.get("synonyms")))
-    tags = tuple(_string_list(payload.get("tags")))
+    questions = _dedupe_texts((canonical_question, *variants))
+    if legacy_schema:
+        synonyms = tuple(_string_list(payload.get("synonyms")))
+        tags = tuple(_string_list(payload.get("tags")))
+    else:
+        synonyms = questions
+        tags = ()
+    source_chunk_indexes = tuple(
+        _non_negative_ints(payload.get("source_chunk_indexes"))
+    )
     embedding_text = _optional_text(payload.get("embedding_text"))
 
     if mode == MODE_PRICE_LIST:
@@ -443,8 +468,13 @@ def _parse_entry(
         synonyms=synonyms,
         tags=tags,
         embedding_text=embedding_text,
+        canonical_question=canonical_question,
+        match_kind=cast(Literal["new", "known"], match_kind),
+        known_intent_id=known_intent_id,
+        source_chunk_indexes=source_chunk_indexes,
     )
-    _validate_query_surface(entry, mode=mode, index=index)
+    if legacy_schema:
+        _validate_query_surface(entry, mode=mode, index=index)
 
     if not entry.embedding_text:
         return KnowledgePreprocessingEntry(
@@ -455,6 +485,10 @@ def _parse_entry(
             synonyms=entry.synonyms,
             tags=entry.tags,
             embedding_text=build_embedding_text(entry),
+            canonical_question=entry.canonical_question,
+            match_kind=entry.match_kind,
+            known_intent_id=entry.known_intent_id,
+            source_chunk_indexes=entry.source_chunk_indexes,
         )
 
     return entry
@@ -563,3 +597,27 @@ def _reject_price_list_noisy_synonyms(
         raise KnowledgePreprocessingValidationError(
             f"Price list entry {index} contains broad noisy synonyms: {', '.join(forbidden)}"
         )
+
+
+def _dedupe_texts(values: Sequence[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _compact_text(value)
+        key = text.casefold()
+        if text and key not in seen:
+            seen.add(key)
+            result.append(text)
+    return tuple(result)
+
+
+def _non_negative_ints(value: object) -> list[int]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    result: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            continue
+        if isinstance(item, int) and item >= 0 and item not in result:
+            result.append(item)
+    return result
