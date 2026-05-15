@@ -2,6 +2,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.knowledge_compilation import AnswerCandidate, SourceRef
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
     KnowledgeSearchTraceView,
@@ -193,6 +194,17 @@ class SourceRefDto:
             confidence=source_ref.confidence,
         )
 
+    @classmethod
+    def from_domain(cls, source_ref: SourceRef) -> "SourceRefDto":
+        return cls(
+            quote=source_ref.quote,
+            source_index=source_ref.source_index,
+            source_chunk_id=source_ref.source_chunk_id,
+            start_offset=source_ref.start_offset,
+            end_offset=source_ref.end_offset,
+            confidence=source_ref.confidence,
+        )
+
     def to_dict(self) -> dict[str, object]:
         payload: dict[str, object] = {"quote": self.quote}
         if self.source_index is not None:
@@ -322,4 +334,158 @@ class KnowledgePreviewResponseDto:
             "best_result": self.best_result.to_dict() if self.best_result else None,
             "top_results": [result.to_dict() for result in self.top_results],
             "is_empty": self.is_empty,
+        }
+
+
+def _metadata_text_list(metadata: Mapping[str, object], key: str) -> list[str]:
+    value = metadata.get(key)
+    if isinstance(value, str):
+        values: tuple[object, ...] = (value,)
+    elif isinstance(value, list | tuple):
+        values = tuple(value)
+    else:
+        return []
+
+    result: list[str] = []
+    for item in values:
+        text = " ".join(str(item or "").strip().split())
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def _metadata_int(metadata: Mapping[str, object], key: str) -> int | None:
+    value = metadata.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeAnswerDraftDto:
+    id: str
+    title: str
+    answer: str
+    status: str
+    batch_id: str
+    batch_index: int | None
+    fragment_index: int | None
+    canonical_question: str
+    question_variants: tuple[str, ...]
+    source_refs: tuple[SourceRefDto, ...]
+    rejection_reason: str = ""
+
+    @classmethod
+    def from_candidate(cls, candidate: AnswerCandidate) -> "KnowledgeAnswerDraftDto":
+        metadata = candidate.metadata
+        return cls(
+            id=candidate.id,
+            title=candidate.title,
+            answer=candidate.candidate_answer,
+            status=str(candidate.status),
+            batch_id=str(metadata.get("batch_id") or ""),
+            batch_index=_metadata_int(metadata, "batch_index"),
+            fragment_index=_metadata_int(metadata, "fragment_index"),
+            canonical_question=str(metadata.get("canonical_question") or ""),
+            question_variants=tuple(_metadata_text_list(metadata, "question_variants")),
+            source_refs=tuple(
+                SourceRefDto.from_domain(source_ref)
+                for source_ref in candidate.source_refs
+            ),
+            rejection_reason=candidate.rejection_reason,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "answer": self.answer,
+            "status": self.status,
+            "batch_id": self.batch_id,
+            "batch_index": self.batch_index,
+            "fragment_index": self.fragment_index,
+            "canonical_question": self.canonical_question,
+            "question_variants": list(self.question_variants),
+            "source_refs": [source_ref.to_dict() for source_ref in self.source_refs],
+            "rejection_reason": self.rejection_reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeAnswerDraftsResponseDto:
+    document_id: str
+    drafts: tuple[KnowledgeAnswerDraftDto, ...]
+    total_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "document_id": self.document_id,
+            "drafts": [draft.to_dict() for draft in self.drafts],
+            "total_count": self.total_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeProcessingStepDto:
+    id: str
+    label: str
+    status: str
+    current: int = 0
+    total: int = 0
+    message: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "status": self.status,
+            "current": self.current,
+            "total": self.total,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeProcessingActionDto:
+    id: str
+    label: str
+    kind: str
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "kind": self.kind,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeProcessingReportDto:
+    document_id: str
+    status: str
+    title: str
+    message: str
+    recoverable: bool
+    steps: tuple[KnowledgeProcessingStepDto, ...]
+    actions: tuple[KnowledgeProcessingActionDto, ...]
+    metrics: JsonObject
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "document_id": self.document_id,
+            "status": self.status,
+            "title": self.title,
+            "message": self.message,
+            "recoverable": self.recoverable,
+            "steps": [step.to_dict() for step in self.steps],
+            "actions": [action.to_dict() for action in self.actions],
+            "metrics": self.metrics,
         }

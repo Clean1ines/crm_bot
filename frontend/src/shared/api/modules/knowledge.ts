@@ -70,6 +70,61 @@ export type KnowledgePreviewResponse = {
   is_empty: boolean;
 };
 
+
+export type KnowledgeProcessingStep = {
+  id: string;
+  label: string;
+  status: string;
+  current: number;
+  total: number;
+  message: string;
+};
+
+export type KnowledgeProcessingAction = {
+  id: string;
+  label: string;
+  kind: string;
+  enabled: boolean;
+};
+
+export type KnowledgeProcessingReport = {
+  document_id: string;
+  status: string;
+  title: string;
+  message: string;
+  recoverable: boolean;
+  steps: KnowledgeProcessingStep[];
+  actions: KnowledgeProcessingAction[];
+  metrics: Record<string, unknown>;
+};
+
+export type KnowledgeAnswerDraft = {
+  id: string;
+  title: string;
+  answer: string;
+  status: string;
+  batch_id: string;
+  batch_index: number | null;
+  fragment_index: number | null;
+  canonical_question: string;
+  question_variants: string[];
+  source_refs: Array<{
+    quote: string;
+    source_index?: number;
+    source_chunk_id?: string;
+    start_offset?: number;
+    end_offset?: number;
+    confidence?: number;
+  }>;
+  rejection_reason: string;
+};
+
+export type KnowledgeAnswerDraftsResponse = {
+  document_id: string;
+  drafts: KnowledgeAnswerDraft[];
+  total_count: number;
+};
+
 export type KnowledgeUsageBreakdown = {
   provider: string;
   model: string;
@@ -119,6 +174,32 @@ export const knowledgeApi = {
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retighten`, {
       method: 'POST',
     }),
+
+  publishReady: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
+      method: 'POST',
+    }),
+
+  retryFailedBatches: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
+      method: 'POST',
+    }),
+
+  progress: (projectId: string, documentId: string) =>
+    authedJsonRequest<KnowledgeProcessingReport>(
+      `/api/projects/${projectId}/knowledge/${documentId}/progress`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  fragments: (projectId: string, documentId: string, limit = 5) =>
+    authedJsonRequest<KnowledgeAnswerDraftsResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/fragments?limit=${limit}`,
+      {
+        method: 'GET',
+      },
+    ),
 
   preview: (projectId: string, question: string, limit = 5) =>
     authedJsonRequest<KnowledgePreviewResponse, { question: string; limit: number }>(

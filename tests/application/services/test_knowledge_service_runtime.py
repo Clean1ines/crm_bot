@@ -162,3 +162,89 @@ async def test_clear_project_knowledge_uses_pool_repo():
 
     knowledge_repo_factory.assert_called_once_with(pool)
     repo.clear_project_knowledge.assert_awaited_once_with("project-1")
+
+
+@pytest.mark.asyncio
+async def test_retry_document_failed_batches_queues_retry_task():
+    from src.infrastructure.queue.job_types import TASK_RETRY_KNOWLEDGE_FAILED_BATCHES
+
+    project_repo = Mock()
+    project_repo.user_has_project_role = AsyncMock(return_value=True)
+    project_repo.project_exists = AsyncMock(return_value=True)
+
+    user_repo = Mock()
+    user_repo.is_platform_admin = AsyncMock(return_value=False)
+
+    queue_repo = Mock()
+    queue_repo.enqueue = AsyncMock(return_value="job-retry-1")
+    logger = Mock()
+
+    service = KnowledgeService(project_repo, user_repo, object(), "secret", FakeJwt)
+
+    result = await service.retry_document_failed_batches(
+        "project-1",
+        "doc-1",
+        "Bearer valid-token",
+        queue_repo=queue_repo,
+        retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+        logger=logger,
+    )
+
+    assert result == {
+        "status": "queued",
+        "job_id": "job-retry-1",
+        "document_id": "doc-1",
+    }
+    queue_repo.enqueue.assert_awaited_once_with(
+        TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+        payload={
+            "project_id": "project-1",
+            "document_id": "doc-1",
+            "requested_by": "user-1",
+            "source": "knowledge_failed_batch_retry",
+        },
+        max_attempts=3,
+    )
+
+
+@pytest.mark.asyncio
+async def test_publish_document_ready_answers_queues_publish_task():
+    from src.infrastructure.queue.job_types import TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS
+
+    project_repo = Mock()
+    project_repo.user_has_project_role = AsyncMock(return_value=True)
+    project_repo.project_exists = AsyncMock(return_value=True)
+
+    user_repo = Mock()
+    user_repo.is_platform_admin = AsyncMock(return_value=False)
+
+    queue_repo = Mock()
+    queue_repo.enqueue = AsyncMock(return_value="job-publish-1")
+    logger = Mock()
+
+    service = KnowledgeService(project_repo, user_repo, object(), "secret", FakeJwt)
+
+    result = await service.publish_document_ready_answers(
+        "project-1",
+        "doc-1",
+        "Bearer valid-token",
+        queue_repo=queue_repo,
+        publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+        logger=logger,
+    )
+
+    assert result == {
+        "status": "queued",
+        "job_id": "job-publish-1",
+        "document_id": "doc-1",
+    }
+    queue_repo.enqueue.assert_awaited_once_with(
+        TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+        payload={
+            "project_id": "project-1",
+            "document_id": "doc-1",
+            "requested_by": "user-1",
+            "source": "knowledge_ready_answer_publish",
+        },
+        max_attempts=3,
+    )

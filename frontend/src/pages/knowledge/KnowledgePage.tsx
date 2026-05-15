@@ -23,11 +23,16 @@ import {
   type KnowledgeUsageResponse,
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
+  type KnowledgeProcessingReport,
+  type KnowledgeAnswerDraftsResponse,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
+
+type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingReport>;
+type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
 
 interface Document {
   id: string;
@@ -640,6 +645,74 @@ export const KnowledgePage: React.FC = () => {
 
   const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
+  const reportableDocuments = documents.filter((doc) => (
+    isDocumentProcessing(doc) || isDocumentFailed(doc) || isDocumentCancelled(doc) || Boolean(doc.structured_entries)
+  ));
+  const reportableDocumentIds = reportableDocuments.map((doc) => doc.id).sort();
+  const processingReportsQuery = useQuery({
+    queryKey: ['knowledge-processing-reports', projectId, reportableDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || reportableDocumentIds.length === 0) return {};
+
+      const reports = await Promise.all(
+        reportableDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.progress(projectId, documentId);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return reports.reduce<KnowledgeProcessingReportByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && reportableDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const processingReports = processingReportsQuery.data || {};
+  const draftPreviewDocumentIds = Object.values(processingReports)
+    .filter((report) => {
+      const draftCount = metricNumber(report.metrics, 'draft_answer_count') ?? 0;
+      const publishedCount = metricNumber(report.metrics, 'published_answer_count') ?? 0;
+      return draftCount > publishedCount;
+    })
+    .map((report) => report.document_id)
+    .sort();
+  const answerDraftsQuery = useQuery({
+    queryKey: ['knowledge-answer-drafts', projectId, draftPreviewDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || draftPreviewDocumentIds.length === 0) return {};
+
+      const drafts = await Promise.all(
+        draftPreviewDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.fragments(projectId, documentId, 3);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return drafts.reduce<KnowledgeAnswerDraftsByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && draftPreviewDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const answerDrafts = answerDraftsQuery.data || {};
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
 
@@ -682,6 +755,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.documentQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.uploadError')));
@@ -711,6 +785,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.cleared'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.clearFailed')));
@@ -727,6 +802,7 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.processingStopped'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.stopFailed')));
@@ -742,9 +818,42 @@ export const KnowledgePage: React.FC = () => {
       toast.success(t('knowledge.feedback.retightenQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.retightenFailed')));
+    },
+  });
+
+  const retryFailedBatchesMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.retryFailedBatches(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success(t('knowledge.feedback.retryFailedBatchesQueued'));
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, t('knowledge.feedback.retryFailedBatchesFailed')));
+    },
+  });
+
+  const publishReadyMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.publishReady(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success(t('knowledge.feedback.publishReadyQueued'));
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
     },
   });
 
@@ -1024,6 +1133,7 @@ export const KnowledgePage: React.FC = () => {
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
+            const processingReport = processingReports[doc.id];
 
             return (
               <div
@@ -1076,6 +1186,102 @@ export const KnowledgePage: React.FC = () => {
                     </>
                   )}
                 </div>
+
+                {processingReport && (
+                  <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+                    <div className="mb-1 font-semibold text-[var(--text-primary)]">
+                      {processingReport.title}
+                    </div>
+                    <p className="leading-relaxed">{processingReport.message}</p>
+                    {processingReport.steps.length > 0 && (
+                      <div className="mt-3 space-y-1.5">
+                        {processingReport.steps.map((step) => (
+                          <div key={step.id} className="flex items-start justify-between gap-3">
+                            <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
+                            <span className="text-right">
+                              {step.total > 0
+                                ? `${formatNumber(step.current)} / ${formatNumber(step.total)}`
+                                : step.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {answerDrafts[doc.id]?.drafts.length > 0 && (
+                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+                        <div className="mb-1 font-medium text-[var(--text-primary)]">
+                          {t('knowledge.drafts.title', { count: formatNumber(answerDrafts[doc.id].total_count) })}
+                        </div>
+                        <div className="space-y-2">
+                          {answerDrafts[doc.id].drafts.map((draft) => (
+                            <div key={draft.id} className="rounded-lg bg-[var(--control-bg)] p-2">
+                              <div className="font-medium text-[var(--text-primary)]">
+                                {draft.canonical_question || draft.title}
+                              </div>
+                              <p className="mt-1 line-clamp-2 leading-relaxed">{draft.answer}</p>
+                              {draft.source_refs[0]?.quote && (
+                                <p className="mt-1 line-clamp-1 text-[var(--text-muted)]">
+                                  {t('knowledge.drafts.sourcePrefix')} {draft.source_refs[0].quote}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {processingReport.actions.length > 0 && (
+                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+                        <div className="mb-1 font-medium text-[var(--text-primary)]">
+                          {t('knowledge.processReport.nextActions')}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {processingReport.actions.map((action) => {
+                            const canRetry = action.id === 'retry_failed_batches' && action.enabled;
+                            const canPublishReady = action.id === 'publish_ready' && action.enabled;
+                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
+                              && retryFailedBatchesMutation.variables === doc.id;
+                            const isPublishingThisDoc = publishReadyMutation.isPending
+                              && publishReadyMutation.variables === doc.id;
+
+                            if (canRetry || canPublishReady) {
+                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
+                              const mutationPending = canRetry
+                                ? retryFailedBatchesMutation.isPending
+                                : publishReadyMutation.isPending;
+                              return (
+                                <button
+                                  key={action.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (canRetry) {
+                                      retryFailedBatchesMutation.mutate(doc.id);
+                                    } else {
+                                      publishReadyMutation.mutate(doc.id);
+                                    }
+                                  }}
+                                  disabled={mutationPending}
+                                  className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+                                >
+                                  {isPending ? t('common.states.loading') : action.label}
+                                </button>
+                              );
+                            }
+
+                            return (
+                              <span
+                                key={action.id}
+                                className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
+                              >
+                                {action.label}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {isDocumentProcessing(doc) && (
                   <div className="mb-4 rounded-xl bg-[var(--accent-primary)]/10 p-3">

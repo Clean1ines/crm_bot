@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 import time
 import uuid
@@ -47,7 +48,9 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
+    KnowledgePreprocessingValidationError,
     KnowledgeQuestionIntentCard,
+    normalize_preprocessing_mode,
     KnowledgeSemanticMergeCandidate,
     KnowledgeSemanticMergeDecision,
     KnowledgeSemanticMergeGroup,
@@ -60,6 +63,8 @@ from src.domain.project_plane.knowledge_compilation import (
     CompilerRunStatus,
     CompilerRun,
     CompilationMetrics,
+    CompilerBatch,
+    CompilerBatchStatus,
     CandidateClusterStatus,
     CandidateCluster,
     AnswerCandidateStatus,
@@ -590,6 +595,28 @@ def _source_chunks_from_json_chunks(
     return tuple(source_chunks)
 
 
+def _json_chunks_from_source_chunks(
+    source_chunks: Sequence[SourceChunk],
+) -> list[JsonObject]:
+    chunks: list[JsonObject] = []
+    for source_chunk in source_chunks:
+        chunk: JsonObject = {
+            "id": source_chunk.id,
+            "index": source_chunk.source_index,
+            "content": source_chunk.content,
+        }
+        if source_chunk.page is not None:
+            chunk["page"] = source_chunk.page
+        if source_chunk.section_title:
+            chunk["section_title"] = source_chunk.section_title
+        if source_chunk.start_offset is not None:
+            chunk["start_offset"] = source_chunk.start_offset
+        if source_chunk.end_offset is not None:
+            chunk["end_offset"] = source_chunk.end_offset
+        chunks.append(chunk)
+    return chunks
+
+
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
 KCD_STAGE_E_COMPILER_VERSION = "kcd_v1_stage_e"
 KCD_STAGE_K_COMPILER_VERSION = "kcd_v1_stage_k_answer_compiler"
@@ -601,6 +628,20 @@ KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT = 8
 KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT = 5
 KCD_STAGE_K_QUESTION_INTENT_TAG_LIMIT = 6
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
+
+
+def _preprocessing_failure_status_message(exc: Exception) -> str:
+    if str(exc) == KCD_STAGE_K_CANCELLED_ERROR:
+        return (
+            "Обработка остановлена: прогресс до последнего завершённого шага сохранён"
+        )
+    if isinstance(exc, KnowledgePreprocessingValidationError):
+        return "Ошибка предобработки: LLM вернула данные в неподдерживаемом формате"
+    if isinstance(exc, ValidationError):
+        return "Ошибка предобработки: результаты не прошли проверку перед публикацией"
+    if isinstance(exc, json.JSONDecodeError):
+        return "Ошибка предобработки: LLM не вернула корректный JSON"
+    return "Ошибка предобработки: pipeline остановлен до публикации результатов"
 
 
 def _answer_digest(
@@ -785,6 +826,240 @@ def _canonical_source_ref(
         end_offset=source_chunk.end_offset,
         confidence=1.0,
     )
+
+
+def _source_chunk_for_technical_chunk(
+    *,
+    technical_chunk: JsonObject,
+    source_chunks: Sequence[SourceChunk],
+) -> SourceChunk | None:
+    if not source_chunks:
+        return None
+
+    raw_index = _source_chunk_optional_int(technical_chunk.get("index"))
+    if raw_index is not None:
+        for source_chunk in source_chunks:
+            if source_chunk.source_index == raw_index:
+                return source_chunk
+
+    content = _chunk_content(technical_chunk)
+    if content:
+        for source_chunk in source_chunks:
+            if content in source_chunk.content or source_chunk.content in content:
+                return source_chunk
+
+    return None
+
+
+def _compiler_batch_id(*, compiler_run_id: str, batch_index: int) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{compiler_run_id}:technical-batch:{batch_index}",
+        )
+    )
+
+
+def _compiler_batches_from_technical_batches(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    technical_batches: Sequence[Sequence[JsonObject]],
+    source_chunks: Sequence[SourceChunk],
+) -> tuple[CompilerBatch, ...]:
+    batch_count = len(technical_batches)
+    batches: list[CompilerBatch] = []
+
+    for batch_index, technical_batch in enumerate(technical_batches, start=1):
+        batch_source_chunks: list[SourceChunk] = []
+        for technical_chunk in technical_batch:
+            source_chunk = _source_chunk_for_technical_chunk(
+                technical_chunk=technical_chunk,
+                source_chunks=source_chunks,
+            )
+            if source_chunk is not None and source_chunk not in batch_source_chunks:
+                batch_source_chunks.append(source_chunk)
+
+        batches.append(
+            CompilerBatch(
+                id=_compiler_batch_id(
+                    compiler_run_id=compiler_run_id,
+                    batch_index=batch_index,
+                ),
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                batch_index=batch_index,
+                batch_count=batch_count,
+                source_chunk_ids=tuple(chunk.id for chunk in batch_source_chunks),
+                source_chunk_indexes=tuple(
+                    chunk.source_index for chunk in batch_source_chunks
+                ),
+                status=CompilerBatchStatus.PENDING,
+                metadata={
+                    "stage": "stage_k_technical_compiler_loop",
+                    "technical_chunk_count": len(technical_batch),
+                },
+            )
+        )
+
+    return tuple(batches)
+
+
+def _raw_answer_candidate_id(
+    *,
+    compiler_run_id: str,
+    batch_index: int,
+    fragment_index: int,
+) -> str:
+    return str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{compiler_run_id}:batch:{batch_index}:fragment:{fragment_index}",
+        )
+    )
+
+
+def _raw_answer_candidates_from_preprocessing_entries(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    batch_id: str,
+    batch_index: int,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    source_chunks: Sequence[SourceChunk],
+    mode: KnowledgePreprocessingMode,
+) -> tuple[AnswerCandidate, ...]:
+    candidates: list[AnswerCandidate] = []
+
+    for fragment_index, entry in enumerate(entries, start=1):
+        draft = _preprocessing_entry_to_compiled_draft(
+            entry,
+            mode=mode,
+            index=fragment_index - 1,
+        )
+        if not draft.answer:
+            continue
+
+        candidates.append(
+            AnswerCandidate(
+                id=_raw_answer_candidate_id(
+                    compiler_run_id=compiler_run_id,
+                    batch_index=batch_index,
+                    fragment_index=fragment_index,
+                ),
+                document_id=document_id,
+                project_id=project_id,
+                compiler_run_id=compiler_run_id,
+                topic_key=_answer_topic_key(entry, index=fragment_index - 1),
+                title=draft.title,
+                candidate_answer=draft.answer,
+                source_refs=_source_refs_for_compiled_answer_draft(
+                    draft=draft,
+                    source_chunks=source_chunks,
+                ),
+                confidence=1.0 if draft.source_excerpts else None,
+                status=AnswerCandidateStatus.EXTRACTED,
+                metadata={
+                    "stage": "stage_k_raw_extraction",
+                    "batch_id": batch_id,
+                    "batch_index": batch_index,
+                    "fragment_index": fragment_index,
+                    "canonical_question": entry.canonical_question,
+                    "question_variants": list(entry.questions),
+                    "source_chunk_indexes": list(entry.source_chunk_indexes),
+                },
+            )
+        )
+
+    return tuple(candidates)
+
+
+def _metadata_text_tuple(metadata: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = metadata.get(key)
+    if isinstance(value, str):
+        values: Sequence[object] = (value,)
+    elif isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        values = value
+    else:
+        return ()
+
+    result: list[str] = []
+    for item in values:
+        text = _clean_optional_text(str(item or ""))
+        if text and text not in result:
+            result.append(text)
+    return tuple(result)
+
+
+def _canonical_entries_from_raw_answer_candidates(
+    *,
+    project_id: str,
+    document_id: str,
+    compiler_run_id: str,
+    mode: KnowledgePreprocessingMode,
+    candidates: Sequence[AnswerCandidate],
+) -> tuple[CanonicalKnowledgeEntry, ...]:
+    entry_kind = entry_kind_for_preprocessing_mode(mode)
+    entries: list[CanonicalKnowledgeEntry] = []
+
+    for index, candidate in enumerate(candidates):
+        answer = _clean_optional_text(candidate.candidate_answer)
+        if not answer:
+            continue
+
+        candidate_metadata = dict(candidate.metadata)
+        canonical_question = _clean_optional_text(
+            str(candidate_metadata.get("canonical_question") or "")
+        )
+        question_variants = _metadata_text_tuple(
+            candidate_metadata, "question_variants"
+        )
+        questions = (
+            _merge_text_tuple_values((canonical_question,), question_variants)
+            if canonical_question
+            else question_variants
+        )
+        stable_key_digest = hashlib.sha256(
+            f"{document_id}:stage_k_raw:{entry_kind.value}:{candidate.id}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        stable_key = f"{document_id}:stage_k_retry:{stable_key_digest[:24]}"
+        metadata: dict[str, object] = dict(candidate_metadata)
+        metadata["source_candidate_id"] = candidate.id
+        metadata["compiler_index"] = index
+        metadata["compiler_stage"] = "stage_k_answer_compiler_retry"
+
+        entry = CanonicalKnowledgeEntry(
+            id=str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key)),
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            stable_key=stable_key,
+            entry_kind=entry_kind,
+            title=_clean_optional_text(candidate.title) or f"Answer entry {index + 1}",
+            answer=answer,
+            source_refs=candidate.source_refs,
+            enrichment=KnowledgeEnrichment(
+                questions=questions,
+                synonyms=(),
+                tags=(),
+            ),
+            embedding_text=None,
+            status=KnowledgeEntryStatus.PUBLISHED,
+            visibility=KnowledgeEntryVisibility.RUNTIME,
+            version=1,
+            compiler_version=KCD_STAGE_K_COMPILER_VERSION,
+            embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
+            metadata=metadata,
+        )
+        entry.assert_publishable()
+        entries.append(entry)
+
+    return tuple(entries)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1997,42 +2272,14 @@ def _canonical_entries_from_preprocessing_result(
     compiler_run_id: str,
     result: KnowledgePreprocessingResult,
     source_chunks: Sequence[SourceChunk],
-    source_excerpts_by_entry: Sequence[tuple[str, ...]] | None = None,
 ) -> tuple[CanonicalKnowledgeEntry, ...]:
     drafts = _compiled_answer_drafts_from_preprocessing_result(result)
-    if source_excerpts_by_entry is not None and len(source_excerpts_by_entry) != len(
-        drafts
-    ):
-        raise ValidationError(
-            "Preserved source excerpts must match compiled answer draft count"
-        )
-
     entry_kind = entry_kind_for_preprocessing_mode(result.mode)
     entries: list[CanonicalKnowledgeEntry] = []
 
     for index, draft in enumerate(drafts):
-        preserved_source_excerpts = (
-            source_excerpts_by_entry[index]
-            if source_excerpts_by_entry is not None
-            else ()
-        )
-        source_ref_draft = (
-            _CompiledAnswerEntryDraft(
-                title=draft.title,
-                answer=draft.answer,
-                source_excerpts=preserved_source_excerpts,
-                source_refs=(),
-                questions=draft.questions,
-                synonyms=draft.synonyms,
-                tags=draft.tags,
-                embedding_text=draft.embedding_text,
-                metadata=draft.metadata,
-            )
-            if preserved_source_excerpts
-            else draft
-        )
         source_refs = _source_refs_for_compiled_answer_draft(
-            draft=source_ref_draft,
+            draft=draft,
             source_chunks=source_chunks,
         )
         stable_key_digest = hashlib.sha256(
@@ -2280,6 +2527,7 @@ async def _persist_stage_e_compiler_outputs(
     compiler_run_id: str,
     source_chunks: Sequence[SourceChunk],
     entries: Sequence[CanonicalKnowledgeEntry],
+    complete_run: bool = True,
 ) -> None:
     candidates = _stage_e_answer_candidates_from_entries(entries)
     clusters = _stage_e_candidate_clusters_from_entries(
@@ -2303,15 +2551,16 @@ async def _persist_stage_e_compiler_outputs(
             document_id=document_id,
             clusters=clusters,
         )
-        await repo.complete_compiler_run(
-            compiler_run_id,
-            _stage_e_compilation_metrics(
-                source_chunks=source_chunks,
-                entries=entries,
-                candidates=candidates,
-                clusters=clusters,
-            ),
-        )
+        if complete_run:
+            await repo.complete_compiler_run(
+                compiler_run_id,
+                _stage_e_compilation_metrics(
+                    source_chunks=source_chunks,
+                    entries=entries,
+                    candidates=candidates,
+                    clusters=clusters,
+                ),
+            )
     except Exception as exc:
         await repo.fail_compiler_run(compiler_run_id, str(exc))
         raise
@@ -2652,6 +2901,365 @@ class KnowledgeIngestionService:
         )
         return result
 
+    async def publish_ready_answers(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+
+        mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_PLAIN:
+            raise ValidationError("Plain knowledge documents do not have answer drafts")
+        if document.status in {"pending", "processing"} or (
+            document.preprocessing_status == PREPROCESSING_STATUS_PROCESSING
+        ):
+            raise ValidationError(
+                "Knowledge document is still processing; wait before publishing drafts"
+            )
+
+        source_chunks = await repo.list_document_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not source_chunks:
+            raise ValidationError("Knowledge document has no saved source chunks")
+
+        raw_candidates = await repo.list_document_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not raw_candidates:
+            raise ValidationError("Knowledge document has no ready answer drafts")
+
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        batch_failed = sum(1 for batch in batches if batch.status == "failed")
+        batch_completed = sum(1 for batch in batches if batch.status == "completed")
+        all_batches_completed = bool(batches) and all(
+            batch.status == "completed" for batch in batches
+        )
+        compiler_run_id = raw_candidates[0].compiler_run_id
+
+        canonical_entries = _canonical_entries_from_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            mode=mode,
+            candidates=raw_candidates,
+        )
+        if not canonical_entries:
+            raise ValidationError("Knowledge document has no publishable answer drafts")
+
+        await _persist_stage_e_compiler_outputs(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            source_chunks=source_chunks,
+            entries=canonical_entries,
+            complete_run=all_batches_completed,
+        )
+
+        metrics: JsonObject = {
+            "stage": "publish_ready",
+            "status_message": (
+                "Готовые ответы опубликованы; проблемные части можно повторить"
+                if batch_failed > 0
+                else "Готовые ответы опубликованы в базу знаний"
+            ),
+            "raw_answer_count": len(raw_candidates),
+            "published_answer_count": len(canonical_entries),
+            "canonical_entry_count": len(canonical_entries),
+            "batch_completed": batch_completed,
+            "batch_failed": batch_failed,
+            "partial_publish": batch_failed > 0,
+        }
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_COMPLETED,
+            model=document.preprocessing_model,
+            prompt_version=document.preprocessing_prompt_version,
+            metrics=metrics,
+        )
+        await repo.update_document_status(document_id, "processed")
+
+        logger.info(
+            "Knowledge ready answer drafts published",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "published_answer_count": len(canonical_entries),
+                "batch_failed": batch_failed,
+            },
+        )
+        return {
+            "status": "completed" if batch_failed == 0 else "partial",
+            "document_id": document_id,
+            "published_answer_count": len(canonical_entries),
+            "raw_answer_count": len(raw_candidates),
+            "remaining_failed_batch_count": batch_failed,
+        }
+
+    async def retry_failed_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
+        preprocessor_factory: KnowledgePreprocessorFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        usage_repo = model_usage_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+
+        mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_PLAIN:
+            raise ValidationError(
+                "Plain knowledge documents do not have compiler batches"
+            )
+
+        source_chunks = await repo.list_document_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not source_chunks:
+            raise ValidationError("Knowledge document has no saved source chunks")
+
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        failed_batches = tuple(batch for batch in batches if batch.status == "failed")
+        if not failed_batches:
+            return {
+                "status": "skipped",
+                "reason": "no_failed_batches",
+                "document_id": document_id,
+            }
+
+        source_json_chunks = _json_chunks_from_source_chunks(source_chunks)
+        technical_batches = tuple(
+            _technical_chunk_batches_for_answer_compiler(source_json_chunks)
+        )
+        preprocessor = preprocessor_factory()
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_PROCESSING,
+            model=preprocessor.model_name,
+            prompt_version=prompt_version_for_mode(mode),
+            metrics={
+                "stage": "retry_failed_batches",
+                "failed_batch_count_before": len(failed_batches),
+            },
+        )
+        await repo.update_document_status(document_id, "processing")
+        usage_event_count = 0
+        retried_batch_count = 0
+
+        for batch in failed_batches:
+            if batch.batch_index < 1 or batch.batch_index > len(technical_batches):
+                await repo.fail_compiler_batch(
+                    batch.id,
+                    error_type="ValidationError",
+                    error_message="Saved compiler batch index is outside reconstructed technical batch range",
+                )
+                continue
+
+            technical_chunks = technical_batches[batch.batch_index - 1]
+            await repo.mark_compiler_batch_processing(
+                batch.id,
+                attempt_count=batch.attempt_count + 1,
+            )
+            try:
+                execution = await preprocessor.preprocess(
+                    mode=mode,
+                    chunks=technical_chunks,
+                    file_name=document.file_name,
+                    previous_question_intents=(),
+                )
+                if execution.usage is not None:
+                    await usage_repo.record_event(
+                        ModelUsageEventCreate.from_measurement(
+                            project_id=project_id,
+                            source="knowledge_preprocessing",
+                            measurement=execution.usage,
+                            document_id=document_id,
+                        )
+                    )
+                    usage_event_count += 1
+
+                safe_entries = tuple(
+                    _entry_as_safe_new_fragment(entry)
+                    for entry in execution.result.entries
+                )
+                raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
+                    project_id=project_id,
+                    document_id=document_id,
+                    compiler_run_id=batch.compiler_run_id,
+                    batch_id=batch.id,
+                    batch_index=batch.batch_index,
+                    entries=safe_entries,
+                    source_chunks=source_chunks,
+                    mode=mode,
+                )
+                await repo.delete_raw_answer_candidates_for_batch(
+                    project_id=project_id,
+                    document_id=document_id,
+                    batch_id=batch.id,
+                )
+                await repo.add_answer_candidates(
+                    project_id=project_id,
+                    document_id=document_id,
+                    candidates=raw_candidates,
+                )
+                usage = execution.usage
+                await repo.complete_compiler_batch(
+                    batch.id,
+                    model=execution.result.model,
+                    prompt_version=execution.result.prompt_version,
+                    tokens_input=usage.tokens_input if usage is not None else 0,
+                    tokens_output=usage.tokens_output
+                    if usage is not None and usage.tokens_output is not None
+                    else 0,
+                    tokens_total=usage.tokens_total if usage is not None else 0,
+                )
+                retried_batch_count += 1
+            except Exception as exc:
+                error_message = str(exc)[:500] or type(exc).__name__
+                await repo.fail_compiler_batch(
+                    batch.id,
+                    error_type=type(exc).__name__,
+                    error_message=error_message,
+                )
+                await repo.update_document_preprocessing_status(
+                    document_id,
+                    mode=mode,
+                    status=PREPROCESSING_STATUS_FAILED,
+                    error=error_message,
+                    model=preprocessor.model_name,
+                    prompt_version=prompt_version_for_mode(mode),
+                    metrics={
+                        "stage": "retry_failed_batches",
+                        "status_message": (
+                            "Повтор проблемной части завершился ошибкой"
+                        ),
+                        "error_type": type(exc).__name__,
+                        "retried_batch_count": retried_batch_count,
+                        "failed_batch_count_before": len(failed_batches),
+                        "usage_event_count": usage_event_count,
+                    },
+                )
+                await repo.update_document_status(document_id, "error", error_message)
+                raise
+
+        updated_batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        remaining_failed_count = sum(
+            1 for batch in updated_batches if batch.status == "failed"
+        )
+        all_batches_completed = bool(updated_batches) and all(
+            batch.status == "completed" for batch in updated_batches
+        )
+        raw_candidates = await repo.list_document_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        canonical_entries: tuple[CanonicalKnowledgeEntry, ...] = ()
+
+        if all_batches_completed:
+            canonical_entries = _canonical_entries_from_raw_answer_candidates(
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=updated_batches[0].compiler_run_id,
+                mode=mode,
+                candidates=raw_candidates,
+            )
+            if not canonical_entries:
+                raise ValidationError(
+                    "Knowledge retry produced no grounded answer entries"
+                )
+            await _persist_stage_e_compiler_outputs(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=updated_batches[0].compiler_run_id,
+                source_chunks=source_chunks,
+                entries=canonical_entries,
+            )
+
+        metrics: JsonObject = {
+            "stage": "retry_failed_batches",
+            "retried_batch_count": retried_batch_count,
+            "failed_batch_count_before": len(failed_batches),
+            "remaining_failed_batch_count": remaining_failed_count,
+            "usage_event_count": usage_event_count,
+            "raw_answer_count": len(raw_candidates),
+            "canonical_entry_count": len(canonical_entries),
+        }
+        if all_batches_completed:
+            metrics["status_message"] = (
+                "Проблемные части повторены, ответы опубликованы"
+            )
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_COMPLETED,
+                model=preprocessor.model_name,
+                prompt_version=prompt_version_for_mode(mode),
+                metrics=metrics,
+            )
+            await repo.update_document_status(document_id, "processed")
+        else:
+            metrics["status_message"] = (
+                "Часть проблемных частей всё ещё требует повтора"
+            )
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_FAILED,
+                model=preprocessor.model_name,
+                prompt_version=prompt_version_for_mode(mode),
+                metrics=metrics,
+            )
+            await repo.update_document_status(
+                document_id,
+                "error",
+                "Some compiler batches still failed after retry",
+            )
+        logger.info(
+            "Knowledge failed compiler batches retried",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "retried_batch_count": retried_batch_count,
+                "remaining_failed_batch_count": remaining_failed_count,
+            },
+        )
+        return {
+            "status": "completed" if all_batches_completed else "partial",
+            "document_id": document_id,
+            "retried_batch_count": retried_batch_count,
+            "remaining_failed_batch_count": remaining_failed_count,
+            "usage_event_count": usage_event_count,
+        }
+
     async def process_document(
         self,
         *,
@@ -2746,9 +3354,20 @@ class KnowledgeIngestionService:
             technical_batches = tuple(
                 _technical_chunk_batches_for_answer_compiler(indexable_chunks)
             )
+            compiler_batches = _compiler_batches_from_technical_batches(
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                technical_batches=technical_batches,
+                source_chunks=source_chunks,
+            )
+            await repo.create_compiler_batches(
+                project_id=project_id,
+                document_id=document_id,
+                batches=compiler_batches,
+            )
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
-            compiled_entry_source_excerpts: list[tuple[str, ...]] = []
             usage_event_count = 0
             llm_merge_call_count = 0
             unknown_known_intent_id_count = 0
@@ -2803,48 +3422,87 @@ class KnowledgeIngestionService:
             )
 
             for batch_index, technical_chunks in enumerate(technical_batches, start=1):
+                compiler_batch = compiler_batches[batch_index - 1]
                 if await repo.is_document_processing_cancelled(document_id):
                     raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
 
-                previous_question_intents: tuple[KnowledgeQuestionIntentCard, ...] = ()
-                execution = await preprocessor.preprocess(
-                    mode=mode,
-                    chunks=technical_chunks,
-                    file_name=file_name,
-                    previous_question_intents=previous_question_intents,
+                await repo.mark_compiler_batch_processing(
+                    compiler_batch.id,
+                    attempt_count=compiler_batch.attempt_count + 1,
                 )
-                if execution.usage is not None:
-                    await usage_repo.record_event(
-                        ModelUsageEventCreate.from_measurement(
-                            project_id=project_id,
-                            source="knowledge_preprocessing",
-                            measurement=execution.usage,
-                            document_id=document_id,
-                        )
-                    )
-                    usage_event_count += 1
 
-                latest_result = execution.result
-                preprocessing_results.append(execution.result)
-
-                for incoming_entry in execution.result.entries:
-                    incoming_source_excerpts = (
-                        _source_excerpts_from_preprocessing_entry(incoming_entry)
+                previous_question_intents: tuple[KnowledgeQuestionIntentCard, ...] = ()
+                try:
+                    execution = await preprocessor.preprocess(
+                        mode=mode,
+                        chunks=technical_chunks,
+                        file_name=file_name,
+                        previous_question_intents=previous_question_intents,
                     )
-                    safe_entry = _entry_as_safe_new_fragment(incoming_entry)
-                    if safe_entry is not incoming_entry:
-                        unknown_known_intent_id_count += 1
-                        logger.warning(
-                            "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
-                            extra={
-                                "project_id": project_id,
-                                "document_id": document_id,
-                                "batch_index": batch_index,
-                                "known_intent_id": incoming_entry.known_intent_id,
-                            },
+                    if execution.usage is not None:
+                        await usage_repo.record_event(
+                            ModelUsageEventCreate.from_measurement(
+                                project_id=project_id,
+                                source="knowledge_preprocessing",
+                                measurement=execution.usage,
+                                document_id=document_id,
+                            )
                         )
-                    compiled_entries.append(safe_entry)
-                    compiled_entry_source_excerpts.append(incoming_source_excerpts)
+                        usage_event_count += 1
+
+                    latest_result = execution.result
+                    preprocessing_results.append(execution.result)
+
+                    safe_entries: list[KnowledgePreprocessingEntry] = []
+                    for incoming_entry in execution.result.entries:
+                        safe_entry = _entry_as_safe_new_fragment(incoming_entry)
+                        if safe_entry is not incoming_entry:
+                            unknown_known_intent_id_count += 1
+                            logger.warning(
+                                "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
+                                extra={
+                                    "project_id": project_id,
+                                    "document_id": document_id,
+                                    "batch_index": batch_index,
+                                    "known_intent_id": incoming_entry.known_intent_id,
+                                },
+                            )
+                        safe_entries.append(safe_entry)
+                        compiled_entries.append(safe_entry)
+
+                    raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
+                        project_id=project_id,
+                        document_id=document_id,
+                        compiler_run_id=compiler_run_id,
+                        batch_id=compiler_batch.id,
+                        batch_index=batch_index,
+                        entries=safe_entries,
+                        source_chunks=source_chunks,
+                        mode=mode,
+                    )
+                    await repo.add_answer_candidates(
+                        project_id=project_id,
+                        document_id=document_id,
+                        candidates=raw_candidates,
+                    )
+                    usage = execution.usage
+                    await repo.complete_compiler_batch(
+                        compiler_batch.id,
+                        model=execution.result.model,
+                        prompt_version=execution.result.prompt_version,
+                        tokens_input=usage.tokens_input if usage is not None else 0,
+                        tokens_output=usage.tokens_output
+                        if usage is not None and usage.tokens_output is not None
+                        else 0,
+                        tokens_total=usage.tokens_total if usage is not None else 0,
+                    )
+                except Exception as exc:
+                    await repo.fail_compiler_batch(
+                        compiler_batch.id,
+                        error_type=type(exc).__name__,
+                        error_message=str(exc)[:500] or type(exc).__name__,
+                    )
+                    raise
 
                 progress_metrics: JsonObject = {
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
@@ -2964,7 +3622,6 @@ class KnowledgeIngestionService:
                 compiler_run_id=compiler_run_id,
                 result=result,
                 source_chunks=source_chunks,
-                source_excerpts_by_entry=compiled_entry_source_excerpts,
             )
             if not canonical_entries:
                 raise ValidationError(
@@ -3123,9 +3780,7 @@ class KnowledgeIngestionService:
                 metrics={
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
                     "stage": "failed",
-                    "status_message": (
-                        "Ошибка предобработки: LLM не вернула корректный JSON"
-                    ),
+                    "status_message": _preprocessing_failure_status_message(exc),
                     "error_type": type(exc).__name__,
                     "fallback": "disabled",
                     "source_chunk_count": len(indexable_chunks),
