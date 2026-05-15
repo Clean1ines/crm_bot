@@ -568,6 +568,8 @@ export type TranslationKey =
   | 'knowledge.feedback.retightenFailed'
   | 'knowledge.feedback.retryFailedBatchesQueued'
   | 'knowledge.feedback.retryFailedBatchesFailed'
+  | 'knowledge.feedback.publishReadyQueued'
+  | 'knowledge.feedback.publishReadyFailed'
   | 'knowledge.feedback.enterClientQuestion'
   | 'knowledge.loading'
   | 'knowledge.status.stopped'

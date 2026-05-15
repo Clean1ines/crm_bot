@@ -803,6 +803,22 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+  const publishReadyMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.publishReady(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success(t('knowledge.feedback.publishReadyQueued'));
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
+    },
+  });
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1161,19 +1177,32 @@ export const KnowledgePage: React.FC = () => {
                         <div className="flex flex-wrap gap-1.5">
                           {processingReport.actions.map((action) => {
                             const canRetry = action.id === 'retry_failed_batches' && action.enabled;
+                            const canPublishReady = action.id === 'publish_ready' && action.enabled;
                             const isRetryingThisDoc = retryFailedBatchesMutation.isPending
                               && retryFailedBatchesMutation.variables === doc.id;
+                            const isPublishingThisDoc = publishReadyMutation.isPending
+                              && publishReadyMutation.variables === doc.id;
 
-                            if (canRetry) {
+                            if (canRetry || canPublishReady) {
+                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
+                              const mutationPending = canRetry
+                                ? retryFailedBatchesMutation.isPending
+                                : publishReadyMutation.isPending;
                               return (
                                 <button
                                   key={action.id}
                                   type="button"
-                                  onClick={() => retryFailedBatchesMutation.mutate(doc.id)}
-                                  disabled={retryFailedBatchesMutation.isPending}
+                                  onClick={() => {
+                                    if (canRetry) {
+                                      retryFailedBatchesMutation.mutate(doc.id);
+                                    } else {
+                                      publishReadyMutation.mutate(doc.id);
+                                    }
+                                  }}
+                                  disabled={mutationPending}
                                   className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
                                 >
-                                  {isRetryingThisDoc ? t('common.states.loading') : action.label}
+                                  {isPending ? t('common.states.loading') : action.label}
                                 </button>
                               );
                             }

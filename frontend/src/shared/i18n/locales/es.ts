@@ -567,6 +567,8 @@ export const es: TranslationDictionary = {
   'knowledge.feedback.retightenFailed': 'No se pudo iniciar la revisión de duplicados',
   'knowledge.feedback.retryFailedBatchesQueued': 'Reintento de partes fallidas puesto en cola',
   'knowledge.feedback.retryFailedBatchesFailed': 'No se pudieron reintentar las partes fallidas',
+  'knowledge.feedback.publishReadyQueued': 'Publicación de respuestas listas puesta en cola',
+  'knowledge.feedback.publishReadyFailed': 'No se pudieron publicar las respuestas listas',
   'knowledge.feedback.enterClientQuestion': 'Introduce una pregunta del cliente',
   'knowledge.loading': 'Cargando base de conocimiento...',
   'knowledge.status.stopped': 'Detenido',
