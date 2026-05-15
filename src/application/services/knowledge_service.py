@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from src.application.dto.knowledge_dto import (
+    KnowledgeAnswerDraftDto,
+    KnowledgeAnswerDraftsResponseDto,
     KnowledgeProcessingActionDto,
     KnowledgeProcessingReportDto,
     KnowledgeProcessingStepDto,
@@ -334,6 +336,49 @@ class KnowledgeService:
             preprocessing_mode=mode,
             preprocessing_status=preprocessing_status,
             structured_entries=0,
+        )
+
+    async def answer_drafts(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+        limit: int = 20,
+    ) -> KnowledgeAnswerDraftsResponseDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+
+        raw_candidates = await repo.list_document_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        normalized_limit = max(1, min(int(limit), 100))
+        drafts = tuple(
+            KnowledgeAnswerDraftDto.from_candidate(candidate)
+            for candidate in raw_candidates[:normalized_limit]
+        )
+
+        logger.info(
+            "Knowledge answer drafts listed",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "draft_count": len(drafts),
+                "total_count": len(raw_candidates),
+            },
+        )
+        return KnowledgeAnswerDraftsResponseDto(
+            document_id=document_id,
+            drafts=drafts,
+            total_count=len(raw_candidates),
         )
 
     async def processing_report(

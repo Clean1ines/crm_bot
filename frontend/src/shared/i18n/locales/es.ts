@@ -615,6 +615,8 @@ export const es: TranslationDictionary = {
   'knowledge.document.stoppedWarning': 'El documento fue detenido por el usuario. No se considera una base de conocimiento completada; súbelo de nuevo si es necesario.',
   'knowledge.document.processingFailed': 'No se pudo procesar el documento',
   'knowledge.processReport.nextActions': 'Próximas acciones',
+  'knowledge.drafts.title': 'Borradores guardados: {count}',
+  'knowledge.drafts.sourcePrefix': 'Fuente:',
   'knowledge.retightenReport.title': 'Informe de revisión de duplicados',
   'knowledge.retightenReport.status': 'Estado: {status}',
   'knowledge.retightenReport.entries': 'Entradas: {before} → {after}',

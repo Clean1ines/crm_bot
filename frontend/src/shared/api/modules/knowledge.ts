@@ -98,6 +98,33 @@ export type KnowledgeProcessingReport = {
   metrics: Record<string, unknown>;
 };
 
+export type KnowledgeAnswerDraft = {
+  id: string;
+  title: string;
+  answer: string;
+  status: string;
+  batch_id: string;
+  batch_index: number | null;
+  fragment_index: number | null;
+  canonical_question: string;
+  question_variants: string[];
+  source_refs: Array<{
+    quote: string;
+    source_index?: number;
+    source_chunk_id?: string;
+    start_offset?: number;
+    end_offset?: number;
+    confidence?: number;
+  }>;
+  rejection_reason: string;
+};
+
+export type KnowledgeAnswerDraftsResponse = {
+  document_id: string;
+  drafts: KnowledgeAnswerDraft[];
+  total_count: number;
+};
+
 export type KnowledgeUsageBreakdown = {
   provider: string;
   model: string;
@@ -161,6 +188,14 @@ export const knowledgeApi = {
   progress: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeProcessingReport>(
       `/api/projects/${projectId}/knowledge/${documentId}/progress`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  fragments: (projectId: string, documentId: string, limit = 5) =>
+    authedJsonRequest<KnowledgeAnswerDraftsResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/fragments?limit=${limit}`,
       {
         method: 'GET',
       },

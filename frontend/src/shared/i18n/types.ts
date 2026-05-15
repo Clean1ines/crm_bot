@@ -616,6 +616,8 @@ export type TranslationKey =
   | 'knowledge.document.stoppedWarning'
   | 'knowledge.document.processingFailed'
   | 'knowledge.processReport.nextActions'
+  | 'knowledge.drafts.title'
+  | 'knowledge.drafts.sourcePrefix'
   | 'knowledge.retightenReport.title'
   | 'knowledge.retightenReport.status'
   | 'knowledge.retightenReport.entries'
