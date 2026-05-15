@@ -3,7 +3,7 @@ import re
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 import asyncpg
@@ -726,7 +726,7 @@ def _select_question_intent_cards_for_batch(
 
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     selected = [item[2] for item in scored[:limit]]
-    return tuple(reversed(selected))
+    return tuple(selected)
 
 
 def _entry_kind_from_chunk_role(role: KnowledgeChunkRole) -> KnowledgeEntryKind:
@@ -1664,6 +1664,14 @@ def _merge_limited_text_tuple_values(
     limit: int,
 ) -> tuple[str, ...]:
     return _merge_text_tuple_values(*groups)[:limit]
+
+
+def _entry_as_safe_new_fragment(
+    entry: KnowledgePreprocessingEntry,
+) -> KnowledgePreprocessingEntry:
+    if entry.match_kind == "new" and not entry.known_intent_id:
+        return entry
+    return replace(entry, match_kind="new", known_intent_id="")
 
 
 def _merge_entry_fields_deterministically(
@@ -2739,6 +2747,8 @@ class KnowledgeIngestionService:
             compiled_entry_source_excerpts: list[tuple[str, ...]] = []
             usage_event_count = 0
             llm_merge_call_count = 0
+            unknown_known_intent_id_count = 0
+            merge_rejected_keep_separate_count = 0
             latest_result: KnowledgePreprocessingResult | None = None
             processing_started_monotonic = time.monotonic()
 
@@ -2840,9 +2850,20 @@ class KnowledgeIngestionService:
                         if existing_index < 0 or existing_index >= len(
                             compiled_entries
                         ):
-                            compiled_entries.append(incoming_entry)
+                            safe_entry = _entry_as_safe_new_fragment(incoming_entry)
+                            compiled_entries.append(safe_entry)
                             compiled_entry_source_excerpts.append(
                                 incoming_source_excerpts
+                            )
+                            unknown_known_intent_id_count += 1
+                            logger.warning(
+                                "Knowledge answer compiler returned unknown known intent id",
+                                extra={
+                                    "project_id": project_id,
+                                    "document_id": document_id,
+                                    "batch_index": batch_index,
+                                    "known_intent_id": incoming_entry.known_intent_id,
+                                },
                             )
                             continue
 
@@ -2864,10 +2885,12 @@ class KnowledgeIngestionService:
                             )
                             usage_event_count += 1
                         if not answer_merge_execution.merge_allowed:
-                            compiled_entries.append(incoming_entry)
+                            safe_entry = _entry_as_safe_new_fragment(incoming_entry)
+                            compiled_entries.append(safe_entry)
                             compiled_entry_source_excerpts.append(
                                 incoming_source_excerpts
                             )
+                            merge_rejected_keep_separate_count += 1
                             continue
 
                         compiled_entries[existing_index] = (
@@ -2918,6 +2941,10 @@ class KnowledgeIngestionService:
                     "llm_merge_call_count": llm_merge_call_count,
                     "semantic_answer_merge_count": llm_merge_call_count,
                     "answer_merge_call_count": llm_merge_call_count,
+                    "unknown_known_intent_id_count": unknown_known_intent_id_count,
+                    "merge_rejected_keep_separate_count": (
+                        merge_rejected_keep_separate_count
+                    ),
                     "usage_event_count": usage_event_count,
                     "elapsed_seconds": round(
                         time.monotonic() - processing_started_monotonic,
@@ -2945,6 +2972,10 @@ class KnowledgeIngestionService:
                         "incoming_entry_count": len(execution.result.entries),
                         "compiled_entry_count": len(compiled_entries),
                         "llm_merge_call_count": llm_merge_call_count,
+                        "unknown_known_intent_id_count": unknown_known_intent_id_count,
+                        "merge_rejected_keep_separate_count": (
+                            merge_rejected_keep_separate_count
+                        ),
                         "model": active_model,
                     },
                 )
@@ -2983,6 +3014,10 @@ class KnowledgeIngestionService:
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
                     "llm_merge_call_count": llm_merge_call_count,
+                    "unknown_known_intent_id_count": unknown_known_intent_id_count,
+                    "merge_rejected_keep_separate_count": (
+                        merge_rejected_keep_separate_count
+                    ),
                     "compiled_entry_key_count": len(compiled_entries),
                     "source_refs_preserved_per_semantic_entry": True,
                     "semantic_merge_tightening": semantic_merge_tightening_metrics,
@@ -3055,6 +3090,12 @@ class KnowledgeIngestionService:
             preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
             preprocessing_metrics["semantic_answer_merge_count"] = llm_merge_call_count
             preprocessing_metrics["answer_merge_call_count"] = llm_merge_call_count
+            preprocessing_metrics["unknown_known_intent_id_count"] = (
+                unknown_known_intent_id_count
+            )
+            preprocessing_metrics["merge_rejected_keep_separate_count"] = (
+                merge_rejected_keep_separate_count
+            )
             preprocessing_metrics["elapsed_seconds"] = round(
                 time.monotonic() - processing_started_monotonic,
                 1,
