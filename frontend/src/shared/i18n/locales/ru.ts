@@ -609,6 +609,7 @@ export const ru: TranslationDictionary = {
   'knowledge.document.llmModelsPrefix': 'Модели обработки документа:',
   'knowledge.document.stoppedWarning': 'Документ остановлен пользователем. Он не считается завершённой базой знаний; при необходимости загрузите его заново.',
   'knowledge.document.processingFailed': 'Документ не удалось обработать',
+  'knowledge.processReport.nextActions': 'Что можно сделать',
   'knowledge.retightenReport.title': 'Отчёт перепроверки дублей',
   'knowledge.retightenReport.status': 'Статус: {status}',
   'knowledge.retightenReport.entries': 'Записей: {before} → {after}',

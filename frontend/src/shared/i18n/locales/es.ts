@@ -610,6 +610,7 @@ export const es: TranslationDictionary = {
   'knowledge.document.llmModelsPrefix': 'Modelos de procesamiento del documento:',
   'knowledge.document.stoppedWarning': 'El documento fue detenido por el usuario. No se considera una base de conocimiento completada; súbelo de nuevo si es necesario.',
   'knowledge.document.processingFailed': 'No se pudo procesar el documento',
+  'knowledge.processReport.nextActions': 'Próximas acciones',
   'knowledge.retightenReport.title': 'Informe de revisión de duplicados',
   'knowledge.retightenReport.status': 'Estado: {status}',
   'knowledge.retightenReport.entries': 'Entradas: {before} → {after}',

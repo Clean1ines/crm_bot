@@ -611,6 +611,7 @@ export type TranslationKey =
   | 'knowledge.document.llmModelsPrefix'
   | 'knowledge.document.stoppedWarning'
   | 'knowledge.document.processingFailed'
+  | 'knowledge.processReport.nextActions'
   | 'knowledge.retightenReport.title'
   | 'knowledge.retightenReport.status'
   | 'knowledge.retightenReport.entries'
