@@ -39,8 +39,8 @@ def _valid_entry() -> dict[str, object]:
     }
 
 
-def test_preprocessing_prompt_versions_are_v2() -> None:
-    assert prompt_version_for_mode(MODE_FAQ) == "knowledge_preprocess_faq_v2"
+def test_preprocessing_prompt_versions_are_current() -> None:
+    assert prompt_version_for_mode(MODE_FAQ) == "knowledge_preprocess_faq_v3"
     assert (
         prompt_version_for_mode(MODE_PRICE_LIST) == "knowledge_preprocess_price_list_v2"
     )

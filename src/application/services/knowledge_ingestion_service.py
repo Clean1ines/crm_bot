@@ -47,6 +47,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
+    KnowledgeQuestionIntentCard,
     KnowledgeSemanticMergeCandidate,
     KnowledgeSemanticMergeDecision,
     KnowledgeSemanticMergeGroup,
@@ -595,6 +596,135 @@ KCD_STAGE_K_CANCELLED_ERROR = "Knowledge preprocessing cancelled by operator"
 KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL = 1
 KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET = 650
 KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
+KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT = 8
+KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT = 5
+KCD_STAGE_K_QUESTION_INTENT_TAG_LIMIT = 6
+KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
+
+
+def _answer_digest(
+    value: str, *, max_chars: int = KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS
+) -> str:
+    text = _clean_optional_text(value)
+    if len(text) <= max_chars:
+        return text
+    trimmed = text[:max_chars].rsplit(" ", 1)[0].strip()
+    return trimmed or text[:max_chars].strip()
+
+
+def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str:
+    for question in _text_tuple(entry.questions):
+        if question:
+            return question
+    return _clean_optional_text(entry.title)
+
+
+def _question_intent_card_from_entry(
+    entry: KnowledgePreprocessingEntry,
+    *,
+    entry_id: str,
+) -> KnowledgeQuestionIntentCard:
+    questions = _text_tuple(entry.questions)
+    return KnowledgeQuestionIntentCard(
+        entry_id=entry_id,
+        title=_clean_optional_text(entry.title),
+        primary_question=_question_intent_primary_question(entry),
+        question_samples=questions[:KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT],
+        answer_digest=_answer_digest(entry.answer),
+        tags=_text_tuple(entry.tags)[:KCD_STAGE_K_QUESTION_INTENT_TAG_LIMIT],
+    )
+
+
+def _question_intent_card_text(card: KnowledgeQuestionIntentCard) -> str:
+    return " ".join(
+        part
+        for part in (
+            card.primary_question,
+            " ".join(card.question_samples),
+            card.title,
+            card.answer_digest,
+            " ".join(card.tags),
+        )
+        if part
+    )
+
+
+def _question_intent_tokens_from_entry(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[str, ...]:
+    return _semantic_merge_tokens_from_text(
+        " ".join(
+            part
+            for part in (
+                _question_intent_primary_question(entry),
+                " ".join(_text_tuple(entry.questions)),
+                _clean_optional_text(entry.title),
+                _answer_digest(entry.answer),
+                " ".join(_text_tuple(entry.tags)),
+            )
+            if part
+        )
+    )
+
+
+def _question_intent_tokens_from_card(
+    card: KnowledgeQuestionIntentCard,
+) -> tuple[str, ...]:
+    return _semantic_merge_tokens_from_text(_question_intent_card_text(card))
+
+
+def _preprocessing_entry_from_technical_chunk(
+    chunk: JsonObject,
+) -> KnowledgePreprocessingEntry:
+    content = _clean_optional_text(str(chunk.get("content") or ""))
+    title = _clean_optional_text(str(chunk.get("title") or "")) or content[:80]
+    return KnowledgePreprocessingEntry(
+        title=title or "technical source chunk",
+        answer=_answer_digest(content),
+        source_excerpt=content[:KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET],
+        questions=_text_tuple(chunk.get("questions")),
+        synonyms=_text_tuple(chunk.get("synonyms")),
+        tags=_text_tuple(chunk.get("tags")),
+        embedding_text=_clean_optional_text(
+            str(chunk.get("embedding_text") or content)
+        ),
+    )
+
+
+def _select_question_intent_cards_for_batch(
+    *,
+    candidates: Sequence[KnowledgePreprocessingEntry],
+    known_cards: Sequence[KnowledgeQuestionIntentCard],
+    limit: int = KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT,
+) -> tuple[KnowledgeQuestionIntentCard, ...]:
+    if not candidates or not known_cards or limit <= 0:
+        return ()
+
+    candidate_tokens: set[str] = set()
+    for candidate in candidates:
+        candidate_tokens.update(_question_intent_tokens_from_entry(candidate))
+
+    if not candidate_tokens:
+        return tuple(known_cards[-limit:])
+
+    scored: list[tuple[float, int, KnowledgeQuestionIntentCard]] = []
+    for index, card in enumerate(known_cards):
+        card_tokens = set(_question_intent_tokens_from_card(card))
+        if not card_tokens:
+            continue
+        overlap = len(candidate_tokens & card_tokens)
+        if overlap == 0:
+            continue
+        union = len(candidate_tokens | card_tokens) or 1
+        score = overlap / union
+        scored.append((score, index, card))
+
+    if not scored:
+        return tuple(known_cards[-limit:])
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    selected = [item[2] for item in scored[:limit]]
+    return tuple(reversed(selected))
 
 
 def _entry_kind_from_chunk_role(role: KnowledgeChunkRole) -> KnowledgeEntryKind:
@@ -2629,6 +2759,9 @@ class KnowledgeIngestionService:
                     "semantic_answer_count": 0,
                     "incoming_entry_count": 0,
                     "previous_title_count": 0,
+                    "question_intent_shortlist_limit": (
+                        KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT
+                    ),
                     "llm_merge_call_count": 0,
                     "semantic_answer_merge_count": 0,
                     "embedding_text_merge_call_count": 0,
@@ -2648,6 +2781,21 @@ class KnowledgeIngestionService:
                     raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
 
                 previous_entry_titles = tuple(entry.title for entry in compiled_entries)
+                known_question_intent_cards = tuple(
+                    _question_intent_card_from_entry(
+                        entry,
+                        entry_id=f"compiled-{index}",
+                    )
+                    for index, entry in enumerate(compiled_entries)
+                )
+                technical_candidate_entries = tuple(
+                    _preprocessing_entry_from_technical_chunk(chunk)
+                    for chunk in technical_chunks
+                )
+                previous_question_intents = _select_question_intent_cards_for_batch(
+                    candidates=technical_candidate_entries,
+                    known_cards=known_question_intent_cards,
+                )
                 execution = await preprocessor.preprocess(
                     mode=mode,
                     chunks=technical_chunks,
@@ -2655,6 +2803,7 @@ class KnowledgeIngestionService:
                     previous_entry_titles=previous_entry_titles[
                         -KCD_STAGE_K_PREVIOUS_TITLE_LIMIT:
                     ],
+                    previous_question_intents=previous_question_intents,
                 )
                 if execution.usage is not None:
                     await usage_repo.record_event(
@@ -2744,6 +2893,11 @@ class KnowledgeIngestionService:
                     "semantic_answer_count": len(compiled_entries),
                     "incoming_entry_count": len(execution.result.entries),
                     "previous_title_count": len(previous_entry_titles),
+                    "question_intent_card_count": len(known_question_intent_cards),
+                    "question_intent_shortlist_count": len(previous_question_intents),
+                    "question_intent_shortlist_limit": (
+                        KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT
+                    ),
                     "llm_merge_call_count": llm_merge_call_count,
                     "semantic_answer_merge_count": llm_merge_call_count,
                     "embedding_text_merge_call_count": llm_merge_call_count,
@@ -2768,6 +2922,9 @@ class KnowledgeIngestionService:
                         "batch_count": len(technical_batches),
                         "source_chunk_count": len(indexable_chunks),
                         "previous_title_count": len(previous_entry_titles),
+                        "question_intent_shortlist_count": len(
+                            previous_question_intents
+                        ),
                         "incoming_entry_count": len(execution.result.entries),
                         "compiled_entry_count": len(compiled_entries),
                         "llm_merge_call_count": llm_merge_call_count,
