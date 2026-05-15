@@ -1,98 +1,50 @@
 HARD JSON OUTPUT CONTRACT:
-- Return JSON and only JSON.
-- Return exactly one top-level JSON object.
+- Return exactly one JSON object.
+- Do not use markdown, code fences, comments, explanations, prefixes, or suffixes.
 - The first non-whitespace character MUST be {.
 - The last non-whitespace character MUST be }.
-- Do not return markdown fences.
-- Do not return explanations, comments, apologies, notes, prefixes, or suffixes.
-- Do not return more than one JSON object.
+- If merging is not allowed, return {"merge_allowed": false, "answer": "", "question_variants": []}.
 
-You are a production-grade canonical answer merger for a Telegram business chatbot.
+This prompt is not part of the online compiler loop. Use it only for offline or pairwise retightening of already extracted narrow answer fragments.
 
-Your task:
-Merge an existing canonical answer with one new grounded answer fragment for the same answer intent.
+You compare two already extracted narrow answer fragments.
 
-Input JSON contains:
-- known_intent: existing compiled answer intent.
-- incoming_fragment: new grounded fragment extracted from the current source.
-- Both should answer the same stable user information need.
+Task:
+Decide whether fragment_a and fragment_b answer the same specific customer question.
 
-Definitions:
-- answer intent = one stable user information need.
-- existing answer = already published canonical answer.
-- incoming fragment = new grounded contribution from the current source.
-- canonical answer = final compact answer with all grounded facts preserved once.
-- question_variants = realistic ways a customer may ask this same intent.
+Allow merge only if:
+- both fragments answer the same customer need;
+- differences are repetition, paraphrase, or a direct clarification of the same answer;
+- the final answer can be one answer without mixing separate topics.
 
-Core rules:
-1. Merge only one known_intent and one incoming_fragment.
-2. Do not create new answer intents here.
-3. Do not split into multiple entries here.
-4. Do not invent facts.
-5. Preserve all grounded useful facts from the existing answer.
-6. Preserve all grounded useful facts from the incoming fragment.
-7. Remove duplicate wording, repeated facts, and paraphrase loops.
-8. If incoming fragment adds fact B to existing answer A, return A+B once.
-9. If incoming fragment only repeats A, return A once.
-10. If incoming fragment narrows, qualifies, or corrects A, produce one clear updated answer.
-11. Do not append old answer + new answer mechanically.
-12. Do not include source excerpts in the final answer unless they are natural business wording.
-13. Merge question_variants by meaning, not by exact string.
-14. question_variants must all ask about the same answer intent.
-15. Do not output tags, synonyms, or embedding_text.
+Reject merge if:
+- fragments are related to one broad topic but answer different questions;
+- one fragment is about price and the other is about refunds, cancellation, integration, roles, audience, security, launch, manager handoff, or another separate topic;
+- one fragment is an overview and the other describes an individual capability;
+- merging would make the answer broad;
+- there is any doubt.
 
-Safety rule:
-- If the incoming_fragment clearly does not answer the same answer intent as known_intent, return merge_allowed=false.
-- If it partially answers the same intent and partially contains other facts, merge only the same-intent part and ignore unrelated facts. Those unrelated facts must be handled by the first compiler prompt as separate fragments.
+If merge_allowed=true:
+- return one compact replacement answer;
+- do not duplicate facts;
+- do not invent facts;
+- preserve limitations, conditions, prices, dates, prohibitions, and important rules;
+- question_variants must all ask about the same single question.
 
-Canonical examples:
-
-Example 1 — additive merge:
-Existing answer:
-"Подключение стоит 100 рублей в месяц."
-Incoming fragment:
-"Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-
-Correct merged answer:
-"Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-
-Incorrect:
-"Подключение стоит 100 рублей в месяц. Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-
-Example 2 — duplicate merge:
-Existing answer:
-"Бот принимает заявки ночью, менеджер отвечает утром."
-Incoming fragment:
-"В нерабочее время бот сохраняет обращение и передаёт его менеджеру утром."
-
-Correct merged answer:
-"В нерабочее время бот принимает и сохраняет заявку, а менеджер отвечает утром."
-
-Incorrect:
-"Бот принимает заявки ночью, менеджер отвечает утром. В нерабочее время бот сохраняет обращение и передаёт его менеджеру утром."
-
-Example 3 — unrelated facts:
-Known intent:
-"Сколько стоит сервис?"
-Incoming fragment:
-"Премиум стоит 500 рублей и включает круглосуточную поддержку менеджера."
-
-Correct:
-- Merge only the price fact into the price answer.
-- Do not turn the price answer into a broad support availability answer.
-- 24/7 support must be a separate intent from the first compiler prompt if it answers a distinct customer question.
-
-Return ONLY this JSON shape:
+Return ONLY this JSON shape when merge is allowed:
 
 {
   "merge_allowed": true,
-  "answer": "single compact updated canonical answer",
+  "answer": "single compact replacement answer",
   "question_variants": [
-    "deduplicated realistic questions for the same answer intent"
+    "question variant 1",
+    "question variant 2",
+    "question variant 3",
+    "question variant 4"
   ]
 }
 
-If merge is not allowed, return ONLY:
+Or return ONLY this JSON shape when merge is not allowed:
 
 {
   "merge_allowed": false,
@@ -108,6 +60,7 @@ Field rules:
 - Do not output tags.
 - Do not output synonyms.
 - Do not output embedding_text.
+- Do not output tags, synonyms, or embedding_text.
 - Keep the answer compact and production-ready.
 
-NOW PROCESS THIS MERGE JSON. Return ONLY the JSON result:
+PROCESS THE SOURCE JSON BELOW. RETURN ONLY JSON:

@@ -424,13 +424,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> str:
         instruction = _load_mode_prompt(mode)
-        known_question_intents = [
-            card.to_payload() for card in previous_question_intents
-        ][:8]
         source_payload = {
             "file_name": file_name,
             "mode": mode,
-            "known_question_intents": known_question_intents,
             "chunks": [
                 {
                     "index": index,
