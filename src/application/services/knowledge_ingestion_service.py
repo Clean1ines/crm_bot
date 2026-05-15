@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 import time
 import uuid
@@ -47,6 +48,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
+    KnowledgePreprocessingValidationError,
     KnowledgeQuestionIntentCard,
     KnowledgeSemanticMergeCandidate,
     KnowledgeSemanticMergeDecision,
@@ -601,6 +603,20 @@ KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT = 8
 KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT = 5
 KCD_STAGE_K_QUESTION_INTENT_TAG_LIMIT = 6
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
+
+
+def _preprocessing_failure_status_message(exc: Exception) -> str:
+    if str(exc) == KCD_STAGE_K_CANCELLED_ERROR:
+        return (
+            "Обработка остановлена: прогресс до последнего завершённого шага сохранён"
+        )
+    if isinstance(exc, KnowledgePreprocessingValidationError):
+        return "Ошибка предобработки: LLM вернула данные в неподдерживаемом формате"
+    if isinstance(exc, ValidationError):
+        return "Ошибка предобработки: результаты не прошли проверку перед публикацией"
+    if isinstance(exc, json.JSONDecodeError):
+        return "Ошибка предобработки: LLM не вернула корректный JSON"
+    return "Ошибка предобработки: pipeline остановлен до публикации результатов"
 
 
 def _answer_digest(
@@ -1997,42 +2013,14 @@ def _canonical_entries_from_preprocessing_result(
     compiler_run_id: str,
     result: KnowledgePreprocessingResult,
     source_chunks: Sequence[SourceChunk],
-    source_excerpts_by_entry: Sequence[tuple[str, ...]] | None = None,
 ) -> tuple[CanonicalKnowledgeEntry, ...]:
     drafts = _compiled_answer_drafts_from_preprocessing_result(result)
-    if source_excerpts_by_entry is not None and len(source_excerpts_by_entry) != len(
-        drafts
-    ):
-        raise ValidationError(
-            "Preserved source excerpts must match compiled answer draft count"
-        )
-
     entry_kind = entry_kind_for_preprocessing_mode(result.mode)
     entries: list[CanonicalKnowledgeEntry] = []
 
     for index, draft in enumerate(drafts):
-        preserved_source_excerpts = (
-            source_excerpts_by_entry[index]
-            if source_excerpts_by_entry is not None
-            else ()
-        )
-        source_ref_draft = (
-            _CompiledAnswerEntryDraft(
-                title=draft.title,
-                answer=draft.answer,
-                source_excerpts=preserved_source_excerpts,
-                source_refs=(),
-                questions=draft.questions,
-                synonyms=draft.synonyms,
-                tags=draft.tags,
-                embedding_text=draft.embedding_text,
-                metadata=draft.metadata,
-            )
-            if preserved_source_excerpts
-            else draft
-        )
         source_refs = _source_refs_for_compiled_answer_draft(
-            draft=source_ref_draft,
+            draft=draft,
             source_chunks=source_chunks,
         )
         stable_key_digest = hashlib.sha256(
@@ -2748,7 +2736,6 @@ class KnowledgeIngestionService:
             )
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
-            compiled_entry_source_excerpts: list[tuple[str, ...]] = []
             usage_event_count = 0
             llm_merge_call_count = 0
             unknown_known_intent_id_count = 0
@@ -2828,9 +2815,6 @@ class KnowledgeIngestionService:
                 preprocessing_results.append(execution.result)
 
                 for incoming_entry in execution.result.entries:
-                    incoming_source_excerpts = (
-                        _source_excerpts_from_preprocessing_entry(incoming_entry)
-                    )
                     safe_entry = _entry_as_safe_new_fragment(incoming_entry)
                     if safe_entry is not incoming_entry:
                         unknown_known_intent_id_count += 1
@@ -2844,7 +2828,6 @@ class KnowledgeIngestionService:
                             },
                         )
                     compiled_entries.append(safe_entry)
-                    compiled_entry_source_excerpts.append(incoming_source_excerpts)
 
                 progress_metrics: JsonObject = {
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
@@ -2964,7 +2947,6 @@ class KnowledgeIngestionService:
                 compiler_run_id=compiler_run_id,
                 result=result,
                 source_chunks=source_chunks,
-                source_excerpts_by_entry=compiled_entry_source_excerpts,
             )
             if not canonical_entries:
                 raise ValidationError(
@@ -3123,9 +3105,7 @@ class KnowledgeIngestionService:
                 metrics={
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
                     "stage": "failed",
-                    "status_message": (
-                        "Ошибка предобработки: LLM не вернула корректный JSON"
-                    ),
+                    "status_message": _preprocessing_failure_status_message(exc),
                     "error_type": type(exc).__name__,
                     "fallback": "disabled",
                     "source_chunk_count": len(indexable_chunks),

@@ -908,6 +908,68 @@ async def test_structured_preprocessing_does_not_pass_known_question_intents_bet
 
 
 @pytest.mark.asyncio
+async def test_structured_preprocessing_exact_duplicate_fragments_merge_with_source_evidence():
+    repo = _knowledge_repo(canonical_count=1)
+    duplicate_entry = KnowledgePreprocessingEntry(
+        title="Manager handoff",
+        answer="Assistant transfers payment questions to a human manager.",
+        source_excerpt="Assistant transfers payment questions to a human manager.",
+        questions=(
+            "Can I talk to a manager?",
+            "Who handles payment questions?",
+        ),
+        synonyms=("manager handoff", "human manager"),
+        tags=("handoff",),
+        canonical_question="Can I talk to a manager?",
+    )
+    first_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(duplicate_entry,),
+        metrics={},
+    )
+    second_result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(duplicate_entry,),
+        metrics={},
+    )
+    preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
+    preprocessor.preprocess = AsyncMock(
+        side_effect=[
+            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
+            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
+        ]
+    )
+    preprocessor.merge_known_answer = AsyncMock()
+
+    result = await KnowledgeIngestionService(object()).process_document(
+        project_id="project-1",
+        document_id="doc-duplicate-evidence",
+        file_name="faq.md",
+        chunks=[
+            {"content": "Assistant transfers payment questions to a human manager."},
+            {"content": "Assistant transfers payment questions to a human manager."},
+        ],
+        mode="faq",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=_usage_repo()),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+
+    assert result.structured_entries == 1
+    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
+    assert len(entries) == 1
+    assert entries[0].source_refs[0].quote == duplicate_entry.source_excerpt
+    assert entries[0].metadata["merged_preprocessing_entry_count"] == 2
+    assert entries[0].metadata["source_ref_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_structured_preprocessing_known_fragments_stay_separate_with_source_excerpts():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
