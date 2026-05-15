@@ -78,6 +78,35 @@ This context must not publish raw technical chunks, eval cases, prompt/debug
 artifacts, generated standalone questions, or live CRM state as production
 knowledge.
 
+#### Current FAQ compiler implementation
+
+FAQ preprocessing is implemented as a question-first answer compiler, not as a
+title-first card generator. The active FAQ path is intentionally simple:
+
+1. technical source chunks are processed in small batches;
+2. the application keeps compiled canonical entries in memory for the current
+   document;
+3. before each compiler call it sends compact `known_question_intents` built
+   from already compiled entries: stable internal intent id, canonical question,
+   realistic question variants, and a short answer digest;
+4. `knowledge_answer_compiler_faq.txt` returns answer fragments, either
+   `match.kind = "new"` or `match.kind = "known"`;
+5. only `known` fragments call `knowledge_answer_merge.txt`, which receives the
+   existing canonical answer and the incoming grounded fragment and returns one
+   replacement answer when `merge_allowed = true`;
+6. new fragments become separate canonical entries.
+
+`canonical_question` is the identity signal for FAQ answer intent. `title` is
+display metadata for UI/legacy persistence only. Previous answer titles, entry
+titles, tags, synonyms, and embedding text must not be sent to the FAQ compiler
+as identity or matching context. If storage still needs synonyms/tags/embedding
+text, application/domain code derives compatibility values deterministically
+from display title, canonical question, question variants, and answer.
+
+Semantic retightening is a late optional sanity/cleanup pass for suspicious
+duplicates or overmerge cases. It is not the primary document-understanding
+compiler and must not be required for a successful FAQ first pass.
+
 ### Commercial Catalog / Pricing Context
 
 Owns commercial facts extracted from price lists, tables, catalogs, tariff grids,
@@ -240,10 +269,13 @@ Preferred sequence:
 2. Add tests that make the contracts explicit.
 3. Add runtime state fields only after the contracts are stable.
 4. Add source routing and authority decision as a separate graph/runtime step.
-5. Add price-list/table compiler as a commercial compiler, not as FAQ prompt
+5. Add dedicated two-prompt contracts for `price_list` and `instruction` modes
+   instead of routing them through FAQ prompt drift. Until those contracts exist,
+   the FAQ compiler contract should remain explicit about being FAQ-only.
+6. Add price-list/table compiler as a commercial compiler, not as FAQ prompt
    drift.
-6. Add operational CRM tools only behind typed action/safety policies.
-7. Extend eval to cover price answers, source routing, missing slots, and tool use.
+7. Add operational CRM tools only behind typed action/safety policies.
+8. Extend eval to cover price answers, source routing, missing slots, and tool use.
 
 ## Non-goals for this document
 

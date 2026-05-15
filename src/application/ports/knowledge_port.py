@@ -16,7 +16,8 @@ from src.domain.project_plane.knowledge_compilation import (
     SourceChunk,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgeEmbeddingTextMergeExecutionResult,
+    KnowledgeAnswerMergeExecutionResult,
+    KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgeQuestionIntentCard,
@@ -242,19 +243,17 @@ class KnowledgePreprocessorPort(Protocol):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_entry_titles: Sequence[str] = (),
         previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult: ...
 
-    async def merge_embedding_text(
+    async def merge_known_answer(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        title: str,
-        existing_embedding_text: str,
-        incoming_embedding_text: str,
-    ) -> KnowledgeEmbeddingTextMergeExecutionResult: ...
+        known_intent: KnowledgePreprocessingEntry,
+        incoming_fragment: KnowledgePreprocessingEntry,
+    ) -> KnowledgeAnswerMergeExecutionResult: ...
 
     async def tighten_semantic_merges(
         self,

@@ -9,9 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]
 INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
 KNOWLEDGE_PORT = ROOT / "src/application/ports/knowledge_port.py"
 KNOWLEDGE_PREPROCESSOR = ROOT / "src/infrastructure/llm/knowledge_preprocessor.py"
-KNOWLEDGE_PREPROCESSOR_SHARED_PROMPT = (
-    ROOT / "src/agent/prompts/knowledge_preprocess_shared_contract.txt"
-)
+FAQ_COMPILER_PROMPT = ROOT / "src/agent/prompts/knowledge_answer_compiler_faq.txt"
+ANSWER_MERGE_PROMPT = ROOT / "src/agent/prompts/knowledge_answer_merge.txt"
 
 
 def _source(path: Path) -> str:
@@ -58,38 +57,41 @@ def test_stage_k_process_document_does_not_combine_raw_and_structured_runtime_ro
     )
 
 
-def test_stage_k_preprocessor_port_requires_carryover_and_one_meaning_merge() -> None:
+def test_stage_k_preprocessor_port_uses_answer_merge_not_embedding_text_merge() -> None:
     source = _source(KNOWLEDGE_PORT)
 
-    assert "previous_entry_titles: Sequence[str] = ()" in source
-    assert "async def merge_embedding_text(" in source
-    assert "existing_embedding_text: str" in source
-    assert "incoming_embedding_text: str" in source
-    assert "KnowledgeEmbeddingTextMergeExecutionResult" in source
+    assert "previous_entry_titles" not in source
+    assert "async def merge_known_answer(" in source
+    assert "known_intent: KnowledgePreprocessingEntry" in source
+    assert "incoming_fragment: KnowledgePreprocessingEntry" in source
+    assert "KnowledgeAnswerMergeExecutionResult" in source
 
 
-def test_stage_k_groq_preprocessor_prompt_has_cross_chunk_carryover_contract() -> None:
+def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
     preprocessor_source = _source(KNOWLEDGE_PREPROCESSOR)
     build_prompt_source = _function_source(KNOWLEDGE_PREPROCESSOR, "_build_prompt")
-    prompt_source = _source(KNOWLEDGE_PREPROCESSOR_SHARED_PROMPT)
+    prompt_source = _source(FAQ_COMPILER_PROMPT)
 
-    assert '"previous_answer_titles": previous_titles' in preprocessor_source
-    assert "PREPROCESSING_SHARED_CONTRACT_PROMPT_FILE" in preprocessor_source
-    assert "CROSS-CHUNK COMPILER CONTEXT" not in build_prompt_source
+    assert '"previous_answer_titles"' not in preprocessor_source
+    assert "PREPROCESSING_SHARED_CONTRACT_PROMPT_FILE" not in preprocessor_source
+    assert "knowledge_preprocess_shared_contract.txt" not in preprocessor_source
+    assert "knowledge_answer_compiler_faq.txt" in preprocessor_source
     assert "NOW PROCESS THIS SOURCE JSON" not in build_prompt_source
 
-    assert "CROSS-CHUNK COMPILER CONTEXT" in prompt_source
-    assert "reuse the exact previous title" in prompt_source
-    assert "Do not output standalone generated questions as entries" in prompt_source
+    assert "known_question_intents" in prompt_source
+    assert "Do not output title for match.kind" in prompt_source
+    assert "Do not output tags, synonyms, or embedding_text" in prompt_source
 
 
-def test_stage_k_groq_preprocessor_has_one_meaning_merge_contract() -> None:
+def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
     source = _source(KNOWLEDGE_PREPROCESSOR)
+    prompt_source = _source(ANSWER_MERGE_PROMPT)
 
-    assert "EMBEDDING TEXT MERGE TASK" in source
-    assert "Merge only existing_embedding_text and incoming_embedding_text" in source
-    assert "The only allowed key is embedding_text" in source
-    assert "parse_embedding_text_merge_payload" in source
+    assert "ANSWER_MERGE_PROMPT_FILE" in source
+    assert "merge_known_answer" in source
+    assert "parse_answer_merge_payload" in source
+    assert "EMBEDDING TEXT MERGE TASK" not in source
+    assert "Do not output tags, synonyms, or embedding_text" in prompt_source
 
 
 def test_stage_k_ingestion_records_compiler_loop_and_merge_metrics() -> None:
@@ -97,6 +99,7 @@ def test_stage_k_ingestion_records_compiler_loop_and_merge_metrics() -> None:
 
     assert "technical_compiler_call_count" in source
     assert "previous_title_carryover" in source
+    assert "False" in source
     assert "one_meaning_at_a_time_merge" in source
     assert "llm_merge_call_count" in source
     assert "KCD_STAGE_K_COMPILER_VERSION" in source

@@ -25,7 +25,7 @@ Definitions:
 - answer intent = one stable user information need that can be answered from source evidence.
 - question_variants = realistic ways a customer may ask for the same answer intent.
 - source fragment = raw text evidence inside chunks[].
-- known_question_intents = previously compiled answer intents represented by id, title, canonical_question, question_variants, and answer_digest.
+- known_question_intents = previously compiled answer intents represented only by intent_id, canonical_question, question_variants, and answer_digest.
 - previous title is not identity. Questions and answer meaning are identity.
 
 Core rules:
@@ -49,7 +49,7 @@ Core rules:
 
 Known intent matching:
 - If a fragment answers a known_question_intent, set match.kind = "known".
-- For known matches, reuse the exact known_intent_id and exact previous title.
+- For known matches, reuse the exact known_intent_id.
 - For known matches, answer_fragment must contain only the current grounded contribution from the current source.
 - Do not include the old full answer unless the old fact is also present in the current source.
 - The final old+new answer will be produced by a separate merge prompt.
@@ -109,8 +109,7 @@ Return ONLY this JSON shape:
     {
       "match": {
         "kind": "known",
-        "known_intent_id": "exact id from known_question_intents",
-        "title": "exact previous title"
+        "known_intent_id": "exact id from known_question_intents"
       },
       "canonical_question": "main customer question this fragment answers",
       "question_variants": [
@@ -139,8 +138,8 @@ Return ONLY this JSON shape:
 Field rules:
 - match.kind must be either "known" or "new".
 - known_intent_id is required only for match.kind = "known".
-- match.title is required only for match.kind = "known" and must exactly equal the known title.
-- title is required only for match.kind = "new".
+- Do not output title for match.kind = "known".
+- title is required only for match.kind = "new" and is display metadata, not identity.
 - canonical_question is always required.
 - question_variants must contain at least 4 questions.
 - answer_fragment is always required.

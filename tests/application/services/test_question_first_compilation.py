@@ -90,15 +90,15 @@ def test_question_first_prompt_uses_intent_cards_not_titles_as_identity_source()
         mode="faq",
         chunks=[{"content": "Refund policy: manager checks the order."}],
         file_name="faq.txt",
-        previous_entry_titles=("Возврат средств",),
         previous_question_intents=(card,),
     )
 
     assert "known_question_intents" in prompt
-    assert "previous_answer_titles is fallback naming context only" in prompt
-    assert "reuse the exact previous title" in prompt
-    assert "Same answer intent means the same stable user information need" in prompt
-    assert "Never append old answer text plus new answer text" in prompt
+    assert "previous_answer_titles" not in prompt
+    assert "previous_entry_titles" not in prompt
+    assert "Возврат средств" not in prompt
+    assert "canonical_question" in prompt
+    assert "question_variants" in prompt
     assert "Можно вернуть деньги?" in prompt
 
 
@@ -111,11 +111,11 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
         file_name="faq.txt",
     )
 
-    assert "One entry = one answer intent / one stable user information need" in prompt
-    assert "Split a multi-topic source fragment into multiple entries" in prompt
-    assert "replacement canonical answer A+B once" in prompt
-    assert "never append A + rephrased A + B" in prompt
-    assert "not the full source_excerpt" in prompt
+    assert "One output fragment = one answer intent contribution" in prompt
+    assert "One source chunk may contain many answer intents" in prompt
+    assert "A+A' once" in prompt
+    assert "Do not output tags, synonyms, or embedding_text" in prompt
+    assert "answer_fragment" in prompt
 
 
 def test_semantic_merge_prompt_requires_replacement_not_append_and_keeps_related_intents() -> (

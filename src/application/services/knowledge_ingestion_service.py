@@ -51,6 +51,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeSemanticMergeCandidate,
     KnowledgeSemanticMergeDecision,
     KnowledgeSemanticMergeGroup,
+    build_embedding_text,
     entry_kind_for_preprocessing_mode,
     prompt_version_for_mode,
 )
@@ -613,10 +614,12 @@ def _answer_digest(
 
 
 def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str:
+    if entry.canonical_question:
+        return entry.canonical_question
     for question in _text_tuple(entry.questions):
         if question:
             return question
-    return _clean_optional_text(entry.title)
+    return _answer_digest(entry.answer)
 
 
 def _question_intent_card_from_entry(
@@ -631,7 +634,7 @@ def _question_intent_card_from_entry(
         primary_question=_question_intent_primary_question(entry),
         question_samples=questions[:KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT],
         answer_digest=_answer_digest(entry.answer),
-        tags=_text_tuple(entry.tags)[:KCD_STAGE_K_QUESTION_INTENT_TAG_LIMIT],
+        tags=(),
     )
 
 
@@ -641,9 +644,7 @@ def _question_intent_card_text(card: KnowledgeQuestionIntentCard) -> str:
         for part in (
             card.primary_question,
             " ".join(card.question_samples),
-            card.title,
             card.answer_digest,
-            " ".join(card.tags),
         )
         if part
     )
@@ -658,9 +659,7 @@ def _question_intent_tokens_from_entry(
             for part in (
                 _question_intent_primary_question(entry),
                 " ".join(_text_tuple(entry.questions)),
-                _clean_optional_text(entry.title),
                 _answer_digest(entry.answer),
-                " ".join(_text_tuple(entry.tags)),
             )
             if part
         )
@@ -683,10 +682,13 @@ def _preprocessing_entry_from_technical_chunk(
         answer=_answer_digest(content),
         source_excerpt=content[:KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET],
         questions=_text_tuple(chunk.get("questions")),
-        synonyms=_text_tuple(chunk.get("synonyms")),
-        tags=_text_tuple(chunk.get("tags")),
+        synonyms=(),
+        tags=(),
         embedding_text=_clean_optional_text(
             str(chunk.get("embedding_text") or content)
+        ),
+        canonical_question=_clean_optional_text(
+            str(chunk.get("canonical_question") or "")
         ),
     )
 
@@ -805,9 +807,11 @@ def _normalized_answer_topic_key(value: str) -> str:
 
 
 def _answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
-    title_key = _normalized_answer_topic_key(entry.title)
-    if title_key:
-        return title_key
+    canonical_question_key = _normalized_answer_topic_key(
+        entry.canonical_question or _question_intent_primary_question(entry)
+    )
+    if canonical_question_key:
+        return canonical_question_key
 
     answer_key = _normalized_answer_topic_key(entry.answer)
     if answer_key:
@@ -1436,6 +1440,7 @@ def _entry_with_semantic_merge_decision(
         synonyms=entry.synonyms,
         tags=entry.tags,
         embedding_text=embedding_text,
+        canonical_question=entry.canonical_question,
     )
 
 
@@ -1495,7 +1500,7 @@ def _apply_semantic_merge_tightening_decisions(
             merged_entry = _merge_entry_fields_deterministically(
                 existing_entry=merged_entry,
                 incoming_entry=updated_entries[index],
-                merged_embedding_text=decision.merged_embedding_text,
+                merged_answer=decision.merged_embedding_text,
             )
 
         merged_source_excerpts = _merge_text_tuple_values(
@@ -1665,51 +1670,58 @@ def _merge_entry_fields_deterministically(
     *,
     existing_entry: KnowledgePreprocessingEntry,
     incoming_entry: KnowledgePreprocessingEntry,
-    merged_embedding_text: str,
+    merged_answer: str,
+    merged_question_variants: tuple[str, ...] = (),
 ) -> KnowledgePreprocessingEntry:
     answer = _limit_compiled_text(
-        _merge_answer_text(existing_entry.answer, incoming_entry.answer),
+        merged_answer
+        or _merge_answer_text(existing_entry.answer, incoming_entry.answer),
         max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
     )
     source_excerpt = _limit_compiled_text(
         _merge_source_excerpt_text(existing_entry, incoming_entry),
         max_chars=KCD_STAGE_K_MERGED_SOURCE_EXCERPT_MAX_CHARS,
     )
+    merged_questions = _merge_limited_text_tuple_values(
+        _text_tuple(existing_entry.questions),
+        _text_tuple(incoming_entry.questions),
+        _text_tuple(merged_question_variants),
+        limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
+    )
+    compatibility_entry = KnowledgePreprocessingEntry(
+        title=_clean_optional_text(existing_entry.title)
+        or _clean_optional_text(incoming_entry.title),
+        answer=answer,
+        source_excerpt=source_excerpt,
+        questions=merged_questions,
+        synonyms=merged_questions[:KCD_STAGE_K_MERGED_SYNONYM_LIMIT],
+        tags=_merge_limited_text_tuple_values(
+            _text_tuple(existing_entry.tags),
+            _text_tuple(incoming_entry.tags),
+            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
+        ),
+        canonical_question=existing_entry.canonical_question
+        or _question_intent_primary_question(existing_entry),
+    )
     embedding_text = _limit_compiled_text(
-        merged_embedding_text,
+        build_embedding_text(compatibility_entry),
         max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
     )
-
-    if not embedding_text:
-        embedding_text = _limit_compiled_text(
-            _merge_answer_text(
-                existing_entry.embedding_text,
-                incoming_entry.embedding_text,
-            ),
-            max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
-        )
 
     return KnowledgePreprocessingEntry(
         title=_clean_optional_text(existing_entry.title)
         or _clean_optional_text(incoming_entry.title),
         answer=answer,
         source_excerpt=source_excerpt,
-        questions=_merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.questions),
-            _text_tuple(incoming_entry.questions),
-            limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
-        ),
-        synonyms=_merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.synonyms),
-            _text_tuple(incoming_entry.synonyms),
-            limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
-        ),
+        questions=merged_questions,
+        synonyms=merged_questions[:KCD_STAGE_K_MERGED_SYNONYM_LIMIT],
         tags=_merge_limited_text_tuple_values(
             _text_tuple(existing_entry.tags),
             _text_tuple(incoming_entry.tags),
             limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
         ),
         embedding_text=embedding_text,
+        canonical_question=compatibility_entry.canonical_question,
     )
 
 
@@ -1778,7 +1790,7 @@ def _retighten_existing_document_plan(
             merged_entry = _merge_entry_fields_deterministically(
                 existing_entry=merged_entry,
                 incoming_entry=updated_entries[index],
-                merged_embedding_text=decision.merged_embedding_text,
+                merged_answer=decision.merged_embedding_text,
             )
 
         merged_indexes_for_survivor: list[int] = []
@@ -2725,8 +2737,6 @@ class KnowledgeIngestionService:
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
             compiled_entry_source_excerpts: list[tuple[str, ...]] = []
-            compiled_entry_keys: list[str] = []
-            compiled_entry_index_by_key: dict[str, int] = {}
             usage_event_count = 0
             llm_merge_call_count = 0
             latest_result: KnowledgePreprocessingResult | None = None
@@ -2764,10 +2774,10 @@ class KnowledgeIngestionService:
                     ),
                     "llm_merge_call_count": 0,
                     "semantic_answer_merge_count": 0,
-                    "embedding_text_merge_call_count": 0,
+                    "answer_merge_call_count": 0,
                     "usage_event_count": 0,
                     "elapsed_seconds": 0,
-                    "previous_title_carryover": True,
+                    "previous_title_carryover": False,
                     "one_meaning_at_a_time_merge": True,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
@@ -2780,7 +2790,6 @@ class KnowledgeIngestionService:
                 if await repo.is_document_processing_cancelled(document_id):
                     raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
 
-                previous_entry_titles = tuple(entry.title for entry in compiled_entries)
                 known_question_intent_cards = tuple(
                     _question_intent_card_from_entry(
                         entry,
@@ -2800,9 +2809,6 @@ class KnowledgeIngestionService:
                     mode=mode,
                     chunks=technical_chunks,
                     file_name=file_name,
-                    previous_entry_titles=previous_entry_titles[
-                        -KCD_STAGE_K_PREVIOUS_TITLE_LIMIT:
-                    ],
                     previous_question_intents=previous_question_intents,
                 )
                 if execution.usage is not None:
@@ -2820,58 +2826,69 @@ class KnowledgeIngestionService:
                 preprocessing_results.append(execution.result)
 
                 for incoming_entry in execution.result.entries:
-                    entry_key = _answer_topic_key(
-                        incoming_entry,
-                        index=len(compiled_entries),
-                    )
                     incoming_source_excerpts = (
                         _source_excerpts_from_preprocessing_entry(incoming_entry)
                     )
-                    if entry_key not in compiled_entry_index_by_key:
-                        compiled_entry_index_by_key[entry_key] = len(compiled_entries)
-                        compiled_entry_keys.append(entry_key)
-                        compiled_entries.append(incoming_entry)
-                        compiled_entry_source_excerpts.append(incoming_source_excerpts)
-                        continue
+                    if (
+                        incoming_entry.match_kind == "known"
+                        and incoming_entry.known_intent_id
+                    ):
+                        raw_index = incoming_entry.known_intent_id.removeprefix(
+                            "compiled-"
+                        )
+                        existing_index = int(raw_index) if raw_index.isdigit() else -1
+                        if existing_index < 0 or existing_index >= len(
+                            compiled_entries
+                        ):
+                            compiled_entries.append(incoming_entry)
+                            compiled_entry_source_excerpts.append(
+                                incoming_source_excerpts
+                            )
+                            continue
 
-                    existing_index = compiled_entry_index_by_key[entry_key]
-                    existing_entry = compiled_entries[existing_index]
-                    embedding_text_merge_execution = (
-                        await preprocessor.merge_embedding_text(
+                        existing_entry = compiled_entries[existing_index]
+                        answer_merge_execution = await preprocessor.merge_known_answer(
                             mode=mode,
                             file_name=file_name,
-                            title=existing_entry.title,
-                            existing_embedding_text=existing_entry.embedding_text,
-                            incoming_embedding_text=incoming_entry.embedding_text,
+                            known_intent=existing_entry,
+                            incoming_fragment=incoming_entry,
                         )
-                    )
-                    if embedding_text_merge_execution.usage is not None:
-                        await usage_repo.record_event(
-                            ModelUsageEventCreate.from_measurement(
-                                project_id=project_id,
-                                source="knowledge_preprocessing",
-                                measurement=embedding_text_merge_execution.usage,
-                                document_id=document_id,
+                        if answer_merge_execution.usage is not None:
+                            await usage_repo.record_event(
+                                ModelUsageEventCreate.from_measurement(
+                                    project_id=project_id,
+                                    source="knowledge_preprocessing",
+                                    measurement=answer_merge_execution.usage,
+                                    document_id=document_id,
+                                )
+                            )
+                            usage_event_count += 1
+                        if not answer_merge_execution.merge_allowed:
+                            compiled_entries.append(incoming_entry)
+                            compiled_entry_source_excerpts.append(
+                                incoming_source_excerpts
+                            )
+                            continue
+
+                        compiled_entries[existing_index] = (
+                            _merge_entry_fields_deterministically(
+                                existing_entry=existing_entry,
+                                incoming_entry=incoming_entry,
+                                merged_answer=answer_merge_execution.answer,
+                                merged_question_variants=answer_merge_execution.question_variants,
                             )
                         )
-                        usage_event_count += 1
+                        compiled_entry_source_excerpts[existing_index] = (
+                            _merge_text_tuple_values(
+                                compiled_entry_source_excerpts[existing_index],
+                                incoming_source_excerpts,
+                            )
+                        )
+                        llm_merge_call_count += 1
+                        continue
 
-                    compiled_entries[existing_index] = (
-                        _merge_entry_fields_deterministically(
-                            existing_entry=existing_entry,
-                            incoming_entry=incoming_entry,
-                            merged_embedding_text=(
-                                embedding_text_merge_execution.embedding_text
-                            ),
-                        )
-                    )
-                    compiled_entry_source_excerpts[existing_index] = (
-                        _merge_text_tuple_values(
-                            compiled_entry_source_excerpts[existing_index],
-                            incoming_source_excerpts,
-                        )
-                    )
-                    llm_merge_call_count += 1
+                    compiled_entries.append(incoming_entry)
+                    compiled_entry_source_excerpts.append(incoming_source_excerpts)
 
                 progress_metrics: JsonObject = {
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
@@ -2892,7 +2909,7 @@ class KnowledgeIngestionService:
                     "compiled_entry_count": len(compiled_entries),
                     "semantic_answer_count": len(compiled_entries),
                     "incoming_entry_count": len(execution.result.entries),
-                    "previous_title_count": len(previous_entry_titles),
+                    "previous_title_count": 0,
                     "question_intent_card_count": len(known_question_intent_cards),
                     "question_intent_shortlist_count": len(previous_question_intents),
                     "question_intent_shortlist_limit": (
@@ -2900,13 +2917,13 @@ class KnowledgeIngestionService:
                     ),
                     "llm_merge_call_count": llm_merge_call_count,
                     "semantic_answer_merge_count": llm_merge_call_count,
-                    "embedding_text_merge_call_count": llm_merge_call_count,
+                    "answer_merge_call_count": llm_merge_call_count,
                     "usage_event_count": usage_event_count,
                     "elapsed_seconds": round(
                         time.monotonic() - processing_started_monotonic,
                         1,
                     ),
-                    "previous_title_carryover": True,
+                    "previous_title_carryover": False,
                     "one_meaning_at_a_time_merge": True,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
@@ -2921,7 +2938,7 @@ class KnowledgeIngestionService:
                         "batch_index": batch_index,
                         "batch_count": len(technical_batches),
                         "source_chunk_count": len(indexable_chunks),
-                        "previous_title_count": len(previous_entry_titles),
+                        "previous_title_count": 0,
                         "question_intent_shortlist_count": len(
                             previous_question_intents
                         ),
@@ -2946,25 +2963,12 @@ class KnowledgeIngestionService:
             if latest_result is None:
                 raise ValidationError("Knowledge preprocessing produced no results")
 
-            existing_project_titles = await _existing_project_titles_for_semantic_merge(
-                repo=repo,
-                project_id=project_id,
-                document_id=document_id,
-            )
-            (
-                tightened_entries,
-                tightened_source_excerpts,
-                semantic_merge_tightening_metrics,
-            ) = await _tighten_compiled_entries_with_semantic_merge(
-                preprocessor=preprocessor,
-                mode=mode,
-                file_name=file_name,
-                entries=compiled_entries,
-                source_excerpts_by_entry=compiled_entry_source_excerpts,
-                existing_project_titles=existing_project_titles,
-            )
-            compiled_entries = list(tightened_entries)
-            compiled_entry_source_excerpts = list(tightened_source_excerpts)
+            semantic_merge_tightening_metrics: JsonObject = {
+                "skipped": True,
+                "reason": "optional_post_pass_not_required_for_primary_faq_compilation",
+                "entry_count_after": len(compiled_entries),
+                "llm_call_count": 0,
+            }
 
             result = _preprocessing_result_from_entries(
                 mode=mode,
@@ -2979,7 +2983,7 @@ class KnowledgeIngestionService:
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
                     "llm_merge_call_count": llm_merge_call_count,
-                    "compiled_entry_key_count": len(compiled_entry_keys),
+                    "compiled_entry_key_count": len(compiled_entries),
                     "source_refs_preserved_per_semantic_entry": True,
                     "semantic_merge_tightening": semantic_merge_tightening_metrics,
                 },
@@ -3050,14 +3054,12 @@ class KnowledgeIngestionService:
             preprocessing_metrics["usage_event_count"] = usage_event_count
             preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
             preprocessing_metrics["semantic_answer_merge_count"] = llm_merge_call_count
-            preprocessing_metrics["embedding_text_merge_call_count"] = (
-                llm_merge_call_count
-            )
+            preprocessing_metrics["answer_merge_call_count"] = llm_merge_call_count
             preprocessing_metrics["elapsed_seconds"] = round(
                 time.monotonic() - processing_started_monotonic,
                 1,
             )
-            preprocessing_metrics["previous_title_carryover"] = True
+            preprocessing_metrics["previous_title_carryover"] = False
             preprocessing_metrics["one_meaning_at_a_time_merge"] = True
             preprocessing_metrics["source_refs_preserved_per_semantic_entry"] = True
             preprocessing_metrics["row_explosion_guard"] = (
