@@ -15,6 +15,8 @@ from typing import Protocol
 import asyncpg
 
 from src.domain.project_plane.knowledge_views import (
+    KnowledgeAnswerCandidateSummaryView,
+    KnowledgeCompilerBatchView,
     KnowledgeDocumentDetailView,
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
@@ -2771,6 +2773,106 @@ class KnowledgeRepository:
             preprocessing_metrics=row["preprocessing_metrics"],
             structured_entries=runtime_entry_count,
             structured_chunk_count=runtime_entry_count,
+        )
+
+    async def list_document_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[KnowledgeCompilerBatchView, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    compiler_run_id,
+                    batch_index,
+                    batch_count,
+                    status,
+                    source_chunk_ids,
+                    source_chunk_indexes,
+                    attempt_count,
+                    model,
+                    prompt_version,
+                    tokens_input,
+                    tokens_output,
+                    tokens_total,
+                    error_type,
+                    error_message,
+                    started_at,
+                    finished_at,
+                    updated_at
+                FROM knowledge_compiler_batches
+                WHERE project_id = $1
+                  AND document_id = $2
+                ORDER BY compiler_run_id, batch_index
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        return tuple(
+            KnowledgeCompilerBatchView(
+                id=str(row["id"]),
+                compiler_run_id=str(row["compiler_run_id"]),
+                batch_index=int(row["batch_index"] or 0),
+                batch_count=int(row["batch_count"] or 0),
+                status=str(row["status"]),
+                source_chunk_ids=row["source_chunk_ids"],
+                source_chunk_indexes=row["source_chunk_indexes"],
+                attempt_count=int(row["attempt_count"] or 0),
+                model=str(row["model"] or ""),
+                prompt_version=str(row["prompt_version"] or ""),
+                tokens_input=int(row["tokens_input"] or 0),
+                tokens_output=int(row["tokens_output"] or 0),
+                tokens_total=int(row["tokens_total"] or 0),
+                error_type=str(row["error_type"] or ""),
+                error_message=str(row["error_message"] or ""),
+                started_at=_normalize_timestamp(row["started_at"]),
+                finished_at=_normalize_timestamp(row["finished_at"]),
+                updated_at=_normalize_timestamp(row["updated_at"]),
+            )
+            for row in rows
+        )
+
+    async def get_document_answer_candidate_summary(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> KnowledgeAnswerCandidateSummaryView:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::int AS total_count,
+                    COUNT(*) FILTER (
+                        WHERE metadata->>'stage' = 'stage_k_raw_extraction'
+                    )::int AS raw_count,
+                    COUNT(*) FILTER (
+                        WHERE metadata->>'stage' <> 'stage_k_raw_extraction'
+                           OR metadata->>'stage' IS NULL
+                    )::int AS final_count,
+                    COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
+                    COUNT(*) FILTER (WHERE jsonb_array_length(source_refs) > 0)::int AS grounded_count
+                FROM knowledge_answer_candidates
+                WHERE project_id = $1
+                  AND document_id = $2
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        if row is None:
+            return KnowledgeAnswerCandidateSummaryView()
+
+        return KnowledgeAnswerCandidateSummaryView(
+            total_count=int(row["total_count"] or 0),
+            raw_count=int(row["raw_count"] or 0),
+            final_count=int(row["final_count"] or 0),
+            rejected_count=int(row["rejected_count"] or 0),
+            grounded_count=int(row["grounded_count"] or 0),
         )
 
     async def update_document_status(

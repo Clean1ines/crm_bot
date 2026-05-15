@@ -4,7 +4,8 @@ import inspect
 from pathlib import Path
 
 from src.application.ports import knowledge_port
-from src.application.services import knowledge_ingestion_service
+from src.application.services import knowledge_ingestion_service, knowledge_service
+from src.interfaces.http import knowledge as knowledge_http
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 
 
@@ -75,3 +76,14 @@ def test_ingestion_creates_compiler_run_before_outputs() -> None:
     assert "compiler_run_id=compiler_run_id" in Path(
         "src/application/services/knowledge_ingestion_service.py"
     ).read_text(encoding="utf-8")
+
+
+def test_knowledge_progress_report_exposes_durable_batch_state() -> None:
+    service_source = inspect.getsource(knowledge_service.KnowledgeService)
+    http_source = inspect.getsource(knowledge_http)
+
+    assert "processing_report" in service_source
+    assert "list_document_compiler_batches" in service_source
+    assert "get_document_answer_candidate_summary" in service_source
+    assert '@router.get("/{document_id}/progress")' in http_source
+    assert "result.to_dict()" in http_source

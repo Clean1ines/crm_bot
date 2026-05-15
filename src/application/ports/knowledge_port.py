@@ -25,7 +25,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeSemanticMergeExecutionResult,
     KnowledgeSemanticMergeGroup,
 )
-from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+from src.domain.project_plane.knowledge_views import (
+    KnowledgeAnswerCandidateSummaryView,
+    KnowledgeCompilerBatchView,
+    KnowledgeDocumentDetailView,
+    KnowledgeSearchResultView,
+)
 from src.domain.project_plane.model_usage_views import (
     ModelUsageEventCreate,
     ModelUsageSummaryView,
@@ -219,12 +224,31 @@ class KnowledgeRepositoryPort(Protocol):
         metrics: JsonObject,
     ) -> JsonObject: ...
 
+    async def get_document(
+        self,
+        document_id: str,
+    ) -> KnowledgeDocumentDetailView | None: ...
+
     async def load_document_runtime_entries(
         self,
         *,
         project_id: str,
         document_id: str,
     ) -> KnowledgeDocumentRuntimeEntries | None: ...
+
+    async def list_document_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[KnowledgeCompilerBatchView, ...]: ...
+
+    async def get_document_answer_candidate_summary(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> KnowledgeAnswerCandidateSummaryView: ...
 
     async def search(
         self,
