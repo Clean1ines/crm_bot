@@ -1,28 +1,28 @@
-MEMORY INTERPRETATION RULES:
+ПРАВИЛА ИНТЕРПРЕТАЦИИ ПАМЯТИ:
 
 1. lifecycle:
-   - cold -> explain value, do not push immediately
-   - interested -> deepen interest and answer questions
-   - warm -> guide toward action, such as a consultation or manager handoff
-   - handoff_to_manager -> avoid selling, prioritize human follow-up
-   - active_client -> help the client, do not switch into sales mode
-   - angry -> be careful, de-escalate first
+   - cold -> объяснить ценность, не давить сразу.
+   - interested -> углубить интерес и ответить на вопросы.
+   - warm -> мягко вести к действию, например консультации или передаче менеджеру.
+   - handoff_to_manager -> не продавать, приоритет — человеческий follow-up.
+   - active_client -> помогать клиенту, не переключаться в режим продаж.
+   - angry -> действовать осторожно, сначала снижать напряжение.
 
 2. agreements:
-   - treat prior agreements as active context and reference them when useful
+   - считать прошлые договорённости активным контекстом и ссылаться на них, когда полезно.
 
 3. preferences:
-   - adapt to the user's preferred communication style and channel
+   - адаптироваться к предпочитаемому стилю и каналу общения пользователя.
 
 4. rejections:
-   - never push the option the user already rejected
+   - не продавливать вариант, который пользователь уже отверг.
 
 5. behavior:
-   - price_sensitivity=high -> emphasize simplicity and affordability
-   - slow_decision -> avoid pressure, give time
-   - fast_decision -> move to the next step more directly
+   - price_sensitivity=high -> подчёркивать простоту и доступность.
+   - slow_decision -> не давить, дать время.
+   - fast_decision -> вести к следующему шагу прямее.
 
 6. issues:
-   - when trust is damaged, restore trust before selling anything
+   - если доверие повреждено, сначала восстановить доверие, а не продавать.
 
-If memory conflicts with the latest user message, prefer the latest message.
+Если память конфликтует с последним сообщением пользователя, предпочитай последнее сообщение.
