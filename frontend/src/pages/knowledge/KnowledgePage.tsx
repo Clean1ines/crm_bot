@@ -372,6 +372,13 @@ const retightenReportRows = (doc: Document): string[] => {
   const llmCalls = metricNumber(metrics, 'llm_call_count');
   const cleanupOriginalUnits = metricNumber(metrics, 'retighten_cleanup_original_unit_count');
   const cleanupRemovedUnits = metricNumber(metrics, 'retighten_cleanup_removed_unit_count');
+  const deterministicCollapsed = metricNumber(metrics, 'deterministic_collapsed_entry_count');
+  const deterministicExactAnswer = metricNumber(metrics, 'deterministic_exact_answer_merge_count');
+  const deterministicContainment = metricNumber(metrics, 'deterministic_answer_containment_merge_count');
+  const dedupedQuestions = metricNumber(metrics, 'deduped_question_variant_count');
+  const dedupedEmbeddingUnits = metricNumber(metrics, 'deduped_embedding_text_unit_count');
+  const suspiciousMeta = metricNumber(metrics, 'suspicious_meta_entry_count');
+  const llmCollapsed = metricNumber(metrics, 'llm_collapsed_entry_count');
 
   if (statusText) {
     rows.push(t('knowledge.retightenReport.status', { status: statusText }));
@@ -384,6 +391,27 @@ const retightenReportRows = (doc: Document): string[] => {
   }
   if (collapsed !== null) {
     rows.push(t('knowledge.retightenReport.collapsed', { count: formatNumber(collapsed) }));
+  }
+  if (deterministicCollapsed !== null) {
+    rows.push(`Без LLM схлопнуто очевидных дублей: ${formatNumber(deterministicCollapsed)}`);
+  }
+  if (deterministicExactAnswer !== null) {
+    rows.push(`Exact answer duplicates: ${formatNumber(deterministicExactAnswer)}`);
+  }
+  if (deterministicContainment !== null) {
+    rows.push(`Схлопнуто вложенных/почти одинаковых ответов: ${formatNumber(deterministicContainment)}`);
+  }
+  if (llmCollapsed !== null) {
+    rows.push(`После LLM схлопнуто дополнительно: ${formatNumber(llmCollapsed)}`);
+  }
+  if (dedupedQuestions !== null) {
+    rows.push(`Удалено повторов в вопросах/вариантах: ${formatNumber(dedupedQuestions)}`);
+  }
+  if (dedupedEmbeddingUnits !== null) {
+    rows.push(`Удалено повторов в retrieval-тексте: ${formatNumber(dedupedEmbeddingUnits)}`);
+  }
+  if (suspiciousMeta !== null) {
+    rows.push(`Подозрительных служебных/meta-ответов найдено: ${formatNumber(suspiciousMeta)}`);
   }
   if (groups !== null) {
     rows.push(t('knowledge.retightenReport.groups', { count: formatNumber(groups) }));

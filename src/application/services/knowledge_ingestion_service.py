@@ -22,7 +22,11 @@ from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_normalization_service import (
     KnowledgeNormalizationService,
 )
-from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.json_types import (
+    JsonObject,
+    JsonValue,
+    json_value_from_unknown,
+)
 from src.domain.project_plane.embedding_text import CANONICAL_EMBEDDING_TEXT_VERSION
 from src.domain.project_plane.knowledge_chunks import (
     KnowledgeChunk,
@@ -2020,6 +2024,375 @@ class _RetightenExistingDocumentPlan:
     removed_source_indexes: tuple[int, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _DeterministicRetightenResult:
+    plan: _RetightenExistingDocumentPlan
+    metrics: JsonObject
+
+
+def _retighten_deduped_text_tuple(
+    values: object,
+) -> tuple[tuple[str, ...], int]:
+    result: list[str] = []
+    seen: set[str] = set()
+    duplicate_count = 0
+
+    for value in _text_tuple(values):
+        cleaned = _clean_optional_text(value)
+        if not cleaned:
+            continue
+
+        fingerprint = _semantic_merge_text_fingerprint(cleaned)
+        if not fingerprint:
+            continue
+
+        if fingerprint in seen:
+            duplicate_count += 1
+            continue
+
+        seen.add(fingerprint)
+        result.append(cleaned)
+
+    return tuple(result), duplicate_count
+
+
+def _retighten_entry_with_deduped_fields(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[KnowledgePreprocessingEntry, JsonObject]:
+    questions, duplicate_question_count = _retighten_deduped_text_tuple(entry.questions)
+    synonyms, duplicate_synonym_count = _retighten_deduped_text_tuple(entry.synonyms)
+    tags, duplicate_tag_count = _retighten_deduped_text_tuple(entry.tags)
+
+    answer_cleanup = _cleanup_semantic_merge_embedding_text_with_metrics(entry.answer)
+    embedding_cleanup = _cleanup_semantic_merge_embedding_text_with_metrics(
+        entry.embedding_text
+    )
+
+    deduped = KnowledgePreprocessingEntry(
+        title=entry.title,
+        answer=answer_cleanup.text or entry.answer,
+        source_excerpt=entry.source_excerpt,
+        questions=questions,
+        synonyms=synonyms,
+        tags=tags,
+        embedding_text=embedding_cleanup.text or entry.embedding_text,
+        canonical_question=entry.canonical_question,
+    )
+    metrics: JsonObject = {
+        "deduped_question_variant_count": duplicate_question_count,
+        "deduped_synonym_count": duplicate_synonym_count,
+        "deduped_tag_count": duplicate_tag_count,
+        "deduped_answer_unit_count": answer_cleanup.removed_unit_count,
+        "deduped_embedding_text_unit_count": embedding_cleanup.removed_unit_count,
+    }
+    return deduped, metrics
+
+
+def _retighten_entry_intent_fingerprint(
+    entry: KnowledgePreprocessingEntry,
+) -> str:
+    return _semantic_merge_text_fingerprint(
+        " ".join(
+            part
+            for part in (
+                entry.title,
+                entry.canonical_question,
+                " ".join(_text_tuple(entry.questions)),
+                " ".join(_text_tuple(entry.synonyms)),
+            )
+            if _clean_optional_text(part)
+        )
+    )
+
+
+def _retighten_answer_fingerprint(entry: KnowledgePreprocessingEntry) -> str:
+    return _semantic_merge_text_fingerprint(entry.answer)
+
+
+def _retighten_answer_contains(
+    left: KnowledgePreprocessingEntry,
+    right: KnowledgePreprocessingEntry,
+) -> bool:
+    left_answer = _retighten_answer_fingerprint(left)
+    right_answer = _retighten_answer_fingerprint(right)
+    if not left_answer or not right_answer:
+        return False
+    if len(left_answer) < 32 or len(right_answer) < 32:
+        return False
+    return left_answer in right_answer or right_answer in left_answer
+
+
+def _retighten_deterministic_duplicate_reason(
+    left: KnowledgePreprocessingEntry,
+    right: KnowledgePreprocessingEntry,
+) -> str | None:
+    left_answer = _retighten_answer_fingerprint(left)
+    right_answer = _retighten_answer_fingerprint(right)
+    if left_answer and right_answer and left_answer == right_answer:
+        return "exact_answer"
+
+    if _retighten_answer_contains(left, right):
+        return "answer_containment"
+
+    left_intent = _retighten_entry_intent_fingerprint(left)
+    right_intent = _retighten_entry_intent_fingerprint(right)
+    if left_intent and right_intent and left_intent == right_intent:
+        answer_score = _semantic_merge_token_similarity(
+            _semantic_merge_tokens_from_text(left.answer),
+            _semantic_merge_tokens_from_text(right.answer),
+        )
+        if answer_score >= 0.72:
+            return "exact_intent_high_answer_overlap"
+
+    return None
+
+
+def _retighten_entry_richness_score(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[int, int, int, int]:
+    return (
+        len(_clean_optional_text(entry.answer)),
+        len(_source_excerpts_from_preprocessing_entry(entry)),
+        len(_text_tuple(entry.questions)),
+        len(_clean_optional_text(entry.embedding_text)),
+    )
+
+
+def _retighten_merge_entries_deterministically(
+    *,
+    existing_entry: KnowledgePreprocessingEntry,
+    incoming_entry: KnowledgePreprocessingEntry,
+    reason: str,
+) -> KnowledgePreprocessingEntry:
+    existing_score = _retighten_entry_richness_score(existing_entry)
+    incoming_score = _retighten_entry_richness_score(incoming_entry)
+    survivor = incoming_entry if incoming_score > existing_score else existing_entry
+    absorbed = existing_entry if survivor is incoming_entry else incoming_entry
+
+    if reason == "answer_containment":
+        survivor_answer = survivor.answer
+    elif _retighten_answer_fingerprint(existing_entry) == _retighten_answer_fingerprint(
+        incoming_entry
+    ):
+        survivor_answer = survivor.answer
+    else:
+        survivor_answer = _merge_answer_text(
+            existing_entry.answer, incoming_entry.answer
+        )
+
+    merged = _merge_entry_fields_deterministically(
+        existing_entry=survivor,
+        incoming_entry=absorbed,
+        merged_answer=survivor_answer,
+    )
+    deduped, _ = _retighten_entry_with_deduped_fields(merged)
+    return deduped
+
+
+def _retighten_entry_is_suspicious_meta(
+    entry: KnowledgePreprocessingEntry,
+) -> bool:
+    text = _semantic_merge_text_fingerprint(
+        " ".join(
+            part
+            for part in (
+                entry.title,
+                entry.answer,
+                entry.source_excerpt,
+                entry.embedding_text,
+            )
+            if _clean_optional_text(part)
+        )
+    )
+    if not text:
+        return False
+
+    suspicious_markers: tuple[str, ...] = (
+        "kazhdaya tema dolzhna byt otdelena",
+        "ne smeshivat",
+        "eti voprosy nuzhno ispolzovat",
+        "testirovaniya preview",
+        "chastye voprosy i pravilnye otvety",
+        "spisok pohozhih voprosov",
+    )
+    # Cyrillic-safe fingerprints. The latin markers above are harmless when
+    # input is transliterated by tests or future fixtures; the real checks below
+    # cover current Russian production data.
+    suspicious_markers = suspicious_markers + (
+        _semantic_merge_text_fingerprint("Каждая тема должна быть отделена"),
+        _semantic_merge_text_fingerprint("Не смешивать"),
+        _semantic_merge_text_fingerprint("Эти вопросы нужно использовать"),
+        _semantic_merge_text_fingerprint("тестирования preview"),
+        _semantic_merge_text_fingerprint("Частые вопросы и правильные ответы"),
+        _semantic_merge_text_fingerprint("список похожих вопросов"),
+    )
+    return any(marker and marker in text for marker in suspicious_markers)
+
+
+def _deterministic_retighten_existing_document_plan(
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> _DeterministicRetightenResult:
+    working_entries: list[KnowledgePreprocessingEntry] = []
+    survivor_source_indexes: list[int] = []
+    merged_source_indexes: list[list[int]] = []
+
+    metrics: JsonObject = {
+        "deterministic_duplicate_group_count": 0,
+        "deterministic_collapsed_entry_count": 0,
+        "deterministic_exact_answer_merge_count": 0,
+        "deterministic_exact_intent_merge_count": 0,
+        "deterministic_answer_containment_merge_count": 0,
+        "deduped_question_variant_count": 0,
+        "deduped_synonym_count": 0,
+        "deduped_tag_count": 0,
+        "deduped_answer_unit_count": 0,
+        "deduped_embedding_text_unit_count": 0,
+        "suspicious_meta_entry_count": 0,
+    }
+    suspicious_examples: list[JsonObject] = []
+
+    for source_index, raw_entry in enumerate(entries):
+        entry, dedupe_metrics = _retighten_entry_with_deduped_fields(raw_entry)
+        for key, value in dedupe_metrics.items():
+            metrics[key] = int(cast(int, metrics.get(key, 0))) + int(cast(int, value))
+
+        if _retighten_entry_is_suspicious_meta(entry):
+            metrics["suspicious_meta_entry_count"] = (
+                int(cast(int, metrics["suspicious_meta_entry_count"])) + 1
+            )
+            if len(suspicious_examples) < 5:
+                suspicious_examples.append(
+                    {
+                        "title": _limit_compiled_text(entry.title, max_chars=120),
+                        "answer_preview": _limit_compiled_text(
+                            entry.answer,
+                            max_chars=180,
+                        ),
+                    }
+                )
+
+        target_index: int | None = None
+        target_reason: str | None = None
+        for existing_index, existing_entry in enumerate(working_entries):
+            reason = _retighten_deterministic_duplicate_reason(existing_entry, entry)
+            if reason is None:
+                continue
+            target_index = existing_index
+            target_reason = reason
+            break
+
+        if target_index is None or target_reason is None:
+            working_entries.append(entry)
+            survivor_source_indexes.append(source_index)
+            merged_source_indexes.append([source_index])
+            continue
+
+        existing_entry = working_entries[target_index]
+        existing_survivor = survivor_source_indexes[target_index]
+        merged_entry = _retighten_merge_entries_deterministically(
+            existing_entry=existing_entry,
+            incoming_entry=entry,
+            reason=target_reason,
+        )
+
+        if _retighten_entry_richness_score(entry) > _retighten_entry_richness_score(
+            existing_entry
+        ):
+            survivor_source_indexes[target_index] = source_index
+            if existing_survivor not in merged_source_indexes[target_index]:
+                merged_source_indexes[target_index].append(existing_survivor)
+
+        if source_index not in merged_source_indexes[target_index]:
+            merged_source_indexes[target_index].append(source_index)
+
+        working_entries[target_index] = merged_entry
+        metrics["deterministic_duplicate_group_count"] = (
+            int(cast(int, metrics["deterministic_duplicate_group_count"])) + 1
+        )
+        metrics["deterministic_collapsed_entry_count"] = (
+            int(cast(int, metrics["deterministic_collapsed_entry_count"])) + 1
+        )
+
+        if target_reason == "exact_answer":
+            metrics["deterministic_exact_answer_merge_count"] = (
+                int(cast(int, metrics["deterministic_exact_answer_merge_count"])) + 1
+            )
+        elif target_reason == "answer_containment":
+            metrics["deterministic_answer_containment_merge_count"] = (
+                int(cast(int, metrics["deterministic_answer_containment_merge_count"]))
+                + 1
+            )
+        elif target_reason == "exact_intent_high_answer_overlap":
+            metrics["deterministic_exact_intent_merge_count"] = (
+                int(cast(int, metrics["deterministic_exact_intent_merge_count"])) + 1
+            )
+
+    survivor_set = set(survivor_source_indexes)
+    removed_source_indexes = tuple(
+        sorted(
+            source_index
+            for source_indexes in merged_source_indexes
+            for source_index in source_indexes
+            if source_index not in survivor_set
+        )
+    )
+    if suspicious_examples:
+        metrics["suspicious_meta_examples"] = cast(JsonValue, suspicious_examples)
+
+    return _DeterministicRetightenResult(
+        plan=_RetightenExistingDocumentPlan(
+            entries=tuple(working_entries),
+            survivor_source_indexes=tuple(survivor_source_indexes),
+            merged_source_indexes_by_entry=tuple(
+                tuple(source_indexes) for source_indexes in merged_source_indexes
+            ),
+            removed_source_indexes=removed_source_indexes,
+        ),
+        metrics=metrics,
+    )
+
+
+def _compose_retighten_existing_document_plans(
+    *,
+    base: _RetightenExistingDocumentPlan,
+    overlay: _RetightenExistingDocumentPlan,
+) -> _RetightenExistingDocumentPlan:
+    survivor_source_indexes = tuple(
+        base.survivor_source_indexes[index] for index in overlay.survivor_source_indexes
+    )
+
+    merged_source_indexes_by_entry: list[tuple[int, ...]] = []
+    for overlay_source_indexes in overlay.merged_source_indexes_by_entry:
+        original_indexes: list[int] = []
+        for base_index in overlay_source_indexes:
+            if base_index < 0 or base_index >= len(base.merged_source_indexes_by_entry):
+                continue
+            for original_index in base.merged_source_indexes_by_entry[base_index]:
+                if original_index not in original_indexes:
+                    original_indexes.append(original_index)
+        merged_source_indexes_by_entry.append(tuple(original_indexes))
+
+    removed_source_indexes: set[int] = set(base.removed_source_indexes)
+    for base_index in overlay.removed_source_indexes:
+        if base_index < 0 or base_index >= len(base.merged_source_indexes_by_entry):
+            continue
+        removed_source_indexes.update(base.merged_source_indexes_by_entry[base_index])
+
+    survivor_set = set(survivor_source_indexes)
+    removed_source_indexes = {
+        source_index
+        for source_index in removed_source_indexes
+        if source_index not in survivor_set
+    }
+
+    return _RetightenExistingDocumentPlan(
+        entries=overlay.entries,
+        survivor_source_indexes=survivor_source_indexes,
+        merged_source_indexes_by_entry=tuple(merged_source_indexes_by_entry),
+        removed_source_indexes=tuple(sorted(removed_source_indexes)),
+    )
+
+
 def _preprocessing_entry_from_canonical_entry(
     entry: CanonicalKnowledgeEntry,
 ) -> KnowledgePreprocessingEntry:
@@ -2166,6 +2539,45 @@ def _retightened_canonical_entry(
         compiler_version=original.compiler_version,
         embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
         metadata=metadata,
+    )
+
+
+def _retighten_updated_canonical_entries(
+    *,
+    plan: _RetightenExistingDocumentPlan,
+    current_entries: Sequence[CanonicalKnowledgeEntry],
+) -> tuple[CanonicalKnowledgeEntry, ...]:
+    updated_entries: list[CanonicalKnowledgeEntry] = []
+    for output_index, tightened_entry in enumerate(plan.entries):
+        survivor_source_index = plan.survivor_source_indexes[output_index]
+        merged_source_indexes = plan.merged_source_indexes_by_entry[output_index]
+        original = current_entries[survivor_source_index]
+        source_refs = _merge_source_refs_for_existing_entry_indexes(
+            source_indexes=merged_source_indexes,
+            entries=current_entries,
+        )
+        updated_entries.append(
+            _retightened_canonical_entry(
+                original=original,
+                entry=tightened_entry,
+                source_refs=source_refs,
+                merged_from_entry_ids=tuple(
+                    current_entries[index].id for index in merged_source_indexes
+                ),
+            )
+        )
+    return tuple(updated_entries)
+
+
+def _retighten_archived_entry_ids(
+    *,
+    plan: _RetightenExistingDocumentPlan,
+    current_entries: Sequence[CanonicalKnowledgeEntry],
+) -> tuple[str, ...]:
+    return tuple(
+        current_entries[index].id
+        for index in plan.removed_source_indexes
+        if 0 <= index < len(current_entries)
     )
 
 
@@ -2708,14 +3120,62 @@ class KnowledgeIngestionService:
             _preprocessing_entry_from_canonical_entry(entry)
             for entry in current_entries
         )
+
+        deterministic_result = _deterministic_retighten_existing_document_plan(
+            preprocessing_entries
+        )
+        deterministic_plan = deterministic_result.plan
+        preprocessing_entries = deterministic_plan.entries
+        metrics.update(deterministic_result.metrics)
+
         groups = _semantic_merge_suspect_groups_from_entries(preprocessing_entries)
         metrics["candidate_group_count"] = len(groups)
+        metrics["llm_candidate_group_count"] = len(groups)
 
         if not groups:
-            metrics["status"] = "skipped"
-            metrics["reason"] = "no_semantic_merge_suspect_groups"
-            metrics["entry_count_after"] = len(current_entries)
-            return metrics
+            metrics["status"] = (
+                "completed" if deterministic_plan.removed_source_indexes else "skipped"
+            )
+            metrics["reason"] = (
+                "deterministic_cleanup_applied_without_llm_groups"
+                if deterministic_plan.removed_source_indexes
+                else "no_semantic_merge_suspect_groups"
+            )
+            metrics["entry_count_after"] = len(deterministic_plan.entries)
+            metrics["collapsed_entry_count"] = len(
+                deterministic_plan.removed_source_indexes
+            )
+            metrics["llm_call_count"] = 0
+            metrics["usage_event_count"] = 0
+            if not deterministic_plan.removed_source_indexes:
+                return metrics
+
+            result = await repo.apply_document_semantic_retightening(
+                project_id=project_id,
+                document_id=document_id,
+                updated_entries=_retighten_updated_canonical_entries(
+                    plan=deterministic_plan,
+                    current_entries=current_entries,
+                ),
+                archived_entry_ids=_retighten_archived_entry_ids(
+                    plan=deterministic_plan,
+                    current_entries=current_entries,
+                ),
+                metrics=metrics,
+            )
+            logger.info(
+                "Knowledge document deterministic retighten completed",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "entry_count_before": len(current_entries),
+                    "entry_count_after": len(deterministic_plan.entries),
+                    "collapsed_entry_count": len(
+                        deterministic_plan.removed_source_indexes
+                    ),
+                },
+            )
+            return result
 
         preprocessor = preprocessor_factory()
         existing_project_titles = await _existing_project_titles_for_semantic_merge(
@@ -2786,7 +3246,31 @@ class KnowledgeIngestionService:
                     "error_type": type(exc).__name__,
                 },
             )
-            return metrics
+            if not deterministic_plan.removed_source_indexes:
+                return metrics
+
+            metrics["status"] = "completed_with_warnings"
+            metrics["reason"] = (
+                "semantic_merge_tightening_failed_after_deterministic_cleanup"
+            )
+            metrics["entry_count_after"] = len(deterministic_plan.entries)
+            metrics["collapsed_entry_count"] = len(
+                deterministic_plan.removed_source_indexes
+            )
+            result = await repo.apply_document_semantic_retightening(
+                project_id=project_id,
+                document_id=document_id,
+                updated_entries=_retighten_updated_canonical_entries(
+                    plan=deterministic_plan,
+                    current_entries=current_entries,
+                ),
+                archived_entry_ids=_retighten_archived_entry_ids(
+                    plan=deterministic_plan,
+                    current_entries=current_entries,
+                ),
+                metrics=metrics,
+            )
+            return result
 
         rejected_noisy_merge_decision_count = sum(
             1
@@ -2817,9 +3301,13 @@ class KnowledgeIngestionService:
         )[:5]
         decisions = _reject_noisy_semantic_merge_decisions(decisions)
 
-        plan = _retighten_existing_document_plan(
+        llm_plan = _retighten_existing_document_plan(
             entries=preprocessing_entries,
             decisions=decisions,
+        )
+        plan = _compose_retighten_existing_document_plans(
+            base=deterministic_plan,
+            overlay=llm_plan,
         )
 
         cleanup_results = tuple(
@@ -2847,6 +3335,11 @@ class KnowledgeIngestionService:
             1 for decision in decisions if decision.is_merge
         )
         metrics["collapsed_entry_count"] = len(plan.removed_source_indexes)
+        metrics["deterministic_entry_count_after"] = len(deterministic_plan.entries)
+        metrics["llm_collapsed_entry_count"] = max(
+            0,
+            len(deterministic_plan.entries) - len(plan.entries),
+        )
         metrics["entry_count_after"] = len(plan.entries)
         metrics["llm_call_count"] = llm_call_count
         metrics["usage_event_count"] = usage_event_count
@@ -2858,34 +3351,17 @@ class KnowledgeIngestionService:
             metrics["reason"] = "llm_kept_suspects_separate"
             return metrics
 
-        updated_entries: list[CanonicalKnowledgeEntry] = []
-        for output_index, tightened_entry in enumerate(plan.entries):
-            survivor_source_index = plan.survivor_source_indexes[output_index]
-            merged_source_indexes = plan.merged_source_indexes_by_entry[output_index]
-            original = current_entries[survivor_source_index]
-            source_refs = _merge_source_refs_for_existing_entry_indexes(
-                source_indexes=merged_source_indexes,
-                entries=current_entries,
-            )
-            updated_entries.append(
-                _retightened_canonical_entry(
-                    original=original,
-                    entry=tightened_entry,
-                    source_refs=source_refs,
-                    merged_from_entry_ids=tuple(
-                        current_entries[index].id for index in merged_source_indexes
-                    ),
-                )
-            )
-
-        archived_entry_ids = tuple(
-            current_entries[index].id for index in plan.removed_source_indexes
-        )
         result = await repo.apply_document_semantic_retightening(
             project_id=project_id,
             document_id=document_id,
-            updated_entries=tuple(updated_entries),
-            archived_entry_ids=archived_entry_ids,
+            updated_entries=_retighten_updated_canonical_entries(
+                plan=plan,
+                current_entries=current_entries,
+            ),
+            archived_entry_ids=_retighten_archived_entry_ids(
+                plan=plan,
+                current_entries=current_entries,
+            ),
             metrics=metrics,
         )
 
