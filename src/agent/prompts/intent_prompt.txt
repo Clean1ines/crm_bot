@@ -32,6 +32,9 @@ Important:
 - For greeting without a concrete business question, set should_search_kb=false and should_generate_answer=false.
 - For ambiguous short messages without actionable context, set should_search_kb=false and should_generate_answer=false.
 - Use recent messages to interpret short follow-ups like "да", "нет", "дорого", or "не работает".
+- For broad business questions like "what is this?", "what can it do?", "how does it work?", "what do you offer?", set should_search_kb=true when project knowledge may contain product/service details.
+- For pricing, refund, cancellation, integration, availability, documents, setup, manager handoff, or policy questions, set should_search_kb=true.
+- Do not answer from general model knowledge when project-specific knowledge may exist.
 
 User message: {user_input}
 
