@@ -54,6 +54,15 @@ class CompilerRunStatus(StrEnum):
     FAILED = "failed"
 
 
+class CompilerBatchStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    CANCELLED = "cancelled"
+
+
 class AnswerCandidateStatus(StrEnum):
     EXTRACTED = "extracted"
     GROUNDED_CHECKED = "grounded_checked"
@@ -125,6 +134,44 @@ class CompilerRun:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_by: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CompilerBatch:
+    id: str
+    document_id: str
+    project_id: str
+    compiler_run_id: str
+    batch_index: int
+    batch_count: int
+    source_chunk_ids: tuple[str, ...] = ()
+    source_chunk_indexes: tuple[int, ...] = ()
+    status: CompilerBatchStatus = CompilerBatchStatus.PENDING
+    attempt_count: int = 0
+    model: str = ""
+    prompt_version: str = ""
+    tokens_input: int = 0
+    tokens_output: int = 0
+    tokens_total: int = 0
+    error_type: str = ""
+    error_message: str = ""
+    metadata: Metadata = field(default_factory=dict)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.batch_index < 1:
+            raise ValueError("CompilerBatch.batch_index must be positive")
+        if self.batch_count < 1:
+            raise ValueError("CompilerBatch.batch_count must be positive")
+        if self.batch_index > self.batch_count:
+            raise ValueError("CompilerBatch.batch_index must be <= batch_count")
+        if self.attempt_count < 0:
+            raise ValueError("CompilerBatch.attempt_count must be non-negative")
+        if self.tokens_input < 0 or self.tokens_output < 0 or self.tokens_total < 0:
+            raise ValueError("CompilerBatch token counts must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)

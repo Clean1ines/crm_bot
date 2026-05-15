@@ -15,6 +15,8 @@ from typing import Protocol
 import asyncpg
 
 from src.domain.project_plane.knowledge_views import (
+    KnowledgeAnswerCandidateSummaryView,
+    KnowledgeCompilerBatchView,
     KnowledgeDocumentDetailView,
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
@@ -44,6 +46,8 @@ from src.domain.project_plane.knowledge_compilation import (
     CompilationMetrics,
     CandidateCluster,
     AnswerCandidate,
+    AnswerCandidateStatus,
+    CompilerBatch,
     CanonicalKnowledgeEntry,
     EmbeddingText,
     KnowledgeEnrichment,
@@ -1767,6 +1771,188 @@ class KnowledgeRepository:
                     metrics_payload=metrics_payload,
                 )
 
+    async def create_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batches: Sequence[CompilerBatch],
+    ) -> int:
+        if not batches:
+            return 0
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for batch in batches:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_compiler_batches (
+                            id,
+                            project_id,
+                            document_id,
+                            compiler_run_id,
+                            batch_index,
+                            batch_count,
+                            source_chunk_ids,
+                            source_chunk_indexes,
+                            status,
+                            attempt_count,
+                            model,
+                            prompt_version,
+                            tokens_input,
+                            tokens_output,
+                            tokens_total,
+                            error_type,
+                            error_message,
+                            metadata
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3,
+                            $4,
+                            $5,
+                            $6,
+                            $7::jsonb,
+                            $8::jsonb,
+                            $9,
+                            $10,
+                            $11,
+                            $12,
+                            $13,
+                            $14,
+                            $15,
+                            $16,
+                            $17,
+                            $18::jsonb
+                        )
+                        ON CONFLICT (id)
+                        DO UPDATE SET
+                            batch_index = EXCLUDED.batch_index,
+                            batch_count = EXCLUDED.batch_count,
+                            source_chunk_ids = EXCLUDED.source_chunk_ids,
+                            source_chunk_indexes = EXCLUDED.source_chunk_indexes,
+                            status = EXCLUDED.status,
+                            attempt_count = EXCLUDED.attempt_count,
+                            model = EXCLUDED.model,
+                            prompt_version = EXCLUDED.prompt_version,
+                            tokens_input = EXCLUDED.tokens_input,
+                            tokens_output = EXCLUDED.tokens_output,
+                            tokens_total = EXCLUDED.tokens_total,
+                            error_type = EXCLUDED.error_type,
+                            error_message = EXCLUDED.error_message,
+                            metadata = EXCLUDED.metadata,
+                            updated_at = now()
+                        """,
+                        batch.id,
+                        ensure_uuid(project_id),
+                        ensure_uuid(document_id),
+                        batch.compiler_run_id,
+                        batch.batch_index,
+                        batch.batch_count,
+                        _stage_e_jsonb_array(
+                            [
+                                {"source_chunk_id": source_chunk_id}
+                                for source_chunk_id in batch.source_chunk_ids
+                            ]
+                        ),
+                        json.dumps(
+                            list(batch.source_chunk_indexes), ensure_ascii=False
+                        ),
+                        batch.status.value,
+                        batch.attempt_count,
+                        batch.model,
+                        batch.prompt_version,
+                        batch.tokens_input,
+                        batch.tokens_output,
+                        batch.tokens_total,
+                        batch.error_type,
+                        batch.error_message,
+                        _jsonb_object(batch.metadata),
+                    )
+
+        return len(batches)
+
+    async def mark_compiler_batch_processing(
+        self,
+        batch_id: str,
+        *,
+        attempt_count: int,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_batches
+                SET status = 'processing',
+                    attempt_count = $2,
+                    started_at = COALESCE(started_at, now()),
+                    finished_at = NULL,
+                    error_type = '',
+                    error_message = '',
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                batch_id,
+                attempt_count,
+            )
+
+    async def complete_compiler_batch(
+        self,
+        batch_id: str,
+        *,
+        model: str,
+        prompt_version: str,
+        tokens_input: int,
+        tokens_output: int,
+        tokens_total: int,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_batches
+                SET status = 'completed',
+                    model = $2,
+                    prompt_version = $3,
+                    tokens_input = $4,
+                    tokens_output = $5,
+                    tokens_total = $6,
+                    error_type = '',
+                    error_message = '',
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                batch_id,
+                model,
+                prompt_version,
+                tokens_input,
+                tokens_output,
+                tokens_total,
+            )
+
+    async def fail_compiler_batch(
+        self,
+        batch_id: str,
+        *,
+        error_type: str,
+        error_message: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_compiler_batches
+                SET status = 'failed',
+                    error_type = $2,
+                    error_message = $3,
+                    finished_at = now(),
+                    updated_at = now()
+                WHERE id = $1
+                """,
+                batch_id,
+                error_type,
+                error_message,
+            )
+
     async def complete_compiler_run(
         self,
         compiler_run_id: str,
@@ -1886,6 +2072,32 @@ class KnowledgeRepository:
             metrics.entries_without_source_refs_count,
             _jsonb_object(metrics_payload),
         )
+
+    async def delete_raw_answer_candidates_for_batch(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batch_id: str,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM knowledge_answer_candidates
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND metadata->>'stage' = 'stage_k_raw_extraction'
+                  AND metadata->>'batch_id' = $3
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+                batch_id,
+            )
+
+        try:
+            return int(str(result).split()[-1])
+        except (IndexError, ValueError):
+            return 0
 
     async def add_answer_candidates(
         self,
@@ -2275,6 +2487,59 @@ class KnowledgeRepository:
 
         return len(entries)
 
+    async def list_document_source_chunks(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SourceChunk, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    document_id,
+                    source_index,
+                    content,
+                    page,
+                    section_title,
+                    start_offset,
+                    end_offset,
+                    checksum,
+                    metadata,
+                    created_at
+                FROM knowledge_source_chunks
+                WHERE project_id = $1
+                  AND document_id = $2
+                ORDER BY source_index
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        return tuple(
+            SourceChunk(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                document_id=str(row["document_id"]),
+                source_index=int(row["source_index"]),
+                content=str(row["content"]),
+                page=int(row["page"]) if row["page"] is not None else None,
+                section_title=str(row["section_title"] or ""),
+                start_offset=int(row["start_offset"])
+                if row["start_offset"] is not None
+                else None,
+                end_offset=int(row["end_offset"])
+                if row["end_offset"] is not None
+                else None,
+                checksum=str(row["checksum"] or ""),
+                metadata=_json_object_from_db(row["metadata"]),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        )
+
     async def add_source_chunks(
         self,
         *,
@@ -2588,6 +2853,160 @@ class KnowledgeRepository:
             preprocessing_metrics=row["preprocessing_metrics"],
             structured_entries=runtime_entry_count,
             structured_chunk_count=runtime_entry_count,
+        )
+
+    async def list_document_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[KnowledgeCompilerBatchView, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    compiler_run_id,
+                    batch_index,
+                    batch_count,
+                    status,
+                    source_chunk_ids,
+                    source_chunk_indexes,
+                    attempt_count,
+                    model,
+                    prompt_version,
+                    tokens_input,
+                    tokens_output,
+                    tokens_total,
+                    error_type,
+                    error_message,
+                    started_at,
+                    finished_at,
+                    updated_at
+                FROM knowledge_compiler_batches
+                WHERE project_id = $1
+                  AND document_id = $2
+                ORDER BY compiler_run_id, batch_index
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        return tuple(
+            KnowledgeCompilerBatchView(
+                id=str(row["id"]),
+                compiler_run_id=str(row["compiler_run_id"]),
+                batch_index=int(row["batch_index"] or 0),
+                batch_count=int(row["batch_count"] or 0),
+                status=str(row["status"]),
+                source_chunk_ids=row["source_chunk_ids"],
+                source_chunk_indexes=row["source_chunk_indexes"],
+                attempt_count=int(row["attempt_count"] or 0),
+                model=str(row["model"] or ""),
+                prompt_version=str(row["prompt_version"] or ""),
+                tokens_input=int(row["tokens_input"] or 0),
+                tokens_output=int(row["tokens_output"] or 0),
+                tokens_total=int(row["tokens_total"] or 0),
+                error_type=str(row["error_type"] or ""),
+                error_message=str(row["error_message"] or ""),
+                started_at=_normalize_timestamp(row["started_at"]),
+                finished_at=_normalize_timestamp(row["finished_at"]),
+                updated_at=_normalize_timestamp(row["updated_at"]),
+            )
+            for row in rows
+        )
+
+    async def list_document_raw_answer_candidates(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[AnswerCandidate, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    document_id,
+                    compiler_run_id,
+                    topic_key,
+                    title,
+                    candidate_answer,
+                    source_refs,
+                    confidence,
+                    status,
+                    rejection_reason,
+                    metadata,
+                    created_at
+                FROM knowledge_answer_candidates
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND metadata->>'stage' = 'stage_k_raw_extraction'
+                ORDER BY (metadata->>'batch_index')::int,
+                         (metadata->>'fragment_index')::int,
+                         created_at
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        return tuple(
+            AnswerCandidate(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                document_id=str(row["document_id"]),
+                compiler_run_id=str(row["compiler_run_id"]),
+                topic_key=str(row["topic_key"]),
+                title=str(row["title"] or ""),
+                candidate_answer=str(row["candidate_answer"] or ""),
+                source_refs=_source_refs_from_db(row["source_refs"]),
+                confidence=_optional_float(row["confidence"]),
+                status=AnswerCandidateStatus(str(row["status"])),
+                rejection_reason=str(row["rejection_reason"] or ""),
+                metadata=_json_object_from_db(row["metadata"]),
+                created_at=row["created_at"],
+            )
+            for row in rows
+        )
+
+    async def get_document_answer_candidate_summary(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> KnowledgeAnswerCandidateSummaryView:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::int AS total_count,
+                    COUNT(*) FILTER (
+                        WHERE metadata->>'stage' = 'stage_k_raw_extraction'
+                    )::int AS raw_count,
+                    COUNT(*) FILTER (
+                        WHERE metadata->>'stage' <> 'stage_k_raw_extraction'
+                           OR metadata->>'stage' IS NULL
+                    )::int AS final_count,
+                    COUNT(*) FILTER (WHERE status = 'rejected')::int AS rejected_count,
+                    COUNT(*) FILTER (WHERE jsonb_array_length(source_refs) > 0)::int AS grounded_count
+                FROM knowledge_answer_candidates
+                WHERE project_id = $1
+                  AND document_id = $2
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+
+        if row is None:
+            return KnowledgeAnswerCandidateSummaryView()
+
+        return KnowledgeAnswerCandidateSummaryView(
+            total_count=int(row["total_count"] or 0),
+            raw_count=int(row["raw_count"] or 0),
+            final_count=int(row["final_count"] or 0),
+            rejected_count=int(row["rejected_count"] or 0),
+            grounded_count=int(row["grounded_count"] or 0),
         )
 
     async def update_document_status(

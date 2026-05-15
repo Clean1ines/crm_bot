@@ -11,6 +11,7 @@ from src.domain.project_plane.knowledge_compilation import (
     AnswerCandidate,
     CandidateCluster,
     CanonicalKnowledgeEntry,
+    CompilerBatch,
     CompilationMetrics,
     CompilerRun,
     SourceChunk,
@@ -24,7 +25,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeSemanticMergeExecutionResult,
     KnowledgeSemanticMergeGroup,
 )
-from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
+from src.domain.project_plane.knowledge_views import (
+    KnowledgeAnswerCandidateSummaryView,
+    KnowledgeCompilerBatchView,
+    KnowledgeDocumentDetailView,
+    KnowledgeSearchResultView,
+)
 from src.domain.project_plane.model_usage_views import (
     ModelUsageEventCreate,
     ModelUsageSummaryView,
@@ -90,6 +96,13 @@ class KnowledgeRepositoryPort(Protocol):
         chunks: Sequence[SourceChunk],
     ) -> int: ...
 
+    async def list_document_source_chunks(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SourceChunk, ...]: ...
+
     async def add_canonical_entries(
         self,
         *,
@@ -111,6 +124,48 @@ class KnowledgeRepositoryPort(Protocol):
         compiler_run_id: str,
         error: str,
     ) -> None: ...
+
+    async def create_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batches: Sequence[CompilerBatch],
+    ) -> int: ...
+
+    async def mark_compiler_batch_processing(
+        self,
+        batch_id: str,
+        *,
+        attempt_count: int,
+    ) -> None: ...
+
+    async def complete_compiler_batch(
+        self,
+        batch_id: str,
+        *,
+        model: str,
+        prompt_version: str,
+        tokens_input: int,
+        tokens_output: int,
+        tokens_total: int,
+    ) -> None: ...
+
+    async def fail_compiler_batch(
+        self,
+        batch_id: str,
+        *,
+        error_type: str,
+        error_message: str,
+    ) -> None: ...
+
+    async def delete_raw_answer_candidates_for_batch(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        batch_id: str,
+    ) -> int: ...
 
     async def add_answer_candidates(
         self,
@@ -184,12 +239,38 @@ class KnowledgeRepositoryPort(Protocol):
         metrics: JsonObject,
     ) -> JsonObject: ...
 
+    async def get_document(
+        self,
+        document_id: str,
+    ) -> KnowledgeDocumentDetailView | None: ...
+
     async def load_document_runtime_entries(
         self,
         *,
         project_id: str,
         document_id: str,
     ) -> KnowledgeDocumentRuntimeEntries | None: ...
+
+    async def list_document_compiler_batches(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[KnowledgeCompilerBatchView, ...]: ...
+
+    async def list_document_raw_answer_candidates(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[AnswerCandidate, ...]: ...
+
+    async def get_document_answer_candidate_summary(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> KnowledgeAnswerCandidateSummaryView: ...
 
     async def search(
         self,

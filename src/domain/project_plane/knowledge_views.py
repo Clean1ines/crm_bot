@@ -118,3 +118,34 @@ class KnowledgeDocumentDetailView:
     llm_tokens_total: int = 0
     llm_usage_events_count: int = 0
     llm_models: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeCompilerBatchView:
+    id: str
+    compiler_run_id: str
+    batch_index: int
+    batch_count: int
+    status: str
+    source_chunk_ids: object
+    source_chunk_indexes: object
+    attempt_count: int = 0
+    model: str = ""
+    prompt_version: str = ""
+    tokens_input: int = 0
+    tokens_output: int = 0
+    tokens_total: int = 0
+    error_type: str = ""
+    error_message: str = ""
+    started_at: datetime | str | None = None
+    finished_at: datetime | str | None = None
+    updated_at: datetime | str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeAnswerCandidateSummaryView:
+    total_count: int = 0
+    raw_count: int = 0
+    final_count: int = 0
+    rejected_count: int = 0
+    grounded_count: int = 0
