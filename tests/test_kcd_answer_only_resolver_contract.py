@@ -6,11 +6,11 @@ import json
 import pytest
 
 from src.application.services.knowledge_ingestion_service import (
-    _apply_semantic_merge_tightening_decisions,
+    _apply_answer_resolution_decisions,
     _mechanically_cleanup_compiled_entries,
-    _semantic_merge_decisions_with_group_candidate_ids,
-    _semantic_merge_suspect_groups_from_entries,
-    _tighten_compiled_entries_with_semantic_merge,
+    _answer_resolution_decisions_with_case_candidate_ids,
+    _answer_resolution_cases_from_entries,
+    _resolve_compiled_answer_cases,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
@@ -90,7 +90,7 @@ def test_answer_only_group_payload_excludes_entry_enrichment_and_retrieval_field
         embedding_text="Вернёте деньги Решение по возврату принимает менеджер.",
     )
 
-    groups = _semantic_merge_suspect_groups_from_entries((left, right))
+    groups = _answer_resolution_cases_from_entries((left, right))
 
     assert len(groups) == 1
     payload = groups[0].to_payload()
@@ -125,7 +125,7 @@ def test_llm_prompt_payload_contains_only_answer_resolution_cases() -> None:
             embedding_text="another retrieval text must not leak",
         ),
     )
-    groups = _semantic_merge_suspect_groups_from_entries(entries)
+    groups = _answer_resolution_cases_from_entries(entries)
     preprocessor = GroqKnowledgePreprocessor(client=object(), model="test-model")
 
     prompt = preprocessor._build_answer_resolution_prompt(
@@ -172,7 +172,7 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
         canonical_answer="Возврат зависит от ситуации; решение принимает менеджер.",
     )
 
-    tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
+    tightened, source_excerpts = _apply_answer_resolution_decisions(
         entries=entries,
         decisions=(decision,),
         source_excerpts_by_entry=(("Источник A.",), ("Источник B.",)),
@@ -279,7 +279,7 @@ def test_answer_resolution_parser_rejects_candidate_ids_from_resolver_output() -
 
 
 def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
-    group = _semantic_merge_suspect_groups_from_entries(
+    group = _answer_resolution_cases_from_entries(
         (
             _entry(
                 title="Возврат",
@@ -300,8 +300,8 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
         canonical_answer="Итоговый ответ.",
     )
 
-    mapped = _semantic_merge_decisions_with_group_candidate_ids(
-        group=group,
+    mapped = _answer_resolution_decisions_with_case_candidate_ids(
+        answer_case=group,
         decisions=(decision,),
     )
 
@@ -336,7 +336,7 @@ def test_deterministic_cleanup_collapses_exact_answers_before_llm_resolver() -> 
     )
 
     tightened, _, metrics = asyncio.run(
-        _tighten_compiled_entries_with_semantic_merge(
+        _resolve_compiled_answer_cases(
             preprocessor=_FailingPreprocessor(),
             mode="plain",
             file_name="faq.md",

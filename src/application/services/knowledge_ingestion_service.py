@@ -791,7 +791,7 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
 def _question_intent_tokens_from_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _semantic_merge_tokens_from_text(
+    return _answer_resolution_tokens_from_text(
         " ".join(
             part
             for part in (
@@ -1198,9 +1198,9 @@ def _merge_answer_text(left: str, right: str) -> str:
 
     unit_merge = _merge_answer_units_deterministically(left_clean, right_clean)
     if unit_merge is not None:
-        return _cleanup_semantic_merge_answer_text(unit_merge.answer)
+        return _cleanup_answer_resolution_text(unit_merge.answer)
 
-    return _cleanup_semantic_merge_answer_text(f"{left_clean}\n\n{right_clean}")
+    return _cleanup_answer_resolution_text(f"{left_clean}\n\n{right_clean}")
 
 
 def _source_excerpts_from_preprocessing_entry(
@@ -1347,18 +1347,18 @@ def _compiled_answer_drafts_from_preprocessing_result(
     return tuple(grouped[key] for key in ordered_keys)
 
 
-KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS = 24
-KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE = 2
-KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS = 900
-KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS = 3
+KCD_STAGE_K8_ANSWER_RESOLUTION_MAX_GROUPS = 24
+KCD_STAGE_K8_ANSWER_RESOLUTION_MAX_GROUP_SIZE = 2
+KCD_STAGE_K8_ANSWER_RESOLUTION_CANDIDATE_ANSWER_MAX_CHARS = 900
+KCD_STAGE_K8_ANSWER_RESOLUTION_MIN_TOKEN_CHARS = 3
 KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT = 3
 
 
-def _semantic_merge_candidate_id(index: int) -> str:
+def _answer_resolution_candidate_id(index: int) -> str:
     return f"entry-{index}"
 
 
-def _semantic_merge_candidate_index(candidate_id: str) -> int | None:
+def _answer_resolution_candidate_index(candidate_id: str) -> int | None:
     prefix = "entry-"
     if not candidate_id.startswith(prefix):
         return None
@@ -1370,17 +1370,17 @@ def _semantic_merge_candidate_index(candidate_id: str) -> int | None:
     return int(raw_index)
 
 
-def _semantic_merge_tokens_from_text(value: str) -> tuple[str, ...]:
+def _answer_resolution_tokens_from_text(value: str) -> tuple[str, ...]:
     text = value.lower().replace("ё", "е")
     tokens = (
         token
         for token in re.findall(r"[0-9a-zа-я]+", text)
-        if len(token) >= KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS
+        if len(token) >= KCD_STAGE_K8_ANSWER_RESOLUTION_MIN_TOKEN_CHARS
     )
     return tuple(dict.fromkeys(tokens))
 
 
-def _semantic_merge_entry_text(entry: KnowledgePreprocessingEntry) -> str:
+def _answer_resolution_entry_text(entry: KnowledgePreprocessingEntry) -> str:
     return " ".join(
         part
         for part in (
@@ -1392,13 +1392,13 @@ def _semantic_merge_entry_text(entry: KnowledgePreprocessingEntry) -> str:
     )
 
 
-def _semantic_merge_entry_tokens(
+def _answer_resolution_entry_tokens(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _semantic_merge_tokens_from_text(_semantic_merge_entry_text(entry))
+    return _answer_resolution_tokens_from_text(_answer_resolution_entry_text(entry))
 
 
-def _semantic_merge_token_similarity(
+def _answer_resolution_token_similarity(
     left: tuple[str, ...],
     right: tuple[str, ...],
 ) -> float:
@@ -1411,7 +1411,7 @@ def _semantic_merge_token_similarity(
     return len(left_set & right_set) / len(left_set | right_set)
 
 
-def _semantic_merge_question_intent_text(entry: KnowledgePreprocessingEntry) -> str:
+def _answer_resolution_question_intent_text(entry: KnowledgePreprocessingEntry) -> str:
     return " ".join(
         part
         for part in (
@@ -1423,13 +1423,13 @@ def _semantic_merge_question_intent_text(entry: KnowledgePreprocessingEntry) -> 
     )
 
 
-def _semantic_merge_question_intent_tokens(
+def _answer_resolution_question_intent_tokens(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _semantic_merge_tokens_from_text(_semantic_merge_question_intent_text(entry))
+    return _answer_resolution_tokens_from_text(_answer_resolution_question_intent_text(entry))
 
 
-def _semantic_merge_entry_pair_score(
+def _answer_resolution_entry_pair_score(
     left: KnowledgePreprocessingEntry,
     right: KnowledgePreprocessingEntry,
 ) -> float:
@@ -1445,30 +1445,30 @@ def _semantic_merge_entry_pair_score(
     ):
         return 0.92
 
-    title_score = _semantic_merge_token_similarity(
-        _semantic_merge_tokens_from_text(left_title),
-        _semantic_merge_tokens_from_text(right_title),
+    title_score = _answer_resolution_token_similarity(
+        _answer_resolution_tokens_from_text(left_title),
+        _answer_resolution_tokens_from_text(right_title),
     )
-    question_score = _semantic_merge_token_similarity(
-        _semantic_merge_question_intent_tokens(left),
-        _semantic_merge_question_intent_tokens(right),
+    question_score = _answer_resolution_token_similarity(
+        _answer_resolution_question_intent_tokens(left),
+        _answer_resolution_question_intent_tokens(right),
     )
-    full_score = _semantic_merge_token_similarity(
-        _semantic_merge_entry_tokens(left),
-        _semantic_merge_entry_tokens(right),
+    full_score = _answer_resolution_token_similarity(
+        _answer_resolution_entry_tokens(left),
+        _answer_resolution_entry_tokens(right),
     )
 
     return max(title_score, question_score * 1.15, full_score)
 
 
-def _semantic_merge_entries_are_suspects(
+def _answer_resolution_entries_are_suspects(
     left: KnowledgePreprocessingEntry,
     right: KnowledgePreprocessingEntry,
 ) -> bool:
-    return _semantic_merge_entry_pair_score(left, right) >= 0.24
+    return _answer_resolution_entry_pair_score(left, right) >= 0.24
 
 
-def _semantic_merge_limited_text_tuple(
+def _answer_resolution_limited_text_tuple(
     value: object,
     *,
     limit: int,
@@ -1484,34 +1484,34 @@ def _semantic_merge_limited_text_tuple(
     return tuple(result)
 
 
-def _semantic_merge_candidate_from_entry(
+def _answer_resolution_candidate_from_entry(
     *,
     index: int,
     entry: KnowledgePreprocessingEntry,
 ) -> KnowledgeAnswerResolutionCandidate:
-    """Build an answer-only option for unresolved semantic resolution."""
+    """Build an answer-only option for unresolved answer resolution."""
 
     return KnowledgeAnswerResolutionCandidate(
-        candidate_id=_semantic_merge_candidate_id(index),
+        candidate_id=_answer_resolution_candidate_id(index),
         answer=_limit_compiled_text(
             _clean_optional_text(entry.answer),
-            max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
+            max_chars=KCD_STAGE_K8_ANSWER_RESOLUTION_CANDIDATE_ANSWER_MAX_CHARS,
         ),
         source_excerpt=_limit_compiled_text(
             _merge_source_excerpt_text(entry),
-            max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
+            max_chars=KCD_STAGE_K8_ANSWER_RESOLUTION_CANDIDATE_ANSWER_MAX_CHARS,
         ),
     )
 
 
 @dataclass(frozen=True, slots=True)
-class _SemanticMergeSuspectPair:
+class _AnswerResolutionSuspectPair:
     left_index: int
     right_index: int
     score: float
 
 
-def _semantic_merge_question_intent(
+def _answer_resolution_question_intent(
     *entries: KnowledgePreprocessingEntry,
 ) -> str:
     intent_parts: list[str] = []
@@ -1529,17 +1529,17 @@ def _semantic_merge_question_intent(
     )
 
 
-def _semantic_merge_suspect_pairs_from_entries(
+def _answer_resolution_suspect_pairs_from_entries(
     entries: Sequence[KnowledgePreprocessingEntry],
-) -> tuple[_SemanticMergeSuspectPair, ...]:
-    pairs: list[_SemanticMergeSuspectPair] = []
+) -> tuple[_AnswerResolutionSuspectPair, ...]:
+    pairs: list[_AnswerResolutionSuspectPair] = []
 
     for left_index, left_entry in enumerate(entries):
         for right_index in range(left_index + 1, len(entries)):
-            score = _semantic_merge_entry_pair_score(left_entry, entries[right_index])
+            score = _answer_resolution_entry_pair_score(left_entry, entries[right_index])
             if score >= 0.24:
                 pairs.append(
-                    _SemanticMergeSuspectPair(
+                    _AnswerResolutionSuspectPair(
                         left_index=left_index,
                         right_index=right_index,
                         score=score,
@@ -1554,30 +1554,30 @@ def _semantic_merge_suspect_pairs_from_entries(
     )
 
 
-def _semantic_merge_suspect_groups_from_entries(
+def _answer_resolution_cases_from_entries(
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> tuple[KnowledgeAnswerResolutionCase, ...]:
     if len(entries) < 2:
         return ()
 
-    groups: list[KnowledgeAnswerResolutionCase] = []
-    for pair in _semantic_merge_suspect_pairs_from_entries(entries)[
-        :KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS
+    cases: list[KnowledgeAnswerResolutionCase] = []
+    for pair in _answer_resolution_suspect_pairs_from_entries(entries)[
+        :KCD_STAGE_K8_ANSWER_RESOLUTION_MAX_GROUPS
     ]:
         component = (pair.left_index, pair.right_index)
         digest = hashlib.sha256(
-            ",".join(_semantic_merge_candidate_id(index) for index in component).encode(
+            ",".join(_answer_resolution_candidate_id(index) for index in component).encode(
                 "utf-8"
             )
         ).hexdigest()[:12]
-        groups.append(
+        cases.append(
             KnowledgeAnswerResolutionCase(
-                case_id=f"semantic-merge-pair-{digest}",
-                question_intent=_semantic_merge_question_intent(
+                case_id=f"answer-resolution-case-{digest}",
+                question_intent=_answer_resolution_question_intent(
                     *(entries[index] for index in component)
                 ),
                 candidates=tuple(
-                    _semantic_merge_candidate_from_entry(
+                    _answer_resolution_candidate_from_entry(
                         index=index,
                         entry=entries[index],
                     )
@@ -1586,7 +1586,7 @@ def _semantic_merge_suspect_groups_from_entries(
             )
         )
 
-    return tuple(groups)
+    return tuple(cases)
 
 
 def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
@@ -1646,14 +1646,14 @@ def _mechanically_cleanup_compiled_entries(
         cleaned_entries, cleaned_source_excerpts, strict=True
     ):
         source_fingerprint = " | ".join(
-            _semantic_merge_text_fingerprint(excerpt)
+            _answer_resolution_text_fingerprint(excerpt)
             for excerpt in entry_source_excerpts
-            if _semantic_merge_text_fingerprint(excerpt)
+            if _answer_resolution_text_fingerprint(excerpt)
         )
         exact_key = (
-            _semantic_merge_text_fingerprint(entry.title),
-            _semantic_merge_text_fingerprint(entry.canonical_question),
-            _semantic_merge_text_fingerprint(entry.answer),
+            _answer_resolution_text_fingerprint(entry.title),
+            _answer_resolution_text_fingerprint(entry.canonical_question),
+            _answer_resolution_text_fingerprint(entry.answer),
             source_fingerprint,
         )
         existing_index = index_by_exact_key.get(exact_key)
@@ -1725,7 +1725,7 @@ def _mechanically_cleanup_compiled_entries(
     )
 
 
-def _semantic_merge_survivor_index(
+def _answer_resolution_survivor_index(
     *,
     decision: KnowledgeAnswerResolutionDecision,
     candidate_indexes: tuple[int, ...],
@@ -1734,13 +1734,13 @@ def _semantic_merge_survivor_index(
     return candidate_indexes[0]
 
 
-def _semantic_merge_text_fingerprint(value: str) -> str:
+def _answer_resolution_text_fingerprint(value: str) -> str:
     return " ".join(
         re.sub(r"[^0-9a-zа-яё]+", " ", value.lower().replace("ё", "е")).split()
     )
 
 
-def _semantic_merge_text_units(value: str) -> tuple[str, ...]:
+def _answer_resolution_text_units(value: str) -> tuple[str, ...]:
     compact = _clean_optional_text(value)
     if not compact:
         return ()
@@ -1762,12 +1762,12 @@ class _DeterministicAnswerUnitMergeResult:
 
 
 def _answer_unit_fingerprint(value: str) -> str:
-    return _semantic_merge_text_fingerprint(value)
+    return _answer_resolution_text_fingerprint(value)
 
 
 def _answer_units_by_fingerprint(value: str) -> dict[str, str]:
     result: dict[str, str] = {}
-    for unit in _semantic_merge_text_units(value):
+    for unit in _answer_resolution_text_units(value):
         fingerprint = _answer_unit_fingerprint(unit)
         if fingerprint and fingerprint not in result:
             result[fingerprint] = unit
@@ -1859,7 +1859,7 @@ def _entry_question_intent_fingerprints(
         _question_intent_primary_question(entry),
         *_text_tuple(entry.questions),
     ):
-        fingerprint = _semantic_merge_text_fingerprint(value)
+        fingerprint = _answer_resolution_text_fingerprint(value)
         if fingerprint and fingerprint not in values:
             values.append(fingerprint)
     return tuple(values)
@@ -1879,7 +1879,7 @@ def _entries_have_exact_question_intent(
 
 
 @dataclass(frozen=True, slots=True)
-class _SemanticMergeCleanupResult:
+class _AnswerResolutionCleanupResult:
     text: str
     original_unit_count: int
     kept_unit_count: int
@@ -1889,32 +1889,32 @@ class _SemanticMergeCleanupResult:
         return max(0, self.original_unit_count - self.kept_unit_count)
 
 
-def _cleanup_semantic_merge_answer_text_with_metrics(
+def _cleanup_answer_resolution_text_with_metrics(
     value: str,
-) -> _SemanticMergeCleanupResult:
-    units = _semantic_merge_text_units(value)
+) -> _AnswerResolutionCleanupResult:
+    units = _answer_resolution_text_units(value)
     if not units:
         cleaned = _clean_optional_text(value)
         count = 1 if cleaned else 0
-        return _SemanticMergeCleanupResult(
+        return _AnswerResolutionCleanupResult(
             text=cleaned,
             original_unit_count=count,
             kept_unit_count=count,
         )
 
-    cleaned_text = _cleanup_semantic_merge_answer_text(value)
-    kept_units = _semantic_merge_text_units(cleaned_text)
-    return _SemanticMergeCleanupResult(
+    cleaned_text = _cleanup_answer_resolution_text(value)
+    kept_units = _answer_resolution_text_units(cleaned_text)
+    return _AnswerResolutionCleanupResult(
         text=cleaned_text,
         original_unit_count=len(units),
         kept_unit_count=len(kept_units),
     )
 
 
-def _cleanup_semantic_merge_answer_text(value: str) -> str:
+def _cleanup_answer_resolution_text(value: str) -> str:
     """Remove deterministic exact/near sentence duplicates from answer text."""
 
-    units = _semantic_merge_text_units(value)
+    units = _answer_resolution_text_units(value)
     if not units:
         return _clean_optional_text(value)
 
@@ -1922,7 +1922,7 @@ def _cleanup_semantic_merge_answer_text(value: str) -> str:
     fingerprints: list[str] = []
 
     for unit in units:
-        fingerprint = _semantic_merge_text_fingerprint(unit)
+        fingerprint = _answer_resolution_text_fingerprint(unit)
         if not fingerprint:
             continue
 
@@ -1950,13 +1950,13 @@ def _cleanup_semantic_merge_answer_text(value: str) -> str:
 KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
 
 
-def _semantic_merge_decision_is_too_noisy(
+def _answer_resolution_decision_is_too_noisy(
     decision: KnowledgeAnswerResolutionDecision,
 ) -> bool:
     if not decision.is_merge or not decision.canonical_answer:
         return False
 
-    cleanup = _cleanup_semantic_merge_answer_text_with_metrics(
+    cleanup = _cleanup_answer_resolution_text_with_metrics(
         decision.canonical_answer
     )
     if cleanup.original_unit_count < 3:
@@ -1967,13 +1967,13 @@ def _semantic_merge_decision_is_too_noisy(
     ) >= KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO
 
 
-def _reject_noisy_semantic_merge_decisions(
+def _reject_noisy_answer_resolution_decisions(
     decisions: Sequence[KnowledgeAnswerResolutionDecision],
 ) -> tuple[KnowledgeAnswerResolutionDecision, ...]:
     filtered: list[KnowledgeAnswerResolutionDecision] = []
 
     for decision in decisions:
-        if not _semantic_merge_decision_is_too_noisy(decision):
+        if not _answer_resolution_decision_is_too_noisy(decision):
             filtered.append(decision)
             continue
 
@@ -1989,7 +1989,7 @@ def _reject_noisy_semantic_merge_decisions(
     return tuple(filtered)
 
 
-def _entry_with_semantic_merge_decision(
+def _entry_with_answer_resolution_decision(
     *,
     entry: KnowledgePreprocessingEntry,
     decision: KnowledgeAnswerResolutionDecision,
@@ -2025,13 +2025,13 @@ def _entry_with_semantic_merge_decision(
     )
 
 
-def _semantic_merge_decision_is_publishable(
+def _answer_resolution_decision_is_publishable(
     decision: KnowledgeAnswerResolutionDecision,
 ) -> bool:
     return True
 
 
-def _apply_semantic_merge_tightening_decisions(
+def _apply_answer_resolution_decisions(
     *,
     entries: Sequence[KnowledgePreprocessingEntry],
     decisions: Sequence[KnowledgeAnswerResolutionDecision],
@@ -2058,12 +2058,12 @@ def _apply_semantic_merge_tightening_decisions(
     removed_indexes: set[int] = set()
 
     for decision in decisions:
-        if not decision.is_merge and _semantic_merge_decision_is_publishable(decision):
+        if not decision.is_merge and _answer_resolution_decision_is_publishable(decision):
             continue
 
         candidate_indexes: list[int] = []
         for candidate_id in decision.candidate_ids:
-            index = _semantic_merge_candidate_index(candidate_id)
+            index = _answer_resolution_candidate_index(candidate_id)
             if index is None or index < 0 or index >= len(entries):
                 continue
             if index in candidate_indexes or index in removed_indexes:
@@ -2074,7 +2074,7 @@ def _apply_semantic_merge_tightening_decisions(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
-        survivor_index = _semantic_merge_survivor_index(
+        survivor_index = _answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
             entries=entries,
@@ -2093,7 +2093,7 @@ def _apply_semantic_merge_tightening_decisions(
         merged_source_excerpts = _merge_text_tuple_values(
             *(updated_source_excerpts[index] for index in ordered_indexes)
         )
-        updated_entries[survivor_index] = _entry_with_semantic_merge_decision(
+        updated_entries[survivor_index] = _entry_with_answer_resolution_decision(
             entry=merged_entry,
             decision=decision,
         )
@@ -2116,7 +2116,7 @@ def _apply_semantic_merge_tightening_decisions(
     )
 
 
-async def _existing_project_titles_for_semantic_merge(
+async def _existing_project_titles_for_answer_resolution(
     *,
     repo: KnowledgeRepositoryPort,
     project_id: str,
@@ -2140,7 +2140,7 @@ async def _existing_project_titles_for_semantic_merge(
     return tuple(result)
 
 
-def _semantic_merge_candidate_trace_payload(
+def _answer_resolution_candidate_trace_payload(
     candidate: KnowledgeAnswerResolutionCandidate,
 ) -> JsonObject:
     return {
@@ -2150,20 +2150,20 @@ def _semantic_merge_candidate_trace_payload(
     }
 
 
-def _semantic_merge_trace_row(
+def _answer_resolution_trace_row(
     *,
-    group: KnowledgeAnswerResolutionCase,
+    answer_case: KnowledgeAnswerResolutionCase,
     decision: KnowledgeAnswerResolutionDecision,
 ) -> JsonObject:
     return {
-        "group_id": group.group_id,
+        "case_id": answer_case.case_id,
         "action": decision.action,
         "candidate_ids": list(decision.candidate_ids),
-        "candidate_count": len(group.candidates),
-        "question_intent": group.question_intent,
+        "candidate_count": len(answer_case.candidates),
+        "question_intent": answer_case.question_intent,
         "candidates": [
-            _semantic_merge_candidate_trace_payload(candidate)
-            for candidate in group.candidates
+            _answer_resolution_candidate_trace_payload(candidate)
+            for candidate in answer_case.candidates
         ],
         "canonical_answer_preview": decision.canonical_answer[:360],
         "reason": decision.reason,
@@ -2171,24 +2171,24 @@ def _semantic_merge_trace_row(
     }
 
 
-def _semantic_merge_decisions_with_group_candidate_ids(
+def _answer_resolution_decisions_with_case_candidate_ids(
     *,
-    group: KnowledgeAnswerResolutionCase,
+    answer_case: KnowledgeAnswerResolutionCase,
     decisions: Sequence[KnowledgeAnswerResolutionDecision],
 ) -> tuple[KnowledgeAnswerResolutionDecision, ...]:
-    group_candidate_ids = tuple(
-        candidate.candidate_id for candidate in group.candidates
+    case_candidate_ids = tuple(
+        candidate.candidate_id for candidate in answer_case.candidates
     )
     updated: list[KnowledgeAnswerResolutionDecision] = []
     for decision in decisions:
-        if decision.group_id != group.group_id or decision.candidate_ids:
+        if decision.case_id != answer_case.case_id or decision.candidate_ids:
             updated.append(decision)
             continue
-        updated.append(replace(decision, candidate_ids=group_candidate_ids))
+        updated.append(replace(decision, candidate_ids=case_candidate_ids))
     return tuple(updated)
 
 
-async def _tighten_compiled_entries_with_semantic_merge(
+async def _resolve_compiled_answer_cases(
     *,
     preprocessor: KnowledgePreprocessorPort,
     mode: KnowledgePreprocessingMode,
@@ -2202,7 +2202,7 @@ async def _tighten_compiled_entries_with_semantic_merge(
     tuple[tuple[str, ...], ...],
     JsonObject,
 ]:
-    groups = _semantic_merge_suspect_groups_from_entries(entries)
+    groups = _answer_resolution_cases_from_entries(entries)
     source_excerpts = tuple(source_excerpts_by_entry)
     if len(source_excerpts) != len(entries):
         source_excerpts = tuple(
@@ -2213,19 +2213,19 @@ async def _tighten_compiled_entries_with_semantic_merge(
         "status": "processing" if groups else "completed",
         "candidate_count": len(entries),
         "raw_draft_count": len(entries),
-        "suspect_group_count": len(groups),
-        "candidate_group_count": len(groups),
-        "processed_group_count": 0,
+        "suspect_case_count": len(groups),
+        "candidate_case_count": len(groups),
+        "processed_case_count": 0,
         "entry_count_before": len(entries),
         "existing_project_title_count": len(existing_project_titles),
         "strategy": "deterministic_first_answer_only_llm_resolver",
-        "fallback_used": False,
+        "fallback_published": False,
         "llm_call_count": 0,
         "decision_count": 0,
-        "merge_decision_count": 0,
-        "keep_separate_decision_count": 0,
+        "resolved_answer_count": 0,
+        "kept_separate_count": 0,
         "rejected_decision_count": 0,
-        "invalid_merge_output_count": 0,
+        "invalid_resolution_output_count": 0,
         "decision_trace": [],
     }
 
@@ -2249,48 +2249,48 @@ async def _tighten_compiled_entries_with_semantic_merge(
                 existing_project_titles=existing_project_titles,
             )
             metrics["llm_call_count"] = _json_metric_int(metrics, "llm_call_count") + 1
-            group_decisions = _semantic_merge_decisions_with_group_candidate_ids(
-                group=group,
+            case_decisions = _answer_resolution_decisions_with_case_candidate_ids(
+                answer_case=group,
                 decisions=execution.result.decisions,
             )
-            decisions = (*decisions, *group_decisions)
+            decisions = (*decisions, *case_decisions)
             existing_trace = metrics.get("decision_trace")
             decision_trace = (
                 list(existing_trace) if isinstance(existing_trace, list) else []
             )
             decision_trace.extend(
-                _semantic_merge_trace_row(group=group, decision=decision)
-                for decision in group_decisions
+                _answer_resolution_trace_row(answer_case=group, decision=decision)
+                for decision in case_decisions
             )
             metrics["decision_trace"] = decision_trace[-200:]
-            metrics["processed_group_count"] = (
-                _json_metric_int(metrics, "processed_group_count") + 1
+            metrics["processed_case_count"] = (
+                _json_metric_int(metrics, "processed_case_count") + 1
             )
             metrics["decision_count"] = len(decisions)
-            metrics["merge_decision_count"] = sum(
+            metrics["resolved_answer_count"] = sum(
                 1 for decision in decisions if decision.is_merge
             )
-            metrics["keep_separate_decision_count"] = sum(
+            metrics["kept_separate_count"] = sum(
                 1 for decision in decisions if not decision.is_merge
             )
             metrics["rejected_decision_count"] = sum(
                 1
                 for decision in decisions
-                if not _semantic_merge_decision_is_publishable(decision)
+                if not _answer_resolution_decision_is_publishable(decision)
             )
             await publish_progress()
     except Exception as exc:
         metrics["status"] = "failed"
-        metrics["fallback_used"] = True
+        metrics["fallback_published"] = True
         metrics["error_type"] = type(exc).__name__
         metrics["error_message"] = str(exc)[:240]
         metrics["entry_count_after"] = len(entries)
-        metrics["invalid_merge_output_count"] = 1
+        metrics["invalid_resolution_output_count"] = 1
         await publish_progress()
         return tuple(entries), source_excerpts, metrics
 
     tightened_entries, tightened_source_excerpts = (
-        _apply_semantic_merge_tightening_decisions(
+        _apply_answer_resolution_decisions(
             entries=entries,
             decisions=decisions,
             source_excerpts_by_entry=source_excerpts,
@@ -2298,20 +2298,20 @@ async def _tighten_compiled_entries_with_semantic_merge(
     )
 
     metrics["status"] = "completed"
-    metrics["fallback_used"] = False
+    metrics["fallback_published"] = False
     metrics["decision_count"] = len(decisions)
-    metrics["merge_decision_count"] = sum(
+    metrics["resolved_answer_count"] = sum(
         1 for decision in decisions if decision.is_merge
     )
-    metrics["keep_separate_decision_count"] = sum(
+    metrics["kept_separate_count"] = sum(
         1 for decision in decisions if not decision.is_merge
     )
     metrics["rejected_decision_count"] = sum(
         1
         for decision in decisions
-        if not _semantic_merge_decision_is_publishable(decision)
+        if not _answer_resolution_decision_is_publishable(decision)
     )
-    metrics["invalid_merge_output_count"] = 0
+    metrics["invalid_resolution_output_count"] = 0
     metrics["entry_count_after"] = len(tightened_entries)
     metrics["final_entry_count"] = len(tightened_entries)
     metrics["published_entry_count"] = len(tightened_entries)
@@ -2447,7 +2447,7 @@ def _retighten_deduped_text_tuple(
         if not cleaned:
             continue
 
-        fingerprint = _semantic_merge_text_fingerprint(cleaned)
+        fingerprint = _answer_resolution_text_fingerprint(cleaned)
         if not fingerprint:
             continue
 
@@ -2468,8 +2468,8 @@ def _retighten_entry_with_deduped_fields(
     synonyms, duplicate_synonym_count = _retighten_deduped_text_tuple(entry.synonyms)
     tags, duplicate_tag_count = _retighten_deduped_text_tuple(entry.tags)
 
-    answer_cleanup = _cleanup_semantic_merge_answer_text_with_metrics(entry.answer)
-    embedding_cleanup = _cleanup_semantic_merge_answer_text_with_metrics(
+    answer_cleanup = _cleanup_answer_resolution_text_with_metrics(entry.answer)
+    embedding_cleanup = _cleanup_answer_resolution_text_with_metrics(
         entry.embedding_text
     )
 
@@ -2496,7 +2496,7 @@ def _retighten_entry_with_deduped_fields(
 def _retighten_entry_intent_fingerprint(
     entry: KnowledgePreprocessingEntry,
 ) -> str:
-    return _semantic_merge_text_fingerprint(
+    return _answer_resolution_text_fingerprint(
         " ".join(
             part
             for part in (
@@ -2511,7 +2511,7 @@ def _retighten_entry_intent_fingerprint(
 
 
 def _retighten_answer_fingerprint(entry: KnowledgePreprocessingEntry) -> str:
-    return _semantic_merge_text_fingerprint(entry.answer)
+    return _answer_resolution_text_fingerprint(entry.answer)
 
 
 def _retighten_answer_contains(
@@ -2551,9 +2551,9 @@ def _retighten_deterministic_duplicate_reason(
             return answer_unit_merge.strategy
 
     if left_intent and right_intent and left_intent == right_intent:
-        answer_score = _semantic_merge_token_similarity(
-            _semantic_merge_tokens_from_text(left.answer),
-            _semantic_merge_tokens_from_text(right.answer),
+        answer_score = _answer_resolution_token_similarity(
+            _answer_resolution_tokens_from_text(left.answer),
+            _answer_resolution_tokens_from_text(right.answer),
         )
         if answer_score >= 0.72:
             return "exact_intent_high_answer_overlap"
@@ -2841,7 +2841,7 @@ def _retighten_existing_document_plan(
 
         candidate_indexes: list[int] = []
         for candidate_id in decision.candidate_ids:
-            index = _semantic_merge_candidate_index(candidate_id)
+            index = _answer_resolution_candidate_index(candidate_id)
             if index is None or index < 0 or index >= len(entries):
                 continue
             if index in candidate_indexes or index in removed_indexes:
@@ -2852,7 +2852,7 @@ def _retighten_existing_document_plan(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
-        survivor_index = _semantic_merge_survivor_index(
+        survivor_index = _answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
             entries=entries,
@@ -2874,7 +2874,7 @@ def _retighten_existing_document_plan(
                 if source_index not in merged_indexes_for_survivor:
                     merged_indexes_for_survivor.append(source_index)
 
-        updated_entries[survivor_index] = _entry_with_semantic_merge_decision(
+        updated_entries[survivor_index] = _entry_with_answer_resolution_decision(
             entry=merged_entry,
             decision=decision,
         )
@@ -2917,7 +2917,7 @@ def _retightened_canonical_entry(
     merged_from_entry_ids: Sequence[str],
 ) -> CanonicalKnowledgeEntry:
     metadata: dict[str, object] = dict(original.metadata)
-    metadata["semantic_merge_tightening"] = {
+    metadata["answer_resolution"] = {
         "strategy": "kcd_stage_k8_existing_document_retighten",
         "merged_from_entry_ids": tuple(merged_from_entry_ids),
         "merged_source_entry_count": len(merged_from_entry_ids),
@@ -3652,7 +3652,7 @@ class KnowledgeIngestionService:
         )
 
         metrics: JsonObject = {
-            "stage": "semantic_retighten_existing_document",
+            "stage": "answer_resolution_existing_document",
             "source": "kcd_stage_k8_3",
             "entry_count_before": len(current_entries),
             "source_compiler_rerun": False,
@@ -3676,9 +3676,9 @@ class KnowledgeIngestionService:
         preprocessing_entries = deterministic_plan.entries
         metrics.update(deterministic_result.metrics)
 
-        groups = _semantic_merge_suspect_groups_from_entries(preprocessing_entries)
-        metrics["candidate_group_count"] = len(groups)
-        metrics["llm_candidate_group_count"] = len(groups)
+        groups = _answer_resolution_cases_from_entries(preprocessing_entries)
+        metrics["candidate_case_count"] = len(groups)
+        metrics["llm_candidate_case_count"] = len(groups)
 
         if not groups:
             metrics["status"] = (
@@ -3687,7 +3687,7 @@ class KnowledgeIngestionService:
             metrics["reason"] = (
                 "deterministic_cleanup_applied_without_llm_groups"
                 if deterministic_plan.removed_source_indexes
-                else "no_semantic_merge_suspect_groups"
+                else "no_answer_resolution_cases"
             )
             metrics["entry_count_after"] = len(deterministic_plan.entries)
             metrics["collapsed_entry_count"] = len(
@@ -3698,7 +3698,7 @@ class KnowledgeIngestionService:
             if not deterministic_plan.removed_source_indexes:
                 return metrics
 
-            result = await repo.apply_document_semantic_retightening(
+            result = await repo.apply_document_answer_resolution_retightening(
                 project_id=project_id,
                 document_id=document_id,
                 updated_entries=_retighten_updated_canonical_entries(
@@ -3726,7 +3726,7 @@ class KnowledgeIngestionService:
             return result
 
         preprocessor = preprocessor_factory()
-        existing_project_titles = await _existing_project_titles_for_semantic_merge(
+        existing_project_titles = await _existing_project_titles_for_answer_resolution(
             repo=repo,
             project_id=project_id,
             document_id=document_id,
@@ -3741,8 +3741,8 @@ class KnowledgeIngestionService:
                 existing_project_titles=existing_project_titles,
             )
             llm_call_count = 1
-            decisions = _semantic_merge_decisions_with_group_candidate_ids(
-                group=groups[0],
+            decisions = _answer_resolution_decisions_with_case_candidate_ids(
+                answer_case=groups[0],
                 decisions=first_execution.result.decisions,
             )
             model = first_execution.result.model
@@ -3768,8 +3768,8 @@ class KnowledgeIngestionService:
                 llm_call_count += 1
                 decisions = (
                     *decisions,
-                    *_semantic_merge_decisions_with_group_candidate_ids(
-                        group=group,
+                    *_answer_resolution_decisions_with_case_candidate_ids(
+                        answer_case=group,
                         decisions=execution.result.decisions,
                     ),
                 )
@@ -3787,18 +3787,18 @@ class KnowledgeIngestionService:
                     usage_event_count += 1
         except Exception as exc:
             metrics["status"] = "skipped"
-            metrics["reason"] = "semantic_merge_tightening_failed"
+            metrics["reason"] = "answer_resolution_failed"
             metrics["error_type"] = type(exc).__name__
             metrics["error"] = str(exc)[:240]
             metrics["entry_count_after"] = len(current_entries)
             metrics["llm_call_count"] = llm_call_count
             metrics["usage_event_count"] = usage_event_count
             logger.warning(
-                "Knowledge document semantic retighten skipped after LLM failure",
+                "Knowledge document answer resolution retighten skipped after LLM failure",
                 extra={
                     "project_id": project_id,
                     "document_id": document_id,
-                    "candidate_group_count": len(groups),
+                    "candidate_case_count": len(groups),
                     "llm_call_count": llm_call_count,
                     "error_type": type(exc).__name__,
                 },
@@ -3808,13 +3808,13 @@ class KnowledgeIngestionService:
 
             metrics["status"] = "completed_with_warnings"
             metrics["reason"] = (
-                "semantic_merge_tightening_failed_after_deterministic_cleanup"
+                "answer_resolution_failed_after_deterministic_cleanup"
             )
             metrics["entry_count_after"] = len(deterministic_plan.entries)
             metrics["collapsed_entry_count"] = len(
                 deterministic_plan.removed_source_indexes
             )
-            result = await repo.apply_document_semantic_retightening(
+            result = await repo.apply_document_answer_resolution_retightening(
                 project_id=project_id,
                 document_id=document_id,
                 updated_entries=_retighten_updated_canonical_entries(
@@ -3829,12 +3829,12 @@ class KnowledgeIngestionService:
             )
             return result
 
-        rejected_noisy_merge_decision_count = sum(
+        rejected_noisy_resolved_answer_count = sum(
             1
             for decision in decisions
-            if _semantic_merge_decision_is_too_noisy(decision)
+            if _answer_resolution_decision_is_too_noisy(decision)
         )
-        rejected_noisy_merge_examples: tuple[JsonObject, ...] = tuple(
+        rejected_noisy_resolution_examples: tuple[JsonObject, ...] = tuple(
             cast(
                 JsonObject,
                 {
@@ -3845,7 +3845,7 @@ class KnowledgeIngestionService:
                         max_chars=240,
                     ),
                     "cleanup_original_unit_count": (
-                        cleanup := _cleanup_semantic_merge_answer_text_with_metrics(
+                        cleanup := _cleanup_answer_resolution_text_with_metrics(
                             decision.canonical_answer
                         )
                     ).original_unit_count,
@@ -3853,9 +3853,9 @@ class KnowledgeIngestionService:
                 },
             )
             for decision in decisions
-            if _semantic_merge_decision_is_too_noisy(decision)
+            if _answer_resolution_decision_is_too_noisy(decision)
         )[:5]
-        decisions = _reject_noisy_semantic_merge_decisions(decisions)
+        decisions = _reject_noisy_answer_resolution_decisions(decisions)
 
         llm_plan = _retighten_existing_document_plan(
             entries=preprocessing_entries,
@@ -3867,7 +3867,7 @@ class KnowledgeIngestionService:
         )
 
         cleanup_results = tuple(
-            _cleanup_semantic_merge_answer_text_with_metrics(decision.canonical_answer)
+            _cleanup_answer_resolution_text_with_metrics(decision.canonical_answer)
             for decision in decisions
             if decision.is_merge and decision.canonical_answer
         )
@@ -3877,20 +3877,20 @@ class KnowledgeIngestionService:
         metrics["retighten_cleanup_removed_unit_count"] = sum(
             result.removed_unit_count for result in cleanup_results
         )
-        metrics["rejected_noisy_merge_decision_count"] = (
-            rejected_noisy_merge_decision_count
+        metrics["rejected_noisy_resolved_answer_count"] = (
+            rejected_noisy_resolved_answer_count
         )
-        if rejected_noisy_merge_examples:
-            metrics["rejected_noisy_merge_examples"] = list(
-                rejected_noisy_merge_examples
+        if rejected_noisy_resolution_examples:
+            metrics["rejected_noisy_resolution_examples"] = list(
+                rejected_noisy_resolution_examples
             )
         metrics["decision_count"] = len(decisions)
-        metrics["merge_decision_count"] = sum(
+        metrics["resolved_answer_count"] = sum(
             1 for decision in decisions if decision.is_merge
         )
         metrics["collapsed_entry_count"] = len(plan.removed_source_indexes)
         metrics["deterministic_entry_count_after"] = len(deterministic_plan.entries)
-        metrics["llm_collapsed_entry_count"] = max(
+        metrics["llm_resolved_entry_count"] = max(
             0,
             len(deterministic_plan.entries) - len(plan.entries),
         )
@@ -3905,7 +3905,7 @@ class KnowledgeIngestionService:
             metrics["reason"] = "llm_kept_suspects_separate"
             return metrics
 
-        result = await repo.apply_document_semantic_retightening(
+        result = await repo.apply_document_answer_resolution_retightening(
             project_id=project_id,
             document_id=document_id,
             updated_entries=_retighten_updated_canonical_entries(
@@ -3920,7 +3920,7 @@ class KnowledgeIngestionService:
         )
 
         logger.info(
-            "Knowledge document semantic retighten completed",
+            "Knowledge document answer resolution retighten completed",
             extra={
                 "project_id": project_id,
                 "document_id": document_id,
@@ -4731,7 +4731,7 @@ class KnowledgeIngestionService:
                 entries=compiled_entries,
                 source_excerpts_by_entry=source_excerpts_before_cleanup,
             )
-            existing_project_titles = await _existing_project_titles_for_semantic_merge(
+            existing_project_titles = await _existing_project_titles_for_answer_resolution(
                 repo=repo,
                 project_id=project_id,
                 document_id=document_id,
@@ -4744,7 +4744,7 @@ class KnowledgeIngestionService:
                 prompt_version=active_prompt_version,
                 metrics={
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
-                    "stage": "semantic_merge_tightening",
+                    "stage": "answer_resolution",
                     "status_message": (
                         "Извлечение завершено, идёт уплотнение повторяющихся смыслов."
                     ),
@@ -4763,7 +4763,7 @@ class KnowledgeIngestionService:
                 },
             )
 
-            async def persist_semantic_merge_progress(metrics: JsonObject) -> None:
+            async def persist_answer_resolution_progress(metrics: JsonObject) -> None:
                 await repo.update_document_preprocessing_status(
                     document_id,
                     mode=mode,
@@ -4772,9 +4772,9 @@ class KnowledgeIngestionService:
                     prompt_version=active_prompt_version,
                     metrics={
                         "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
-                        "stage": "semantic_merge_tightening",
+                        "stage": "answer_resolution",
                         "status_message": (
-                            "Черновики сохранены, идёт уплотнение смысловых дублей."
+                            "Черновики сохранены, идёт разрешение похожих ответов."
                         ),
                         "technical_chunk_processed_count": len(technical_batches),
                         "technical_chunk_total_count": len(technical_batches),
@@ -4782,12 +4782,12 @@ class KnowledgeIngestionService:
                         "raw_draft_count": raw_candidate_count,
                         "compiled_entry_count": len(cleanup_result.entries),
                         "deterministic_cleanup": cleanup_result.metrics,
-                        "semantic_merge_tightening": {
+                        "answer_resolution": {
                             **metrics,
                             "raw_draft_count": raw_candidate_count,
                         },
-                        "semantic_merge_fallback_used": (
-                            metrics.get("fallback_used") is True
+                        "answer_resolution_fallback_published": (
+                            metrics.get("fallback_published") is True
                         ),
                         "answer_resolution_enabled": True,
                         "extraction_concurrency": extraction_concurrency,
@@ -4801,32 +4801,32 @@ class KnowledgeIngestionService:
             (
                 tightened_entries,
                 tightened_source_excerpts,
-                semantic_merge_tightening_metrics,
-            ) = await _tighten_compiled_entries_with_semantic_merge(
+                answer_resolution_metrics,
+            ) = await _resolve_compiled_answer_cases(
                 preprocessor=preprocessor,
                 mode=mode,
                 file_name=file_name,
                 entries=cleanup_result.entries,
                 source_excerpts_by_entry=cleanup_result.source_excerpts_by_entry,
                 existing_project_titles=existing_project_titles,
-                on_progress=persist_semantic_merge_progress,
+                on_progress=persist_answer_resolution_progress,
             )
-            semantic_merge_fallback_used = (
-                semantic_merge_tightening_metrics.get("fallback_used") is True
+            answer_resolution_fallback_published = (
+                answer_resolution_metrics.get("fallback_published") is True
             )
-            if semantic_merge_fallback_used:
-                semantic_merge_tightening_metrics["status"] = "failed_fallback_used"
-                semantic_merge_tightening_metrics["published_fallback_entry_count"] = (
+            if answer_resolution_fallback_published:
+                answer_resolution_metrics["status"] = "failed_fallback_published"
+                answer_resolution_metrics["published_fallback_entry_count"] = (
                     len(tightened_entries)
                 )
-                semantic_merge_tightening_metrics["raw_draft_count"] = (
+                answer_resolution_metrics["raw_draft_count"] = (
                     raw_candidate_count
                 )
             llm_answer_resolution_call_count = _json_metric_int(
-                semantic_merge_tightening_metrics, "llm_call_count"
+                answer_resolution_metrics, "llm_call_count"
             )
             answer_resolution_keep_separate_count = _json_metric_int(
-                semantic_merge_tightening_metrics, "keep_separate_decision_count"
+                answer_resolution_metrics, "kept_separate_count"
             )
 
             result = _preprocessing_result_from_entries(
@@ -4852,8 +4852,8 @@ class KnowledgeIngestionService:
                         "merged_preprocessing_entry_counts", []
                     ),
                     "source_refs_preserved_per_semantic_entry": True,
-                    "semantic_merge_tightening": semantic_merge_tightening_metrics,
-                    "semantic_merge_fallback_used": semantic_merge_fallback_used,
+                    "answer_resolution": answer_resolution_metrics,
+                    "answer_resolution_fallback_published": answer_resolution_fallback_published,
                     "answer_resolution_enabled": True,
                     "extraction_concurrency": extraction_concurrency,
                 },

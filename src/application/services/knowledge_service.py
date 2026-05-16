@@ -73,8 +73,8 @@ def _dedupe_preview_results_by_exact_answer(
     return deduped
 
 
-def _semantic_merge_metrics(metrics: JsonObject) -> JsonObject:
-    value = metrics.get("semantic_merge_tightening")
+def _answer_resolution_metrics(metrics: JsonObject) -> JsonObject:
+    value = metrics.get("answer_resolution")
     return dict(value) if isinstance(value, Mapping) else {}
 
 
@@ -126,9 +126,9 @@ def _json_int_value(value: object) -> int | None:
     return None
 
 
-def _semantic_merge_report_status(metrics: JsonObject, *, is_processing: bool) -> str:
+def _answer_resolution_report_status(metrics: JsonObject, *, is_processing: bool) -> str:
     status = str(metrics.get("status") or "")
-    if status == "failed_fallback_used":
+    if status == "failed_fallback_published":
         return "failed"
     if status in {"processing", "completed", "failed"}:
         return status
@@ -574,22 +574,28 @@ class KnowledgeService:
             if isinstance(document.preprocessing_metrics, Mapping)
             else {}
         )
-        semantic_metrics = _semantic_merge_metrics(document_metrics)
+        answer_resolution_metrics = _answer_resolution_metrics(document_metrics)
         current_stage = str(document_metrics.get("stage") or "")
-        semantic_status = _semantic_merge_report_status(
-            semantic_metrics,
+        answer_resolution_status = _answer_resolution_report_status(
+            answer_resolution_metrics,
             is_processing=is_processing,
         )
         if (
-            current_stage == "semantic_merge_tightening"
-            and semantic_status == "waiting"
+            current_stage == "answer_resolution"
+            and answer_resolution_status == "waiting"
         ):
-            semantic_status = "processing"
-        semantic_total = _json_int_metric(semantic_metrics, "suspect_group_count")
-        semantic_current = _json_int_metric(semantic_metrics, "processed_group_count")
-        semantic_final_count = (
-            _json_int_metric(semantic_metrics, "final_entry_count")
-            or _json_int_metric(semantic_metrics, "entry_count_after")
+            answer_resolution_status = "processing"
+        answer_resolution_total = _json_int_metric(
+            answer_resolution_metrics,
+            "suspect_case_count",
+        )
+        answer_resolution_current = _json_int_metric(
+            answer_resolution_metrics,
+            "processed_case_count",
+        )
+        answer_resolution_final_count = (
+            _json_int_metric(answer_resolution_metrics, "final_entry_count")
+            or _json_int_metric(answer_resolution_metrics, "entry_count_after")
             or _json_int_metric(document_metrics, "canonical_entry_count")
             or _json_int_metric(document_metrics, "published_entry_count")
         )
@@ -622,14 +628,14 @@ class KnowledgeService:
                 message=f"Черновиков найдено: {candidate_summary.raw_count}",
             ),
             KnowledgeProcessingStepDto(
-                id="semantic_merge_tightening",
-                label="Уплотнение смысловых дублей",
-                status=semantic_status,
-                current=semantic_current,
-                total=semantic_total,
+                id="answer_resolution",
+                label="Разрешение ответов",
+                status=answer_resolution_status,
+                current=answer_resolution_current,
+                total=answer_resolution_total,
                 message=(
-                    f"Проверено групп: {semantic_current} из {semantic_total}"
-                    if semantic_total > 0
+                    f"Проверено случаев: {answer_resolution_current} из {answer_resolution_total}"
+                    if answer_resolution_total > 0
                     else "Ожидаем завершения извлечения"
                 ),
             ),
@@ -640,14 +646,14 @@ class KnowledgeService:
                     "completed"
                     if published_answer_count > 0
                     else "waiting"
-                    if current_stage == "semantic_merge_tightening" and is_processing
+                    if current_stage == "answer_resolution" and is_processing
                     else "pending"
                 ),
                 current=published_answer_count,
-                total=max(semantic_final_count, published_answer_count),
+                total=max(answer_resolution_final_count, published_answer_count),
                 message=(
-                    "Ожидаем завершения уплотнения смысловых дублей"
-                    if current_stage == "semantic_merge_tightening" and is_processing
+                    "Ожидаем завершения разрешения похожих ответов"
+                    if current_stage == "answer_resolution" and is_processing
                     else f"Опубликовано ответов: {published_answer_count}"
                 ),
             ),
@@ -688,14 +694,14 @@ class KnowledgeService:
             "tokens_input": sum(batch.tokens_input for batch in batches),
             "tokens_output": sum(batch.tokens_output for batch in batches),
             "tokens_total": sum(batch.tokens_total for batch in batches),
-            "semantic_merge_tightening": semantic_metrics,
+            "answer_resolution": answer_resolution_metrics,
         }
 
-        if current_stage == "semantic_merge_tightening" and is_processing:
-            title = "Уплотняем похожие ответы"
+        if current_stage == "answer_resolution" and is_processing:
+            title = "Разрешаем похожие ответы"
             message = (
                 "Черновики уже сохранены. Сейчас система проверяет смысловые дубли "
-                "и собирает компактную базу знаний перед публикацией."
+                "и выбирает итоговые ответы перед публикацией."
             )
         else:
             title = (
@@ -832,7 +838,7 @@ class KnowledgeService:
             "document_id": document_id,
         }
 
-    async def retighten_document_semantic_merges(
+    async def retighten_document_answer_resolution(
         self,
         project_id: str,
         document_id: str,
@@ -857,7 +863,7 @@ class KnowledgeService:
         )
 
         logger.info(
-            "Knowledge semantic retighten queued",
+            "Knowledge answer resolution retighten queued",
             extra={
                 "project_id": project_id,
                 "document_id": document_id,

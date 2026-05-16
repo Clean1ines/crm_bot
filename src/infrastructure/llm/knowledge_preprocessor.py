@@ -26,7 +26,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeAnswerResolverExecutionResult,
     KnowledgeAnswerResolutionCase,
     KnowledgeAnswerResolutionResult,
-    SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
+    ANSWER_RESOLUTION_PROMPT_VERSION,
     parse_preprocessing_payload,
     parse_answer_resolution_payload,
     prompt_version_for_mode,
@@ -216,7 +216,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         cases: Sequence[KnowledgeAnswerResolutionCase],
         existing_project_titles: Sequence[str] = (),
     ) -> KnowledgeAnswerResolverExecutionResult:
-        prompt_version = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
+        prompt_version = ANSWER_RESOLUTION_PROMPT_VERSION
 
         if not cases:
             return KnowledgeAnswerResolverExecutionResult(
@@ -239,7 +239,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
 
         max_tokens = 3000
         request_model = self._model_for_json_request(
-            task="semantic_merge_tightening",
+            task="answer_resolution",
             prompt=prompt,
             max_tokens=max_tokens,
         )
@@ -257,7 +257,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
-                task="semantic_merge_tightening",
+                task="answer_resolution",
                 mode=mode,
                 model=request_model,
                 prompt_version=prompt_version,
@@ -291,7 +291,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             KnowledgePreprocessingValidationError,
         ) as exc:
             logger.warning(
-                "Knowledge semantic answer resolution failed",
+                "Knowledge answer resolution failed",
                 extra={
                     "mode": mode,
                     "model": self._model,

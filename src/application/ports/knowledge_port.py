@@ -226,7 +226,7 @@ class KnowledgeRepositoryPort(Protocol):
         document_id: str,
     ) -> tuple[CanonicalKnowledgeEntry, ...]: ...
 
-    async def apply_document_semantic_retightening(
+    async def apply_document_answer_resolution_retightening(
         self,
         *,
         project_id: str,

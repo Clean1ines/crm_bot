@@ -11,7 +11,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingValidationError,
     KnowledgeAnswerResolutionCandidate,
     KnowledgeAnswerResolutionCase,
-    SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
+    ANSWER_RESOLUTION_PROMPT_VERSION,
     parse_preprocessing_payload,
     parse_answer_resolution_payload,
     prompt_version_for_mode,
@@ -162,7 +162,7 @@ def test_parse_answer_resolution_payload_accepts_merge_decision() -> None:
 
     decision = result.decisions[0]
 
-    assert result.prompt_version == SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
+    assert result.prompt_version == ANSWER_RESOLUTION_PROMPT_VERSION
     assert result.metrics["source"] == "unit-test"
     assert decision.is_merge
     assert decision.candidate_ids == ()

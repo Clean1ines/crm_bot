@@ -213,7 +213,7 @@ export interface paths {
         put?: never;
         /**
          * Retighten Knowledge Document
-         * @description Queues semantic merge tightening for an already processed document.
+         * @description Queues answer resolution tightening for an already processed document.
          */
         post: operations["retighten_knowledge_document_api_projects__project_id__knowledge__document_id__retighten_post"];
         delete?: never;

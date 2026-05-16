@@ -33,14 +33,14 @@ PREPROCESSING_STATUS_FAILED = "failed"
 PROMPT_VERSION_FAQ = "knowledge_answer_compiler_faq_v1"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
 PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
-SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v2"
+ANSWER_RESOLUTION_PROMPT_VERSION = "knowledge_answer_resolution_v1"
 
-SemanticMergeAction: TypeAlias = Literal["merge", "keep_separate"]
+AnswerResolutionDecisionAction: TypeAlias = Literal["merge", "keep_separate"]
 AnswerResolutionAction: TypeAlias = Literal[
     "merge", "keep_separate", "conflict", "needs_review"
 ]
-SEMANTIC_MERGE_ACTION_MERGE = "merge"
-SEMANTIC_MERGE_ACTION_KEEP_SEPARATE = "keep_separate"
+ANSWER_RESOLUTION_ACTION_MERGE = "merge"
+ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE = "keep_separate"
 ANSWER_RESOLUTION_ACTION_CONFLICT = "conflict"
 ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW = "needs_review"
 ANSWER_RESOLUTION_FORBIDDEN_OUTPUT_FIELDS: frozenset[str] = frozenset(
@@ -147,7 +147,7 @@ class KnowledgeAnswerResolutionCase:
 @dataclass(frozen=True, slots=True)
 class KnowledgeAnswerResolutionDecision:
     case_id: str
-    action: SemanticMergeAction
+    action: AnswerResolutionDecisionAction
     candidate_ids: tuple[str, ...]
     canonical_answer: str = ""
     reason: str = ""
@@ -159,7 +159,7 @@ class KnowledgeAnswerResolutionDecision:
 
     @property
     def is_merge(self) -> bool:
-        return self.action == SEMANTIC_MERGE_ACTION_MERGE
+        return self.action == ANSWER_RESOLUTION_ACTION_MERGE
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +249,7 @@ def parse_answer_resolution_payload(
     *,
     mode: KnowledgePreprocessingMode,
     model: str,
-    prompt_version: str = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
+    prompt_version: str = ANSWER_RESOLUTION_PROMPT_VERSION,
     max_answer_chars: int = 2400,
 ) -> KnowledgeAnswerResolutionResult:
     if isinstance(payload, str):
@@ -313,16 +313,16 @@ def _parse_answer_resolution_decision(
     case_id = _required_text(payload, "case_id", index=index)
     raw_action = _required_answer_resolution_action(payload.get("action"), index=index)
     action = cast(
-        SemanticMergeAction,
-        SEMANTIC_MERGE_ACTION_MERGE
-        if raw_action == SEMANTIC_MERGE_ACTION_MERGE
-        else SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        AnswerResolutionDecisionAction,
+        ANSWER_RESOLUTION_ACTION_MERGE
+        if raw_action == ANSWER_RESOLUTION_ACTION_MERGE
+        else ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE,
     )
     canonical_answer = _optional_text(payload.get("canonical_answer"))
     reason = _optional_text(payload.get("reason"))
     confidence = _clamped_float(payload.get("confidence"))
 
-    if action == SEMANTIC_MERGE_ACTION_MERGE and not canonical_answer:
+    if action == ANSWER_RESOLUTION_ACTION_MERGE and not canonical_answer:
         raise KnowledgePreprocessingValidationError(
             f"Answer resolution decision {index} missing canonical_answer"
         )
@@ -486,8 +486,8 @@ def _required_answer_resolution_action(
 ) -> AnswerResolutionAction:
     action = _optional_text(value)
     if action in {
-        SEMANTIC_MERGE_ACTION_MERGE,
-        SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        ANSWER_RESOLUTION_ACTION_MERGE,
+        ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE,
         ANSWER_RESOLUTION_ACTION_CONFLICT,
         ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW,
     }:
@@ -498,17 +498,17 @@ def _required_answer_resolution_action(
     )
 
 
-def _required_semantic_merge_action(
+def _required_answer_resolution_decision_action(
     value: object,
     *,
     index: int,
-) -> SemanticMergeAction:
+) -> AnswerResolutionDecisionAction:
     action = _optional_text(value)
     if action in {
-        SEMANTIC_MERGE_ACTION_MERGE,
-        SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        ANSWER_RESOLUTION_ACTION_MERGE,
+        ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE,
     }:
-        return cast(SemanticMergeAction, action)
+        return cast(AnswerResolutionDecisionAction, action)
 
     raise KnowledgePreprocessingValidationError(
         f"Answer resolution decision {index} has unsupported action: {action}"

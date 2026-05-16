@@ -900,7 +900,7 @@ def test_online_pipeline_defaults_to_parallel_extraction_and_merge_enabled():
     assert service_module.KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT == 3
     assert "asyncio.Semaphore(extraction_concurrency)" in source
     assert 'preprocessing_metrics["answer_resolution_enabled"] = True' in source
-    assert "semantic_merge_tightening_failed" in source
+    assert "answer_resolution_failed" in source
 
 
 def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_saved():
@@ -910,7 +910,7 @@ def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_sa
     source = Path(service_module.__file__).read_text()
     raw_save_index = source.index("await repo.add_answer_candidates")
     merge_index = source.index(
-        "await _tighten_compiled_entries_with_semantic_merge", raw_save_index
+        "await _resolve_compiled_answer_cases", raw_save_index
     )
     publish_index = source.index(
         "canonical_entries = _canonical_entries_from_preprocessing_result",
@@ -957,7 +957,7 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
     source = Path(service_module.__file__).read_text()
     online_section = source[
         source.index("def _mechanically_cleanup_compiled_entries") : source.index(
-            "async def _existing_project_titles_for_semantic_merge"
+            "async def _existing_project_titles_for_answer_resolution"
         )
     ]
 
@@ -973,7 +973,7 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
 
 def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
     from src.application.services.knowledge_ingestion_service import (
-        _apply_semantic_merge_tightening_decisions,
+        _apply_answer_resolution_decisions,
     )
     from src.domain.project_plane.knowledge_preprocessing import (
         KnowledgeAnswerResolutionDecision,
@@ -1006,7 +1006,7 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
         canonical_answer="Условия возврата зависят от ситуации и этапа работы.",
     )
 
-    tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
+    tightened, source_excerpts = _apply_answer_resolution_decisions(
         entries=entries,
         decisions=(decision,),
         source_excerpts_by_entry=(
@@ -1030,7 +1030,7 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
 
 def test_keep_separate_answer_resolution_does_not_delete_answer_entry():
     from src.application.services.knowledge_ingestion_service import (
-        _apply_semantic_merge_tightening_decisions,
+        _apply_answer_resolution_decisions,
     )
     from src.domain.project_plane.knowledge_preprocessing import (
         KnowledgeAnswerResolutionDecision,
@@ -1050,7 +1050,7 @@ def test_keep_separate_answer_resolution_does_not_delete_answer_entry():
         confidence=0.7,
     )
 
-    tightened, _ = _apply_semantic_merge_tightening_decisions(
+    tightened, _ = _apply_answer_resolution_decisions(
         entries=(entry,),
         decisions=(decision,),
     )

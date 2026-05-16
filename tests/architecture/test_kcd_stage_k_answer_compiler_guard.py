@@ -121,8 +121,8 @@ def test_stage_k_ingestion_records_online_merge_compiler_metrics() -> None:
     assert "one_meaning_at_a_time_merge" in source
     assert "extractor_only_compiler_loop" not in source
     assert "answer_resolution_enabled" in source
-    assert "semantic_merge_tightening" in source
-    assert "semantic_merge_fallback_used" in source
+    assert "answer_resolution" in source
+    assert "answer_resolution_fallback_published" in source
     assert "llm_answer_resolution_call_count" in source
     assert "KCD_STAGE_K_COMPILER_VERSION" in source
     assert "Knowledge answer compiler technical batch completed" in source
