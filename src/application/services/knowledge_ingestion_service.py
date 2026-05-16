@@ -1272,9 +1272,9 @@ def _merge_answer_text(left: str, right: str) -> str:
 
     unit_merge = _merge_answer_units_deterministically(left_clean, right_clean)
     if unit_merge is not None:
-        return _cleanup_semantic_merge_embedding_text(unit_merge.answer)
+        return _cleanup_semantic_merge_answer_text(unit_merge.answer)
 
-    return _cleanup_semantic_merge_embedding_text(f"{left_clean}\n\n{right_clean}")
+    return _cleanup_semantic_merge_answer_text(f"{left_clean}\n\n{right_clean}")
 
 
 def _source_excerpts_from_preprocessing_entry(
@@ -1592,7 +1592,6 @@ def _semantic_merge_candidate_from_entry(
 
     return KnowledgeSemanticMergeCandidate(
         candidate_id=_semantic_merge_candidate_id(index),
-        title=_clean_optional_text(entry.title),
         answer=_limit_compiled_text(
             _clean_optional_text(entry.answer),
             max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
@@ -1831,19 +1830,6 @@ def _semantic_merge_survivor_index(
     candidate_indexes: tuple[int, ...],
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> int:
-    survivor_key = _normalized_answer_topic_key(decision.survivor_title)
-
-    if survivor_key:
-        for index in candidate_indexes:
-            entry_key = _normalized_answer_topic_key(entries[index].title)
-            if entry_key == survivor_key:
-                return index
-
-        for index in candidate_indexes:
-            entry_key = _normalized_answer_topic_key(entries[index].title)
-            if entry_key and (entry_key in survivor_key or survivor_key in entry_key):
-                return index
-
     return candidate_indexes[0]
 
 
@@ -2002,7 +1988,7 @@ class _SemanticMergeCleanupResult:
         return max(0, self.original_unit_count - self.kept_unit_count)
 
 
-def _cleanup_semantic_merge_embedding_text_with_metrics(
+def _cleanup_semantic_merge_answer_text_with_metrics(
     value: str,
 ) -> _SemanticMergeCleanupResult:
     units = _semantic_merge_text_units(value)
@@ -2015,7 +2001,7 @@ def _cleanup_semantic_merge_embedding_text_with_metrics(
             kept_unit_count=count,
         )
 
-    cleaned_text = _cleanup_semantic_merge_embedding_text(value)
+    cleaned_text = _cleanup_semantic_merge_answer_text(value)
     kept_units = _semantic_merge_text_units(cleaned_text)
     return _SemanticMergeCleanupResult(
         text=cleaned_text,
@@ -2024,13 +2010,8 @@ def _cleanup_semantic_merge_embedding_text_with_metrics(
     )
 
 
-def _cleanup_semantic_merge_embedding_text(value: str) -> str:
-    """Remove deterministic exact/near sentence duplicates from LLM merge text.
-
-    The LLM may propose useful merge decisions but still concatenate repeated
-    retrieval wording. Application code owns the production retrieval row, so it
-    must not persist obviously inflated embedding_text verbatim.
-    """
+def _cleanup_semantic_merge_answer_text(value: str) -> str:
+    """Remove deterministic exact/near sentence duplicates from answer text."""
 
     units = _semantic_merge_text_units(value)
     if not units:
@@ -2071,11 +2052,11 @@ KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
 def _semantic_merge_decision_is_too_noisy(
     decision: KnowledgeSemanticMergeDecision,
 ) -> bool:
-    if not decision.is_merge or not decision.merged_embedding_text:
+    if not decision.is_merge or not decision.canonical_answer:
         return False
 
-    cleanup = _cleanup_semantic_merge_embedding_text_with_metrics(
-        decision.merged_embedding_text
+    cleanup = _cleanup_semantic_merge_answer_text_with_metrics(
+        decision.canonical_answer
     )
     if cleanup.original_unit_count < 3:
         return False
@@ -2100,8 +2081,7 @@ def _reject_noisy_semantic_merge_decisions(
                 group_id=decision.group_id,
                 action="keep_separate",
                 candidate_ids=decision.candidate_ids,
-                survivor_title="",
-                merged_embedding_text="",
+                canonical_answer="",
             )
         )
 
@@ -2114,7 +2094,7 @@ def _entry_with_semantic_merge_decision(
     decision: KnowledgeSemanticMergeDecision,
 ) -> KnowledgePreprocessingEntry:
     answer = _limit_compiled_text(
-        _clean_optional_text(decision.merged_embedding_text) or entry.answer,
+        _clean_optional_text(decision.canonical_answer) or entry.answer,
         max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
     )
     compatibility_entry = KnowledgePreprocessingEntry(
@@ -2264,11 +2244,8 @@ def _semantic_merge_candidate_trace_payload(
 ) -> JsonObject:
     return {
         "candidate_id": candidate.candidate_id,
-        "title": candidate.title,
-        "questions": list(candidate.questions[:4]),
-        "tags": list(candidate.tags[:6]),
         "answer_preview": candidate.answer[:280],
-        "source_ref_count": candidate.source_ref_count,
+        "source_excerpt_preview": candidate.source_excerpt[:280],
     }
 
 
@@ -2277,39 +2254,19 @@ def _semantic_merge_trace_row(
     group: KnowledgeSemanticMergeGroup,
     decision: KnowledgeSemanticMergeDecision,
 ) -> JsonObject:
-    canonical_card = decision.canonical_card
-    result_title = (
-        canonical_card.title
-        if canonical_card is not None and canonical_card.title
-        else decision.survivor_title
-    )
-    result_answer = (
-        canonical_card.answer
-        if canonical_card is not None and canonical_card.answer
-        else decision.merged_embedding_text
-    )
     return {
         "group_id": group.group_id,
         "action": decision.action,
         "candidate_ids": list(decision.candidate_ids),
         "candidate_count": len(group.candidates),
+        "question_intent": group.question_intent,
         "candidates": [
             _semantic_merge_candidate_trace_payload(candidate)
             for candidate in group.candidates
         ],
-        "result_title": result_title,
-        "result_answer_preview": result_answer[:360],
-        "publishable": (
-            canonical_card.publishable if canonical_card is not None else True
-        ),
-        "publishable_classification": (
-            canonical_card.publishable_classification
-            if canonical_card is not None
-            else "publishable_customer_answer"
-        ),
-        "publishable_reason": (
-            canonical_card.publishable_reason if canonical_card is not None else ""
-        ),
+        "canonical_answer_preview": decision.canonical_answer[:360],
+        "reason": decision.reason,
+        "confidence": decision.confidence,
     }
 
 
@@ -2618,8 +2575,8 @@ def _retighten_entry_with_deduped_fields(
     synonyms, duplicate_synonym_count = _retighten_deduped_text_tuple(entry.synonyms)
     tags, duplicate_tag_count = _retighten_deduped_text_tuple(entry.tags)
 
-    answer_cleanup = _cleanup_semantic_merge_embedding_text_with_metrics(entry.answer)
-    embedding_cleanup = _cleanup_semantic_merge_embedding_text_with_metrics(
+    answer_cleanup = _cleanup_semantic_merge_answer_text_with_metrics(entry.answer)
+    embedding_cleanup = _cleanup_semantic_merge_answer_text_with_metrics(
         entry.embedding_text
     )
 
@@ -2781,7 +2738,7 @@ def _deterministic_retighten_existing_document_plan(
     metrics: JsonObject = {
         "deterministic_duplicate_group_count": 0,
         "deterministic_collapsed_entry_count": 0,
-        "deterministic_exact_answer_merge_count": 0,
+        "deterministic_exact_answer_collapse_count": 0,
         "deterministic_exact_intent_merge_count": 0,
         "deterministic_answer_containment_merge_count": 0,
         "deterministic_answer_unit_subset_merge_count": 0,
@@ -2859,8 +2816,8 @@ def _deterministic_retighten_existing_document_plan(
         )
 
         if target_reason == "exact_answer":
-            metrics["deterministic_exact_answer_merge_count"] = (
-                int(cast(int, metrics["deterministic_exact_answer_merge_count"])) + 1
+            metrics["deterministic_exact_answer_collapse_count"] = (
+                int(cast(int, metrics["deterministic_exact_answer_collapse_count"])) + 1
             )
         elif target_reason == "answer_containment":
             metrics["deterministic_answer_containment_merge_count"] = (
@@ -3015,7 +2972,7 @@ def _retighten_existing_document_plan(
             merged_entry = _merge_entry_fields_deterministically(
                 existing_entry=merged_entry,
                 incoming_entry=updated_entries[index],
-                merged_answer=decision.merged_embedding_text,
+                merged_answer=decision.canonical_answer,
             )
 
         merged_indexes_for_survivor: list[int] = []
@@ -3990,14 +3947,13 @@ class KnowledgeIngestionService:
                 {
                     "group_id": decision.group_id,
                     "candidate_ids": tuple(decision.candidate_ids),
-                    "survivor_title": decision.survivor_title,
-                    "merged_embedding_text_preview": _limit_compiled_text(
-                        decision.merged_embedding_text,
+                    "canonical_answer_preview": _limit_compiled_text(
+                        decision.canonical_answer,
                         max_chars=240,
                     ),
                     "cleanup_original_unit_count": (
-                        cleanup := _cleanup_semantic_merge_embedding_text_with_metrics(
-                            decision.merged_embedding_text
+                        cleanup := _cleanup_semantic_merge_answer_text_with_metrics(
+                            decision.canonical_answer
                         )
                     ).original_unit_count,
                     "cleanup_removed_unit_count": cleanup.removed_unit_count,
@@ -4018,11 +3974,9 @@ class KnowledgeIngestionService:
         )
 
         cleanup_results = tuple(
-            _cleanup_semantic_merge_embedding_text_with_metrics(
-                decision.merged_embedding_text
-            )
+            _cleanup_semantic_merge_answer_text_with_metrics(decision.canonical_answer)
             for decision in decisions
-            if decision.is_merge and decision.merged_embedding_text
+            if decision.is_merge and decision.canonical_answer
         )
         metrics["retighten_cleanup_original_unit_count"] = sum(
             result.original_unit_count for result in cleanup_results
@@ -4557,9 +4511,9 @@ class KnowledgeIngestionService:
             preprocessing_results: list[KnowledgePreprocessingResult] = []
             compiled_entries: list[KnowledgePreprocessingEntry] = []
             usage_event_count = 0
-            llm_merge_call_count = 0
+            llm_answer_resolution_call_count = 0
             unknown_known_intent_id_count = 0
-            merge_rejected_keep_separate_count = 0
+            answer_resolution_keep_separate_count = 0
             latest_result: KnowledgePreprocessingResult | None = None
             processing_started_monotonic = time.monotonic()
 
@@ -4606,14 +4560,14 @@ class KnowledgeIngestionService:
                     "semantic_answer_count": 0,
                     "incoming_entry_count": 0,
                     "extraction_concurrency": KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT,
-                    "llm_merge_call_count": 0,
-                    "semantic_answer_merge_count": 0,
-                    "answer_merge_call_count": 0,
+                    "llm_answer_resolution_call_count": 0,
+                    "semantic_answer_resolution_count": 0,
+                    "answer_resolution_call_count": 0,
                     "usage_event_count": 0,
                     "elapsed_seconds": 0,
                     "previous_title_carryover": False,
                     "one_meaning_at_a_time_merge": False,
-                    "online_answer_merge_enabled": True,
+                    "answer_resolution_enabled": True,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
                         "raw_source_chunks_not_persisted_as_runtime_entries"
@@ -4747,7 +4701,7 @@ class KnowledgeIngestionService:
                                     len(entries)
                                     for entries in entries_by_batch_index.values()
                                 ),
-                                "online_answer_merge_enabled": True,
+                                "answer_resolution_enabled": True,
                                 "extraction_concurrency": extraction_concurrency,
                                 "elapsed_seconds": round(
                                     time.monotonic() - processing_started_monotonic,
@@ -4821,15 +4775,15 @@ class KnowledgeIngestionService:
                             "compiled_entry_count": compiled_count,
                             "semantic_answer_count": compiled_count,
                             "incoming_entry_count": len(execution.result.entries),
-                            "llm_merge_call_count": llm_merge_call_count,
-                            "semantic_answer_merge_count": llm_merge_call_count,
-                            "answer_merge_call_count": llm_merge_call_count,
+                            "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
+                            "semantic_answer_resolution_count": llm_answer_resolution_call_count,
+                            "answer_resolution_call_count": llm_answer_resolution_call_count,
                             "unknown_known_intent_id_count": unknown_known_intent_id_count,
-                            "merge_rejected_keep_separate_count": (
-                                merge_rejected_keep_separate_count
+                            "answer_resolution_keep_separate_count": (
+                                answer_resolution_keep_separate_count
                             ),
                             "usage_event_count": usage_event_count,
-                            "online_answer_merge_enabled": True,
+                            "answer_resolution_enabled": True,
                             "extraction_concurrency": extraction_concurrency,
                             "source_refs_preserved_per_semantic_entry": True,
                             "row_explosion_guard": (
@@ -4934,7 +4888,7 @@ class KnowledgeIngestionService:
                     "failed_part_count": 0,
                     "raw_draft_count": raw_candidate_count,
                     "compiled_entry_count": len(cleanup_result.entries),
-                    "online_answer_merge_enabled": True,
+                    "answer_resolution_enabled": True,
                     "extraction_concurrency": extraction_concurrency,
                     **cleanup_result.metrics,
                     "elapsed_seconds": round(
@@ -4970,7 +4924,7 @@ class KnowledgeIngestionService:
                         "semantic_merge_fallback_used": (
                             metrics.get("fallback_used") is True
                         ),
-                        "online_answer_merge_enabled": True,
+                        "answer_resolution_enabled": True,
                         "extraction_concurrency": extraction_concurrency,
                         "elapsed_seconds": round(
                             time.monotonic() - processing_started_monotonic,
@@ -5003,10 +4957,10 @@ class KnowledgeIngestionService:
                 semantic_merge_tightening_metrics["raw_draft_count"] = (
                     raw_candidate_count
                 )
-            llm_merge_call_count = _json_metric_int(
+            llm_answer_resolution_call_count = _json_metric_int(
                 semantic_merge_tightening_metrics, "llm_call_count"
             )
-            merge_rejected_keep_separate_count = _json_metric_int(
+            answer_resolution_keep_separate_count = _json_metric_int(
                 semantic_merge_tightening_metrics, "keep_separate_decision_count"
             )
 
@@ -5022,10 +4976,10 @@ class KnowledgeIngestionService:
                     "technical_source_char_budget": (
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
-                    "llm_merge_call_count": llm_merge_call_count,
+                    "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
                     "unknown_known_intent_id_count": unknown_known_intent_id_count,
-                    "merge_rejected_keep_separate_count": (
-                        merge_rejected_keep_separate_count
+                    "answer_resolution_keep_separate_count": (
+                        answer_resolution_keep_separate_count
                     ),
                     "compiled_entry_key_count": len(tightened_entries),
                     "raw_draft_count": raw_candidate_count,
@@ -5036,7 +4990,7 @@ class KnowledgeIngestionService:
                     "source_refs_preserved_per_semantic_entry": True,
                     "semantic_merge_tightening": semantic_merge_tightening_metrics,
                     "semantic_merge_fallback_used": semantic_merge_fallback_used,
-                    "online_answer_merge_enabled": True,
+                    "answer_resolution_enabled": True,
                     "extraction_concurrency": extraction_concurrency,
                 },
             )
@@ -5121,14 +5075,20 @@ class KnowledgeIngestionService:
                 "База знаний обновлена. Сырые черновики сохранены для проверки."
             )
             preprocessing_metrics["usage_event_count"] = usage_event_count
-            preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
-            preprocessing_metrics["semantic_answer_merge_count"] = llm_merge_call_count
-            preprocessing_metrics["answer_merge_call_count"] = llm_merge_call_count
+            preprocessing_metrics["llm_answer_resolution_call_count"] = (
+                llm_answer_resolution_call_count
+            )
+            preprocessing_metrics["semantic_answer_resolution_count"] = (
+                llm_answer_resolution_call_count
+            )
+            preprocessing_metrics["answer_resolution_call_count"] = (
+                llm_answer_resolution_call_count
+            )
             preprocessing_metrics["unknown_known_intent_id_count"] = (
                 unknown_known_intent_id_count
             )
-            preprocessing_metrics["merge_rejected_keep_separate_count"] = (
-                merge_rejected_keep_separate_count
+            preprocessing_metrics["answer_resolution_keep_separate_count"] = (
+                answer_resolution_keep_separate_count
             )
             preprocessing_metrics["elapsed_seconds"] = round(
                 time.monotonic() - processing_started_monotonic,
@@ -5137,7 +5097,7 @@ class KnowledgeIngestionService:
             preprocessing_metrics["previous_title_carryover"] = False
             preprocessing_metrics["one_meaning_at_a_time_merge"] = False
             preprocessing_metrics["one_meaning_at_a_time_extraction"] = True
-            preprocessing_metrics["online_answer_merge_enabled"] = True
+            preprocessing_metrics["answer_resolution_enabled"] = True
             preprocessing_metrics["extraction_concurrency"] = extraction_concurrency
             preprocessing_metrics["raw_draft_count"] = raw_candidate_count
             preprocessing_metrics["duplicates_collapsed_safely_count"] = (

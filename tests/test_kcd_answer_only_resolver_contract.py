@@ -12,7 +12,6 @@ from src.application.services.knowledge_ingestion_service import (
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
-    KnowledgeSemanticMergeCanonicalCard,
     KnowledgeSemanticMergeDecision,
     KnowledgeSemanticMergeExecutionResult,
     parse_semantic_merge_tightening_payload,
@@ -27,9 +26,12 @@ FORBIDDEN_RESOLVER_FIELDS = {
     "embedding_text",
     "metadata",
     "source_refs",
+    "source_chunk_indexes",
     "source_ref_count",
-    "canonical_card",
     "title",
+    "canonical" + "_card",
+    "entries",
+    "cards",
 }
 
 
@@ -164,16 +166,7 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
         group_id="group-1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
-        merged_embedding_text="Возврат зависит от ситуации; решение принимает менеджер.",
-        canonical_card=KnowledgeSemanticMergeCanonicalCard(
-            title="LLM title",
-            canonical_question="LLM question",
-            answer="LLM card answer must be ignored.",
-            questions=("LLM question",),
-            synonyms=("llm synonym",),
-            tags=("llm-tag",),
-            source_chunk_indexes=(999,),
-        ),
+        canonical_answer="Возврат зависит от ситуации; решение принимает менеджер.",
     )
 
     tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
@@ -218,11 +211,8 @@ def test_answer_resolution_parser_ignores_forbidden_legacy_fields() -> None:
                     "source_refs": ["ref"],
                     "embedding_text": "LLM embedding",
                     "metadata": {"unsafe": True},
-                    "canonical_card": {
-                        "title": "LLM title",
-                        "answer": "LLM card answer",
-                        "publishable": False,
-                    },
+                    "cards": [{"answer": "ignored"}],
+                    "entries": [{"answer": "ignored"}],
                 }
             ]
         },
@@ -233,8 +223,7 @@ def test_answer_resolution_parser_ignores_forbidden_legacy_fields() -> None:
     decision = result.decisions[0]
     assert decision.group_id == "case-1"
     assert decision.is_merge
-    assert decision.merged_embedding_text == "Итоговый ответ."
-    assert decision.canonical_card is None
+    assert decision.canonical_answer == "Итоговый ответ."
 
 
 def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
@@ -256,7 +245,7 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
         group_id=group.group_id,
         action="merge",
         candidate_ids=(),
-        merged_embedding_text="Итоговый ответ.",
+        canonical_answer="Итоговый ответ.",
     )
 
     mapped = _semantic_merge_decisions_with_group_candidate_ids(

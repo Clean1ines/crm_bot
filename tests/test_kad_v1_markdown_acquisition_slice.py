@@ -11,7 +11,6 @@ from src.application.services.markdown_structure_extractor import (
 from src.domain.project_plane.knowledge_compilation import SourceChunk
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
-    KnowledgeSemanticMergeCanonicalCard,
     KnowledgeSemanticMergeDecision,
 )
 
@@ -126,21 +125,7 @@ def test_semantic_merge_uses_answer_only_resolution_not_concatenation() -> None:
         group_id="g1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
-        survivor_title="Возврат средств",
-        merged_embedding_text=("Возврат средств зависит от ситуации и этапа работы."),
-        canonical_card=KnowledgeSemanticMergeCanonicalCard(
-            title="Возврат средств",
-            canonical_question="Как работает возврат средств?",
-            answer="Возврат средств зависит от ситуации и этапа работы.",
-            questions=(
-                "Как работает возврат средств?",
-                "Можно ли вернуть оплату?",
-            ),
-            synonyms=("возврат", "вернуть оплату"),
-            tags=("оплата", "деньги"),
-            source_chunk_indexes=(0, 1),
-            publishable=True,
-        ),
+        canonical_answer="Возврат средств зависит от ситуации и этапа работы.",
     )
 
     merged, source_excerpts = _apply_semantic_merge_tightening_decisions(

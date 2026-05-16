@@ -17,8 +17,6 @@ from src.domain.project_plane.knowledge_compilation import (
     SourceChunk,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgeAnswerMergeExecutionResult,
-    KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgeQuestionIntentCard,
@@ -326,15 +324,6 @@ class KnowledgePreprocessorPort(Protocol):
         file_name: str,
         previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult: ...
-
-    async def merge_known_answer(
-        self,
-        *,
-        mode: KnowledgePreprocessingMode,
-        file_name: str,
-        known_intent: KnowledgePreprocessingEntry,
-        incoming_fragment: KnowledgePreprocessingEntry,
-    ) -> KnowledgeAnswerMergeExecutionResult: ...
 
     async def tighten_semantic_merges(
         self,

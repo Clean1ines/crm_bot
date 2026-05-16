@@ -10,7 +10,6 @@ from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgeAnswerMergeExecutionResult,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingResult,
@@ -484,7 +483,6 @@ async def test_structured_preprocessing_persists_only_answer_entries():
             ),
         ]
     )
-    preprocessor.merge_known_answer = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -550,7 +548,6 @@ async def test_structured_preprocessing_persists_only_answer_entries():
         "operator transfer",
         "human support",
     )
-    preprocessor.merge_known_answer.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -634,35 +631,6 @@ async def test_structured_preprocessing_keeps_extracted_answer_meanings_separate
         entries=(preprocessing_result.entries[1],),
         metrics={},
     )
-    merged_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_preprocess_faq_v2",
-        model="llama-test",
-        entries=(
-            KnowledgePreprocessingEntry(
-                title="Manager handoff",
-                answer=(
-                    "Assistant transfers payment questions and contract "
-                    "questions to a human manager."
-                ),
-                source_excerpt="Assistant transfers payment questions to a human manager.",
-                questions=(
-                    "Can I talk to a manager?",
-                    "Who handles payment questions?",
-                    "Who handles contract questions?",
-                ),
-                synonyms=(
-                    "manager handoff",
-                    "human manager",
-                    "payment support",
-                    "contract manager",
-                    "operator transfer",
-                ),
-                tags=("handoff", "payment", "contract"),
-            ),
-        ),
-        metrics={},
-    )
 
     preprocessor = Mock()
     preprocessor.model_name = "llama-test"
@@ -671,14 +639,6 @@ async def test_structured_preprocessing_keeps_extracted_answer_meanings_separate
             KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
-    )
-    preprocessor.merge_known_answer = AsyncMock(
-        return_value=KnowledgeAnswerMergeExecutionResult(
-            merge_allowed=True,
-            answer=merged_result.entries[0].answer,
-            question_variants=merged_result.entries[0].questions,
-            usage=None,
-        )
     )
 
     service = KnowledgeIngestionService(object())
@@ -708,7 +668,6 @@ async def test_structured_preprocessing_keeps_extracted_answer_meanings_separate
         logger=Mock(),
     )
 
-    preprocessor.merge_known_answer.assert_not_awaited()
     repo.add_canonical_entries.assert_awaited_once()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
     assert len(entries) == 2
@@ -895,7 +854,6 @@ async def test_structured_preprocessing_does_not_pass_known_question_intents_bet
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_known_answer = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -984,7 +942,6 @@ async def test_structured_preprocessing_exact_duplicate_fragments_merge_with_sou
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_known_answer = AsyncMock()
 
     result = await KnowledgeIngestionService(object()).process_document(
         project_id="project-1",
@@ -1062,7 +1019,6 @@ async def test_faq_compilation_unknown_known_intent_id_keeps_fragment_separate_w
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_known_answer = AsyncMock()
 
     await KnowledgeIngestionService(object()).process_document(
         project_id="project-1",
@@ -1079,14 +1035,13 @@ async def test_faq_compilation_unknown_known_intent_id_keeps_fragment_separate_w
         logger=Mock(),
     )
 
-    preprocessor.merge_known_answer.assert_not_awaited()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
     assert [entry.title for entry in entries] == ["Стоимость сервиса", "Сроки запуска"]
     final_metrics = repo.update_document_preprocessing_status.await_args_list[
         -1
     ].kwargs["metrics"]
     assert final_metrics["unknown_known_intent_id_count"] == 1
-    assert final_metrics["merge_rejected_keep_separate_count"] == 0
+    assert final_metrics["answer_resolution_keep_separate_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -1133,14 +1088,6 @@ async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entr
             KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
         ]
     )
-    preprocessor.merge_known_answer = AsyncMock(
-        return_value=KnowledgeAnswerMergeExecutionResult(
-            merge_allowed=False,
-            answer="",
-            question_variants=(),
-            usage=None,
-        )
-    )
 
     await KnowledgeIngestionService(object()).process_document(
         project_id="project-1",
@@ -1157,7 +1104,6 @@ async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entr
         logger=Mock(),
     )
 
-    preprocessor.merge_known_answer.assert_not_awaited()
     entries = repo.add_canonical_entries.await_args.kwargs["entries"]
     assert [entry.title for entry in entries] == ["Стоимость сервиса", "Поддержка 24/7"]
     assert entries[0].answer == "Базовое подключение стоит 100 рублей в месяц."
@@ -1169,8 +1115,8 @@ async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entr
         -1
     ].kwargs["metrics"]
     assert final_metrics["unknown_known_intent_id_count"] == 1
-    assert final_metrics["merge_rejected_keep_separate_count"] == 0
-    assert final_metrics["online_answer_merge_enabled"] is True
+    assert final_metrics["answer_resolution_keep_separate_count"] == 0
+    assert final_metrics["answer_resolution_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -1198,7 +1144,6 @@ async def test_structured_preprocessing_failure_marks_document_error():
     preprocessor.preprocess = AsyncMock(
         side_effect=ValueError("Invalid preprocessing JSON: Extra data")
     )
-    preprocessor.merge_known_answer = AsyncMock()
 
     service = KnowledgeIngestionService(object())
 
@@ -1230,7 +1175,7 @@ def test_online_pipeline_defaults_to_parallel_extraction_and_merge_enabled():
     source = Path(service_module.__file__).read_text()
     assert service_module.KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT == 3
     assert "asyncio.Semaphore(extraction_concurrency)" in source
-    assert 'preprocessing_metrics["online_answer_merge_enabled"] = True' in source
+    assert 'preprocessing_metrics["answer_resolution_enabled"] = True' in source
     assert "semantic_merge_tightening_failed" in source
 
 
@@ -1307,7 +1252,6 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
         _apply_semantic_merge_tightening_decisions,
     )
     from src.domain.project_plane.knowledge_preprocessing import (
-        KnowledgeSemanticMergeCanonicalCard,
         KnowledgeSemanticMergeDecision,
     )
 
@@ -1335,16 +1279,7 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
         group_id="group-1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
-        merged_embedding_text="Условия возврата зависят от ситуации и этапа работы.",
-        canonical_card=KnowledgeSemanticMergeCanonicalCard(
-            title="LLM title must be ignored",
-            canonical_question="LLM question must be ignored",
-            answer="LLM canonical_card answer must be ignored.",
-            questions=("LLM question must not overwrite",),
-            synonyms=("llm synonym",),
-            tags=("llm-tag",),
-            source_chunk_indexes=(999,),
-        ),
+        canonical_answer="Условия возврата зависят от ситуации и этапа работы.",
     )
 
     tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
@@ -1369,12 +1304,11 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
     assert len(source_excerpts[0]) == 2
 
 
-def test_legacy_non_publishable_card_cannot_delete_answer_entry():
+def test_keep_separate_answer_resolution_does_not_delete_answer_entry():
     from src.application.services.knowledge_ingestion_service import (
         _apply_semantic_merge_tightening_decisions,
     )
     from src.domain.project_plane.knowledge_preprocessing import (
-        KnowledgeSemanticMergeCanonicalCard,
         KnowledgeSemanticMergeDecision,
     )
 
@@ -1388,14 +1322,8 @@ def test_legacy_non_publishable_card_cannot_delete_answer_entry():
         group_id="group-1",
         action="keep_separate",
         candidate_ids=("entry-0",),
-        canonical_card=KnowledgeSemanticMergeCanonicalCard(
-            title="",
-            canonical_question="",
-            answer="",
-            publishable=False,
-            publishable_classification="internal_instruction",
-            publishable_reason="LLM classified it as internal instruction",
-        ),
+        reason="not the same answer intent",
+        confidence=0.7,
     )
 
     tightened, _ = _apply_semantic_merge_tightening_decisions(
