@@ -2159,6 +2159,60 @@ async def _existing_project_titles_for_semantic_merge(
     return tuple(result)
 
 
+def _semantic_merge_candidate_trace_payload(
+    candidate: KnowledgeSemanticMergeCandidate,
+) -> JsonObject:
+    return {
+        "candidate_id": candidate.candidate_id,
+        "title": candidate.title,
+        "questions": list(candidate.questions[:4]),
+        "tags": list(candidate.tags[:6]),
+        "answer_preview": candidate.answer[:280],
+        "source_ref_count": candidate.source_ref_count,
+    }
+
+
+def _semantic_merge_trace_row(
+    *,
+    group: KnowledgeSemanticMergeGroup,
+    decision: KnowledgeSemanticMergeDecision,
+) -> JsonObject:
+    canonical_card = decision.canonical_card
+    result_title = (
+        canonical_card.title
+        if canonical_card is not None and canonical_card.title
+        else decision.survivor_title
+    )
+    result_answer = (
+        canonical_card.answer
+        if canonical_card is not None and canonical_card.answer
+        else decision.merged_embedding_text
+    )
+    return {
+        "group_id": group.group_id,
+        "action": decision.action,
+        "candidate_ids": list(decision.candidate_ids),
+        "candidate_count": len(group.candidates),
+        "candidates": [
+            _semantic_merge_candidate_trace_payload(candidate)
+            for candidate in group.candidates
+        ],
+        "result_title": result_title,
+        "result_answer_preview": result_answer[:360],
+        "publishable": (
+            canonical_card.publishable if canonical_card is not None else True
+        ),
+        "publishable_classification": (
+            canonical_card.publishable_classification
+            if canonical_card is not None
+            else "publishable_customer_answer"
+        ),
+        "publishable_reason": (
+            canonical_card.publishable_reason if canonical_card is not None else ""
+        ),
+    }
+
+
 async def _tighten_compiled_entries_with_semantic_merge(
     *,
     preprocessor: KnowledgePreprocessorPort,
@@ -2197,6 +2251,7 @@ async def _tighten_compiled_entries_with_semantic_merge(
         "keep_separate_decision_count": 0,
         "rejected_decision_count": 0,
         "invalid_merge_output_count": 0,
+        "decision_trace": [],
     }
 
     async def publish_progress() -> None:
@@ -2219,7 +2274,17 @@ async def _tighten_compiled_entries_with_semantic_merge(
                 existing_project_titles=existing_project_titles,
             )
             metrics["llm_call_count"] = _json_metric_int(metrics, "llm_call_count") + 1
-            decisions = (*decisions, *execution.result.decisions)
+            group_decisions = tuple(execution.result.decisions)
+            decisions = (*decisions, *group_decisions)
+            existing_trace = metrics.get("decision_trace")
+            decision_trace = (
+                list(existing_trace) if isinstance(existing_trace, list) else []
+            )
+            decision_trace.extend(
+                _semantic_merge_trace_row(group=group, decision=decision)
+                for decision in group_decisions
+            )
+            metrics["decision_trace"] = decision_trace[-200:]
             metrics["processed_group_count"] = (
                 _json_metric_int(metrics, "processed_group_count") + 1
             )

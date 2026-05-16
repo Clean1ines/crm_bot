@@ -128,6 +128,26 @@ export type KnowledgeAnswerDraftsResponse = {
   total_count: number;
 };
 
+export type KnowledgeSourceUnit = {
+  id: string;
+  source_index: number;
+  title: string;
+  content: string;
+  page?: number;
+  start_offset?: number;
+  end_offset?: number;
+  metadata: Record<string, unknown>;
+  draft_count: number;
+  draft_titles: string[];
+  draft_ids: string[];
+};
+
+export type KnowledgeSourceUnitsResponse = {
+  document_id: string;
+  source_units: KnowledgeSourceUnit[];
+  total_count: number;
+};
+
 export type KnowledgeUsageBreakdown = {
   provider: string;
   model: string;
@@ -199,6 +219,14 @@ export const knowledgeApi = {
   fragments: (projectId: string, documentId: string, limit = 5) =>
     authedJsonRequest<KnowledgeAnswerDraftsResponse>(
       `/api/projects/${projectId}/knowledge/${documentId}/fragments?limit=${limit}`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  sourceUnits: (projectId: string, documentId: string, limit = 1000) =>
+    authedJsonRequest<KnowledgeSourceUnitsResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/source-units?limit=${limit}`,
       {
         method: 'GET',
       },

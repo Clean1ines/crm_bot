@@ -27,6 +27,8 @@ import {
   type KnowledgeProcessingReport,
   type KnowledgeAnswerDraft,
   type KnowledgeAnswerDraftsResponse,
+  type KnowledgeSourceUnit,
+  type KnowledgeSourceUnitsResponse,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
@@ -35,6 +37,7 @@ type KnowledgeProcessingMetrics = Record<string, unknown>;
 
 type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingReport>;
 type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
+type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
 
 interface Document {
   id: string;
@@ -101,6 +104,7 @@ const formatPreviewScore = (value: number): string => (
 
 
 const DRAFT_FETCH_LIMIT = 1000;
+const SOURCE_UNIT_FETCH_LIMIT = 1000;
 
 const draftTitle = (draft: KnowledgeAnswerDraft): string => (
   draft.canonical_question.trim() || draft.title.trim() || t('knowledge.drafts.untitled')
@@ -128,6 +132,17 @@ const draftSourceChunkIndexes = (draft: KnowledgeAnswerDraft): number[] => {
   }
   return [...indexes].sort((left, right) => left - right);
 };
+
+const sourceUnitTitle = (sourceUnit: KnowledgeSourceUnit): string => (
+  sourceUnit.title.trim() || `Source unit ${sourceUnit.source_index}`
+);
+
+const sourceUnitSearchText = (sourceUnit: KnowledgeSourceUnit): string => [
+  sourceUnit.title,
+  sourceUnit.content,
+  ...sourceUnit.draft_titles,
+  JSON.stringify(sourceUnit.metadata || {}),
+].join(' ').toLowerCase();
 
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
@@ -877,6 +892,258 @@ const DraftsModal: React.FC<{
   );
 };
 
+
+const SourceUnitsSummary: React.FC<{
+  response: KnowledgeSourceUnitsResponse | undefined;
+  isLoading: boolean;
+  onOpen: () => void;
+}> = ({ response, isLoading, onOpen }) => {
+  if (isLoading && !response) {
+    return (
+      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>Загружаем source units…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!response) return null;
+
+  const previewUnits = response.source_units.slice(0, 3);
+  return (
+    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="font-medium text-[var(--text-primary)]">
+            Source units: {formatNumber(response.total_count)}
+          </div>
+          <div className="mt-0.5 text-[var(--text-muted)]">
+            Смысловые блоки / source evidence перед extraction
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+        >
+          Открыть source units
+        </button>
+      </div>
+
+      {previewUnits.length > 0 ? (
+        <div className="space-y-1">
+          {previewUnits.map((sourceUnit) => (
+            <div
+              key={sourceUnit.id}
+              className="truncate rounded-lg bg-[var(--control-bg)] px-2 py-1.5 font-medium text-[var(--text-primary)]"
+              title={sourceUnitTitle(sourceUnit)}
+            >
+              #{sourceUnit.source_index} · {sourceUnitTitle(sourceUnit)}
+              {sourceUnit.draft_count > 0 ? ` · drafts ${sourceUnit.draft_count}` : ''}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg bg-[var(--control-bg)] px-2 py-2 text-[var(--text-muted)]">
+          Source units пока не сохранены.
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SourceUnitsModal: React.FC<{
+  documentName: string;
+  response: KnowledgeSourceUnitsResponse | undefined;
+  isLoading: boolean;
+  filter: string;
+  expandedSourceUnitIds: string[];
+  onFilterChange: (value: string) => void;
+  onToggleSourceUnit: (sourceUnitId: string) => void;
+  onClose: () => void;
+}> = ({
+  documentName,
+  response,
+  isLoading,
+  filter,
+  expandedSourceUnitIds,
+  onFilterChange,
+  onToggleSourceUnit,
+  onClose,
+}) => {
+  const normalizedFilter = filter.trim().toLowerCase();
+  const expandedSet = useMemo(() => new Set(expandedSourceUnitIds), [expandedSourceUnitIds]);
+  const filteredSourceUnits = useMemo(() => {
+    const sourceUnits = response?.source_units ?? [];
+    if (!normalizedFilter) return sourceUnits;
+    return sourceUnits.filter((sourceUnit) => sourceUnitSearchText(sourceUnit).includes(normalizedFilter));
+  }, [normalizedFilter, response?.source_units]);
+
+  return (
+    <BaseModal
+      isOpen
+      onClose={onClose}
+      title="Source units"
+      cancelLabel={t('common.actions.close')}
+      maxWidthClassName="max-w-4xl"
+    >
+      <div className="-mt-2 max-h-[72vh] overflow-hidden text-sm text-[var(--text-primary)]">
+        <div className="mb-3 text-xs text-[var(--text-muted)]">{documentName}</div>
+        <div className="relative mb-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            value={filter}
+            onChange={(event) => onFilterChange(event.target.value)}
+            placeholder="Искать по source units"
+            className="min-h-10 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/15"
+          />
+        </div>
+
+        <div className="max-h-[56vh] overflow-y-auto pr-1">
+          {isLoading && !response && (
+            <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Загружаем source units…</span>
+            </div>
+          )}
+
+          {response && response.source_units.length === 0 && (
+            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
+              Source units пока не сохранены.
+            </div>
+          )}
+
+          {response && response.source_units.length > 0 && filteredSourceUnits.length === 0 && (
+            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
+              Ничего не найдено.
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {filteredSourceUnits.map((sourceUnit) => {
+              const isExpanded = expandedSet.has(sourceUnit.id);
+              return (
+                <div key={sourceUnit.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
+                  <button
+                    type="button"
+                    onClick={() => onToggleSourceUnit(sourceUnit.id)}
+                    aria-expanded={isExpanded}
+                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--control-bg)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-primary)]/25"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-[var(--text-primary)]" title={sourceUnitTitle(sourceUnit)}>
+                        #{sourceUnit.source_index} · {sourceUnitTitle(sourceUnit)}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
+                        {sourceUnit.draft_count > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">drafts {sourceUnit.draft_count}</span>}
+                        {typeof sourceUnit.start_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">offset {sourceUnit.start_offset}</span>}
+                        {typeof sourceUnit.end_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">end {sourceUnit.end_offset}</span>}
+                      </div>
+                    </div>
+                    <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isExpanded && (
+                    <div className="space-y-4 border-t border-[var(--border-subtle)] px-3 py-3">
+                      <DraftDetailRow label="Source text">
+                        <div className="whitespace-pre-wrap">{sourceUnit.content || '—'}</div>
+                      </DraftDetailRow>
+
+                      {sourceUnit.draft_titles.length > 0 && (
+                        <DraftDetailRow label="Drafts extracted from this source">
+                          <ul className="list-disc space-y-1 pl-5">
+                            {sourceUnit.draft_titles.map((title) => <li key={title}>{title}</li>)}
+                          </ul>
+                        </DraftDetailRow>
+                      )}
+
+                      <DraftDetailRow label="Metadata">
+                        <div className="flex flex-wrap gap-1.5 text-xs text-[var(--text-muted)]">
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">id: {sourceUnit.id}</span>
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_index: {sourceUnit.source_index}</span>
+                          {typeof sourceUnit.page === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">page: {sourceUnit.page}</span>}
+                        </div>
+                      </DraftDetailRow>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </BaseModal>
+  );
+};
+
+const semanticMergeTraceRows = (
+  report: KnowledgeProcessingReport | undefined,
+): KnowledgeProcessingMetrics[] => {
+  const semanticMetrics = metricObject(report?.metrics, 'semantic_merge_tightening');
+  return metricObjectArray(semanticMetrics, 'decision_trace');
+};
+
+const SemanticMergeTracePanel: React.FC<{
+  report: KnowledgeProcessingReport;
+}> = ({ report }) => {
+  const traceRows = semanticMergeTraceRows(report);
+  if (traceRows.length === 0) return null;
+
+  return (
+    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
+      <div className="mb-2 font-medium text-[var(--text-primary)]">
+        Уплотнение смысловых дублей: {formatNumber(traceRows.length)} решений
+      </div>
+      <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+        {traceRows.map((row, index) => {
+          const groupId = metricText(row, 'group_id') || `group-${index + 1}`;
+          const action = metricText(row, 'action') || 'unknown';
+          const resultTitle = metricText(row, 'result_title') || 'Без итогового заголовка';
+          const resultPreview = metricText(row, 'result_answer_preview');
+          const candidates = Array.isArray(row.candidates)
+            ? row.candidates.filter((item): item is KnowledgeProcessingMetrics => (
+              item !== null && typeof item === 'object' && !Array.isArray(item)
+            ))
+            : [];
+
+          return (
+            <details key={`${groupId}-${index}`} className="rounded-lg bg-[var(--control-bg)] p-2">
+              <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                {action} · {resultTitle}
+              </summary>
+              <div className="mt-2 space-y-2 text-[var(--text-muted)]">
+                <div>group_id: {groupId}</div>
+                {resultPreview && <div className="whitespace-pre-wrap">Итог: {resultPreview}</div>}
+                {candidates.length > 0 && (
+                  <div>
+                    <div className="mb-1 font-medium text-[var(--text-primary)]">Сжимало:</div>
+                    <ul className="list-disc space-y-1 pl-5">
+                      {candidates.map((candidate, candidateIndex) => {
+                        const title = metricText(candidate, 'title') || metricText(candidate, 'candidate_id') || `candidate-${candidateIndex + 1}`;
+                        const preview = metricText(candidate, 'answer_preview');
+                        return (
+                          <li key={`${groupId}-${candidateIndex}`}>
+                            <span className="text-[var(--text-primary)]">{title}</span>
+                            {preview ? <span> — {preview}</span> : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+
 const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
   const llmBreakdown = llmUsageBreakdown(usage.breakdown);
   const answerBreakdown = usageBySources(llmBreakdown, USER_ANSWER_USAGE_SOURCES);
@@ -943,8 +1210,11 @@ export const KnowledgePage: React.FC = () => {
   const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
+  const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
+  const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
   const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
+  const [expandedSourceUnitIdsByDocument, setExpandedSourceUnitIdsByDocument] = useState<Record<string, string[]>>({});
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -1041,17 +1311,67 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const answerDrafts = answerDraftsQuery.data || {};
+  const sourceUnitDocumentIds = Object.values(processingReports)
+    .filter((report) => {
+      const document = documents.find((doc) => doc.id === report.document_id);
+      const sourceCount = metricNumber(report.metrics, 'raw_source_chunk_count')
+        ?? metricNumber(report.metrics, 'source_chunk_count')
+        ?? 0;
+      return Boolean(document && isDocumentProcessing(document)) || sourceCount > 0;
+    })
+    .map((report) => report.document_id)
+    .sort();
+  const sourceUnitsQuery = useQuery({
+    queryKey: ['knowledge-source-units', projectId, sourceUnitDocumentIds.join(','), SOURCE_UNIT_FETCH_LIMIT],
+    queryFn: async () => {
+      if (!projectId || sourceUnitDocumentIds.length === 0) return {};
+
+      const sourceUnits = await Promise.all(
+        sourceUnitDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.sourceUnits(projectId, documentId, SOURCE_UNIT_FETCH_LIMIT);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return sourceUnits.reduce<KnowledgeSourceUnitsByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && sourceUnitDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const sourceUnits = sourceUnitsQuery.data || {};
   const draftsDocument = draftsDocumentId
     ? documents.find((doc) => doc.id === draftsDocumentId) ?? null
     : null;
   const draftsModalResponse = draftsDocumentId ? answerDrafts[draftsDocumentId] : undefined;
   const draftsModalFilter = draftsDocumentId ? draftFiltersByDocument[draftsDocumentId] || '' : '';
   const draftsModalExpandedIds = draftsDocumentId ? expandedDraftIdsByDocument[draftsDocumentId] || [] : [];
+  const sourceUnitsDocument = sourceUnitsDocumentId
+    ? documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null
+    : null;
+  const sourceUnitsModalResponse = sourceUnitsDocumentId ? sourceUnits[sourceUnitsDocumentId] : undefined;
+  const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
+  const sourceUnitsModalExpandedIds = sourceUnitsDocumentId ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || [] : [];
   const openDraftsModal = (documentId: string): void => {
     setDraftsDocumentId(documentId);
   };
+  const openSourceUnitsModal = (documentId: string): void => {
+    setSourceUnitsDocumentId(documentId);
+  };
   const setDraftFilter = (documentId: string, value: string): void => {
     setDraftFiltersByDocument((current) => ({ ...current, [documentId]: value }));
+  };
+  const setSourceUnitFilter = (documentId: string, value: string): void => {
+    setSourceUnitFiltersByDocument((current) => ({ ...current, [documentId]: value }));
   };
   const toggleDraftExpanded = (documentId: string, draftId: string): void => {
     setExpandedDraftIdsByDocument((current) => {
@@ -1059,6 +1379,15 @@ export const KnowledgePage: React.FC = () => {
       const nextIds = currentIds.includes(draftId)
         ? currentIds.filter((item) => item !== draftId)
         : [...currentIds, draftId];
+      return { ...current, [documentId]: nextIds };
+    });
+  };
+  const toggleSourceUnitExpanded = (documentId: string, sourceUnitId: string): void => {
+    setExpandedSourceUnitIdsByDocument((current) => {
+      const currentIds = current[documentId] || [];
+      const nextIds = currentIds.includes(sourceUnitId)
+        ? currentIds.filter((item) => item !== sourceUnitId)
+        : [...currentIds, sourceUnitId];
       return { ...current, [documentId]: nextIds };
     });
   };
