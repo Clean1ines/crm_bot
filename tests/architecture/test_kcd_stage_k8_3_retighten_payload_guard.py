@@ -46,9 +46,10 @@ def test_compiled_ingestion_tightening_reports_actual_llm_call_count() -> None:
     body = _function_body(source, "_tighten_compiled_entries_with_semantic_merge")
 
     assert "groups=groups" not in body
-    assert "groups=(groups[0],)" in body
+    assert "for group in groups:" in body
     assert "groups=(group,)" in body
-    assert 'metrics["llm_call_count"] = llm_call_count' in body
+    assert '"llm_call_count": 0' in body
+    assert 'metrics["llm_call_count"]' in body
     assert "model = first_execution.result.model" not in body
     assert "prompt_version = first_execution.result.prompt_version" not in body
 

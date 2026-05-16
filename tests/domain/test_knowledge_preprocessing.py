@@ -283,3 +283,62 @@ def test_parse_semantic_merge_tightening_payload_requires_embedding_for_merge() 
             mode=MODE_FAQ,
             model="test-model",
         )
+
+
+def test_parse_semantic_merge_tightening_payload_accepts_canonical_card() -> None:
+    result = parse_semantic_merge_tightening_payload(
+        {
+            "decisions": [
+                {
+                    "group_id": "group-1",
+                    "action": "merge",
+                    "candidate_ids": ["entry-0", "entry-1"],
+                    "canonical_card": {
+                        "title": "Условия возврата",
+                        "canonical_question": "Какие условия возврата?",
+                        "answer": "Условия возврата зависят от ситуации и этапа работы.",
+                        "questions": ["Как оформить возврат?"],
+                        "synonyms": ["возврат средств"],
+                        "tags": ["refund"],
+                        "source_chunk_indexes": [0, "1"],
+                        "publishable": True,
+                        "publishable_classification": "publishable_customer_answer",
+                        "publishable_reason": "grounded customer answer",
+                    },
+                }
+            ]
+        },
+        mode=MODE_FAQ,
+        model="llama-test",
+    )
+
+    decision = result.decisions[0]
+    assert decision.canonical_card is not None
+    assert decision.canonical_card.answer == (
+        "Условия возврата зависят от ситуации и этапа работы."
+    )
+    assert decision.canonical_card.source_chunk_indexes == (0, 1)
+
+
+def test_parse_semantic_merge_tightening_payload_accepts_non_publishable_card() -> None:
+    result = parse_semantic_merge_tightening_payload(
+        {
+            "decisions": [
+                {
+                    "group_id": "group-1",
+                    "action": "keep_separate",
+                    "candidate_ids": ["entry-0"],
+                    "canonical_card": {
+                        "publishable": False,
+                        "publishable_classification": "internal_instruction",
+                        "publishable_reason": "LLM classified it as not a customer answer",
+                    },
+                }
+            ]
+        },
+        mode=MODE_FAQ,
+        model="llama-test",
+    )
+
+    assert result.decisions[0].canonical_card is not None
+    assert result.decisions[0].canonical_card.publishable is False

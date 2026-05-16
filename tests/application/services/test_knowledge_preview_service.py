@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import pytest
+import asyncio
 
 from src.application.dto.knowledge_dto import KnowledgePreviewRequestDto
 from src.application.services.knowledge_service import KnowledgeService
@@ -138,8 +138,7 @@ class FakeKnowledgeRepo:
         self.preview_calls.append((project_id, "clear", 0))
 
 
-@pytest.mark.asyncio
-async def test_preview_query_uses_existing_search_without_generation() -> None:
+def test_preview_query_uses_existing_search_without_generation() -> None:
     repo = FakeKnowledgeRepo()
     service = KnowledgeService(
         FakeProjectRepo(),
@@ -149,23 +148,24 @@ async def test_preview_query_uses_existing_search_without_generation() -> None:
         FakeJwt,
     )
 
-    result = await service.preview_query(
-        "project-1",
-        KnowledgePreviewRequestDto(question="  Сколько идёт доставка?  ", limit=5),
-        "Bearer owner-user",
-        knowledge_repo_factory=lambda pool: repo,
-        logger=FakeLogger(),
+    result = asyncio.run(
+        service.preview_query(
+            "project-1",
+            KnowledgePreviewRequestDto(question="  Сколько идёт доставка?  ", limit=5),
+            "Bearer owner-user",
+            knowledge_repo_factory=lambda pool: repo,
+            logger=FakeLogger(),
+        )
     )
 
-    assert repo.preview_calls == [("project-1", "Сколько идёт доставка?", 5)]
+    assert repo.preview_calls == [("project-1", "Сколько идёт доставка?", 10)]
     assert repo.search_calls == []
     assert result.best_result is not None
     assert result.best_result.content == "Доставка занимает 2-3 дня."
     assert result.best_result.source == "delivery.md"
 
 
-@pytest.mark.asyncio
-async def test_preview_query_returns_empty_for_blank_question() -> None:
+def test_preview_query_returns_empty_for_blank_question() -> None:
     repo = FakeKnowledgeRepo()
     service = KnowledgeService(
         FakeProjectRepo(),
@@ -175,12 +175,14 @@ async def test_preview_query_returns_empty_for_blank_question() -> None:
         FakeJwt,
     )
 
-    result = await service.preview_query(
-        "project-1",
-        KnowledgePreviewRequestDto(question="   ", limit=5),
-        "Bearer owner-user",
-        knowledge_repo_factory=lambda pool: repo,
-        logger=FakeLogger(),
+    result = asyncio.run(
+        service.preview_query(
+            "project-1",
+            KnowledgePreviewRequestDto(question="   ", limit=5),
+            "Bearer owner-user",
+            knowledge_repo_factory=lambda pool: repo,
+            logger=FakeLogger(),
+        )
     )
 
     assert repo.preview_calls == []
@@ -188,3 +190,51 @@ async def test_preview_query_returns_empty_for_blank_question() -> None:
     assert result.is_empty is True
     assert result.best_result is None
     assert result.top_results == []
+
+
+def test_preview_dedupes_exact_duplicate_answers_if_duplicate_rows_exist() -> None:
+    class DuplicatePreviewRepo(FakeKnowledgeRepo):
+        async def preview_search(
+            self,
+            project_id: str,
+            query: str,
+            limit: int = 10,
+        ) -> list[KnowledgeSearchResultView]:
+            self.preview_calls.append((project_id, query, limit))
+            return [
+                KnowledgeSearchResultView(
+                    id="chunk-1",
+                    content="Доставка занимает 2-3 дня.",
+                    score=0.90,
+                    method="hybrid",
+                ),
+                KnowledgeSearchResultView(
+                    id="chunk-2",
+                    content="Доставка занимает 2-3 дня.",
+                    score=0.80,
+                    method="hybrid",
+                ),
+            ]
+
+    repo = DuplicatePreviewRepo()
+    service = KnowledgeService(
+        FakeProjectRepo(),
+        FakeUserRepo(),
+        object(),
+        "secret",
+        FakeJwt,
+    )
+
+    import asyncio
+
+    result = asyncio.run(
+        service.preview_query(
+            "project-1",
+            KnowledgePreviewRequestDto(question="Сколько идёт доставка?", limit=5),
+            "Bearer owner-user",
+            knowledge_repo_factory=lambda pool: repo,
+            logger=FakeLogger(),
+        )
+    )
+
+    assert len(result.top_results) == 1

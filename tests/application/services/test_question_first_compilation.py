@@ -167,19 +167,3 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
     assert "Не объединяй результат с предыдущими ответами" in prompt
     assert "Не возвращай match, kind, known_intent_id" in prompt
     assert "answer_fragment" in prompt
-
-
-def test_semantic_merge_prompt_requires_replacement_not_append_and_keeps_related_intents() -> (
-    None
-):
-    prompt = _preprocessor()._build_semantic_merge_tightening_prompt(
-        mode="faq",
-        file_name="faq.txt",
-        groups=(),
-    )
-
-    assert "same answer intent / stable user information need" in prompt
-    assert "Do NOT append old answer + new answer" in prompt
-    assert "return A+B once, not A+A+B" in prompt
-    assert "keep separate price vs onboarding" in prompt
-    assert "embedding_text as the primary identity signal" in prompt

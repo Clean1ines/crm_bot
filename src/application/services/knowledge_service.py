@@ -34,7 +34,10 @@ from src.application.ports.knowledge_port import (
 )
 from src.application.ports.logger_port import LoggerPort
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
-from src.domain.project_plane.knowledge_views import KnowledgeCompilerBatchView
+from src.domain.project_plane.knowledge_views import (
+    KnowledgeCompilerBatchView,
+    KnowledgeSearchResultView,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     PREPROCESSING_STATUS_NOT_REQUESTED,
@@ -46,6 +49,54 @@ from src.domain.project_plane.knowledge_preprocessing import (
 BEARER_PREFIX = "Bearer "
 UPLOAD_FALLBACK_NAME = "upload"
 KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE = "Остановлено пользователем"
+
+
+def _exact_answer_fingerprint(value: str) -> str:
+    return " ".join(value.lower().replace("ё", "е").split())
+
+
+def _dedupe_preview_results_by_exact_answer(
+    results: Sequence[KnowledgeSearchResultView],
+) -> list[KnowledgeSearchResultView]:
+    deduped: list[KnowledgeSearchResultView] = []
+    seen: set[str] = set()
+    for result in results:
+        fingerprint = _exact_answer_fingerprint(result.content)
+        if fingerprint and fingerprint in seen:
+            continue
+        if fingerprint:
+            seen.add(fingerprint)
+        deduped.append(result)
+    return deduped
+
+
+def _semantic_merge_metrics(metrics: JsonObject) -> JsonObject:
+    value = metrics.get("semantic_merge_tightening")
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _json_int_metric(metrics: JsonObject, key: str) -> int:
+    value = metrics.get(key)
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
+
+def _semantic_merge_report_status(metrics: JsonObject, *, is_processing: bool) -> str:
+    status = str(metrics.get("status") or "")
+    if status == "failed_fallback_used":
+        return "failed"
+    if status in {"processing", "completed", "failed"}:
+        return status
+    if is_processing:
+        return "waiting"
+    return "completed" if metrics else "pending"
 
 
 def _batch_status_count(
@@ -416,6 +467,19 @@ class KnowledgeService:
             document.preprocessing_status == "processing"
         )
         published_answer_count = int(document.structured_entries or 0)
+        document_metrics = (
+            dict(document.preprocessing_metrics)
+            if isinstance(document.preprocessing_metrics, Mapping)
+            else {}
+        )
+        semantic_metrics = _semantic_merge_metrics(document_metrics)
+        semantic_status = _semantic_merge_report_status(
+            semantic_metrics,
+            is_processing=is_processing,
+        )
+        semantic_total = _json_int_metric(semantic_metrics, "suspect_group_count")
+        semantic_current = _json_int_metric(semantic_metrics, "processed_group_count")
+        current_stage = str(document_metrics.get("stage") or "")
 
         steps = (
             KnowledgeProcessingStepDto(
@@ -445,6 +509,18 @@ class KnowledgeService:
                 message=f"Черновиков найдено: {candidate_summary.raw_count}",
             ),
             KnowledgeProcessingStepDto(
+                id="semantic_merge_tightening",
+                label="Уплотнение смысловых дублей",
+                status=semantic_status,
+                current=semantic_current,
+                total=semantic_total,
+                message=(
+                    f"Проверено групп: {semantic_current} из {semantic_total}"
+                    if semantic_total > 0
+                    else "Ожидаем завершения извлечения"
+                ),
+            ),
+            KnowledgeProcessingStepDto(
                 id="publish",
                 label="Публикация в базу знаний",
                 status="completed" if published_answer_count > 0 else "pending",
@@ -468,23 +544,31 @@ class KnowledgeService:
             "tokens_input": sum(batch.tokens_input for batch in batches),
             "tokens_output": sum(batch.tokens_output for batch in batches),
             "tokens_total": sum(batch.tokens_total for batch in batches),
+            "semantic_merge_tightening": semantic_metrics,
         }
 
-        title = (
-            "Опубликовано частично: есть проблемные части"
-            if batch_failed > 0 and published_answer_count > 0
-            else _knowledge_processing_title(
-                document_status=document.status,
-                preprocessing_status=document.preprocessing_status or "",
+        if current_stage == "semantic_merge_tightening" and is_processing:
+            title = "Уплотняем похожие ответы"
+            message = (
+                "Черновики уже сохранены. Сейчас система проверяет смысловые дубли "
+                "и собирает компактную базу знаний перед публикацией."
             )
-        )
-        message = _knowledge_processing_message(
-            batch_total=batch_total,
-            batch_completed=batch_completed,
-            batch_failed=batch_failed,
-            raw_answer_count=candidate_summary.raw_count,
-            published_answer_count=published_answer_count,
-        )
+        else:
+            title = (
+                "Опубликовано частично: есть проблемные части"
+                if batch_failed > 0 and published_answer_count > 0
+                else _knowledge_processing_title(
+                    document_status=document.status,
+                    preprocessing_status=document.preprocessing_status or "",
+                )
+            )
+            message = _knowledge_processing_message(
+                batch_total=batch_total,
+                batch_completed=batch_completed,
+                batch_failed=batch_failed,
+                raw_answer_count=candidate_summary.raw_count,
+                published_answer_count=published_answer_count,
+            )
         return KnowledgeProcessingReportDto(
             document_id=document_id,
             status=document.preprocessing_status or document.status,
@@ -659,11 +743,13 @@ class KnowledgeService:
             return KnowledgePreviewResponseDto.empty(query=query)
 
         repo = knowledge_repo_factory(self.pool)
-        results = await repo.preview_search(
-            project_id=project_id,
-            query=query,
-            limit=request.normalized_limit(),
-        )
+        results = _dedupe_preview_results_by_exact_answer(
+            await repo.preview_search(
+                project_id=project_id,
+                query=query,
+                limit=max(request.normalized_limit() * 2, request.normalized_limit()),
+            )
+        )[: request.normalized_limit()]
 
         logger.info(
             "Knowledge preview search completed",

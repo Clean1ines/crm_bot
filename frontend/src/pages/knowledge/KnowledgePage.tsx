@@ -473,10 +473,16 @@ const retightenReportRows = (doc: Document): string[] => {
   return rows;
 };
 
+const SEMANTIC_MERGE_TIGHTENING_STEP_ID = 'semantic_merge_tightening';
+
+const positiveMetric = (value: number | null): number | null => (
+  value !== null && value > 0 ? value : null
+);
+
 const sourceChunkCount = (doc: Document): number | null => (
-  metricNumber(doc.preprocessing_metrics, 'raw_source_chunk_count')
-  ?? metricNumber(doc.preprocessing_metrics, 'source_chunk_count')
-  ?? (Number.isFinite(doc.chunk_count) ? doc.chunk_count : null)
+  positiveMetric(metricNumber(doc.preprocessing_metrics, 'raw_source_chunk_count'))
+  ?? positiveMetric(metricNumber(doc.preprocessing_metrics, 'source_chunk_count'))
+  ?? (Number.isFinite(doc.chunk_count) && doc.chunk_count > 0 ? doc.chunk_count : null)
 );
 
 const incomingSemanticEntryCount = (doc: Document): number | null => (
@@ -1537,7 +1543,10 @@ export const KnowledgePage: React.FC = () => {
                     {processingReport.steps.length > 0 && (
                       <div className="mt-3 space-y-1.5">
                         {processingReport.steps.map((step) => (
-                          <div key={step.id} className="flex items-start justify-between gap-3">
+                          <div
+                            key={step.id}
+                            className={`flex items-start justify-between gap-3 ${step.id === SEMANTIC_MERGE_TIGHTENING_STEP_ID ? 'rounded-lg bg-[var(--control-bg)] px-2 py-1' : ''}`}
+                          >
                             <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
                             <span className="text-right">
                               {step.total > 0
