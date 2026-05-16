@@ -828,5 +828,5 @@ async def test_apply_semantic_retightening_archives_collapsed_entries_and_republ
     assert "knowledge_documents" in metric_sql
     assert project_id in metric_payload
     assert document_id in metric_payload
-    assert "semantic_retightening" in metric_payload
+    assert "semantic_merge_tightening" in metric_payload
     assert "collapsed_entry_count" in metric_payload

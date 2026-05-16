@@ -54,11 +54,10 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
     KnowledgePreprocessingValidationError,
-    KnowledgeQuestionIntentCard,
     normalize_preprocessing_mode,
-    KnowledgeSemanticMergeCandidate,
-    KnowledgeSemanticMergeDecision,
-    KnowledgeSemanticMergeGroup,
+    KnowledgeAnswerResolutionCandidate,
+    KnowledgeAnswerResolutionDecision,
+    KnowledgeAnswerResolutionCase,
     build_embedding_text,
     entry_kind_for_preprocessing_mode,
     prompt_version_for_mode,
@@ -753,9 +752,6 @@ KCD_STAGE_K_CANCELLED_ERROR = "Knowledge preprocessing cancelled by operator"
 KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL = 1
 KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET = 650
 KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
-KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT = 8
-KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT = 5
-KCD_STAGE_K_QUESTION_INTENT_TAG_LIMIT = 6
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
@@ -792,34 +788,6 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     return _answer_digest(entry.answer)
 
 
-def _question_intent_card_from_entry(
-    entry: KnowledgePreprocessingEntry,
-    *,
-    entry_id: str,
-) -> KnowledgeQuestionIntentCard:
-    questions = _text_tuple(entry.questions)
-    return KnowledgeQuestionIntentCard(
-        entry_id=entry_id,
-        title=_clean_optional_text(entry.title),
-        primary_question=_question_intent_primary_question(entry),
-        question_samples=questions[:KCD_STAGE_K_QUESTION_INTENT_SAMPLE_LIMIT],
-        answer_digest=_answer_digest(entry.answer),
-        tags=(),
-    )
-
-
-def _question_intent_card_text(card: KnowledgeQuestionIntentCard) -> str:
-    return " ".join(
-        part
-        for part in (
-            card.primary_question,
-            " ".join(card.question_samples),
-            card.answer_digest,
-        )
-        if part
-    )
-
-
 def _question_intent_tokens_from_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
@@ -834,12 +802,6 @@ def _question_intent_tokens_from_entry(
             if part
         )
     )
-
-
-def _question_intent_tokens_from_card(
-    card: KnowledgeQuestionIntentCard,
-) -> tuple[str, ...]:
-    return _semantic_merge_tokens_from_text(_question_intent_card_text(card))
 
 
 def _preprocessing_entry_from_technical_chunk(
@@ -861,42 +823,6 @@ def _preprocessing_entry_from_technical_chunk(
             str(chunk.get("canonical_question") or "")
         ),
     )
-
-
-def _select_question_intent_cards_for_batch(
-    *,
-    candidates: Sequence[KnowledgePreprocessingEntry],
-    known_cards: Sequence[KnowledgeQuestionIntentCard],
-    limit: int = KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT,
-) -> tuple[KnowledgeQuestionIntentCard, ...]:
-    if not candidates or not known_cards or limit <= 0:
-        return ()
-
-    candidate_tokens: set[str] = set()
-    for candidate in candidates:
-        candidate_tokens.update(_question_intent_tokens_from_entry(candidate))
-
-    if not candidate_tokens:
-        return tuple(known_cards[-limit:])
-
-    scored: list[tuple[float, int, KnowledgeQuestionIntentCard]] = []
-    for index, card in enumerate(known_cards):
-        card_tokens = set(_question_intent_tokens_from_card(card))
-        if not card_tokens:
-            continue
-        overlap = len(candidate_tokens & card_tokens)
-        if overlap == 0:
-            continue
-        union = len(candidate_tokens | card_tokens) or 1
-        score = overlap / union
-        scored.append((score, index, card))
-
-    if not scored:
-        return tuple(known_cards[-limit:])
-
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    selected = [item[2] for item in scored[:limit]]
-    return tuple(selected)
 
 
 def _entry_kind_from_chunk_role(role: KnowledgeChunkRole) -> KnowledgeEntryKind:
@@ -1562,10 +1488,10 @@ def _semantic_merge_candidate_from_entry(
     *,
     index: int,
     entry: KnowledgePreprocessingEntry,
-) -> KnowledgeSemanticMergeCandidate:
+) -> KnowledgeAnswerResolutionCandidate:
     """Build an answer-only option for unresolved semantic resolution."""
 
-    return KnowledgeSemanticMergeCandidate(
+    return KnowledgeAnswerResolutionCandidate(
         candidate_id=_semantic_merge_candidate_id(index),
         answer=_limit_compiled_text(
             _clean_optional_text(entry.answer),
@@ -1630,11 +1556,11 @@ def _semantic_merge_suspect_pairs_from_entries(
 
 def _semantic_merge_suspect_groups_from_entries(
     entries: Sequence[KnowledgePreprocessingEntry],
-) -> tuple[KnowledgeSemanticMergeGroup, ...]:
+) -> tuple[KnowledgeAnswerResolutionCase, ...]:
     if len(entries) < 2:
         return ()
 
-    groups: list[KnowledgeSemanticMergeGroup] = []
+    groups: list[KnowledgeAnswerResolutionCase] = []
     for pair in _semantic_merge_suspect_pairs_from_entries(entries)[
         :KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS
     ]:
@@ -1645,8 +1571,8 @@ def _semantic_merge_suspect_groups_from_entries(
             )
         ).hexdigest()[:12]
         groups.append(
-            KnowledgeSemanticMergeGroup(
-                group_id=f"semantic-merge-pair-{digest}",
+            KnowledgeAnswerResolutionCase(
+                case_id=f"semantic-merge-pair-{digest}",
                 question_intent=_semantic_merge_question_intent(
                     *(entries[index] for index in component)
                 ),
@@ -1801,7 +1727,7 @@ def _mechanically_cleanup_compiled_entries(
 
 def _semantic_merge_survivor_index(
     *,
-    decision: KnowledgeSemanticMergeDecision,
+    decision: KnowledgeAnswerResolutionDecision,
     candidate_indexes: tuple[int, ...],
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> int:
@@ -2025,7 +1951,7 @@ KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
 
 
 def _semantic_merge_decision_is_too_noisy(
-    decision: KnowledgeSemanticMergeDecision,
+    decision: KnowledgeAnswerResolutionDecision,
 ) -> bool:
     if not decision.is_merge or not decision.canonical_answer:
         return False
@@ -2042,9 +1968,9 @@ def _semantic_merge_decision_is_too_noisy(
 
 
 def _reject_noisy_semantic_merge_decisions(
-    decisions: Sequence[KnowledgeSemanticMergeDecision],
-) -> tuple[KnowledgeSemanticMergeDecision, ...]:
-    filtered: list[KnowledgeSemanticMergeDecision] = []
+    decisions: Sequence[KnowledgeAnswerResolutionDecision],
+) -> tuple[KnowledgeAnswerResolutionDecision, ...]:
+    filtered: list[KnowledgeAnswerResolutionDecision] = []
 
     for decision in decisions:
         if not _semantic_merge_decision_is_too_noisy(decision):
@@ -2052,8 +1978,8 @@ def _reject_noisy_semantic_merge_decisions(
             continue
 
         filtered.append(
-            KnowledgeSemanticMergeDecision(
-                group_id=decision.group_id,
+            KnowledgeAnswerResolutionDecision(
+                case_id=decision.group_id,
                 action="keep_separate",
                 candidate_ids=decision.candidate_ids,
                 canonical_answer="",
@@ -2066,7 +1992,7 @@ def _reject_noisy_semantic_merge_decisions(
 def _entry_with_semantic_merge_decision(
     *,
     entry: KnowledgePreprocessingEntry,
-    decision: KnowledgeSemanticMergeDecision,
+    decision: KnowledgeAnswerResolutionDecision,
 ) -> KnowledgePreprocessingEntry:
     answer = _limit_compiled_text(
         _clean_optional_text(decision.canonical_answer) or entry.answer,
@@ -2100,7 +2026,7 @@ def _entry_with_semantic_merge_decision(
 
 
 def _semantic_merge_decision_is_publishable(
-    decision: KnowledgeSemanticMergeDecision,
+    decision: KnowledgeAnswerResolutionDecision,
 ) -> bool:
     return True
 
@@ -2108,7 +2034,7 @@ def _semantic_merge_decision_is_publishable(
 def _apply_semantic_merge_tightening_decisions(
     *,
     entries: Sequence[KnowledgePreprocessingEntry],
-    decisions: Sequence[KnowledgeSemanticMergeDecision],
+    decisions: Sequence[KnowledgeAnswerResolutionDecision],
     source_excerpts_by_entry: Sequence[tuple[str, ...]] | None = None,
 ) -> tuple[tuple[KnowledgePreprocessingEntry, ...], tuple[tuple[str, ...], ...]]:
     if not entries:
@@ -2215,7 +2141,7 @@ async def _existing_project_titles_for_semantic_merge(
 
 
 def _semantic_merge_candidate_trace_payload(
-    candidate: KnowledgeSemanticMergeCandidate,
+    candidate: KnowledgeAnswerResolutionCandidate,
 ) -> JsonObject:
     return {
         "candidate_id": candidate.candidate_id,
@@ -2226,8 +2152,8 @@ def _semantic_merge_candidate_trace_payload(
 
 def _semantic_merge_trace_row(
     *,
-    group: KnowledgeSemanticMergeGroup,
-    decision: KnowledgeSemanticMergeDecision,
+    group: KnowledgeAnswerResolutionCase,
+    decision: KnowledgeAnswerResolutionDecision,
 ) -> JsonObject:
     return {
         "group_id": group.group_id,
@@ -2247,13 +2173,13 @@ def _semantic_merge_trace_row(
 
 def _semantic_merge_decisions_with_group_candidate_ids(
     *,
-    group: KnowledgeSemanticMergeGroup,
-    decisions: Sequence[KnowledgeSemanticMergeDecision],
-) -> tuple[KnowledgeSemanticMergeDecision, ...]:
+    group: KnowledgeAnswerResolutionCase,
+    decisions: Sequence[KnowledgeAnswerResolutionDecision],
+) -> tuple[KnowledgeAnswerResolutionDecision, ...]:
     group_candidate_ids = tuple(
         candidate.candidate_id for candidate in group.candidates
     )
-    updated: list[KnowledgeSemanticMergeDecision] = []
+    updated: list[KnowledgeAnswerResolutionDecision] = []
     for decision in decisions:
         if decision.group_id != group.group_id or decision.candidate_ids:
             updated.append(decision)
@@ -2313,13 +2239,13 @@ async def _tighten_compiled_entries_with_semantic_merge(
         metrics["entry_count_after"] = len(entries)
         return tuple(entries), source_excerpts, metrics
 
-    decisions: tuple[KnowledgeSemanticMergeDecision, ...] = ()
+    decisions: tuple[KnowledgeAnswerResolutionDecision, ...] = ()
     try:
         for group in groups:
-            execution = await preprocessor.tighten_semantic_merges(
+            execution = await preprocessor.resolve_answer_cases(
                 mode=mode,
                 file_name=file_name,
-                groups=(group,),
+                cases=(group,),
                 existing_project_titles=existing_project_titles,
             )
             metrics["llm_call_count"] = _json_metric_int(metrics, "llm_call_count") + 1
@@ -2428,14 +2354,6 @@ def _merge_limited_text_tuple_values(
     limit: int,
 ) -> tuple[str, ...]:
     return _merge_text_tuple_values(*groups)[:limit]
-
-
-def _entry_as_safe_new_fragment(
-    entry: KnowledgePreprocessingEntry,
-) -> KnowledgePreprocessingEntry:
-    if entry.match_kind == "new" and not entry.known_intent_id:
-        return entry
-    return replace(entry, match_kind="new", known_intent_id="")
 
 
 def _merge_entry_fields_deterministically(
@@ -2911,7 +2829,7 @@ def _preprocessing_entry_from_canonical_entry(
 def _retighten_existing_document_plan(
     *,
     entries: Sequence[KnowledgePreprocessingEntry],
-    decisions: Sequence[KnowledgeSemanticMergeDecision],
+    decisions: Sequence[KnowledgeAnswerResolutionDecision],
 ) -> _RetightenExistingDocumentPlan:
     updated_entries: list[KnowledgePreprocessingEntry] = list(entries)
     merged_source_indexes: list[list[int]] = [[index] for index in range(len(entries))]
@@ -2999,7 +2917,7 @@ def _retightened_canonical_entry(
     merged_from_entry_ids: Sequence[str],
 ) -> CanonicalKnowledgeEntry:
     metadata: dict[str, object] = dict(original.metadata)
-    metadata["semantic_retightening"] = {
+    metadata["semantic_merge_tightening"] = {
         "strategy": "kcd_stage_k8_existing_document_retighten",
         "merged_from_entry_ids": tuple(merged_from_entry_ids),
         "merged_source_entry_count": len(merged_from_entry_ids),
@@ -3816,10 +3734,10 @@ class KnowledgeIngestionService:
         llm_call_count = 0
         usage_event_count = 0
         try:
-            first_execution = await preprocessor.tighten_semantic_merges(
+            first_execution = await preprocessor.resolve_answer_cases(
                 mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
                 file_name=file_name,
-                groups=(groups[0],),
+                cases=(groups[0],),
                 existing_project_titles=existing_project_titles,
             )
             llm_call_count = 1
@@ -3841,10 +3759,10 @@ class KnowledgeIngestionService:
                 usage_event_count += 1
 
             for group in groups[1:]:
-                execution = await preprocessor.tighten_semantic_merges(
+                execution = await preprocessor.resolve_answer_cases(
                     mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
                     file_name=file_name,
-                    groups=(group,),
+                    cases=(group,),
                     existing_project_titles=existing_project_titles,
                 )
                 llm_call_count += 1
@@ -4202,7 +4120,6 @@ class KnowledgeIngestionService:
                     mode=mode,
                     chunks=technical_chunks,
                     file_name=document.file_name,
-                    previous_question_intents=(),
                 )
                 if execution.usage is not None:
                     await usage_repo.record_event(
@@ -4215,10 +4132,7 @@ class KnowledgeIngestionService:
                     )
                     usage_event_count += 1
 
-                safe_entries = tuple(
-                    _entry_as_safe_new_fragment(entry)
-                    for entry in execution.result.entries
-                )
+                safe_entries = tuple(execution.result.entries)
                 raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
                     project_id=project_id,
                     document_id=document_id,
@@ -4487,7 +4401,6 @@ class KnowledgeIngestionService:
             compiled_entries: list[KnowledgePreprocessingEntry] = []
             usage_event_count = 0
             llm_answer_resolution_call_count = 0
-            unknown_known_intent_id_count = 0
             answer_resolution_keep_separate_count = 0
             latest_result: KnowledgePreprocessingResult | None = None
             processing_started_monotonic = time.monotonic()
@@ -4570,7 +4483,6 @@ class KnowledgeIngestionService:
                 nonlocal failed_batch_count
                 nonlocal raw_candidate_count
                 nonlocal usage_event_count
-                nonlocal unknown_known_intent_id_count
                 nonlocal latest_result
 
                 async with extraction_semaphore:
@@ -4587,7 +4499,6 @@ class KnowledgeIngestionService:
                             mode=mode,
                             chunks=technical_chunks,
                             file_name=file_name,
-                            previous_question_intents=(),
                         )
                         if execution.usage is not None:
                             await usage_repo.record_event(
@@ -4599,24 +4510,7 @@ class KnowledgeIngestionService:
                                 )
                             )
 
-                        safe_entries: list[KnowledgePreprocessingEntry] = []
-                        batch_unknown_known_intent_count = 0
-                        for incoming_entry in execution.result.entries:
-                            safe_entry = _entry_as_safe_new_fragment(incoming_entry)
-                            if safe_entry is not incoming_entry:
-                                batch_unknown_known_intent_count += 1
-                                logger.warning(
-                                    "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
-                                    extra={
-                                        "project_id": project_id,
-                                        "document_id": document_id,
-                                        "batch_index": batch_index,
-                                        "known_intent_id_set": bool(
-                                            incoming_entry.known_intent_id
-                                        ),
-                                    },
-                                )
-                            safe_entries.append(safe_entry)
+                        safe_entries = list(execution.result.entries)
 
                         raw_candidates = (
                             _raw_answer_candidates_from_preprocessing_entries(
@@ -4708,9 +4602,6 @@ class KnowledgeIngestionService:
                         raw_candidate_count += len(raw_candidates)
                         if execution.usage is not None:
                             usage_event_count += 1
-                        unknown_known_intent_id_count += (
-                            batch_unknown_known_intent_count
-                        )
                         latest_result = execution.result
                         preprocessing_results.append(execution.result)
                         results_by_batch_index[batch_index] = execution.result
@@ -4753,7 +4644,6 @@ class KnowledgeIngestionService:
                             "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
                             "semantic_answer_resolution_count": llm_answer_resolution_call_count,
                             "answer_resolution_call_count": llm_answer_resolution_call_count,
-                            "unknown_known_intent_id_count": unknown_known_intent_id_count,
                             "answer_resolution_keep_separate_count": (
                                 answer_resolution_keep_separate_count
                             ),
@@ -4952,7 +4842,6 @@ class KnowledgeIngestionService:
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
                     ),
                     "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
-                    "unknown_known_intent_id_count": unknown_known_intent_id_count,
                     "answer_resolution_keep_separate_count": (
                         answer_resolution_keep_separate_count
                     ),
@@ -5058,9 +4947,6 @@ class KnowledgeIngestionService:
             )
             preprocessing_metrics["answer_resolution_call_count"] = (
                 llm_answer_resolution_call_count
-            )
-            preprocessing_metrics["unknown_known_intent_id_count"] = (
-                unknown_known_intent_id_count
             )
             preprocessing_metrics["answer_resolution_keep_separate_count"] = (
                 answer_resolution_keep_separate_count
