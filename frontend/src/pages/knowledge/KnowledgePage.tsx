@@ -282,13 +282,6 @@ const processingProgressLabel = (doc: Document): string => {
   return t('knowledge.document.preparingProcessing');
 };
 
-const compiledEntryCount = (doc: Document): number | null => (
-  metricNumber(doc.preprocessing_metrics, 'semantic_answer_count')
-  ?? metricNumber(doc.preprocessing_metrics, 'compiled_entry_count')
-  ?? metricNumber(doc.preprocessing_metrics, 'canonical_entry_count')
-  ?? (typeof doc.structured_entries === 'number' ? doc.structured_entries : null)
-);
-
 const semanticMergeCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'semantic_answer_merge_count')
   ?? metricNumber(doc.preprocessing_metrics, 'embedding_text_merge_call_count')
@@ -448,20 +441,6 @@ const retightenReportRows = (doc: Document): string[] => {
   return rows;
 };
 
-const technicalChunkProgressText = (doc: Document): string | null => {
-  const current = metricNumber(doc.preprocessing_metrics, 'technical_chunk_processed_count')
-    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
-  const total = metricNumber(doc.preprocessing_metrics, 'technical_chunk_total_count')
-    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_total_count');
-
-  if (current === null && total === null) return null;
-  if (current !== null && total !== null && total > 0) {
-    return t('knowledge.progress.of', { current: formatNumber(current), total: formatNumber(total) });
-  }
-  if (total !== null && total > 0) return t('knowledge.progress.of', { current: '0', total: formatNumber(total) });
-  return current !== null ? formatNumber(current) : null;
-};
-
 const sourceChunkCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'raw_source_chunk_count')
   ?? metricNumber(doc.preprocessing_metrics, 'source_chunk_count')
@@ -472,6 +451,53 @@ const incomingSemanticEntryCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'incoming_entry_count')
   ?? metricNumber(doc.preprocessing_metrics, 'answer_candidate_count')
 );
+
+
+const processingDetailRows = (doc: Document): string[] => {
+  const metrics = doc.preprocessing_metrics;
+  const rows: string[] = [];
+  const totalParts = metricNumber(metrics, 'technical_chunk_total_count')
+    ?? metricNumber(metrics, 'technical_compiler_total_count');
+  const completedParts = metricNumber(metrics, 'technical_chunk_processed_count')
+    ?? metricNumber(metrics, 'technical_compiler_call_count');
+  const failedParts = metricNumber(metrics, 'failed_part_count');
+  const rawDrafts = metricNumber(metrics, 'raw_draft_count')
+    ?? metricNumber(metrics, 'draft_answer_count');
+  const safelyCollapsed = metricNumber(metrics, 'duplicates_collapsed_safely_count')
+    ?? metricNumber(metricObject(metrics, 'deterministic_cleanup'), 'exact_duplicate_candidate_collapse_count');
+  const semanticMerge = metricObject(metrics, 'semantic_merge_tightening');
+  const mergePasses = semanticMerge ? 1 : metricNumber(metrics, 'semantic_merge_pass_count');
+  const mergeGroups = metricNumber(semanticMerge, 'candidate_group_count');
+  const mergedByLlm = metricNumber(semanticMerge, 'merge_decision_count');
+  const keptSeparate = metricNumber(semanticMerge, 'keep_separate_decision_count');
+  const invalidMergeOutputs = metricNumber(semanticMerge, 'invalid_merge_output_count');
+  const publishedEntries = metricNumber(metrics, 'canonical_entry_count')
+    ?? metricNumber(metrics, 'published_entry_count');
+
+  if (totalParts !== null) rows.push(`Технических частей всего: ${formatNumber(totalParts)}`);
+  if (completedParts !== null && totalParts !== null) {
+    rows.push(`Извлечено частей: ${formatNumber(completedParts)} / ${formatNumber(totalParts)}`);
+  }
+  if (failedParts !== null) rows.push(`Failed parts: ${formatNumber(failedParts)}`);
+  if (rawDrafts !== null) rows.push(`Raw drafts saved: ${formatNumber(rawDrafts)}`);
+  if (safelyCollapsed !== null) rows.push(`Duplicates collapsed safely: ${formatNumber(safelyCollapsed)}`);
+  if (mergePasses !== null) rows.push(`Semantic merge passes: ${formatNumber(mergePasses)}`);
+  if (mergeGroups !== null) rows.push(`LLM merge candidates/groups: ${formatNumber(mergeGroups)}`);
+  if (mergedByLlm !== null) rows.push(`Merged by LLM: ${formatNumber(mergedByLlm)}`);
+  if (keptSeparate !== null) rows.push(`Kept separate by LLM: ${formatNumber(keptSeparate)}`);
+  if (invalidMergeOutputs !== null) rows.push(`Rejected/invalid merge outputs: ${formatNumber(invalidMergeOutputs)}`);
+  if (publishedEntries !== null) rows.push(`Published entries: ${formatNumber(publishedEntries)}`);
+
+  return rows;
+};
+
+const processingStatusMessage = (doc: Document): string => {
+  const message = metricText(doc.preprocessing_metrics, 'status_message');
+  if (message) return message;
+  if (isDocumentProcessing(doc)) return 'Документ разбирается. Черновики сохраняются после каждого шага.';
+  if (doc.status === 'error') return 'Обработка завершилась с ошибкой, но уже сохранённые черновики доступны.';
+  return 'База знаний обновлена. Сырые черновики сохранены для проверки.';
+};
 
 const documentLlmTokenText = (doc: Document): string | null => {
   const total = doc.llm_tokens_total
@@ -1326,16 +1352,14 @@ export const KnowledgePage: React.FC = () => {
                       </div>
                     )}
                     <div className="space-y-1 text-xs text-[var(--text-muted)]">
+                      <div className="text-[var(--text-primary)]">{processingStatusMessage(doc)}</div>
                       <div>{t('knowledge.document.processingModelPrefix')} {processingModelLabel(doc)}</div>
                       <div>{t('knowledge.document.elapsedPrefix')} {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
+                      {processingDetailRows(doc).map((row) => (
+                        <div key={row}>{row}</div>
+                      ))}
                       {sourceChunkCount(doc) !== null && (
                         <div>{t('knowledge.document.sourceChunksPrefix')} {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
-                      )}
-                      {technicalChunkProgressText(doc) !== null && (
-                        <div>{t('knowledge.document.processingStepsPrefix')} {technicalChunkProgressText(doc)}</div>
-                      )}
-                      {compiledEntryCount(doc) !== null && (
-                        <div>{t('knowledge.document.compiledAnswersPrefix')} {formatNumber(compiledEntryCount(doc) ?? 0)}</div>
                       )}
                       {incomingSemanticEntryCount(doc) !== null && (
                         <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
