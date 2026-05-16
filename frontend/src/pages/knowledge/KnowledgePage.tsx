@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   Upload,
@@ -8,6 +8,7 @@ import {
   Search,
   TestTube2,
   Loader2,
+  ChevronDown,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -24,6 +25,7 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
+  type KnowledgeAnswerDraft,
   type KnowledgeAnswerDraftsResponse,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
@@ -96,6 +98,36 @@ const previewTraceLabel = (value: string): string => {
 const formatPreviewScore = (value: number): string => (
   Number.isFinite(value) ? value.toFixed(3) : '0.000'
 );
+
+
+const DRAFT_FETCH_LIMIT = 1000;
+
+const draftTitle = (draft: KnowledgeAnswerDraft): string => (
+  draft.canonical_question.trim() || draft.title.trim() || t('knowledge.drafts.untitled')
+);
+
+const draftSearchText = (draft: KnowledgeAnswerDraft): string => [
+  draft.title,
+  draft.canonical_question,
+  draft.answer,
+  ...draft.question_variants,
+  ...draft.synonyms,
+  ...draft.tags,
+  ...draft.source_refs.map((ref) => ref.quote),
+].join(' ').toLowerCase();
+
+const draftSourceChunkIndexes = (draft: KnowledgeAnswerDraft): number[] => {
+  const indexes = new Set<number>();
+  for (const index of draft.source_chunk_indexes) {
+    indexes.add(index);
+  }
+  for (const ref of draft.source_refs) {
+    if (typeof ref.source_index === 'number' && Number.isFinite(ref.source_index)) {
+      indexes.add(ref.source_index);
+    }
+  }
+  return [...indexes].sort((left, right) => left - right);
+};
 
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
@@ -609,6 +641,236 @@ const UsageScenarioCard: React.FC<{
   );
 };
 
+
+const DraftsSummary: React.FC<{
+  response: KnowledgeAnswerDraftsResponse | undefined;
+  isLoading: boolean;
+  onOpen: () => void;
+}> = ({ response, isLoading, onOpen }) => {
+  if (isLoading && !response) {
+    return (
+      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>{t('knowledge.drafts.loading')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!response) return null;
+
+  const previewDrafts = response.drafts.slice(-3).reverse();
+  const shownCount = response.drafts.length;
+  const totalCount = response.total_count;
+
+  return (
+    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="font-medium text-[var(--text-primary)]">
+            {t('knowledge.drafts.title', { count: formatNumber(totalCount) })}
+          </div>
+          <div className="mt-0.5 text-[var(--text-muted)]">
+            {t('knowledge.drafts.shownAvailable', {
+              shown: formatNumber(shownCount),
+              total: formatNumber(totalCount),
+            })}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+        >
+          {t('knowledge.drafts.openAll')}
+        </button>
+      </div>
+
+      {previewDrafts.length > 0 ? (
+        <div className="space-y-1">
+          {previewDrafts.map((draft) => (
+            <div key={draft.id} className="truncate rounded-lg bg-[var(--control-bg)] px-2 py-1.5 font-medium text-[var(--text-primary)]" title={draftTitle(draft)}>
+              {draftTitle(draft)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg bg-[var(--control-bg)] px-2 py-2 text-[var(--text-muted)]">
+          {t('knowledge.drafts.empty')}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const DraftDetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div>
+    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
+    <div className="text-sm leading-relaxed text-[var(--text-primary)]">{children}</div>
+  </div>
+);
+
+const DraftsModal: React.FC<{
+  documentName: string;
+  response: KnowledgeAnswerDraftsResponse | undefined;
+  isLoading: boolean;
+  filter: string;
+  expandedDraftIds: string[];
+  onFilterChange: (value: string) => void;
+  onToggleDraft: (draftId: string) => void;
+  onClose: () => void;
+}> = ({
+  documentName,
+  response,
+  isLoading,
+  filter,
+  expandedDraftIds,
+  onFilterChange,
+  onToggleDraft,
+  onClose,
+}) => {
+  const normalizedFilter = filter.trim().toLowerCase();
+  const expandedSet = useMemo(() => new Set(expandedDraftIds), [expandedDraftIds]);
+  const filteredDrafts = useMemo(() => {
+    const drafts = response?.drafts ?? [];
+    if (!normalizedFilter) return drafts;
+    return drafts.filter((draft) => draftSearchText(draft).includes(normalizedFilter));
+  }, [normalizedFilter, response?.drafts]);
+
+  return (
+    <BaseModal
+      isOpen
+      onClose={onClose}
+      title={t('knowledge.drafts.modalTitle')}
+      cancelLabel={t('common.actions.close')}
+      maxWidthClassName="max-w-4xl"
+    >
+      <div className="-mt-2 max-h-[72vh] overflow-hidden text-sm text-[var(--text-primary)]">
+        <div className="mb-3 text-xs text-[var(--text-muted)]">{documentName}</div>
+        <div className="relative mb-4">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+          <input
+            type="text"
+            value={filter}
+            onChange={(event) => onFilterChange(event.target.value)}
+            placeholder={t('knowledge.drafts.searchPlaceholder')}
+            className="min-h-10 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/15"
+          />
+        </div>
+
+        <div className="max-h-[56vh] overflow-y-auto pr-1">
+          {isLoading && !response && (
+            <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>{t('knowledge.drafts.loading')}</span>
+            </div>
+          )}
+
+          {response && response.drafts.length === 0 && (
+            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
+              {t('knowledge.drafts.empty')}
+            </div>
+          )}
+
+          {response && response.drafts.length > 0 && filteredDrafts.length === 0 && (
+            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
+              {t('knowledge.drafts.noFilterResults')}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {filteredDrafts.map((draft) => {
+              const isExpanded = expandedSet.has(draft.id);
+              const sourceChunkIndexes = draftSourceChunkIndexes(draft);
+
+              return (
+                <div key={draft.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
+                  <button
+                    type="button"
+                    onClick={() => onToggleDraft(draft.id)}
+                    aria-expanded={isExpanded}
+                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--control-bg)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-primary)]/25"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold text-[var(--text-primary)]" title={draftTitle(draft)}>{draftTitle(draft)}</div>
+                      <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
+                        {draft.status && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{draft.status}</span>}
+                        {draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">batch {draft.batch_index}</span>}
+                        {sourceChunkIndexes.length > 0 && (
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                            chunks {sourceChunkIndexes.join(', ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isExpanded && (
+                    <div className="space-y-4 border-t border-[var(--border-subtle)] px-3 py-3">
+                      <DraftDetailRow label={t('knowledge.drafts.fields.answer')}>
+                        <div className="whitespace-pre-wrap">{draft.answer || '—'}</div>
+                      </DraftDetailRow>
+
+                      {draft.question_variants.length > 0 && (
+                        <DraftDetailRow label={t('knowledge.drafts.fields.questions')}>
+                          <ul className="list-disc space-y-1 pl-5">
+                            {draft.question_variants.map((question) => <li key={question}>{question}</li>)}
+                          </ul>
+                        </DraftDetailRow>
+                      )}
+
+                      {(draft.synonyms.length > 0 || draft.tags.length > 0) && (
+                        <DraftDetailRow label={t('knowledge.drafts.fields.synonymsTags')}>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[...draft.synonyms, ...draft.tags].map((item) => (
+                              <span key={item} className="rounded-full bg-[var(--control-bg)] px-2 py-1 text-xs text-[var(--text-muted)]">{item}</span>
+                            ))}
+                          </div>
+                        </DraftDetailRow>
+                      )}
+
+                      {draft.source_refs.length > 0 && (
+                        <DraftDetailRow label={t('knowledge.drafts.fields.sources')}>
+                          <div className="space-y-2">
+                            {draft.source_refs.map((ref, index) => (
+                              <div key={`${draft.id}-${index}-${ref.source_chunk_id || ref.source_index || 'source'}`} className="rounded-lg bg-[var(--control-bg)] p-2">
+                                <div className="whitespace-pre-wrap">{ref.quote}</div>
+                                <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
+                                  {typeof ref.source_index === 'number' && <span>chunk {ref.source_index}</span>}
+                                  {ref.source_chunk_id && <span>{ref.source_chunk_id}</span>}
+                                  {typeof ref.confidence === 'number' && <span>{formatPreviewScore(ref.confidence)}</span>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </DraftDetailRow>
+                      )}
+
+                      {(draft.status || draft.rejection_reason || draft.batch_index !== null || draft.fragment_index !== null || sourceChunkIndexes.length > 0) && (
+                        <DraftDetailRow label={t('knowledge.drafts.fields.metadata')}>
+                          <div className="flex flex-wrap gap-1.5 text-xs text-[var(--text-muted)]">
+                            {draft.status && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">status: {draft.status}</span>}
+                            {draft.rejection_reason && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">reason: {draft.rejection_reason}</span>}
+                            {draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">batch_index: {draft.batch_index}</span>}
+                            {draft.fragment_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">fragment_index: {draft.fragment_index}</span>}
+                            {sourceChunkIndexes.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_chunk_indexes: {sourceChunkIndexes.join(', ')}</span>}
+                          </div>
+                        </DraftDetailRow>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </BaseModal>
+  );
+};
+
 const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
   const llmBreakdown = llmUsageBreakdown(usage.breakdown);
   const answerBreakdown = usageBySources(llmBreakdown, USER_ANSWER_USAGE_SOURCES);
@@ -674,6 +936,9 @@ export const KnowledgePage: React.FC = () => {
   const [previewQuestion, setPreviewQuestion] = useState('');
   const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
+  const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
+  const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -733,21 +998,24 @@ export const KnowledgePage: React.FC = () => {
   const processingReports = processingReportsQuery.data || {};
   const draftPreviewDocumentIds = Object.values(processingReports)
     .filter((report) => {
-      const draftCount = metricNumber(report.metrics, 'draft_answer_count') ?? 0;
+      const document = documents.find((doc) => doc.id === report.document_id);
+      const draftCount = metricNumber(report.metrics, 'raw_draft_count')
+        ?? metricNumber(report.metrics, 'draft_answer_count')
+        ?? 0;
       const publishedCount = metricNumber(report.metrics, 'published_answer_count') ?? 0;
-      return draftCount > publishedCount;
+      return Boolean(document && isDocumentProcessing(document)) || draftCount > publishedCount;
     })
     .map((report) => report.document_id)
     .sort();
   const answerDraftsQuery = useQuery({
-    queryKey: ['knowledge-answer-drafts', projectId, draftPreviewDocumentIds.join(',')],
+    queryKey: ['knowledge-answer-drafts', projectId, draftPreviewDocumentIds.join(','), DRAFT_FETCH_LIMIT],
     queryFn: async () => {
       if (!projectId || draftPreviewDocumentIds.length === 0) return {};
 
       const drafts = await Promise.all(
         draftPreviewDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.fragments(projectId, documentId, 3);
+            const { data } = await knowledgeApi.fragments(projectId, documentId, DRAFT_FETCH_LIMIT);
             return [documentId, data] as const;
           } catch {
             return null;
@@ -767,6 +1035,27 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const answerDrafts = answerDraftsQuery.data || {};
+  const draftsDocument = draftsDocumentId
+    ? documents.find((doc) => doc.id === draftsDocumentId) ?? null
+    : null;
+  const draftsModalResponse = draftsDocumentId ? answerDrafts[draftsDocumentId] : undefined;
+  const draftsModalFilter = draftsDocumentId ? draftFiltersByDocument[draftsDocumentId] || '' : '';
+  const draftsModalExpandedIds = draftsDocumentId ? expandedDraftIdsByDocument[draftsDocumentId] || [] : [];
+  const openDraftsModal = (documentId: string): void => {
+    setDraftsDocumentId(documentId);
+  };
+  const setDraftFilter = (documentId: string, value: string): void => {
+    setDraftFiltersByDocument((current) => ({ ...current, [documentId]: value }));
+  };
+  const toggleDraftExpanded = (documentId: string, draftId: string): void => {
+    setExpandedDraftIdsByDocument((current) => {
+      const currentIds = current[documentId] || [];
+      const nextIds = currentIds.includes(draftId)
+        ? currentIds.filter((item) => item !== draftId)
+        : [...currentIds, draftId];
+      return { ...current, [documentId]: nextIds };
+    });
+  };
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
 
@@ -1231,8 +1520,6 @@ export const KnowledgePage: React.FC = () => {
                 </h4>
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
                   <span>{formatSize(doc.file_size)}</span>
-                  <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
-                  <span>{t('knowledge.document.fragmentsCount', { count: doc.chunk_count })}</span>
                   {doc.preprocessing_mode && (
                     <>
                       <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
@@ -1261,27 +1548,12 @@ export const KnowledgePage: React.FC = () => {
                         ))}
                       </div>
                     )}
-                    {answerDrafts[doc.id]?.drafts.length > 0 && (
-                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
-                        <div className="mb-1 font-medium text-[var(--text-primary)]">
-                          {t('knowledge.drafts.title', { count: formatNumber(answerDrafts[doc.id].total_count) })}
-                        </div>
-                        <div className="space-y-2">
-                          {answerDrafts[doc.id].drafts.map((draft) => (
-                            <div key={draft.id} className="rounded-lg bg-[var(--control-bg)] p-2">
-                              <div className="font-medium text-[var(--text-primary)]">
-                                {draft.canonical_question || draft.title}
-                              </div>
-                              <p className="mt-1 line-clamp-2 leading-relaxed">{draft.answer}</p>
-                              {draft.source_refs[0]?.quote && (
-                                <p className="mt-1 line-clamp-1 text-[var(--text-muted)]">
-                                  {t('knowledge.drafts.sourcePrefix')} {draft.source_refs[0].quote}
-                                </p>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                    {draftPreviewDocumentIds.includes(doc.id) && (
+                      <DraftsSummary
+                        response={answerDrafts[doc.id]}
+                        isLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
+                        onOpen={() => openDraftsModal(doc.id)}
+                      />
                     )}
 
                     {processingReport.actions.length > 0 && (
@@ -1421,6 +1693,19 @@ export const KnowledgePage: React.FC = () => {
             );
           })}
         </div>
+      )}
+
+      {draftsDocumentId && draftsDocument && (
+        <DraftsModal
+          documentName={draftsDocument.file_name}
+          response={draftsModalResponse}
+          isLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !draftsModalResponse)}
+          filter={draftsModalFilter}
+          expandedDraftIds={draftsModalExpandedIds}
+          onFilterChange={(value) => setDraftFilter(draftsDocumentId, value)}
+          onToggleDraft={(draftId) => toggleDraftExpanded(draftsDocumentId, draftId)}
+          onClose={() => setDraftsDocumentId(null)}
+        />
       )}
 
       <BaseModal

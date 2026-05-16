@@ -367,6 +367,22 @@ def _metadata_int(metadata: Mapping[str, object], key: str) -> int | None:
     return None
 
 
+def _metadata_int_list(metadata: Mapping[str, object], key: str) -> tuple[int, ...]:
+    value = metadata.get(key)
+    if isinstance(value, list | tuple):
+        values: tuple[object, ...] = tuple(value)
+    else:
+        parsed = _metadata_int(metadata, key)
+        return () if parsed is None else (parsed,)
+
+    result: list[int] = []
+    for item in values:
+        parsed = _metadata_int({"value": item}, "value")
+        if parsed is not None and parsed not in result:
+            result.append(parsed)
+    return tuple(result)
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeAnswerDraftDto:
     id: str
@@ -378,6 +394,9 @@ class KnowledgeAnswerDraftDto:
     fragment_index: int | None
     canonical_question: str
     question_variants: tuple[str, ...]
+    synonyms: tuple[str, ...]
+    tags: tuple[str, ...]
+    source_chunk_indexes: tuple[int, ...]
     source_refs: tuple[SourceRefDto, ...]
     rejection_reason: str = ""
 
@@ -394,6 +413,9 @@ class KnowledgeAnswerDraftDto:
             fragment_index=_metadata_int(metadata, "fragment_index"),
             canonical_question=str(metadata.get("canonical_question") or ""),
             question_variants=tuple(_metadata_text_list(metadata, "question_variants")),
+            synonyms=tuple(_metadata_text_list(metadata, "synonyms")),
+            tags=tuple(_metadata_text_list(metadata, "tags")),
+            source_chunk_indexes=_metadata_int_list(metadata, "source_chunk_indexes"),
             source_refs=tuple(
                 SourceRefDto.from_domain(source_ref)
                 for source_ref in candidate.source_refs
@@ -412,6 +434,9 @@ class KnowledgeAnswerDraftDto:
             "fragment_index": self.fragment_index,
             "canonical_question": self.canonical_question,
             "question_variants": list(self.question_variants),
+            "synonyms": list(self.synonyms),
+            "tags": list(self.tags),
+            "source_chunk_indexes": list(self.source_chunk_indexes),
             "source_refs": [source_ref.to_dict() for source_ref in self.source_refs],
             "rejection_reason": self.rejection_reason,
         }

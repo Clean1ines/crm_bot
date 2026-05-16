@@ -223,7 +223,7 @@ async def knowledge_answer_drafts(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=1000),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),

@@ -108,6 +108,9 @@ export type KnowledgeAnswerDraft = {
   fragment_index: number | null;
   canonical_question: string;
   question_variants: string[];
+  synonyms: string[];
+  tags: string[];
+  source_chunk_indexes: number[];
   source_refs: Array<{
     quote: string;
     source_index?: number;

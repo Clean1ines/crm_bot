@@ -6,6 +6,7 @@ interface BaseModalProps {
   title: string;
   children: React.ReactNode;
   cancelLabel?: string;
+  maxWidthClassName?: string;
 }
 
 /**
@@ -18,12 +19,13 @@ export const BaseModal: React.FC<BaseModalProps> = ({
   title,
   children,
   cancelLabel = 'Cancel',
+  maxWidthClassName = 'max-w-md',
 }) => {
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/15 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-[var(--surface-elevated)] p-4 text-[var(--text-primary)] shadow-[var(--shadow-heavy)] sm:p-6">
+      <div className={`w-full ${maxWidthClassName} rounded-2xl bg-[var(--surface-elevated)] p-4 text-[var(--text-primary)] shadow-[var(--shadow-heavy)] sm:p-6`}>
         <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{title}</h2>
         {children}
         <div className="flex justify-end gap-2 mt-6">
