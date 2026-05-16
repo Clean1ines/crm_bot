@@ -208,6 +208,39 @@ def _actionable_action_summary(action: KnowledgeEditAction) -> JsonObject:
     return summary
 
 
+def _result_summary(result: RagEvalResult) -> JsonObject:
+    retrieved_entry_ids = [
+        str(item) for item in _json_list(result.judge_json.get("retrieved_entry_ids"))
+    ] or [entry.id for entry in result.retrieved_entries]
+    return {
+        "result_id": result.id,
+        "run_id": result.run_id,
+        "question_id": result.question_id,
+        "question": result.question.question,
+        "question_type": result.question.question_type,
+        "expected_entry_ids": list(result.question.expected_entry_ids),
+        "retrieved_entry_ids": _json_value(retrieved_entry_ids),
+        "top1_hit": result.top1_hit,
+        "top3_hit": result.top3_hit,
+        "top5_hit": result.top5_hit,
+        "expected_entry_found": result.expected_entry_found,
+        "wrong_entry_top1": result.wrong_entry_top1,
+        "answer_supported": result.answer_supported,
+        "should_answer_passed": result.should_answer_passed,
+        "hallucination_risk": result.hallucination_risk,
+        "score": result.score,
+        "notes": result.notes,
+        "latency_ms": result.latency_ms,
+        "created_at": result.created_at.isoformat(),
+        "classification": _json_value(result.classification.to_json())
+        if result.classification is not None
+        else None,
+        "proposed_actions": [
+            _actionable_action_summary(action) for action in result.proposed_actions
+        ],
+    }
+
+
 def _actionable_result_summary(result: RagEvalResult) -> JsonObject:
     return {
         "result_id": result.id,
@@ -642,8 +675,11 @@ class RagEvalRepository:
         started_at = row["started_at"]
         finished_at = row["finished_at"]
 
+        run_id = str(row["id"])
+        run_results = await self.load_run_results(run_id=run_id)
+
         return {
-            "id": str(row["id"]),
+            "id": run_id,
             "dataset_id": str(row["dataset_id"]),
             "project_id": str(row["project_id"]),
             "document_id": str(row["document_id"]),
@@ -658,6 +694,7 @@ class RagEvalRepository:
             "reranker_version": str(row["reranker_version"]),
             "generator_model": str(row["generator_model"] or ""),
             "result_count": int(row["result_count"] or 0),
+            "results": [_result_summary(result) for result in run_results],
         }
 
     async def get_latest_ready_dataset_with_questions(

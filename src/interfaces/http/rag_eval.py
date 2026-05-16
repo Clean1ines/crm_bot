@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Annotated, TypedDict, cast
+from typing import Annotated, Literal, TypedDict, cast
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -37,13 +37,25 @@ RAG_EVAL_JUDGE_MAX_TOKENS = 2048
 RAG_EVAL_PROGRESS_PAYLOAD_KEY = "rag_eval_progress"
 RAG_EVAL_CONTROL_PAYLOAD_KEY = "rag_eval_control"
 
+RagEvalModeValue = Literal["retrieval_eval", "answer_quality_eval"]
+
 ModeQuery = Annotated[
     str,
     Query(
-        description="RAG eval mode.",
-        pattern="^(quick|standard|deep|paranoid)$",
+        description=(
+            "RAG eval mode. retrieval_eval is deterministic retrieval coverage; "
+            "answer_quality_eval additionally runs production answer generation and LLM judging."
+        ),
+        pattern="^(quick|standard|deep|paranoid|retrieval_eval|answer_quality_eval)$",
     ),
 ]
+
+
+def _rag_eval_mode_from_query(mode: str) -> RagEvalModeValue:
+    normalized = mode.strip().lower()
+    if normalized == "answer_quality_eval":
+        return "answer_quality_eval"
+    return "retrieval_eval"
 
 
 class DocumentHealth(TypedDict):
@@ -355,6 +367,7 @@ async def enqueue_full_rag_eval_for_document(
         "document_id": resolved_document_id,
         "requested_by": current_user_id,
         "mode": "full_document",
+        "eval_mode": "retrieval_eval",
         "retrieval_limit": 5,
     }
 
@@ -370,13 +383,14 @@ async def enqueue_full_rag_eval_for_document(
         "job_id": job_id,
         "document": health,
         "mode": "full_document",
+        "eval_mode": "retrieval_eval",
     }
 
 
 @router.post("/documents/{document_id}/run")
 async def run_rag_eval_for_document(
     document_id: str,
-    mode: ModeQuery = "quick",
+    mode: ModeQuery = "retrieval_eval",
     current_user_id: str = Depends(get_current_user_id),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: ProjectRepository = Depends(get_project_repo),
@@ -407,10 +421,10 @@ async def run_rag_eval_for_document(
             detail="Document has no retrieval surface entries",
         )
 
+    eval_mode = _rag_eval_mode_from_query(mode)
+
     # Lazy imports keep plain FastAPI app import light.
-    # These runtime dependencies pull the agent graph stack, including langgraph.
     from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
-    from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
     from src.application.rag_eval.reporter import RagQualityReporter
     from src.application.rag_eval.runner import RagEvalRunner
     from src.application.rag_eval.service import RagEvalService
@@ -424,7 +438,6 @@ async def run_rag_eval_for_document(
         GroqRagEvalJsonLlmAdapter,
         RagServiceRagEvalRetriever,
     )
-    from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswerer
 
     knowledge_repo = KnowledgeRepository(pool)
     rag_service = RAGService(
@@ -437,22 +450,34 @@ async def run_rag_eval_for_document(
         model=RAG_EVAL_QUESTION_MODEL,
         max_tokens=RAG_EVAL_QUESTION_MAX_TOKENS,
     )
-    judge_llm = GroqRagEvalJsonLlmAdapter(
-        model=RAG_EVAL_JUDGE_MODEL,
-        max_tokens=RAG_EVAL_JUDGE_MAX_TOKENS,
-    )
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=question_llm,
         model_name=RAG_EVAL_QUESTION_MODEL,
     )
-    answer_judge = LlmRagEvalAnswerJudge(llm=judge_llm)
 
-    runner = RagEvalRunner(
-        retriever=RagServiceRagEvalRetriever(rag_service),
-        answerer=ProductionRagEvalAnswerer(),
-        answer_judge=answer_judge,
-        retrieval_limit=5,
-    )
+    if eval_mode == "answer_quality_eval":
+        from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
+        from src.interfaces.composition.rag_eval_answerer import (
+            ProductionRagEvalAnswerer,
+        )
+
+        judge_llm = GroqRagEvalJsonLlmAdapter(
+            model=RAG_EVAL_JUDGE_MODEL,
+            max_tokens=RAG_EVAL_JUDGE_MAX_TOKENS,
+        )
+        runner = RagEvalRunner(
+            retriever=RagServiceRagEvalRetriever(rag_service),
+            answerer=ProductionRagEvalAnswerer(),
+            answer_judge=LlmRagEvalAnswerJudge(llm=judge_llm),
+            mode=eval_mode,
+            retrieval_limit=5,
+        )
+    else:
+        runner = RagEvalRunner(
+            retriever=RagServiceRagEvalRetriever(rag_service),
+            mode=eval_mode,
+            retrieval_limit=5,
+        )
 
     service = RagEvalService(
         entry_source=rag_eval_repo,
@@ -471,7 +496,7 @@ async def run_rag_eval_for_document(
     return {
         "ok": True,
         "document": health,
-        "mode": mode,
+        "mode": eval_mode,
         "dataset_id": run.dataset_id,
         "run_id": run.id,
         "questions": len(run.results),

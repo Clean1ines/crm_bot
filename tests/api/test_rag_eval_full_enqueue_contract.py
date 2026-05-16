@@ -82,6 +82,7 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
     assert response["queued"] is True
     assert response["job_id"] == "job-1"
     assert response["mode"] == "full_document"
+    assert response["eval_mode"] == "retrieval_eval"
     assert "target_questions" not in response
 
     queue_repo.enqueue.assert_awaited_once()
@@ -91,6 +92,7 @@ async def test_enqueue_full_rag_eval_queues_full_document_job(
     task_type, payload = awaited.args[:2]
     assert task_type == TASK_RUN_FULL_RAG_EVAL
     assert payload["mode"] == "full_document"
+    assert payload["eval_mode"] == "retrieval_eval"
     assert payload["document_id"] == "00000000-0000-0000-0000-000000000002"
     legacy_density_key = "questions" + "_per_chunk"
     assert legacy_density_key not in payload
