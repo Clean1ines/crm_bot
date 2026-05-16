@@ -575,6 +575,10 @@ class KnowledgeService:
             else {}
         )
         semantic_metrics = _semantic_merge_metrics(document_metrics)
+        if not semantic_metrics:
+            retighten_value = document_metrics.get("semantic_retightening")
+            if isinstance(retighten_value, Mapping):
+                semantic_metrics = dict(retighten_value)
         current_stage = str(document_metrics.get("stage") or "")
         semantic_status = _semantic_merge_report_status(
             semantic_metrics,
@@ -654,6 +658,27 @@ class KnowledgeService:
         )
 
         metrics: JsonObject = {
+            "source_chunk_count": _json_int_metric(
+                document_metrics,
+                "source_chunk_count",
+            ),
+            "raw_source_chunk_count": _json_int_metric(
+                document_metrics,
+                "raw_source_chunk_count",
+            ),
+            "markdown_semantic_units_total": _json_int_metric(
+                document_metrics,
+                "markdown_semantic_units_total",
+            ),
+            "markdown_child_sections_total": _json_int_metric(
+                document_metrics,
+                "markdown_child_sections_total",
+            ),
+            "canonical_entry_count": (
+                _json_int_metric(document_metrics, "canonical_entry_count")
+                or document.chunk_count
+            ),
+            "retrieval_surface_entry_count": document.structured_entries,
             "batch_total": batch_total,
             "batch_completed": batch_completed,
             "batch_failed": batch_failed,
