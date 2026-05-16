@@ -154,12 +154,28 @@ class KnowledgeSemanticMergeGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgeSemanticMergeCanonicalCard:
+    title: str
+    canonical_question: str
+    answer: str
+    questions: tuple[str, ...] = field(default_factory=tuple)
+    synonyms: tuple[str, ...] = field(default_factory=tuple)
+    tags: tuple[str, ...] = field(default_factory=tuple)
+    source_ref_ids: tuple[str, ...] = field(default_factory=tuple)
+    source_chunk_indexes: tuple[int, ...] = field(default_factory=tuple)
+    publishable: bool = True
+    publishable_reason: str = ""
+    publishable_classification: str = "publishable_customer_answer"
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeSemanticMergeDecision:
     group_id: str
     action: SemanticMergeAction
     candidate_ids: tuple[str, ...]
     survivor_title: str = ""
     merged_embedding_text: str = ""
+    canonical_card: KnowledgeSemanticMergeCanonicalCard | None = None
 
     @property
     def is_merge(self) -> bool:
@@ -322,6 +338,72 @@ def parse_semantic_merge_tightening_payload(
     )
 
 
+def _semantic_merge_int_tuple(value: object) -> tuple[int, ...]:
+    raw_values: tuple[object, ...]
+    if isinstance(value, list | tuple):
+        raw_values = tuple(value)
+    else:
+        raw_values = (value,)
+
+    result: list[int] = []
+    for item in raw_values:
+        parsed: int | None = None
+        if isinstance(item, bool) or item is None:
+            parsed = None
+        elif isinstance(item, int):
+            parsed = item
+        elif isinstance(item, float) and item.is_integer():
+            parsed = int(item)
+        elif isinstance(item, str) and item.strip().isdigit():
+            parsed = int(item.strip())
+        if parsed is not None and parsed not in result:
+            result.append(parsed)
+    return tuple(result)
+
+
+def _parse_semantic_merge_canonical_card(
+    payload: object,
+    *,
+    index: int,
+) -> KnowledgeSemanticMergeCanonicalCard | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, Mapping):
+        raise KnowledgePreprocessingValidationError(
+            f"Semantic merge decision {index} canonical_card must be an object"
+        )
+
+    publishable = payload.get("publishable")
+    if publishable is None:
+        publishable = True
+    if not isinstance(publishable, bool):
+        raise KnowledgePreprocessingValidationError(
+            f"Semantic merge decision {index} canonical_card.publishable must be boolean"
+        )
+
+    classification = _optional_text(payload.get("publishable_classification"))
+    if not classification:
+        classification = (
+            "publishable_customer_answer" if publishable else "not_enough_evidence"
+        )
+
+    return KnowledgeSemanticMergeCanonicalCard(
+        title=_optional_text(payload.get("title")),
+        canonical_question=_optional_text(payload.get("canonical_question")),
+        answer=_optional_text(payload.get("answer")),
+        questions=tuple(_string_list(payload.get("questions"))),
+        synonyms=tuple(_string_list(payload.get("synonyms"))),
+        tags=tuple(_string_list(payload.get("tags"))),
+        source_ref_ids=tuple(_string_list(payload.get("source_ref_ids"))),
+        source_chunk_indexes=_semantic_merge_int_tuple(
+            payload.get("source_chunk_indexes")
+        ),
+        publishable=publishable,
+        publishable_reason=_optional_text(payload.get("publishable_reason")),
+        publishable_classification=classification,
+    )
+
+
 def _parse_semantic_merge_decision(
     payload: Mapping[object, object],
     *,
@@ -339,8 +421,22 @@ def _parse_semantic_merge_decision(
 
     survivor_title = _optional_text(payload.get("survivor_title"))
     merged_embedding_text = _optional_text(payload.get("merged_embedding_text"))
+    canonical_card = _parse_semantic_merge_canonical_card(
+        payload.get("canonical_card"),
+        index=index,
+    )
 
-    if action == SEMANTIC_MERGE_ACTION_MERGE:
+    if canonical_card is not None and canonical_card.publishable:
+        if not canonical_card.title:
+            raise KnowledgePreprocessingValidationError(
+                f"Semantic merge decision {index} canonical_card missing title"
+            )
+        if not canonical_card.answer:
+            raise KnowledgePreprocessingValidationError(
+                f"Semantic merge decision {index} canonical_card missing answer"
+            )
+
+    if action == SEMANTIC_MERGE_ACTION_MERGE and canonical_card is None:
         if len(candidate_ids) < 2:
             raise KnowledgePreprocessingValidationError(
                 f"Semantic merge decision {index} must merge at least 2 candidates"
@@ -365,6 +461,7 @@ def _parse_semantic_merge_decision(
         candidate_ids=candidate_ids,
         survivor_title=survivor_title,
         merged_embedding_text=merged_embedding_text,
+        canonical_card=canonical_card,
     )
 
 

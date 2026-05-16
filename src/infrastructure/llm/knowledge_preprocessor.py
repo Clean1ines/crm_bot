@@ -373,7 +373,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "- Do not use embedding_text as the primary identity signal; it is only retrieval helper text.\n"
             "- Merge only when the same user information need should retrieve one consolidated canonical answer.\n"
             "- Keep separate when candidates are related but answer different intents, constraints, audiences, operations, policies, or stages.\n"
-            "- Shared words such as assistant, business, manager, request, client, CRM or bot are never enough to merge.\n"
+            "- Shared generic vocabulary is never enough to merge.\n"
             "- Groups are pairwise by design: compare the two candidates directly, not by broad topic similarity.\n\n"
             "Schema:\n"
             "{\n"
@@ -383,13 +383,29 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             '      "action": "merge | keep_separate",\n'
             '      "candidate_ids": ["..."],\n'
             '      "survivor_title": "...",\n'
-            '      "merged_embedding_text": "..."\n'
+            '      "merged_embedding_text": "...",\n'
+            '      "canonical_card": {\n'
+            '        "title": "...",\n'
+            '        "canonical_question": "...",\n'
+            '        "answer": "...",\n'
+            '        "questions": ["..."],\n'
+            '        "synonyms": ["..."],\n'
+            '        "tags": ["..."],\n'
+            '        "source_ref_ids": ["..."],\n'
+            '        "source_chunk_indexes": [0],\n'
+            '        "publishable": true,\n'
+            '        "publishable_classification": "publishable_customer_answer | assistant_behavior_rule | internal_instruction | eval_or_test_item | not_enough_evidence | noisy_or_non_answer",\n'
+            '        "publishable_reason": "..."\n'
+            "      }\n"
             "    }\n"
             "  ]\n"
             "}\n\n"
             "Rules for action=merge:\n"
             "- candidate_ids MUST contain all candidates being collapsed.\n"
             "- survivor_title MUST be exactly one concise canonical title.\n"
+            "- canonical_card MUST contain one synthesized customer-facing card for the shared intent.\n"
+            "- canonical_card.answer MUST be synthesis, not concatenation.\n"
+            "- publishable_classification MUST be one of the listed labels; publishable must be true only for publishable_customer_answer.\n"
             "- merged_embedding_text MUST be a compact replacement canonical retrieval text for the shared user question/intent.\n"
             "- Do NOT concatenate candidate answers or candidate embedding_text values.\n"
             "- Do NOT append old answer + new answer; return one compressed replacement.\n"
@@ -401,9 +417,10 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "- Do not invent facts.\n\n"
             "Rules for action=keep_separate:\n"
             "- Use when candidates are related but not the same answer intent / stable information need.\n"
-            "- In particular, keep separate price vs onboarding, refund vs handoff, audience vs product description, CRM integration vs generic product, availability vs dialog history.\n"
+            "- Keep separate when the requested outcome, condition, audience, operation, or policy differs.\n"
             "- candidate_ids MUST contain the candidates considered for that decision.\n"
-            "- survivor_title and merged_embedding_text MAY be empty.\n\n"
+            "- survivor_title and merged_embedding_text MAY be empty.\n"
+            "- canonical_card MAY classify a group as non-publishable when it is not a customer answer.\n\n"
             "Project-level title context:\n"
             "- existing_project_titles are already published project answers.\n"
             "- Prefer a survivor_title compatible with an existing project title when the meaning is the same.\n"
@@ -411,7 +428,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "STRICT OUTPUT CONTRACT:\n"
             "- Return exactly one JSON object.\n"
             "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n"
-            "- Do not return markdown, explanation, entries[], source refs, or full answers.\n\n"
+            "- Do not return markdown, explanation, entries[], or free-form text outside schema.\n\n"
             "NOW PROCESS THIS JSON. Return ONLY the JSON result:\n"
             f"{json.dumps(merge_payload, ensure_ascii=False)}"
         )

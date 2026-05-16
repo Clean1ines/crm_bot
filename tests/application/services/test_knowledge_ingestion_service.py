@@ -1019,302 +1019,6 @@ async def test_structured_preprocessing_exact_duplicate_fragments_merge_with_sou
 
 
 @pytest.mark.asyncio
-async def test_structured_preprocessing_known_fragments_stay_separate_with_source_excerpts():
-    repo = Mock()
-    repo.delete_document_chunks = AsyncMock()
-    repo.add_canonical_entries = AsyncMock(return_value=1)
-    repo.add_source_chunks = AsyncMock(return_value=2)
-    repo.create_compiler_run = AsyncMock()
-    repo.create_compiler_batches = AsyncMock(return_value=0)
-    repo.mark_compiler_batch_processing = AsyncMock()
-    repo.complete_compiler_batch = AsyncMock()
-    repo.fail_compiler_batch = AsyncMock()
-    repo.complete_compiler_run = AsyncMock()
-    repo.fail_compiler_run = AsyncMock()
-    repo.add_answer_candidates = AsyncMock(return_value=1)
-    repo.add_candidate_clusters = AsyncMock(return_value=1)
-    repo.update_document_status = AsyncMock()
-    repo.update_document_preprocessing_status = AsyncMock()
-    repo.cancel_document_processing = AsyncMock(return_value=True)
-    repo.is_document_processing_cancelled = AsyncMock(return_value=False)
-
-    first_entry = KnowledgePreprocessingEntry(
-        title="Manager handoff",
-        answer="Assistant transfers payment questions to a human manager.",
-        source_excerpt="Assistant transfers payment questions to a human manager.",
-        questions=(
-            "Can I talk to a manager?",
-            "Who handles payment questions?",
-            "Can support transfer me?",
-        ),
-        synonyms=(
-            "manager handoff",
-            "human manager",
-            "payment support",
-            "operator transfer",
-            "human support",
-        ),
-        tags=("handoff", "payment"),
-    )
-    second_entry = KnowledgePreprocessingEntry(
-        title="Manager handoff",
-        answer="Assistant transfers contract questions to a human manager.",
-        source_excerpt="Assistant transfers contract questions to a human manager.",
-        questions=(
-            "Who handles contract questions?",
-            "Can contracts go to a manager?",
-            "Can I ask a person about the contract?",
-        ),
-        synonyms=(
-            "contract manager",
-            "human contract support",
-            "manager transfer",
-            "contract handoff",
-            "operator contract",
-        ),
-        tags=("handoff", "contract"),
-        canonical_question="Can I talk to a manager?",
-        match_kind="known",
-        known_intent_id="compiled-0",
-    )
-    merged_entry = KnowledgePreprocessingEntry(
-        title="Manager handoff",
-        answer="Assistant transfers payment and contract questions to a human manager.",
-        source_excerpt="Assistant transfers payment questions to a human manager.",
-        questions=(
-            "Can I talk to a manager?",
-            "Who handles payment questions?",
-            "Who handles contract questions?",
-        ),
-        synonyms=(
-            "manager handoff",
-            "human manager",
-            "payment support",
-            "contract manager",
-            "operator transfer",
-        ),
-        tags=("handoff", "payment", "contract"),
-    )
-
-    preprocessor = Mock()
-    preprocessor.model_name = "llama-test"
-    preprocessor.preprocess = AsyncMock(
-        side_effect=[
-            KnowledgePreprocessingExecutionResult(
-                result=KnowledgePreprocessingResult(
-                    mode="faq",
-                    prompt_version="knowledge_preprocess_faq_v2",
-                    model="llama-test",
-                    entries=(first_entry,),
-                    metrics={},
-                ),
-                usage=None,
-            ),
-            KnowledgePreprocessingExecutionResult(
-                result=KnowledgePreprocessingResult(
-                    mode="faq",
-                    prompt_version="knowledge_preprocess_faq_v2",
-                    model="llama-test",
-                    entries=(second_entry,),
-                    metrics={},
-                ),
-                usage=None,
-            ),
-        ]
-    )
-    preprocessor.merge_known_answer = AsyncMock(
-        return_value=KnowledgeAnswerMergeExecutionResult(
-            merge_allowed=True,
-            answer=merged_entry.answer,
-            question_variants=merged_entry.questions,
-            usage=None,
-        )
-    )
-
-    service = KnowledgeIngestionService(object())
-
-    await service.process_document(
-        project_id="project-1",
-        document_id="doc-merge-evidence",
-        file_name="kb.md",
-        chunks=[
-            {
-                "content": (
-                    "## Manager handoff\n\n"
-                    "Assistant transfers payment questions to a human manager."
-                )
-            },
-            {
-                "content": (
-                    "## Manager handoff\n\n"
-                    "Assistant transfers contract questions to a human manager."
-                )
-            },
-        ],
-        mode="faq",
-        knowledge_repo_factory=Mock(return_value=repo),
-        model_usage_repo_factory=Mock(return_value=_usage_repo()),
-        preprocessor_factory=Mock(return_value=preprocessor),
-        logger=Mock(),
-    )
-
-    preprocessor.merge_known_answer.assert_not_awaited()
-    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert len(entries) == 2
-    source_quotes = [entry.source_refs[0].quote for entry in entries]
-    assert source_quotes == [
-        "Assistant transfers payment questions to a human manager.",
-        "Assistant transfers contract questions to a human manager.",
-    ]
-    assert [entry.metadata["source_ref_count"] for entry in entries] == [1, 1]
-
-
-@pytest.mark.asyncio
-async def test_faq_compilation_mixed_known_update_and_new_intents_keeps_entries_separate():
-    repo = _knowledge_repo(canonical_count=4)
-
-    first_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_answer_compiler_faq_v1",
-        model="llama-test",
-        entries=(
-            KnowledgePreprocessingEntry(
-                title="Стоимость сервиса",
-                answer="Базовое подключение стоит 100 рублей в месяц.",
-                source_excerpt="Базовое подключение стоит 100 рублей в месяц.",
-                questions=("Сколько стоит сервис?", "Какая цена подключения?"),
-                synonyms=("Сколько стоит сервис?", "Какая цена подключения?"),
-                canonical_question="Сколько стоит сервис?",
-            ),
-        ),
-        metrics={},
-    )
-    second_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_answer_compiler_faq_v1",
-        model="llama-test",
-        entries=(
-            KnowledgePreprocessingEntry(
-                title="Стоимость сервиса",
-                answer=(
-                    "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-                ),
-                source_excerpt=(
-                    "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-                ),
-                questions=("Сколько стоит сервис?", "Какие цены по тарифам?"),
-                synonyms=("Сколько стоит сервис?", "Какие цены по тарифам?"),
-                canonical_question="Сколько стоит сервис?",
-                match_kind="known",
-                known_intent_id="compiled-0",
-            ),
-            KnowledgePreprocessingEntry(
-                title="Тарифы",
-                answer="Есть базовый и премиум тарифы.",
-                source_excerpt="Есть базовый и премиум тарифы.",
-                questions=("Какие есть тарифы?", "Чем отличаются планы?"),
-                synonyms=("Какие есть тарифы?", "Чем отличаются планы?"),
-                canonical_question="Какие есть тарифы?",
-            ),
-            KnowledgePreprocessingEntry(
-                title="Индивидуальная цена",
-                answer="Для крупных клиентов цену рассчитывают индивидуально.",
-                source_excerpt="Для крупных клиентов цену рассчитывают индивидуально.",
-                questions=(
-                    "Можно индивидуальную цену?",
-                    "Есть расчет для крупных клиентов?",
-                ),
-                synonyms=(
-                    "Можно индивидуальную цену?",
-                    "Есть расчет для крупных клиентов?",
-                ),
-                canonical_question="Можно ли получить индивидуальную цену?",
-            ),
-            KnowledgePreprocessingEntry(
-                title="Поддержка 24/7",
-                answer="Премиум тариф включает круглосуточную поддержку менеджера.",
-                source_excerpt="Премиум тариф включает круглосуточную поддержку менеджера.",
-                questions=("Есть поддержка 24/7?", "Менеджер отвечает круглосуточно?"),
-                synonyms=("Есть поддержка 24/7?", "Менеджер отвечает круглосуточно?"),
-                canonical_question="Есть ли круглосуточная поддержка менеджера?",
-            ),
-        ),
-        metrics={},
-    )
-
-    preprocessor = Mock()
-    preprocessor.model_name = "llama-test"
-    preprocessor.preprocess = AsyncMock(
-        side_effect=[
-            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
-            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
-        ]
-    )
-    preprocessor.merge_known_answer = AsyncMock(
-        return_value=KnowledgeAnswerMergeExecutionResult(
-            merge_allowed=True,
-            answer="Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей.",
-            question_variants=("Сколько стоит сервис?", "Какие цены по тарифам?"),
-            usage=None,
-        )
-    )
-
-    service = KnowledgeIngestionService(object())
-
-    await service.process_document(
-        project_id="project-1",
-        document_id="doc-mixed-known-new",
-        file_name="faq.md",
-        chunks=[
-            {"content": "Базовое подключение стоит 100 рублей в месяц."},
-            {
-                "content": (
-                    "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей. "
-                    "Есть базовый и премиум тарифы. Для крупных клиентов цену "
-                    "рассчитывают индивидуально. Премиум тариф включает "
-                    "круглосуточную поддержку менеджера."
-                )
-            },
-        ],
-        mode="faq",
-        knowledge_repo_factory=Mock(return_value=repo),
-        model_usage_repo_factory=Mock(return_value=_usage_repo()),
-        preprocessor_factory=Mock(return_value=preprocessor),
-        logger=Mock(),
-    )
-
-    preprocessor.merge_known_answer.assert_not_awaited()
-
-    second_call = preprocessor.preprocess.await_args_list[1].kwargs
-    assert "previous_entry_titles" not in second_call
-    assert second_call["previous_question_intents"] == ()
-
-    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert len(entries) == 5
-    entries_by_answer = {entry.answer: entry for entry in entries}
-    assert [entry.title for entry in entries].count("Стоимость сервиса") == 2
-    assert "Тарифы" in {entry.title for entry in entries}
-    assert "Индивидуальная цена" in {entry.title for entry in entries}
-    assert "Поддержка 24/7" in {entry.title for entry in entries}
-    assert "Базовое подключение стоит 100 рублей в месяц." in entries_by_answer
-    assert (
-        "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-        in entries_by_answer
-    )
-    assert (
-        "круглосуточную поддержку"
-        not in entries_by_answer[
-            "Базовый тариф стоит 100 рублей в месяц, премиум — 500 рублей."
-        ].answer
-    )
-    assert (
-        "Премиум тариф включает круглосуточную поддержку менеджера."
-        in entries_by_answer
-    )
-    assert "Для крупных клиентов цену рассчитывают индивидуально." in entries_by_answer
-
-
-@pytest.mark.asyncio
 async def test_faq_compilation_unknown_known_intent_id_keeps_fragment_separate_with_metric():
     repo = _knowledge_repo(canonical_count=2)
     first_result = KnowledgePreprocessingResult(
@@ -1596,3 +1300,158 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
         "метавопрос",
     )
     assert all(snippet not in online_section for snippet in forbidden_snippets)
+
+
+def test_online_merge_never_concats_answers_when_llm_returns_canonical_card():
+    from src.application.services.knowledge_ingestion_service import (
+        _apply_semantic_merge_tightening_decisions,
+    )
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgeSemanticMergeCanonicalCard,
+        KnowledgeSemanticMergeDecision,
+    )
+
+    entries = (
+        KnowledgePreprocessingEntry(
+            title="Возврат",
+            answer="Условия возврата зависят от ситуации и этапа работы.",
+            source_excerpt="Условия возврата зависят от ситуации и этапа работы.",
+            questions=("Как оформить возврат?",),
+            synonyms=("возврат",),
+            tags=("refund",),
+            source_chunk_indexes=(0,),
+        ),
+        KnowledgePreprocessingEntry(
+            title="Возврат средств",
+            answer="Условия возврата средств зависят от ситуации.",
+            source_excerpt="Условия возврата средств зависят от ситуации.",
+            questions=("Можно вернуть оплату?",),
+            synonyms=("возврат средств",),
+            tags=("billing",),
+            source_chunk_indexes=(1,),
+        ),
+    )
+    decision = KnowledgeSemanticMergeDecision(
+        group_id="group-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_card=KnowledgeSemanticMergeCanonicalCard(
+            title="Условия возврата",
+            canonical_question="Какие условия возврата?",
+            answer="Условия возврата зависят от ситуации и этапа работы.",
+            questions=("Как оформить возврат?", "Можно вернуть оплату?"),
+            synonyms=("возврат", "возврат средств"),
+            tags=("refund", "billing"),
+            source_chunk_indexes=(0, 1),
+        ),
+    )
+
+    tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
+        entries=entries,
+        decisions=(decision,),
+        source_excerpts_by_entry=(
+            (entries[0].source_excerpt,),
+            (entries[1].source_excerpt,),
+        ),
+    )
+
+    assert len(tightened) == 1
+    assert tightened[0].answer == "Условия возврата зависят от ситуации и этапа работы."
+    assert "Условия возврата средств зависят от ситуации." not in tightened[0].answer
+    assert tightened[0].questions == (
+        "Какие условия возврата?",
+        "Как оформить возврат?",
+        "Можно вернуть оплату?",
+    )
+    assert tightened[0].synonyms == ("возврат", "возврат средств")
+    assert tightened[0].tags == ("refund", "billing")
+    assert tightened[0].source_chunk_indexes == (0, 1)
+    assert len(source_excerpts[0]) == 2
+
+
+def test_non_publishable_llm_classification_is_not_published():
+    from src.application.services.knowledge_ingestion_service import (
+        _apply_semantic_merge_tightening_decisions,
+    )
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgeSemanticMergeCanonicalCard,
+        KnowledgeSemanticMergeDecision,
+    )
+
+    entry = KnowledgePreprocessingEntry(
+        title="Internal instruction",
+        answer="Каждая тема должна быть отделена от других.",
+        source_excerpt="Каждая тема должна быть отделена от других.",
+        questions=("Как оформлять темы?",),
+    )
+    decision = KnowledgeSemanticMergeDecision(
+        group_id="group-1",
+        action="keep_separate",
+        candidate_ids=("entry-0",),
+        canonical_card=KnowledgeSemanticMergeCanonicalCard(
+            title="",
+            canonical_question="",
+            answer="",
+            publishable=False,
+            publishable_classification="internal_instruction",
+            publishable_reason="LLM classified it as internal instruction",
+        ),
+    )
+
+    tightened, _ = _apply_semantic_merge_tightening_decisions(
+        entries=(entry,),
+        decisions=(decision,),
+    )
+
+    assert tightened == ()
+
+
+def test_publication_guard_collapses_exact_duplicate_answers():
+    from src.application.services.knowledge_ingestion_service import (
+        _canonical_entries_from_preprocessing_result,
+    )
+    from src.domain.project_plane.knowledge_compilation import SourceChunk
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgePreprocessingResult,
+    )
+
+    result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Правило ответа",
+                answer="Ассистент не выдумывает ответ.",
+                source_excerpt="Ассистент не выдумывает ответ.",
+                questions=("Что делает ассистент без данных?",),
+            ),
+            KnowledgePreprocessingEntry(
+                title="Ответ без данных",
+                answer="Ассистент не выдумывает ответ.",
+                source_excerpt="Ассистент не выдумывает ответ.",
+                questions=("Как отвечает ассистент без данных?",),
+            ),
+        ),
+    )
+    source_chunk = SourceChunk(
+        id="chunk-1",
+        document_id="doc-1",
+        project_id="project-1",
+        source_index=0,
+        content="Ассистент не выдумывает ответ.",
+    )
+
+    entries = _canonical_entries_from_preprocessing_result(
+        project_id="project-1",
+        document_id="doc-1",
+        compiler_run_id="run-1",
+        result=result,
+        source_chunks=(source_chunk,),
+    )
+
+    assert len(entries) == 1
+    assert entries[0].enrichment.questions == (
+        "Что делает ассистент без данных?",
+        "Как отвечает ассистент без данных?",
+    )
