@@ -1270,6 +1270,10 @@ def _merge_answer_text(left: str, right: str) -> str:
     if left_normalized and left_normalized in right_normalized:
         return right_clean
 
+    unit_merge = _merge_answer_units_deterministically(left_clean, right_clean)
+    if unit_merge is not None:
+        return _cleanup_semantic_merge_embedding_text(unit_merge.answer)
+
     return _cleanup_semantic_merge_embedding_text(f"{left_clean}\n\n{right_clean}")
 
 
@@ -1751,6 +1755,22 @@ def _mechanically_cleanup_compiled_entries(
             source_fingerprint,
         )
         existing_index = index_by_exact_key.get(exact_key)
+        deterministic_reason = (
+            "exact_candidate_key" if existing_index is not None else ""
+        )
+
+        if existing_index is None:
+            for candidate_index, existing_entry in enumerate(retained_entries):
+                reason = _retighten_deterministic_duplicate_reason(
+                    existing_entry,
+                    entry,
+                )
+                if reason is None:
+                    continue
+                existing_index = candidate_index
+                deterministic_reason = reason
+                break
+
         if existing_index is None:
             index_by_exact_key[exact_key] = len(retained_entries)
             retained_entries.append(entry)
@@ -1759,33 +1779,26 @@ def _mechanically_cleanup_compiled_entries(
             continue
 
         existing_entry = retained_entries[existing_index]
-        merged_questions = _merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.questions),
-            _text_tuple(entry.questions),
-            limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
-        )
-        merged_synonyms = _merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.synonyms),
-            _text_tuple(entry.synonyms),
-            limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
-        )
-        merged_tags = _merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.tags),
-            _text_tuple(entry.tags),
-            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
-        )
-        retained_entries[existing_index] = replace(
-            existing_entry,
-            questions=merged_questions,
-            synonyms=merged_synonyms,
-            tags=merged_tags,
-        )
+        if deterministic_reason == "exact_candidate_key":
+            merged_entry = _merge_entry_fields_deterministically(
+                existing_entry=existing_entry,
+                incoming_entry=entry,
+                merged_answer=existing_entry.answer,
+            )
+            exact_duplicate_candidate_collapse_count += 1
+        else:
+            merged_entry = _retighten_merge_entries_deterministically(
+                existing_entry=existing_entry,
+                incoming_entry=entry,
+                reason=deterministic_reason,
+            )
+
+        retained_entries[existing_index] = merged_entry
         retained_source_excerpts[existing_index] = _merge_text_tuple_values(
             retained_source_excerpts[existing_index],
             entry_source_excerpts,
         )
         retained_merged_entry_counts[existing_index] += 1
-        exact_duplicate_candidate_collapse_count += 1
 
     metrics: JsonObject = {
         "deduped_question_variant_count": deduped_question_variant_count,
@@ -1793,6 +1806,9 @@ def _mechanically_cleanup_compiled_entries(
         "deduped_tag_count": deduped_tag_count,
         "exact_duplicate_candidate_collapse_count": (
             exact_duplicate_candidate_collapse_count
+        ),
+        "deterministic_candidate_collapse_count": (
+            len(entries) - len(retained_entries)
         ),
         "deterministic_cleanup_entry_count_before": len(entries),
         "deterministic_cleanup_entry_count_after": len(retained_entries),
@@ -1843,6 +1859,133 @@ def _semantic_merge_text_units(value: str) -> tuple[str, ...]:
     units = re.split(r"(?<=[.!?])\s+|[\n;]+", compact)
     return tuple(
         _clean_optional_text(unit) for unit in units if _clean_optional_text(unit)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _DeterministicAnswerUnitMergeResult:
+    answer: str
+    strategy: str
+    left_unit_count: int
+    right_unit_count: int
+    merged_unit_count: int
+    overlap_unit_count: int
+
+
+def _answer_unit_fingerprint(value: str) -> str:
+    return _semantic_merge_text_fingerprint(value)
+
+
+def _answer_units_by_fingerprint(value: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for unit in _semantic_merge_text_units(value):
+        fingerprint = _answer_unit_fingerprint(unit)
+        if fingerprint and fingerprint not in result:
+            result[fingerprint] = unit
+    return result
+
+
+def _merge_answer_units_deterministically(
+    left: str,
+    right: str,
+    *,
+    allow_disjoint_union: bool = False,
+) -> _DeterministicAnswerUnitMergeResult | None:
+    """Merge authoritative answer text by atomic-ish answer units.
+
+    This is deterministic-first canonicalization. It does not decide semantic
+    paraphrase equivalence; it only handles exact unit equality, subset/superset,
+    exact overlap union, and same-intent complementary union when the caller has
+    already proven same question-intent.
+    """
+
+    left_units = _answer_units_by_fingerprint(left)
+    right_units = _answer_units_by_fingerprint(right)
+    left_keys = set(left_units)
+    right_keys = set(right_units)
+
+    if not left_keys or not right_keys:
+        return None
+
+    if left_keys == right_keys:
+        return _DeterministicAnswerUnitMergeResult(
+            answer=_clean_optional_text(left),
+            strategy="exact_answer_units",
+            left_unit_count=len(left_keys),
+            right_unit_count=len(right_keys),
+            merged_unit_count=len(left_keys),
+            overlap_unit_count=len(left_keys),
+        )
+
+    if left_keys < right_keys:
+        return _DeterministicAnswerUnitMergeResult(
+            answer=_clean_optional_text(right),
+            strategy="answer_unit_subset_superset",
+            left_unit_count=len(left_keys),
+            right_unit_count=len(right_keys),
+            merged_unit_count=len(right_keys),
+            overlap_unit_count=len(left_keys & right_keys),
+        )
+
+    if right_keys < left_keys:
+        return _DeterministicAnswerUnitMergeResult(
+            answer=_clean_optional_text(left),
+            strategy="answer_unit_subset_superset",
+            left_unit_count=len(left_keys),
+            right_unit_count=len(right_keys),
+            merged_unit_count=len(left_keys),
+            overlap_unit_count=len(left_keys & right_keys),
+        )
+
+    overlap = left_keys & right_keys
+    if not overlap and not allow_disjoint_union:
+        return None
+
+    merged_units: list[str] = list(left_units.values())
+    for fingerprint, unit in right_units.items():
+        if fingerprint not in left_keys:
+            merged_units.append(unit)
+
+    strategy = (
+        "same_intent_complementary_answer_unit_union"
+        if not overlap
+        else "answer_unit_overlap_union"
+    )
+    return _DeterministicAnswerUnitMergeResult(
+        answer=_clean_optional_text("\n".join(merged_units)),
+        strategy=strategy,
+        left_unit_count=len(left_keys),
+        right_unit_count=len(right_keys),
+        merged_unit_count=len({*left_keys, *right_keys}),
+        overlap_unit_count=len(overlap),
+    )
+
+
+def _entry_question_intent_fingerprints(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for value in (
+        entry.canonical_question,
+        _question_intent_primary_question(entry),
+        *_text_tuple(entry.questions),
+    ):
+        fingerprint = _semantic_merge_text_fingerprint(value)
+        if fingerprint and fingerprint not in values:
+            values.append(fingerprint)
+    return tuple(values)
+
+
+def _entries_have_exact_question_intent(
+    left: KnowledgePreprocessingEntry,
+    right: KnowledgePreprocessingEntry,
+) -> bool:
+    left_fingerprints = set(_entry_question_intent_fingerprints(left))
+    right_fingerprints = set(_entry_question_intent_fingerprints(right))
+    return bool(
+        left_fingerprints
+        and right_fingerprints
+        and left_fingerprints & right_fingerprints
     )
 
 
@@ -1977,16 +2120,15 @@ def _entry_with_semantic_merge_decision(
         )
         questions = _merge_limited_text_tuple_values(
             (card.canonical_question,),
-            _text_tuple(card.questions),
             entry.questions,
             limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
         )
         synonyms = _merge_limited_text_tuple_values(
-            _text_tuple(card.synonyms) or entry.synonyms,
+            entry.synonyms,
             limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
         )
         tags = _merge_limited_text_tuple_values(
-            _text_tuple(card.tags) or entry.tags,
+            entry.tags,
             limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
         )
         compatibility_entry = KnowledgePreprocessingEntry(
@@ -2571,6 +2713,15 @@ def _retighten_deterministic_duplicate_reason(
 
     left_intent = _retighten_entry_intent_fingerprint(left)
     right_intent = _retighten_entry_intent_fingerprint(right)
+    if _entries_have_exact_question_intent(left, right):
+        answer_unit_merge = _merge_answer_units_deterministically(
+            left.answer,
+            right.answer,
+            allow_disjoint_union=True,
+        )
+        if answer_unit_merge is not None:
+            return answer_unit_merge.strategy
+
     if left_intent and right_intent and left_intent == right_intent:
         answer_score = _semantic_merge_token_similarity(
             _semantic_merge_tokens_from_text(left.answer),
@@ -2604,7 +2755,14 @@ def _retighten_merge_entries_deterministically(
     survivor = incoming_entry if incoming_score > existing_score else existing_entry
     absorbed = existing_entry if survivor is incoming_entry else incoming_entry
 
-    if reason == "answer_containment":
+    answer_unit_merge = _merge_answer_units_deterministically(
+        existing_entry.answer,
+        incoming_entry.answer,
+        allow_disjoint_union=reason == "same_intent_complementary_answer_unit_union",
+    )
+    if answer_unit_merge is not None:
+        survivor_answer = answer_unit_merge.answer
+    elif reason == "answer_containment":
         survivor_answer = survivor.answer
     elif _retighten_answer_fingerprint(existing_entry) == _retighten_answer_fingerprint(
         incoming_entry
@@ -2648,6 +2806,9 @@ def _deterministic_retighten_existing_document_plan(
         "deterministic_exact_answer_merge_count": 0,
         "deterministic_exact_intent_merge_count": 0,
         "deterministic_answer_containment_merge_count": 0,
+        "deterministic_answer_unit_subset_merge_count": 0,
+        "deterministic_answer_unit_overlap_merge_count": 0,
+        "deterministic_same_intent_complementary_merge_count": 0,
         "deduped_question_variant_count": 0,
         "deduped_synonym_count": 0,
         "deduped_tag_count": 0,
@@ -2731,6 +2892,26 @@ def _deterministic_retighten_existing_document_plan(
         elif target_reason == "exact_intent_high_answer_overlap":
             metrics["deterministic_exact_intent_merge_count"] = (
                 int(cast(int, metrics["deterministic_exact_intent_merge_count"])) + 1
+            )
+        elif target_reason == "answer_unit_subset_superset":
+            metrics["deterministic_answer_unit_subset_merge_count"] = (
+                int(cast(int, metrics["deterministic_answer_unit_subset_merge_count"]))
+                + 1
+            )
+        elif target_reason == "answer_unit_overlap_union":
+            metrics["deterministic_answer_unit_overlap_merge_count"] = (
+                int(cast(int, metrics["deterministic_answer_unit_overlap_merge_count"]))
+                + 1
+            )
+        elif target_reason == "same_intent_complementary_answer_unit_union":
+            metrics["deterministic_same_intent_complementary_merge_count"] = (
+                int(
+                    cast(
+                        int,
+                        metrics["deterministic_same_intent_complementary_merge_count"],
+                    )
+                )
+                + 1
             )
 
     survivor_set = set(survivor_source_indexes)
