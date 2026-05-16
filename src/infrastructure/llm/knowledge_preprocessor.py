@@ -55,6 +55,30 @@ PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
 FAQ_COMPILER_PROMPT_FILE = "knowledge_answer_compiler_faq.txt"
 ANSWER_MERGE_PROMPT_FILE = "knowledge_answer_merge.txt"
 
+GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
+GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
+GROQ_INSTANT_FREE_TPM_LIMIT = 6000
+
+
+def _estimate_groq_request_tokens(
+    *,
+    prompt: str,
+    max_tokens: int,
+) -> int:
+    """Conservative local estimate for Groq TPM routing.
+
+    Groq rejected the previous document batches because requested tokens
+    exceeded llama-3.1-8b-instant Free TPM. We do not need exact tokenizer
+    parity here; we need a safe preflight budget to route large requests to
+    a model with a larger TPM limit.
+    """
+
+    estimated_input_tokens = max(
+        1,
+        (len(STRICT_JSON_SYSTEM_MESSAGE) + len(prompt) + 2) // 3,
+    )
+    return estimated_input_tokens + max_tokens
+
 
 def _usage_int(value: object) -> int | None:
     if isinstance(value, bool):
@@ -84,6 +108,35 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
     def model_name(self) -> str:
         return self._model
 
+    def _model_for_json_request(
+        self,
+        *,
+        task: str,
+        prompt: str,
+        max_tokens: int,
+    ) -> str:
+        estimated_request_tokens = _estimate_groq_request_tokens(
+            prompt=prompt,
+            max_tokens=max_tokens,
+        )
+        if (
+            self._model == GROQ_INSTANT_MODEL_ID
+            and estimated_request_tokens > GROQ_INSTANT_FREE_TPM_LIMIT
+        ):
+            logger.warning(
+                "Groq request exceeds selected model TPM; using fallback model for this call",
+                extra={
+                    "task": task,
+                    "selected_model": self._model,
+                    "fallback_model": GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
+                    "estimated_request_tokens": estimated_request_tokens,
+                    "selected_model_tpm_limit": GROQ_INSTANT_FREE_TPM_LIMIT,
+                },
+            )
+            return GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID
+
+        return self._model
+
     async def preprocess(
         self,
         *,
@@ -100,34 +153,41 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             previous_question_intents=previous_question_intents,
         )
 
+        max_tokens = 4000
+        request_model = self._model_for_json_request(
+            task="preprocess",
+            prompt=prompt,
+            max_tokens=max_tokens,
+        )
+
         try:
             response = await self._client.chat.completions.create(
-                model=self._model,
+                model=request_model,
                 messages=[
                     {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=4000,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
                 task="preprocess",
                 mode=mode,
-                model=self._model,
+                model=request_model,
                 prompt_version=prompt_version,
                 content=content,
                 response=response,
             )
             result = parse_preprocessing_payload(
-                content, mode=mode, model=self._model, prompt_version=prompt_version
+                content, mode=mode, model=request_model, prompt_version=prompt_version
             )
             return KnowledgePreprocessingExecutionResult(
                 result=result,
                 usage=_response_usage_measurement(
                     response=response,
-                    model=self._model,
+                    model=request_model,
                     prompt=prompt,
                     content=content,
                 ),
@@ -170,22 +230,29 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             incoming_fragment=incoming_fragment,
         )
 
+        max_tokens = 1600
+        request_model = self._model_for_json_request(
+            task="answer_merge",
+            prompt=prompt,
+            max_tokens=max_tokens,
+        )
+
         try:
             response = await self._client.chat.completions.create(
-                model=self._model,
+                model=request_model,
                 messages=[
                     {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=1600,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
                 task="answer_merge",
                 mode=mode,
-                model=self._model,
+                model=request_model,
                 prompt_version=prompt_version,
                 content=content,
                 response=response,
@@ -199,7 +266,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 question_variants=question_variants,
                 usage=_response_usage_measurement(
                     response=response,
-                    model=self._model,
+                    model=request_model,
                     prompt=prompt,
                     content=content,
                 ),
@@ -255,22 +322,29 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             existing_project_titles=existing_project_titles,
         )
 
+        max_tokens = 3000
+        request_model = self._model_for_json_request(
+            task="semantic_merge_tightening",
+            prompt=prompt,
+            max_tokens=max_tokens,
+        )
+
         try:
             response = await self._client.chat.completions.create(
-                model=self._model,
+                model=request_model,
                 messages=[
                     {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
-                max_tokens=3000,
+                max_tokens=max_tokens,
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
                 task="semantic_merge_tightening",
                 mode=mode,
-                model=self._model,
+                model=request_model,
                 prompt_version=prompt_version,
                 content=content,
                 response=response,
@@ -278,14 +352,14 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             result = parse_semantic_merge_tightening_payload(
                 content,
                 mode=mode,
-                model=self._model,
+                model=request_model,
                 prompt_version=prompt_version,
             )
             return KnowledgeSemanticMergeExecutionResult(
                 result=result,
                 usage=_response_usage_measurement(
                     response=response,
-                    model=self._model,
+                    model=request_model,
                     prompt=prompt,
                     content=content,
                 ),
