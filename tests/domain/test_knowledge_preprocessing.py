@@ -9,11 +9,11 @@ from src.domain.project_plane.knowledge_preprocessing import (
     MODE_INSTRUCTION,
     MODE_PRICE_LIST,
     KnowledgePreprocessingValidationError,
-    KnowledgeSemanticMergeCandidate,
-    KnowledgeSemanticMergeGroup,
-    SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
+    KnowledgeAnswerResolutionOption,
+    KnowledgeAnswerResolutionCase,
+    ANSWER_RESOLUTION_PROMPT_VERSION,
     parse_preprocessing_payload,
-    parse_semantic_merge_tightening_payload,
+    parse_answer_resolution_payload,
     prompt_version_for_mode,
 )
 
@@ -114,7 +114,7 @@ def test_parse_preprocessing_payload_accepts_dense_query_surface() -> None:
     assert len(entry.tags) == 2
     assert "Can I get a refund?" in entry.embedding_text
     assert "Refund requests are reviewed" in entry.embedding_text
-    assert "billing" not in entry.embedding_text
+    assert "billing" in entry.embedding_text
 
 
 def test_price_list_still_rejects_broad_noisy_synonyms() -> None:
@@ -161,69 +161,39 @@ def test_parse_preprocessing_payload_rejects_trailing_text_after_json_object() -
         )
 
 
-def test_parse_answer_merge_payload_accepts_minimal_json() -> None:
-    from src.domain.project_plane.knowledge_preprocessing import (
-        parse_answer_merge_payload,
-    )
-
-    merge_allowed, answer, question_variants = parse_answer_merge_payload(
-        '{"merge_allowed":true,"answer":"A+B once","question_variants":["Q?"]}'
-    )
-
-    assert merge_allowed is True
-    assert answer == "A+B once"
-    assert question_variants == ("Q?",)
-
-
-def test_parse_answer_merge_payload_rejects_full_entries_schema() -> None:
-    import pytest
-
-    from src.domain.project_plane.knowledge_preprocessing import (
-        KnowledgePreprocessingValidationError,
-        parse_answer_merge_payload,
-    )
-
-    with pytest.raises(KnowledgePreprocessingValidationError):
-        parse_answer_merge_payload('{"entries":[]}')
-
-
-def test_semantic_merge_group_payload_is_json_serializable() -> None:
-    group = KnowledgeSemanticMergeGroup(
-        group_id="manager_handoff",
-        candidates=(
-            KnowledgeSemanticMergeCandidate(
-                candidate_id="entry-a",
-                title="Передача менеджеру",
+def test_answer_resolution_case_payload_is_json_serializable() -> None:
+    case = KnowledgeAnswerResolutionCase(
+        case_id="manager_handoff",
+        question_intent="handoff",
+        answers=(
+            KnowledgeAnswerResolutionOption(
+                id="entry-a",
                 answer="Ассистент передаёт вопрос менеджеру.",
-                embedding_text="передача менеджеру handoff человек оператор",
-                questions=("Как позвать менеджера?",),
-                synonyms=("передать человеку",),
-                tags=("handoff",),
-                source_ref_count=2,
+                source_excerpt="Ассистент передаёт вопрос менеджеру.",
             ),
         ),
     )
 
-    payload = group.to_payload()
+    payload = case.to_payload()
 
-    assert json.loads(json.dumps(payload, ensure_ascii=False))["group_id"] == (
+    assert json.loads(json.dumps(payload, ensure_ascii=False))["case_id"] == (
         "manager_handoff"
     )
 
 
-def test_parse_semantic_merge_tightening_payload_accepts_merge_decision() -> None:
-    result = parse_semantic_merge_tightening_payload(
+def test_parse_answer_resolution_payload_accepts_merge_decision() -> None:
+    result = parse_answer_resolution_payload(
         {
             "decisions": [
                 {
-                    "group_id": "manager_handoff",
+                    "case_id": "manager_handoff",
                     "action": "merge",
-                    "candidate_ids": ["entry-a", "entry-b"],
-                    "survivor_title": "Передача диалога менеджеру",
-                    "merged_embedding_text": (
+                    "canonical_answer": (
                         "Передача диалога менеджеру, handoff, запрос на человека, "
                         "ассистент не принимает критические решения."
                     ),
+                    "reason": "same answer intent",
+                    "confidence": 0.91,
                 }
             ],
             "metrics": {"source": "unit-test"},
@@ -234,22 +204,22 @@ def test_parse_semantic_merge_tightening_payload_accepts_merge_decision() -> Non
 
     decision = result.decisions[0]
 
-    assert result.prompt_version == SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
+    assert result.prompt_version == ANSWER_RESOLUTION_PROMPT_VERSION
     assert result.metrics["source"] == "unit-test"
     assert decision.is_merge
-    assert decision.candidate_ids == ("entry-a", "entry-b")
-    assert decision.survivor_title == "Передача диалога менеджеру"
-    assert "handoff" in decision.merged_embedding_text
+    assert decision.candidate_ids == ()
+    assert "handoff" in decision.canonical_answer
+    assert decision.reason == "same answer intent"
+    assert decision.confidence == 0.91
 
 
-def test_parse_semantic_merge_tightening_payload_accepts_keep_separate() -> None:
-    result = parse_semantic_merge_tightening_payload(
+def test_parse_answer_resolution_payload_accepts_keep_separate() -> None:
+    result = parse_answer_resolution_payload(
         {
             "decisions": [
                 {
-                    "group_id": "pricing",
+                    "case_id": "pricing",
                     "action": "keep_separate",
-                    "candidate_ids": ["entry-a", "entry-b"],
                 }
             ]
         },
@@ -260,85 +230,24 @@ def test_parse_semantic_merge_tightening_payload_accepts_keep_separate() -> None
     decision = result.decisions[0]
 
     assert not decision.is_merge
-    assert decision.survivor_title == ""
-    assert decision.merged_embedding_text == ""
+    assert decision.canonical_answer == ""
 
 
-def test_parse_semantic_merge_tightening_payload_requires_embedding_for_merge() -> None:
+def test_parse_answer_resolution_payload_requires_canonical_answer_for_merge() -> None:
     with pytest.raises(
         KnowledgePreprocessingValidationError,
-        match="merged_embedding_text",
+        match="canonical_answer",
     ):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
-                        "group_id": "startup",
+                        "case_id": "startup",
                         "action": "merge",
-                        "candidate_ids": ["entry-a", "entry-b"],
-                        "survivor_title": "Что нужно для запуска",
+                        "reason": "missing answer",
                     }
                 ]
             },
             mode=MODE_FAQ,
             model="test-model",
         )
-
-
-def test_parse_semantic_merge_tightening_payload_accepts_canonical_card() -> None:
-    result = parse_semantic_merge_tightening_payload(
-        {
-            "decisions": [
-                {
-                    "group_id": "group-1",
-                    "action": "merge",
-                    "candidate_ids": ["entry-0", "entry-1"],
-                    "canonical_card": {
-                        "title": "Условия возврата",
-                        "canonical_question": "Какие условия возврата?",
-                        "answer": "Условия возврата зависят от ситуации и этапа работы.",
-                        "questions": ["Как оформить возврат?"],
-                        "synonyms": ["возврат средств"],
-                        "tags": ["refund"],
-                        "source_chunk_indexes": [0, "1"],
-                        "publishable": True,
-                        "publishable_classification": "publishable_customer_answer",
-                        "publishable_reason": "grounded customer answer",
-                    },
-                }
-            ]
-        },
-        mode=MODE_FAQ,
-        model="llama-test",
-    )
-
-    decision = result.decisions[0]
-    assert decision.canonical_card is not None
-    assert decision.canonical_card.answer == (
-        "Условия возврата зависят от ситуации и этапа работы."
-    )
-    assert decision.canonical_card.source_chunk_indexes == (0, 1)
-
-
-def test_parse_semantic_merge_tightening_payload_accepts_non_publishable_card() -> None:
-    result = parse_semantic_merge_tightening_payload(
-        {
-            "decisions": [
-                {
-                    "group_id": "group-1",
-                    "action": "keep_separate",
-                    "candidate_ids": ["entry-0"],
-                    "canonical_card": {
-                        "publishable": False,
-                        "publishable_classification": "internal_instruction",
-                        "publishable_reason": "LLM classified it as not a customer answer",
-                    },
-                }
-            ]
-        },
-        mode=MODE_FAQ,
-        model="llama-test",
-    )
-
-    assert result.decisions[0].canonical_card is not None
-    assert result.decisions[0].canonical_card.publishable is False

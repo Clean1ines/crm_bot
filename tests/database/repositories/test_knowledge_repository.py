@@ -700,7 +700,7 @@ class _RetightenFakePool:
         return _RetightenFakeAcquire(self._conn)
 
 
-async def test_apply_semantic_retightening_archives_collapsed_entries_and_republishes_survivor(
+async def test_apply_semantic_merge_tightening_archives_collapsed_entries_and_republishes_survivor(
     monkeypatch,
 ) -> None:
     from src.domain.project_plane.embedding_text import (
@@ -766,13 +766,13 @@ async def test_apply_semantic_retightening_archives_collapsed_entries_and_republ
         version=2,
         compiler_version="test",
         embedding_text_version="test",
-        metadata={"semantic_retightening_survivor": True},
+        metadata={"semantic_merge_tightening_survivor": True},
     )
 
     conn = _RetightenFakeConnection()
     repo = _TestKnowledgeRepository(_RetightenFakePool(conn))
 
-    result = await repo.apply_document_semantic_retightening(
+    result = await repo.apply_document_semantic_merge_tightening(
         project_id=project_id,
         document_id=document_id,
         updated_entries=(survivor,),
@@ -828,5 +828,5 @@ async def test_apply_semantic_retightening_archives_collapsed_entries_and_republ
     assert "knowledge_documents" in metric_sql
     assert project_id in metric_payload
     assert document_id in metric_payload
-    assert "semantic_retightening" in metric_payload
+    assert "semantic_merge_tightening" in metric_payload
     assert "collapsed_entry_count" in metric_payload

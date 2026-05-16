@@ -1,30 +1,8 @@
 from __future__ import annotations
 
 import json
-from src.application.services.knowledge_ingestion_service import (
-    _question_intent_card_from_entry,
-    _select_question_intent_cards_for_batch,
-)
-from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingEntry
+
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
-
-
-def _entry(
-    title: str,
-    *,
-    answer: str,
-    questions: tuple[str, ...],
-    tags: tuple[str, ...] = (),
-) -> KnowledgePreprocessingEntry:
-    return KnowledgePreprocessingEntry(
-        title=title,
-        answer=answer,
-        source_excerpt=answer,
-        questions=questions,
-        synonyms=(),
-        tags=tags,
-        embedding_text=f"{title} {answer} {' '.join(questions)}",
-    )
 
 
 def _preprocessor() -> GroqKnowledgePreprocessor:
@@ -34,109 +12,11 @@ def _preprocessor() -> GroqKnowledgePreprocessor:
     return preprocessor
 
 
-def test_question_intent_selector_prefers_same_information_need_over_shared_topic_words() -> (
-    None
-):
-    price = _entry(
-        "Стоимость",
-        answer="Подключение стоит 100 рублей в месяц.",
-        questions=("Сколько стоит подключение?", "Есть ли абонентская плата?"),
-        tags=("цена", "подключение"),
-    )
-    onboarding = _entry(
-        "Подключение",
-        answer="Для подключения нужно оставить заявку менеджеру.",
-        questions=("Как подключиться?", "Как оставить заявку на подключение?"),
-        tags=("подключение", "заявка"),
-    )
-    handoff = _entry(
-        "Передача менеджеру",
-        answer="Сложные вопросы ассистент передает менеджеру.",
-        questions=("Можно поговорить с человеком?", "Позовите менеджера"),
-        tags=("менеджер",),
-    )
-    cards = tuple(
-        _question_intent_card_from_entry(entry, entry_id=f"entry-{index}")
-        for index, entry in enumerate((price, onboarding, handoff))
-    )
-    incoming = _entry(
-        "Цена",
-        answer="Абонентская плата составляет 100 рублей.",
-        questions=("Какая цена?", "Сколько стоит?"),
-        tags=("цена",),
-    )
-
-    selected = _select_question_intent_cards_for_batch(
-        candidates=(incoming,),
-        known_cards=cards,
-        limit=2,
-    )
-
-    assert selected[0].title == "Стоимость"
-    assert all(card.title != "Передача менеджеру" for card in selected)
-
-
-def test_question_intent_selector_returns_highest_score_first_without_title_or_tags_identity() -> (
-    None
-):
-    price = _entry(
-        "Display title unrelated to price",
-        answer="Базовый тариф стоит 100 рублей в месяц.",
-        questions=("Сколько стоит сервис?", "Какая цена тарифа?"),
-        tags=("shared",),
-    )
-    support = _entry(
-        "Стоимость",
-        answer="Менеджер отвечает на сложные вопросы в рабочее время.",
-        questions=("Как связаться с менеджером?", "Когда отвечает поддержка?"),
-        tags=("shared", "цена"),
-    )
-    onboarding = _entry(
-        "Тарифы",
-        answer="Для подключения нужно оставить заявку.",
-        questions=("Как подключиться?", "Как оставить заявку?"),
-        tags=("цена",),
-    )
-    cards = tuple(
-        _question_intent_card_from_entry(entry, entry_id=f"entry-{index}")
-        for index, entry in enumerate((support, onboarding, price))
-    )
-    incoming = _entry(
-        "Поддержка",
-        answer="Премиум тариф стоит 500 рублей в месяц.",
-        questions=("Сколько стоит премиум тариф?", "Какая цена тарифа?"),
-        tags=("shared", "support"),
-    )
-
-    selected = _select_question_intent_cards_for_batch(
-        candidates=(incoming,),
-        known_cards=cards,
-        limit=3,
-    )
-
-    assert selected[0].entry_id == "entry-2"
-    assert selected[0].primary_question == "Сколько стоит сервис?"
-    assert selected[0].question_samples == (
-        "Сколько стоит сервис?",
-        "Какая цена тарифа?",
-    )
-    assert selected[0].answer_digest == "Базовый тариф стоит 100 рублей в месяц."
-
-
 def test_extractor_prompt_omits_known_intents_from_source_payload() -> None:
-    existing = _entry(
-        "Возврат средств",
-        answer="Возврат оформляется через менеджера после проверки заказа.",
-        questions=("Можно вернуть деньги?", "Есть возврат?"),
-        tags=("возврат",),
-    )
-    card = _question_intent_card_from_entry(existing, entry_id="compiled-0")
-
     prompt = _preprocessor()._build_prompt(
         mode="faq",
         chunks=[{"content": "Refund policy: manager checks the order."}],
         file_name="faq.txt",
-        previous_question_intents=(card,),
     )
 
     payload = json.loads(

@@ -19,20 +19,16 @@ from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     MODE_INSTRUCTION,
     MODE_PRICE_LIST,
-    ANSWER_MERGE_PROMPT_VERSION,
-    KnowledgeAnswerMergeExecutionResult,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
-    KnowledgeQuestionIntentCard,
-    KnowledgeSemanticMergeExecutionResult,
-    KnowledgeSemanticMergeGroup,
-    KnowledgeSemanticMergeTighteningResult,
-    SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
-    parse_answer_merge_payload,
+    KnowledgeAnswerResolutionCase,
+    KnowledgeAnswerResolutionResult,
+    KnowledgeAnswerResolverExecutionResult,
+    ANSWER_RESOLUTION_PROMPT_VERSION,
+    parse_answer_resolution_payload,
     parse_preprocessing_payload,
-    parse_semantic_merge_tightening_payload,
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
@@ -53,7 +49,6 @@ KCD_LLM_RESPONSE_LOG_CHUNK_CHARS = 3500
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
 FAQ_COMPILER_PROMPT_FILE = "knowledge_answer_compiler_faq.txt"
-ANSWER_MERGE_PROMPT_FILE = "knowledge_answer_merge.txt"
 
 GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
 GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -143,14 +138,12 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult:
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(
             mode=mode,
             chunks=chunks,
             file_name=file_name,
-            previous_question_intents=previous_question_intents,
         )
 
         max_tokens = 4000
@@ -214,117 +207,38 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    async def merge_known_answer(
+    async def resolve_answer_cases(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        known_intent: KnowledgePreprocessingEntry,
-        incoming_fragment: KnowledgePreprocessingEntry,
-    ) -> KnowledgeAnswerMergeExecutionResult:
-        prompt_version = ANSWER_MERGE_PROMPT_VERSION
-        prompt = self._build_answer_merge_prompt(
-            mode=mode,
-            file_name=file_name,
-            known_intent=known_intent,
-            incoming_fragment=incoming_fragment,
-        )
-
-        max_tokens = 1600
-        request_model = self._model_for_json_request(
-            task="answer_merge",
-            prompt=prompt,
-            max_tokens=max_tokens,
-        )
-
-        try:
-            response = await self._client.chat.completions.create(
-                model=request_model,
-                messages=[
-                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content or ""
-            _log_llm_response(
-                task="answer_merge",
-                mode=mode,
-                model=request_model,
-                prompt_version=prompt_version,
-                content=content,
-                response=response,
-            )
-            merge_allowed, answer, question_variants = parse_answer_merge_payload(
-                content
-            )
-            return KnowledgeAnswerMergeExecutionResult(
-                merge_allowed=merge_allowed,
-                answer=answer,
-                question_variants=question_variants,
-                usage=_response_usage_measurement(
-                    response=response,
-                    model=request_model,
-                    prompt=prompt,
-                    content=content,
-                ),
-            )
-        except (
-            APIConnectionError,
-            APIError,
-            APITimeoutError,
-            RateLimitError,
-            AttributeError,
-            IndexError,
-            TypeError,
-            ValueError,
-            KnowledgePreprocessingValidationError,
-        ) as exc:
-            logger.warning(
-                "Knowledge answer merge failed",
-                extra={
-                    "mode": mode,
-                    "model": self._model,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:300],
-                },
-            )
-            raise
-
-    async def tighten_semantic_merges(
-        self,
-        *,
-        mode: KnowledgePreprocessingMode,
-        file_name: str,
-        groups: Sequence[KnowledgeSemanticMergeGroup],
+        cases: Sequence[KnowledgeAnswerResolutionCase],
         existing_project_titles: Sequence[str] = (),
-    ) -> KnowledgeSemanticMergeExecutionResult:
-        prompt_version = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
+    ) -> KnowledgeAnswerResolverExecutionResult:
+        prompt_version = ANSWER_RESOLUTION_PROMPT_VERSION
 
-        if not groups:
-            return KnowledgeSemanticMergeExecutionResult(
-                result=KnowledgeSemanticMergeTighteningResult(
+        if not cases:
+            return KnowledgeAnswerResolverExecutionResult(
+                result=KnowledgeAnswerResolutionResult(
                     mode=mode,
                     prompt_version=prompt_version,
                     model=self._model,
                     decisions=(),
-                    metrics={"group_count": 0},
+                    metrics={"case_count": 0},
                 ),
                 usage=None,
             )
 
-        prompt = self._build_semantic_merge_tightening_prompt(
+        prompt = self._build_answer_resolution_prompt(
             mode=mode,
             file_name=file_name,
-            groups=groups,
+            cases=cases,
             existing_project_titles=existing_project_titles,
         )
 
         max_tokens = 3000
         request_model = self._model_for_json_request(
-            task="semantic_merge_tightening",
+            task="answer_resolution",
             prompt=prompt,
             max_tokens=max_tokens,
         )
@@ -342,20 +256,20 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             content = response.choices[0].message.content or ""
             _log_llm_response(
-                task="semantic_merge_tightening",
+                task="answer_resolution",
                 mode=mode,
                 model=request_model,
                 prompt_version=prompt_version,
                 content=content,
                 response=response,
             )
-            result = parse_semantic_merge_tightening_payload(
+            result = parse_answer_resolution_payload(
                 content,
                 mode=mode,
                 model=request_model,
                 prompt_version=prompt_version,
             )
-            return KnowledgeSemanticMergeExecutionResult(
+            return KnowledgeAnswerResolverExecutionResult(
                 result=result,
                 usage=_response_usage_measurement(
                     response=response,
@@ -376,53 +290,23 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             KnowledgePreprocessingValidationError,
         ) as exc:
             logger.warning(
-                "Knowledge semantic merge tightening failed",
+                "Knowledge semantic answer resolution failed",
                 extra={
                     "mode": mode,
                     "model": self._model,
-                    "group_count": len(groups),
+                    "case_count": len(cases),
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:300],
                 },
             )
             raise
 
-    def _build_answer_merge_prompt(
+    def _build_answer_resolution_prompt(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        known_intent: KnowledgePreprocessingEntry,
-        incoming_fragment: KnowledgePreprocessingEntry,
-    ) -> str:
-        instruction = _load_answer_merge_prompt()
-        merge_payload = {
-            "file_name": file_name,
-            "mode": mode,
-            "known_intent": {
-                "intent_id": incoming_fragment.known_intent_id,
-                "canonical_question": known_intent.canonical_question
-                or _first_question(known_intent),
-                "question_variants": list(known_intent.questions),
-                "answer": known_intent.answer,
-            },
-            "incoming_fragment": {
-                "canonical_question": incoming_fragment.canonical_question
-                or _first_question(incoming_fragment),
-                "question_variants": list(incoming_fragment.questions),
-                "answer_fragment": incoming_fragment.answer,
-                "source_excerpt": incoming_fragment.source_excerpt,
-                "source_chunk_indexes": list(incoming_fragment.source_chunk_indexes),
-            },
-        }
-        return f"{instruction}\n{json.dumps(merge_payload, ensure_ascii=False)}"
-
-    def _build_semantic_merge_tightening_prompt(
-        self,
-        *,
-        mode: KnowledgePreprocessingMode,
-        file_name: str,
-        groups: Sequence[KnowledgeSemanticMergeGroup],
+        cases: Sequence[KnowledgeAnswerResolutionCase],
         existing_project_titles: Sequence[str] = (),
     ) -> str:
         compact_project_titles = [
@@ -430,83 +314,66 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             for title in existing_project_titles
             if str(title).strip()
         ][:300]
-        merge_payload = {
+        resolution_payload = {
             "file_name": file_name,
             "mode": mode,
             "existing_project_titles": compact_project_titles,
-            "suspect_groups": [group.to_payload() for group in groups],
+            "cases": [case.to_payload() for case in cases],
         }
 
         return (
-            "SEMANTIC MERGE TIGHTENING TASK:\n"
+            "ANSWER-ONLY SEMANTIC RESOLUTION TASK:\n"
             "Return exactly one JSON object and nothing else.\n\n"
             "Purpose:\n"
-            "- You receive groups of already grounded canonical-entry candidates.\n"
-            "- Each group is only a suspect duplicate group, not a command to merge.\n"
-            "- same answer intent / stable user information need is the only valid merge target.\n"
-            "- Decide whether candidates in each group are truly that same answer intent.\n"
-            "- Treat answer intent as: primary user question, realistic question samples, compact answer digest, tags, and grounded answer facts.\n"
-            "- Do not use embedding_text as the primary identity signal; it is only retrieval helper text.\n"
-            "- Merge only when the same user information need should retrieve one consolidated canonical answer.\n"
-            "- Keep separate when candidates are related but answer different intents, constraints, audiences, operations, policies, or stages.\n"
-            "- Shared generic vocabulary is never enough to merge.\n"
-            "- Groups are pairwise by design: compare the two candidates directly, not by broad topic similarity.\n\n"
-            "Schema:\n"
+            "- You are not a full-entry merge engine.\n"
+            "- You only resolve ambiguous answer fragments after deterministic merge rules failed.\n"
+            "- Each case contains one unresolved pair/group for the same suspected user intent.\n"
+            "- Decide whether the answers can become one authoritative answer, or must remain separate / conflict / needs_review.\n"
+            "- Use source_excerpt only as evidence for the answer decision.\n"
+            "- Do not create, edit, or return retrieval enrichment, source refs, metadata, or derived retrieval fields.\n\n"
+            "Input schema:\n"
+            "{\n"
+            '  "cases": [\n'
+            "    {\n"
+            '      "case_id": "...",\n'
+            '      "question_intent": "...",\n'
+            '      "answers": [\n'
+            '        {"id": "entry-0", "answer": "...", "source_excerpt": "..."}\n'
+            "      ]\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Output schema:\n"
             "{\n"
             '  "decisions": [\n'
             "    {\n"
-            '      "group_id": "...",\n'
-            '      "action": "merge | keep_separate",\n'
-            '      "candidate_ids": ["..."],\n'
-            '      "survivor_title": "...",\n'
-            '      "merged_embedding_text": "...",\n'
-            '      "canonical_card": {\n'
-            '        "title": "...",\n'
-            '        "canonical_question": "...",\n'
-            '        "answer": "...",\n'
-            '        "questions": ["..."],\n'
-            '        "synonyms": ["..."],\n'
-            '        "tags": ["..."],\n'
-            '        "source_ref_ids": ["..."],\n'
-            '        "source_chunk_indexes": [0],\n'
-            '        "publishable": true,\n'
-            '        "publishable_classification": "publishable_customer_answer | assistant_behavior_rule | internal_instruction | eval_or_test_item | not_enough_evidence | noisy_or_non_answer",\n'
-            '        "publishable_reason": "..."\n'
-            "      }\n"
+            '      "case_id": "...",\n'
+            '      "action": "merge | keep_separate | conflict | needs_review",\n'
+            '      "canonical_answer": "...",\n'
+            '      "reason": "...",\n'
+            '      "confidence": 0.0\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
             "Rules for action=merge:\n"
-            "- candidate_ids MUST contain all candidates being collapsed.\n"
-            "- survivor_title MUST be exactly one concise canonical title.\n"
-            "- canonical_card MUST contain one synthesized customer-facing card for the shared intent.\n"
-            "- canonical_card.answer MUST be synthesis, not concatenation.\n"
-            "- publishable_classification MUST be one of the listed labels; publishable must be true only for publishable_customer_answer.\n"
-            "- merged_embedding_text MUST be a compact replacement canonical retrieval text for the shared user question/intent.\n"
-            "- Do NOT concatenate candidate answers or candidate embedding_text values.\n"
-            "- Do NOT append old answer + new answer; return one compressed replacement.\n"
-            "- If candidates are A and A+B for the same intent, return A+B once, not A+A+B.\n"
-            "- It MUST be shorter than the combined candidate answer + embedding_text unless preserving distinct grounded constraints requires otherwise.\n"
-            "- Preserve grounded facts, limitations, product terms, handoff rules, prices, dates, and negative constraints exactly once.\n"
-            "- Remove exact and near-duplicate phrases, repeated sentences, repeated examples, repeated benefits, and repeated intent variants.\n"
-            "- If one candidate only adds a minor clarification to the same answer, fold that clarification into the canonical wording once.\n"
-            "- Do not invent facts.\n\n"
-            "Rules for action=keep_separate:\n"
-            "- Use when candidates are related but not the same answer intent / stable information need.\n"
-            "- Keep separate when the requested outcome, condition, audience, operation, or policy differs.\n"
-            "- candidate_ids MUST contain the candidates considered for that decision.\n"
-            "- survivor_title and merged_embedding_text MAY be empty.\n"
-            "- canonical_card MAY classify a group as non-publishable when it is not a customer answer.\n\n"
-            "Project-level title context:\n"
-            "- existing_project_titles are already published project answers.\n"
-            "- Prefer a survivor_title compatible with an existing project title when the meaning is the same.\n"
-            "- Do not merge with existing_project_titles here; only use them for naming consistency.\n\n"
+            "- Use merge only when all answers address the same specific user information need.\n"
+            "- canonical_answer must be one concise replacement answer, not concatenation.\n"
+            "- Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.\n"
+            "- Do not invent facts beyond answer/source_excerpt evidence.\n\n"
+            "Rules for non-merge actions:\n"
+            "- keep_separate when answers are related but not the same specific answer intent.\n"
+            "- conflict when answers contradict each other and a safe canonical answer cannot be produced.\n"
+            "- needs_review when evidence is insufficient or ambiguous.\n"
+            "- canonical_answer must be empty for keep_separate, conflict, and needs_review.\n\n"
+            "Forbidden output fields:\n"
+            "- Do not return retrieval enrichment, evidence lists, source indexes, metadata, cards, entries, or retrieval text.\n"
+            "- Do not return candidate_ids; the application maps case_id back to answers deterministically.\n\n"
             "STRICT OUTPUT CONTRACT:\n"
             "- Return exactly one JSON object.\n"
             "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n"
-            "- Do not return markdown, explanation, entries[], or free-form text outside schema.\n\n"
+            "- Do not return markdown, explanation, or free-form text outside schema.\n\n"
             "NOW PROCESS THIS JSON. Return ONLY the JSON result:\n"
-            f"{json.dumps(merge_payload, ensure_ascii=False)}"
+            f"{json.dumps(resolution_payload, ensure_ascii=False)}"
         )
 
     def _build_prompt(
@@ -515,7 +382,6 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> str:
         instruction = _load_mode_prompt(mode)
         source_payload = {
@@ -654,10 +520,6 @@ def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
             f"Knowledge answer compiler is unavailable for mode: {mode}"
         )
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
-
-
-def _load_answer_merge_prompt() -> str:
-    return (PROMPTS_DIR / ANSWER_MERGE_PROMPT_FILE).read_text(encoding="utf-8")
 
 
 def _first_question(entry: KnowledgePreprocessingEntry) -> str:

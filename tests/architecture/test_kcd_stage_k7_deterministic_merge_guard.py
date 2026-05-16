@@ -21,7 +21,7 @@ def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> No
     source = INGESTION_SERVICE.read_text(encoding="utf-8")
 
     assert "_apply_semantic_merge_tightening_decisions" in source
-    assert "semantic_answer_merge_count" in source
+    assert "semantic_answer_resolution_count" in source
 
     assert_any(
         source,
@@ -39,7 +39,7 @@ def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> No
         source,
         (
             "merged_entry_ids",
-            "semantic_answer_merge_count",
+            "semantic_answer_resolution_count",
             "semantic_merge",
             "merge_count",
         ),

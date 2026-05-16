@@ -34,9 +34,9 @@ def test_existing_document_retighten_dispatches_one_suspect_group_per_llm_call()
     body = _function_body(source, "retighten_processed_document")
 
     assert "groups=groups" not in body
-    assert "groups=(groups[0],)" in body
+    assert "cases=(groups[0],)" in body
     assert "for group in groups[1:]" in body
-    assert "groups=(group,)" in body
+    assert "cases=(group,)" in body
     assert "llm_call_count" in body
     assert "usage_event_count" in body
 
@@ -47,7 +47,7 @@ def test_compiled_ingestion_tightening_reports_actual_llm_call_count() -> None:
 
     assert "groups=groups" not in body
     assert "for group in groups:" in body
-    assert "groups=(group,)" in body
+    assert "cases=(group,)" in body
     assert '"llm_call_count": 0' in body
     assert 'metrics["llm_call_count"]' in body
     assert "model = first_execution.result.model" not in body

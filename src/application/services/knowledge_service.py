@@ -575,10 +575,6 @@ class KnowledgeService:
             else {}
         )
         semantic_metrics = _semantic_merge_metrics(document_metrics)
-        if not semantic_metrics:
-            retighten_value = document_metrics.get("semantic_retightening")
-            if isinstance(retighten_value, Mapping):
-                semantic_metrics = dict(retighten_value)
         current_stage = str(document_metrics.get("stage") or "")
         semantic_status = _semantic_merge_report_status(
             semantic_metrics,
