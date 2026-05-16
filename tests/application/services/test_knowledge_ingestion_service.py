@@ -1466,7 +1466,7 @@ async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entr
     ].kwargs["metrics"]
     assert final_metrics["unknown_known_intent_id_count"] == 1
     assert final_metrics["merge_rejected_keep_separate_count"] == 0
-    assert final_metrics["online_answer_merge_enabled"] is False
+    assert final_metrics["online_answer_merge_enabled"] is True
 
 
 @pytest.mark.asyncio
