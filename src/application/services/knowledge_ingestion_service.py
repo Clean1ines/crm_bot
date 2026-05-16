@@ -974,6 +974,8 @@ def _raw_answer_candidates_from_preprocessing_entries(
                     "fragment_index": fragment_index,
                     "canonical_question": entry.canonical_question,
                     "question_variants": list(entry.questions),
+                    "synonyms": list(entry.synonyms),
+                    "tags": list(entry.tags),
                     "source_chunk_indexes": list(entry.source_chunk_indexes),
                 },
             )

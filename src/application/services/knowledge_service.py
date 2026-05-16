@@ -360,7 +360,7 @@ class KnowledgeService:
             project_id=project_id,
             document_id=document_id,
         )
-        normalized_limit = max(1, min(int(limit), 100))
+        normalized_limit = max(1, min(int(limit), 1000))
         drafts = tuple(
             KnowledgeAnswerDraftDto.from_candidate(candidate)
             for candidate in raw_candidates[:normalized_limit]
