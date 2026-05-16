@@ -1053,7 +1053,7 @@ class KnowledgeRepository:
                     embedding_text = _entry_embedding_text(entry)
                     embedding_text_version = _entry_embedding_text_version(entry)
                     metadata = dict(entry.metadata)
-                    metadata["semantic_retightening_metrics"] = dict(metrics)
+                    metadata["semantic_merge_tightening_metrics"] = dict(metrics)
 
                     await conn.execute(
                         """
@@ -1219,7 +1219,7 @@ class KnowledgeRepository:
                     """,
                     ensure_uuid(project_id),
                     ensure_uuid(document_id),
-                    _jsonb_object({"semantic_retightening": dict(metrics)}),
+                    _jsonb_object({"semantic_merge_tightening": dict(metrics)}),
                 )
 
         result: JsonObject = dict(metrics)

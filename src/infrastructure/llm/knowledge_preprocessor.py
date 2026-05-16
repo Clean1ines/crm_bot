@@ -23,13 +23,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
-    KnowledgeQuestionIntentCard,
-    KnowledgeSemanticMergeExecutionResult,
-    KnowledgeSemanticMergeGroup,
-    KnowledgeSemanticMergeTighteningResult,
+    KnowledgeAnswerResolverExecutionResult,
+    KnowledgeAnswerResolutionCase,
+    KnowledgeAnswerResolutionResult,
     SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
     parse_preprocessing_payload,
-    parse_semantic_merge_tightening_payload,
+    parse_answer_resolution_payload,
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
@@ -140,14 +139,12 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult:
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(
             mode=mode,
             chunks=chunks,
             file_name=file_name,
-            previous_question_intents=previous_question_intents,
         )
 
         max_tokens = 4000
@@ -211,19 +208,19 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    async def tighten_semantic_merges(
+    async def resolve_answer_cases(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        groups: Sequence[KnowledgeSemanticMergeGroup],
+        cases: Sequence[KnowledgeAnswerResolutionCase],
         existing_project_titles: Sequence[str] = (),
-    ) -> KnowledgeSemanticMergeExecutionResult:
+    ) -> KnowledgeAnswerResolverExecutionResult:
         prompt_version = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
 
-        if not groups:
-            return KnowledgeSemanticMergeExecutionResult(
-                result=KnowledgeSemanticMergeTighteningResult(
+        if not cases:
+            return KnowledgeAnswerResolverExecutionResult(
+                result=KnowledgeAnswerResolutionResult(
                     mode=mode,
                     prompt_version=prompt_version,
                     model=self._model,
@@ -233,10 +230,10 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 usage=None,
             )
 
-        prompt = self._build_semantic_merge_tightening_prompt(
+        prompt = self._build_answer_resolution_prompt(
             mode=mode,
             file_name=file_name,
-            groups=groups,
+            cases=cases,
             existing_project_titles=existing_project_titles,
         )
 
@@ -267,13 +264,13 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 content=content,
                 response=response,
             )
-            result = parse_semantic_merge_tightening_payload(
+            result = parse_answer_resolution_payload(
                 content,
                 mode=mode,
                 model=request_model,
                 prompt_version=prompt_version,
             )
-            return KnowledgeSemanticMergeExecutionResult(
+            return KnowledgeAnswerResolverExecutionResult(
                 result=result,
                 usage=_response_usage_measurement(
                     response=response,
@@ -298,19 +295,19 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 extra={
                     "mode": mode,
                     "model": self._model,
-                    "group_count": len(groups),
+                    "group_count": len(cases),
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:300],
                 },
             )
             raise
 
-    def _build_semantic_merge_tightening_prompt(
+    def _build_answer_resolution_prompt(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        groups: Sequence[KnowledgeSemanticMergeGroup],
+        cases: Sequence[KnowledgeAnswerResolutionCase],
         existing_project_titles: Sequence[str] = (),
     ) -> str:
         compact_project_titles = [
@@ -322,9 +319,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "file_name": file_name,
             "mode": mode,
             "existing_project_titles": compact_project_titles,
-            "cases": [
-                group.to_answer_resolution_case().to_payload() for group in groups
-            ],
+            "cases": [case.to_payload() for case in cases],
         }
 
         instruction = _load_answer_resolution_prompt()
@@ -336,7 +331,6 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> str:
         instruction = _load_mode_prompt(mode)
         source_payload = {

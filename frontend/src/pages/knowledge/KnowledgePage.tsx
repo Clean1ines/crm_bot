@@ -345,7 +345,7 @@ const metricObject = (
 };
 
 const retightenMetrics = (doc: Document): KnowledgeProcessingMetrics | null => (
-  metricObject(doc.preprocessing_metrics, 'semantic_retightening')
+  metricObject(doc.preprocessing_metrics, 'semantic_merge_tightening')
 );
 
 const retightenStatusText = (metrics: KnowledgeProcessingMetrics): string | null => {
@@ -1047,8 +1047,7 @@ const SourceUnitsModal: React.FC<{
 const semanticMergeTraceRows = (
   report: KnowledgeProcessingReport | undefined,
 ): KnowledgeProcessingMetrics[] => {
-  const semanticMetrics = metricObject(report?.metrics, 'semantic_merge_tightening')
-    ?? metricObject(report?.metrics, 'semantic_retightening');
+  const semanticMetrics = metricObject(report?.metrics, 'semantic_merge_tightening');
   return metricObjectArray(semanticMetrics, 'decision_trace');
 };
 

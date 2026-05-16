@@ -63,7 +63,7 @@ def test_stage_k_preprocessor_port_has_no_legacy_known_answer_path() -> None:
     assert "previous_entry_titles" not in source
     assert "async def merge_known" + "_answer(" not in source
     assert "KnowledgeAnswerMerge" + "ExecutionResult" not in source
-    assert "tighten_semantic_merges" in source
+    assert "resolve_answer_cases" in source
 
 
 def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
@@ -104,7 +104,7 @@ def test_stage_k_groq_preprocessor_has_answer_only_resolution_contract() -> None
 def test_answer_resolution_parser_does_not_read_candidate_ids_from_payload() -> None:
     parser_source = _function_source(
         ROOT / "src/domain/project_plane/knowledge_preprocessing.py",
-        "_parse_semantic_merge_decision",
+        "_parse_answer_resolution_decision",
     )
 
     assert '.get("candidate_ids")' not in parser_source

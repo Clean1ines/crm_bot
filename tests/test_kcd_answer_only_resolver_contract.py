@@ -15,9 +15,9 @@ from src.application.services.knowledge_ingestion_service import (
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingValidationError,
-    KnowledgeSemanticMergeDecision,
-    KnowledgeSemanticMergeExecutionResult,
-    parse_semantic_merge_tightening_payload,
+    KnowledgeAnswerResolutionDecision,
+    KnowledgeAnswerResolverExecutionResult,
+    parse_answer_resolution_payload,
 )
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 
@@ -128,10 +128,10 @@ def test_llm_prompt_payload_contains_only_answer_resolution_cases() -> None:
     groups = _semantic_merge_suspect_groups_from_entries(entries)
     preprocessor = GroqKnowledgePreprocessor(client=object(), model="test-model")
 
-    prompt = preprocessor._build_semantic_merge_tightening_prompt(
+    prompt = preprocessor._build_answer_resolution_prompt(
         mode="plain",
         file_name="faq.md",
-        groups=groups,
+        cases=groups,
         existing_project_titles=("Existing title",),
     )
     payload = _prompt_payload(prompt)
@@ -165,8 +165,8 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
             source_chunk_indexes=(1,),
         ),
     )
-    decision = KnowledgeSemanticMergeDecision(
-        group_id="group-1",
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
         canonical_answer="Возврат зависит от ситуации; решение принимает менеджер.",
@@ -200,7 +200,7 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
 
 def test_answer_resolution_parser_rejects_forbidden_output_fields() -> None:
     with pytest.raises(KnowledgePreprocessingValidationError, match="forbidden fields"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -231,7 +231,7 @@ def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback
     None
 ):
     with pytest.raises(KnowledgePreprocessingValidationError, match="forbidden fields"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -246,7 +246,7 @@ def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback
         )
 
     with pytest.raises(KnowledgePreprocessingValidationError, match="case_id"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -262,7 +262,7 @@ def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback
 
 def test_answer_resolution_parser_rejects_candidate_ids_from_resolver_output() -> None:
     with pytest.raises(KnowledgePreprocessingValidationError, match="candidate_ids"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -293,8 +293,8 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
             ),
         )
     )[0]
-    decision = KnowledgeSemanticMergeDecision(
-        group_id=group.group_id,
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id=group.group_id,
         action="merge",
         candidate_ids=(),
         canonical_answer="Итоговый ответ.",
@@ -311,9 +311,9 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
 
 
 class _FailingPreprocessor:
-    async def tighten_semantic_merges(
+    async def resolve_answer_cases(
         self, **_: object
-    ) -> KnowledgeSemanticMergeExecutionResult:
+    ) -> KnowledgeAnswerResolverExecutionResult:
         raise AssertionError(
             "LLM resolver must not be called after deterministic collapse"
         )
