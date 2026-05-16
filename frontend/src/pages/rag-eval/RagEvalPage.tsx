@@ -103,7 +103,7 @@ const stageLabel = (stage: string): string => {
   if (stage === 'queued') return t('ragEval.stage.queued');
   if (stage === 'started') return t('ragEval.stage.started');
   if (stage === 'dataset_generation') return t('ragEval.stage.datasetGeneration');
-  if (stage === 'answer_generation') return t('ragEval.stage.answerGeneration');
+  if (stage === 'answer_generation' || stage === 'retrieval_checks') return t('ragEval.stage.answerGeneration');
   if (stage === 'running') return t('ragEval.stage.running');
   if (stage === 'completed' || stage === 'done') return t('ragEval.stage.completed');
   if (stage === 'cancelled') return t('ragEval.stage.cancelled');
@@ -125,7 +125,7 @@ const statusLabel = (status: string): string => {
 const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
   const rawMessage = typeof progress.message === 'string' ? progress.message : '';
   if (stage === 'dataset_generation') return t('ragEval.stageDescription.datasetGeneration');
-  if (stage === 'answer_generation') return t('ragEval.stageDescription.answerGeneration');
+  if (stage === 'answer_generation' || stage === 'retrieval_checks') return t('ragEval.stageDescription.answerGeneration');
   if (stage === 'paused') return t('ragEval.stageDescription.paused');
   if (stage === 'cancelled') return t('ragEval.stageDescription.cancelled');
   if (stage === 'failed') return getErrorMessage(rawMessage, t('ragEval.stageDescription.failed'));
@@ -669,6 +669,12 @@ const JobProgressCard: React.FC<{
   const tokenTotal = asNumber(mergedProgress.tokens_total);
   const questionTokenTotal = asNumber(mergedProgress.question_tokens_total);
   const judgeTokenTotal = asNumber(mergedProgress.judge_tokens_total);
+  const failedBatches = asNumber(mergedProgress.failed_batches);
+  const skippedBatches = asNumber(mergedProgress.skipped_batches);
+  const jsonParseFailures = asNumber(mergedProgress.json_parse_failures);
+  const providerFailures = asNumber(mergedProgress.provider_failures);
+  const retryCount = asNumber(mergedProgress.retry_count);
+  const failedRetrievalCount = asNumber(mergedProgress.failed_retrieval_count);
   const startedAt = timestampMs(job.created_at);
   const observedAt = timestampMs(mergedProgress.updated_at) ?? timestampMs(job.updated_at) ?? timestampMs(job.locked_at);
   const elapsedMs = startedAt === null || observedAt === null ? 0 : observedAt - startedAt;
@@ -747,11 +753,17 @@ const JobProgressCard: React.FC<{
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatPill label={t('ragEval.stats.elapsed')} value={startedAt === null ? '—' : formatDurationMs(elapsedMs)} />
         <StatPill label={t('ragEval.stats.questionsReady')} value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
-        <StatPill label={t('ragEval.stats.answersChecked')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
+        <StatPill label={t('ragEval.stats.retrievalChecks')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
         <StatPill label={t('ragEval.stats.tokensSpent')} value={tokenTotal ? formatNumber(tokenTotal) : '—'} />
         <StatPill label={t('ragEval.stats.questionTokens')} value={questionTokenTotal ? formatNumber(questionTokenTotal) : '—'} />
         <StatPill label={t('ragEval.stats.judgeTokens')} value={judgeTokenTotal ? formatNumber(judgeTokenTotal) : '—'} />
         <StatPill label={t('ragEval.stats.fragmentGroups')} value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
+        <StatPill label={t('ragEval.stats.failedBatches')} value={failedBatches} />
+        <StatPill label={t('ragEval.stats.jsonFailures')} value={jsonParseFailures} />
+        <StatPill label={t('ragEval.stats.providerFailures')} value={providerFailures} />
+        <StatPill label={t('ragEval.stats.retries')} value={retryCount} />
+        <StatPill label={t('ragEval.stats.skippedBatches')} value={skippedBatches} />
+        <StatPill label={t('ragEval.stats.failedRetrieval')} value={failedRetrievalCount} />
         <StatPill label={t('ragEval.stats.fragments')} value={sourceChunkCount || '—'} />
         <StatPill label={t('ragEval.stats.attempts')} value={`${job.attempts}/${job.max_attempts}`} />
       </div>

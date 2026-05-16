@@ -185,6 +185,7 @@ class _DatasetGenerator:
         chunks: list[RagEvalEvidenceEntry],
         progress_callback: object | None = None,
         control_callback: object | None = None,
+        metrics_callback: object | None = None,
     ) -> RagEvalDataset:
         question_1 = RagEvalQuestion(
             id="question-1",

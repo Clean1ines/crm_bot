@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import cast, get_args
 
-from src.application.rag_eval.ports import RagEvalJsonLlmPort
+from src.application.rag_eval.ports import (
+    RagEvalDatasetMetricsCallback,
+    RagEvalJsonLlmPort,
+)
 from src.domain.project_plane.knowledge_retrieval_surface import (
     RUNTIME_ENTRY_KIND_VALUES,
 )
@@ -23,6 +28,19 @@ ALLOWED_SEVERITIES = set(get_args(RagEvalSeverity))
 
 RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
+
+
+@dataclass(frozen=True, slots=True)
+class _BatchGenerationResult:
+    batch_index: int
+    questions: list[RagEvalQuestion]
+    failed: bool = False
+    skipped: bool = False
+    json_parse_failures: int = 0
+    provider_failures: int = 0
+    retry_count: int = 0
+    used_fallback: bool = False
+
 
 MAX_ENTRIES_PER_LLM_BATCH = 1
 MAX_CHUNK_CHARS = 700
@@ -127,9 +145,13 @@ class LlmRagEvalDatasetGenerator:
         *,
         llm: RagEvalJsonLlmPort,
         model_name: str = "llm_json_provider",
+        max_concurrency: int = 2,
+        max_batch_attempts: int = 2,
     ) -> None:
         self._llm = llm
         self._model_name = model_name
+        self._max_concurrency = max(1, min(8, max_concurrency))
+        self._max_batch_attempts = max(1, min(5, max_batch_attempts))
 
     async def generate_dataset(
         self,
@@ -139,6 +161,7 @@ class LlmRagEvalDatasetGenerator:
         chunks: list[RagEvalEvidenceEntry],
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
+        metrics_callback: RagEvalDatasetMetricsCallback | None = None,
     ) -> RagEvalDataset:
         dataset_id = new_eval_id("dataset")
         dataset = RagEvalDataset(
@@ -159,93 +182,277 @@ class LlmRagEvalDatasetGenerator:
             dataset.metadata = {"warning": "document_has_no_useful_entries"}
             if progress_callback is not None:
                 await progress_callback(0, 0, 0)
+            if metrics_callback is not None:
+                await metrics_callback(
+                    {
+                        "generated_questions": 0,
+                        "target_questions": 0,
+                        "processed_batches": 0,
+                        "total_batches": 0,
+                        "successful_batches": 0,
+                        "failed_batches": 0,
+                        "skipped_batches": 0,
+                        "json_parse_failures": 0,
+                        "provider_failures": 0,
+                        "retry_count": 0,
+                        "dataset_generation_concurrency": self._max_concurrency,
+                        "dataset_batch_attempts": self._max_batch_attempts,
+                    }
+                )
             return dataset
 
         questions: list[RagEvalQuestion] = []
         valid_entry_ids = {chunk.id for chunk in chunks if chunk.id}
         related_entry_ids_by_id = self._canonical_related_entry_ids(eval_chunks)
+        completed_batches = 0
+        failed_batches = 0
+        skipped_batches = 0
+        json_parse_failures = 0
+        provider_failures = 0
+        retry_count = 0
 
-        if progress_callback is not None:
-            await progress_callback(0, total_batches, 0)
+        async def emit_progress() -> None:
+            deduped_count = len(self._dedupe(questions))
+            target = max(deduped_count, total_batches)
+            if progress_callback is not None:
+                await progress_callback(deduped_count, target, completed_batches)
+            if metrics_callback is not None:
+                await metrics_callback(
+                    {
+                        "generated_questions": deduped_count,
+                        "target_questions": target,
+                        "processed_batches": completed_batches,
+                        "total_batches": total_batches,
+                        "successful_batches": completed_batches
+                        - failed_batches
+                        - skipped_batches,
+                        "failed_batches": failed_batches,
+                        "skipped_batches": skipped_batches,
+                        "json_parse_failures": json_parse_failures,
+                        "provider_failures": provider_failures,
+                        "retry_count": retry_count,
+                        "dataset_generation_concurrency": self._max_concurrency,
+                        "dataset_batch_attempts": self._max_batch_attempts,
+                    }
+                )
 
-        last_batch_index = 0
+        await emit_progress()
 
-        for batch_index, batch in enumerate(batches, start=1):
-            last_batch_index = batch_index
+        semaphore = asyncio.Semaphore(self._max_concurrency)
 
+        async def process_batch(
+            batch_index: int,
+            batch: list[RagEvalEvidenceEntry],
+        ) -> _BatchGenerationResult:
             if control_callback is not None:
                 await control_callback()
 
-            if progress_callback is not None:
-                await progress_callback(
-                    len(self._dedupe(questions)),
-                    max(len(self._dedupe(questions)), total_batches),
-                    batch_index - 1,
-                )
+            async with semaphore:
+                if control_callback is not None:
+                    await control_callback()
 
-            response = await self._complete_questions_json(
-                project_id=project_id,
-                document_id=document_id,
-                batch=batch,
-                batch_index=batch_index,
-                total_batches=total_batches,
-            )
-
-            raw_questions = response.get("questions")
-            if not isinstance(raw_questions, Sequence) or isinstance(
-                raw_questions, str
-            ):
-                if progress_callback is not None:
-                    await progress_callback(
-                        len(self._dedupe(questions)),
-                        max(len(self._dedupe(questions)), total_batches),
-                        batch_index,
-                    )
-                continue
-
-            for item in raw_questions:
-                if not isinstance(item, Mapping):
-                    continue
-
-                question = self._question_from_payload(
+                return await self._generate_batch_questions(
                     dataset_id=dataset_id,
                     project_id=project_id,
                     document_id=document_id,
-                    payload=item,
+                    batch=batch,
+                    batch_index=batch_index,
+                    total_batches=total_batches,
                     valid_entry_ids=valid_entry_ids,
                     related_entry_ids_by_id=related_entry_ids_by_id,
+                    control_callback=control_callback,
                 )
-                if question is None:
-                    continue
 
-                if not is_document_structure_eval_question(question.question):
-                    questions.append(question)
+        tasks = [
+            asyncio.create_task(process_batch(batch_index, batch))
+            for batch_index, batch in enumerate(batches, start=1)
+        ]
 
-            if progress_callback is not None:
-                await progress_callback(
-                    len(self._dedupe(questions)),
-                    max(len(self._dedupe(questions)), total_batches),
-                    batch_index,
-                )
+        try:
+            for task in asyncio.as_completed(tasks):
+                if control_callback is not None:
+                    await control_callback()
+
+                result = await task
+                completed_batches += 1
+                failed_batches += 1 if result.failed else 0
+                skipped_batches += 1 if result.skipped else 0
+                json_parse_failures += result.json_parse_failures
+                provider_failures += result.provider_failures
+                retry_count += result.retry_count
+                questions.extend(result.questions)
+                await emit_progress()
+        except Exception:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            raise
 
         dataset.questions = self._dedupe(questions)
         dataset.total_questions = len(dataset.questions)
         dataset.status = "ready"
         dataset.metadata = {
-            "generation_strategy": "llm_fact_variant_coverage_batches",
+            "generation_strategy": "parallel_llm_fact_variant_coverage_batches",
             "source_entry_count": len(chunks),
             "canonical_eval_unit_count": len(eval_chunks),
             "useful_entry_count": sum(len(batch) for batch in batches),
             "llm_batches": total_batches,
             "min_variants_per_fact": MIN_VARIANTS_PER_FACT,
+            "dataset_generation_concurrency": self._max_concurrency,
+            "dataset_batch_attempts": self._max_batch_attempts,
+            "successful_batches": completed_batches - failed_batches - skipped_batches,
+            "failed_batches": failed_batches,
+            "skipped_batches": skipped_batches,
+            "json_parse_failures": json_parse_failures,
+            "provider_failures": provider_failures,
+            "retry_count": retry_count,
         }
 
-        if progress_callback is not None:
-            await progress_callback(
-                dataset.total_questions, total_batches, last_batch_index
-            )
+        await emit_progress()
 
         return dataset
+
+    async def _generate_batch_questions(
+        self,
+        *,
+        dataset_id: str,
+        project_id: str,
+        document_id: str,
+        batch: list[RagEvalEvidenceEntry],
+        batch_index: int,
+        total_batches: int,
+        valid_entry_ids: set[str],
+        related_entry_ids_by_id: Mapping[str, list[str]],
+        control_callback: RagEvalDatasetControlCallback | None = None,
+    ) -> _BatchGenerationResult:
+        json_parse_failures = 0
+        provider_failures = 0
+        retry_count = 0
+        last_error: ValueError | None = None
+
+        for attempt in range(1, self._max_batch_attempts + 1):
+            if control_callback is not None:
+                await control_callback()
+
+            try:
+                response = await self._llm.complete_json(
+                    system_prompt=RAG_EVAL_QUESTION_QUALITY_RULES
+                    + "\n\n"
+                    + self._system_prompt(),
+                    user_prompt=self._user_prompt(
+                        project_id=project_id,
+                        document_id=document_id,
+                        chunks=batch,
+                        batch_index=batch_index,
+                        total_batches=total_batches,
+                    ),
+                    schema_name="rag_eval_questions_v2",
+                )
+                return self._batch_result_from_response(
+                    dataset_id=dataset_id,
+                    project_id=project_id,
+                    document_id=document_id,
+                    batch_index=batch_index,
+                    response=response,
+                    valid_entry_ids=valid_entry_ids,
+                    related_entry_ids_by_id=related_entry_ids_by_id,
+                    json_parse_failures=json_parse_failures,
+                    provider_failures=provider_failures,
+                    retry_count=retry_count,
+                )
+            except ValueError as exc:
+                last_error = exc
+                if isinstance(exc, json.JSONDecodeError):
+                    json_parse_failures += 1
+                else:
+                    provider_failures += 1
+                if attempt < self._max_batch_attempts:
+                    retry_count += 1
+                    continue
+
+        fallback_error = last_error or ValueError("RAG eval question batch failed")
+        fallback_payload = {
+            "questions": [
+                self._fallback_question_payload(chunk, error=fallback_error)
+                for chunk in batch
+                if chunk.id
+            ],
+            "_fallback_reason": self._safe_error_text(fallback_error),
+        }
+        fallback_result = self._batch_result_from_response(
+            dataset_id=dataset_id,
+            project_id=project_id,
+            document_id=document_id,
+            batch_index=batch_index,
+            response=fallback_payload,
+            valid_entry_ids=valid_entry_ids,
+            related_entry_ids_by_id=related_entry_ids_by_id,
+            json_parse_failures=json_parse_failures,
+            provider_failures=provider_failures,
+            retry_count=retry_count,
+        )
+        return _BatchGenerationResult(
+            batch_index=batch_index,
+            questions=fallback_result.questions,
+            failed=True,
+            skipped=not fallback_result.questions,
+            json_parse_failures=json_parse_failures,
+            provider_failures=provider_failures,
+            retry_count=retry_count,
+            used_fallback=True,
+        )
+
+    def _batch_result_from_response(
+        self,
+        *,
+        dataset_id: str,
+        project_id: str,
+        document_id: str,
+        batch_index: int,
+        response: Mapping[str, object],
+        valid_entry_ids: set[str],
+        related_entry_ids_by_id: Mapping[str, list[str]],
+        json_parse_failures: int,
+        provider_failures: int,
+        retry_count: int,
+    ) -> _BatchGenerationResult:
+        raw_questions = response.get("questions")
+        if not isinstance(raw_questions, Sequence) or isinstance(raw_questions, str):
+            return _BatchGenerationResult(
+                batch_index=batch_index,
+                questions=[],
+                skipped=True,
+                json_parse_failures=json_parse_failures,
+                provider_failures=provider_failures,
+                retry_count=retry_count,
+            )
+
+        questions: list[RagEvalQuestion] = []
+        for item in raw_questions:
+            if not isinstance(item, Mapping):
+                continue
+
+            question = self._question_from_payload(
+                dataset_id=dataset_id,
+                project_id=project_id,
+                document_id=document_id,
+                payload=item,
+                valid_entry_ids=valid_entry_ids,
+                related_entry_ids_by_id=related_entry_ids_by_id,
+            )
+            if question is not None and not is_document_structure_eval_question(
+                question.question
+            ):
+                questions.append(question)
+
+        return _BatchGenerationResult(
+            batch_index=batch_index,
+            questions=questions,
+            skipped=not questions,
+            json_parse_failures=json_parse_failures,
+            provider_failures=provider_failures,
+            retry_count=retry_count,
+        )
 
     async def _complete_questions_json(
         self,

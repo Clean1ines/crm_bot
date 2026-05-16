@@ -17,8 +17,10 @@ from src.application.rag_eval.schemas import (
 
 
 RagEvalDatasetProgressCallback = Callable[[int, int, int], Awaitable[None]]
+RagEvalDatasetMetricsCallback = Callable[[Mapping[str, object]], Awaitable[None]]
 RagEvalDatasetControlCallback = Callable[[], Awaitable[None]]
 RagEvalRunProgressCallback = Callable[[int, int], Awaitable[None]]
+RagEvalRunMetricsCallback = Callable[[Mapping[str, object]], Awaitable[None]]
 
 
 class RagEvalJsonLlmPort(Protocol):
@@ -49,6 +51,7 @@ class RagEvalDatasetGeneratorPort(Protocol):
         chunks: list[RagEvalEvidenceEntry],
         progress_callback: RagEvalDatasetProgressCallback | None = None,
         control_callback: RagEvalDatasetControlCallback | None = None,
+        metrics_callback: RagEvalDatasetMetricsCallback | None = None,
     ) -> RagEvalDataset: ...
 
 
