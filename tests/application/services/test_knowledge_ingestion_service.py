@@ -1596,3 +1596,158 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
         "метавопрос",
     )
     assert all(snippet not in online_section for snippet in forbidden_snippets)
+
+
+def test_online_merge_never_concats_answers_when_llm_returns_canonical_card():
+    from src.application.services.knowledge_ingestion_service import (
+        _apply_semantic_merge_tightening_decisions,
+    )
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgeSemanticMergeCanonicalCard,
+        KnowledgeSemanticMergeDecision,
+    )
+
+    entries = (
+        KnowledgePreprocessingEntry(
+            title="Возврат",
+            answer="Условия возврата зависят от ситуации и этапа работы.",
+            source_excerpt="Условия возврата зависят от ситуации и этапа работы.",
+            questions=("Как оформить возврат?",),
+            synonyms=("возврат",),
+            tags=("refund",),
+            source_chunk_indexes=(0,),
+        ),
+        KnowledgePreprocessingEntry(
+            title="Возврат средств",
+            answer="Условия возврата средств зависят от ситуации.",
+            source_excerpt="Условия возврата средств зависят от ситуации.",
+            questions=("Можно вернуть оплату?",),
+            synonyms=("возврат средств",),
+            tags=("billing",),
+            source_chunk_indexes=(1,),
+        ),
+    )
+    decision = KnowledgeSemanticMergeDecision(
+        group_id="group-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_card=KnowledgeSemanticMergeCanonicalCard(
+            title="Условия возврата",
+            canonical_question="Какие условия возврата?",
+            answer="Условия возврата зависят от ситуации и этапа работы.",
+            questions=("Как оформить возврат?", "Можно вернуть оплату?"),
+            synonyms=("возврат", "возврат средств"),
+            tags=("refund", "billing"),
+            source_chunk_indexes=(0, 1),
+        ),
+    )
+
+    tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
+        entries=entries,
+        decisions=(decision,),
+        source_excerpts_by_entry=(
+            (entries[0].source_excerpt,),
+            (entries[1].source_excerpt,),
+        ),
+    )
+
+    assert len(tightened) == 1
+    assert tightened[0].answer == "Условия возврата зависят от ситуации и этапа работы."
+    assert "Условия возврата средств зависят от ситуации." not in tightened[0].answer
+    assert tightened[0].questions == (
+        "Какие условия возврата?",
+        "Как оформить возврат?",
+        "Можно вернуть оплату?",
+    )
+    assert tightened[0].synonyms == ("возврат", "возврат средств")
+    assert tightened[0].tags == ("refund", "billing")
+    assert tightened[0].source_chunk_indexes == (0, 1)
+    assert len(source_excerpts[0]) == 2
+
+
+def test_non_publishable_llm_classification_is_not_published():
+    from src.application.services.knowledge_ingestion_service import (
+        _apply_semantic_merge_tightening_decisions,
+    )
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgeSemanticMergeCanonicalCard,
+        KnowledgeSemanticMergeDecision,
+    )
+
+    entry = KnowledgePreprocessingEntry(
+        title="Internal instruction",
+        answer="Каждая тема должна быть отделена от других.",
+        source_excerpt="Каждая тема должна быть отделена от других.",
+        questions=("Как оформлять темы?",),
+    )
+    decision = KnowledgeSemanticMergeDecision(
+        group_id="group-1",
+        action="keep_separate",
+        candidate_ids=("entry-0",),
+        canonical_card=KnowledgeSemanticMergeCanonicalCard(
+            title="",
+            canonical_question="",
+            answer="",
+            publishable=False,
+            publishable_classification="internal_instruction",
+            publishable_reason="LLM classified it as internal instruction",
+        ),
+    )
+
+    tightened, _ = _apply_semantic_merge_tightening_decisions(
+        entries=(entry,),
+        decisions=(decision,),
+    )
+
+    assert tightened == ()
+
+
+def test_publication_guard_collapses_exact_duplicate_answers():
+    from src.application.services.knowledge_ingestion_service import (
+        _canonical_entries_from_preprocessing_result,
+    )
+    from src.domain.project_plane.knowledge_compilation import SourceChunk
+    from src.domain.project_plane.knowledge_preprocessing import (
+        KnowledgePreprocessingResult,
+    )
+
+    result = KnowledgePreprocessingResult(
+        mode="faq",
+        prompt_version="knowledge_answer_compiler_faq_v1",
+        model="llama-test",
+        entries=(
+            KnowledgePreprocessingEntry(
+                title="Правило ответа",
+                answer="Ассистент не выдумывает ответ.",
+                source_excerpt="Ассистент не выдумывает ответ.",
+                questions=("Что делает ассистент без данных?",),
+            ),
+            KnowledgePreprocessingEntry(
+                title="Ответ без данных",
+                answer="Ассистент не выдумывает ответ.",
+                source_excerpt="Ассистент не выдумывает ответ.",
+                questions=("Как отвечает ассистент без данных?",),
+            ),
+        ),
+    )
+    source_chunk = SourceChunk(
+        id="chunk-1",
+        document_id="doc-1",
+        project_id="project-1",
+        source_index=0,
+        content="Ассистент не выдумывает ответ.",
+    )
+
+    entries = _canonical_entries_from_preprocessing_result(
+        project_id="project-1",
+        document_id="doc-1",
+        compiler_run_id="run-1",
+        result=result,
+        source_chunks=(source_chunk,),
+    )
+
+    assert len(entries) == 1
+    assert entries[0].enrichment.questions == (
+        "Что делает ассистент без данных?",
+        "Как отвечает ассистент без данных?",
+    )

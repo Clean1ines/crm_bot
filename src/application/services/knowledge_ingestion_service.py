@@ -4,7 +4,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import cast
 
@@ -1118,6 +1118,15 @@ def _merge_text_tuple_values(
     return tuple(result)
 
 
+def _merge_int_tuple_values(*groups: tuple[int, ...]) -> tuple[int, ...]:
+    result: list[int] = []
+    for group in groups:
+        for value in group:
+            if value not in result:
+                result.append(value)
+    return tuple(result)
+
+
 def _merge_answer_text(left: str, right: str) -> str:
     left_clean = _clean_optional_text(left)
     right_clean = _clean_optional_text(right)
@@ -1835,6 +1844,57 @@ def _entry_with_semantic_merge_decision(
     entry: KnowledgePreprocessingEntry,
     decision: KnowledgeSemanticMergeDecision,
 ) -> KnowledgePreprocessingEntry:
+    card = decision.canonical_card
+    if card is not None and card.publishable:
+        title = _clean_optional_text(card.title) or entry.title
+        answer = _limit_compiled_text(
+            _clean_optional_text(card.answer) or entry.answer,
+            max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
+        )
+        questions = _merge_limited_text_tuple_values(
+            (card.canonical_question,),
+            _text_tuple(card.questions),
+            entry.questions,
+            limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
+        )
+        synonyms = _merge_limited_text_tuple_values(
+            _text_tuple(card.synonyms) or entry.synonyms,
+            limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
+        )
+        tags = _merge_limited_text_tuple_values(
+            _text_tuple(card.tags) or entry.tags,
+            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
+        )
+        compatibility_entry = KnowledgePreprocessingEntry(
+            title=title,
+            answer=answer,
+            source_excerpt=entry.source_excerpt,
+            questions=questions,
+            synonyms=synonyms,
+            tags=tags,
+            canonical_question=_clean_optional_text(card.canonical_question)
+            or entry.canonical_question,
+        )
+        embedding_text = _limit_compiled_text(
+            build_embedding_text(compatibility_entry),
+            max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
+        )
+        return KnowledgePreprocessingEntry(
+            title=title,
+            answer=answer,
+            source_excerpt=entry.source_excerpt,
+            questions=questions,
+            synonyms=synonyms,
+            tags=tags,
+            embedding_text=embedding_text,
+            canonical_question=_clean_optional_text(card.canonical_question)
+            or entry.canonical_question,
+            source_chunk_indexes=_merge_int_tuple_values(
+                entry.source_chunk_indexes,
+                card.source_chunk_indexes,
+            ),
+        )
+
     title = _clean_optional_text(decision.survivor_title) or entry.title
     embedding_text = _limit_compiled_text(
         _cleanup_semantic_merge_embedding_text(
@@ -1852,7 +1912,14 @@ def _entry_with_semantic_merge_decision(
         tags=entry.tags,
         embedding_text=embedding_text,
         canonical_question=entry.canonical_question,
+        source_chunk_indexes=entry.source_chunk_indexes,
     )
+
+
+def _semantic_merge_decision_is_publishable(
+    decision: KnowledgeSemanticMergeDecision,
+) -> bool:
+    return decision.canonical_card is None or decision.canonical_card.publishable
 
 
 def _apply_semantic_merge_tightening_decisions(
@@ -1882,7 +1949,7 @@ def _apply_semantic_merge_tightening_decisions(
     removed_indexes: set[int] = set()
 
     for decision in decisions:
-        if not decision.is_merge:
+        if not decision.is_merge and _semantic_merge_decision_is_publishable(decision):
             continue
 
         candidate_indexes: list[int] = []
@@ -1893,6 +1960,10 @@ def _apply_semantic_merge_tightening_decisions(
             if index in candidate_indexes or index in removed_indexes:
                 continue
             candidate_indexes.append(index)
+
+        if not _semantic_merge_decision_is_publishable(decision):
+            removed_indexes.update(candidate_indexes)
+            continue
 
         if len(candidate_indexes) < 2:
             continue
@@ -1972,6 +2043,7 @@ async def _tighten_compiled_entries_with_semantic_merge(
     entries: Sequence[KnowledgePreprocessingEntry],
     source_excerpts_by_entry: Sequence[tuple[str, ...]],
     existing_project_titles: Sequence[str],
+    on_progress: Callable[[JsonObject], Awaitable[None]] | None = None,
 ) -> tuple[
     tuple[KnowledgePreprocessingEntry, ...],
     tuple[tuple[str, ...], ...],
@@ -1985,52 +2057,69 @@ async def _tighten_compiled_entries_with_semantic_merge(
         )
 
     metrics: JsonObject = {
+        "status": "processing" if groups else "completed",
+        "candidate_count": len(entries),
+        "raw_draft_count": len(entries),
+        "suspect_group_count": len(groups),
         "candidate_group_count": len(groups),
+        "processed_group_count": 0,
         "entry_count_before": len(entries),
         "existing_project_title_count": len(existing_project_titles),
-        "strategy": "generic_token_suspect_groups_plus_llm_decision",
+        "strategy": "generic_token_suspect_groups_plus_llm_canonical_card",
+        "fallback_used": False,
+        "llm_call_count": 0,
+        "decision_count": 0,
+        "merge_decision_count": 0,
+        "keep_separate_decision_count": 0,
+        "rejected_decision_count": 0,
+        "invalid_merge_output_count": 0,
     }
 
+    async def publish_progress() -> None:
+        if on_progress is not None:
+            await on_progress(dict(metrics))
+
+    await publish_progress()
+
     if not groups:
-        metrics["status"] = "completed"
         metrics["entry_count_after"] = len(entries)
-        metrics["llm_call_count"] = 0
-        metrics["decision_count"] = 0
-        metrics["merge_decision_count"] = 0
-        metrics["keep_separate_decision_count"] = 0
-        metrics["invalid_merge_output_count"] = 0
         return tuple(entries), source_excerpts, metrics
 
-    llm_call_count = 0
+    decisions: tuple[KnowledgeSemanticMergeDecision, ...] = ()
     try:
-        first_execution = await preprocessor.tighten_semantic_merges(
-            mode=mode,
-            file_name=file_name,
-            groups=(groups[0],),
-            existing_project_titles=existing_project_titles,
-        )
-        llm_call_count = 1
-        decisions = first_execution.result.decisions
-        for group in groups[1:]:
+        for group in groups:
             execution = await preprocessor.tighten_semantic_merges(
                 mode=mode,
                 file_name=file_name,
                 groups=(group,),
                 existing_project_titles=existing_project_titles,
             )
-            llm_call_count += 1
+            metrics["llm_call_count"] = _json_metric_int(metrics, "llm_call_count") + 1
             decisions = (*decisions, *execution.result.decisions)
+            metrics["processed_group_count"] = (
+                _json_metric_int(metrics, "processed_group_count") + 1
+            )
+            metrics["decision_count"] = len(decisions)
+            metrics["merge_decision_count"] = sum(
+                1 for decision in decisions if decision.is_merge
+            )
+            metrics["keep_separate_decision_count"] = sum(
+                1 for decision in decisions if not decision.is_merge
+            )
+            metrics["rejected_decision_count"] = sum(
+                1
+                for decision in decisions
+                if not _semantic_merge_decision_is_publishable(decision)
+            )
+            await publish_progress()
     except Exception as exc:
         metrics["status"] = "failed"
         metrics["fallback_used"] = True
         metrics["error_type"] = type(exc).__name__
         metrics["error_message"] = str(exc)[:240]
         metrics["entry_count_after"] = len(entries)
-        metrics["llm_call_count"] = llm_call_count
-        metrics["decision_count"] = 0
-        metrics["merge_decision_count"] = 0
-        metrics["keep_separate_decision_count"] = 0
         metrics["invalid_merge_output_count"] = 1
+        await publish_progress()
         return tuple(entries), source_excerpts, metrics
 
     tightened_entries, tightened_source_excerpts = (
@@ -2050,10 +2139,17 @@ async def _tighten_compiled_entries_with_semantic_merge(
     metrics["keep_separate_decision_count"] = sum(
         1 for decision in decisions if not decision.is_merge
     )
+    metrics["rejected_decision_count"] = sum(
+        1
+        for decision in decisions
+        if not _semantic_merge_decision_is_publishable(decision)
+    )
     metrics["invalid_merge_output_count"] = 0
     metrics["entry_count_after"] = len(tightened_entries)
+    metrics["final_entry_count"] = len(tightened_entries)
+    metrics["published_entry_count"] = len(tightened_entries)
     metrics["collapsed_entry_count"] = len(entries) - len(tightened_entries)
-    metrics["llm_call_count"] = llm_call_count
+    await publish_progress()
 
     return tightened_entries, tightened_source_excerpts, metrics
 
@@ -2157,6 +2253,10 @@ def _merge_entry_fields_deterministically(
         ),
         embedding_text=embedding_text,
         canonical_question=compatibility_entry.canonical_question,
+        source_chunk_indexes=_merge_int_tuple_values(
+            existing_entry.source_chunk_indexes,
+            incoming_entry.source_chunk_indexes,
+        ),
     )
 
 
@@ -2821,6 +2921,133 @@ def _source_refs_for_compiled_answer_draft(
     return tuple(refs)
 
 
+def _publication_text_fingerprint(value: str) -> str:
+    return " ".join(
+        re.sub(r"[^0-9a-zа-яё]+", " ", value.lower().replace("ё", "е")).split()
+    )
+
+
+def _source_ref_fingerprint(source_ref: SourceRef) -> tuple[object, ...]:
+    return (
+        source_ref.source_chunk_id or "",
+        source_ref.source_index,
+        _publication_text_fingerprint(source_ref.quote),
+    )
+
+
+def _merge_source_ref_tuple_values(
+    *groups: tuple[SourceRef, ...],
+) -> tuple[SourceRef, ...]:
+    result: list[SourceRef] = []
+    seen: set[tuple[object, ...]] = set()
+    for group in groups:
+        for source_ref in group:
+            fingerprint = _source_ref_fingerprint(source_ref)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            result.append(source_ref)
+    return tuple(result)
+
+
+def _merge_canonical_entries_structurally(
+    existing_entry: CanonicalKnowledgeEntry,
+    incoming_entry: CanonicalKnowledgeEntry,
+) -> CanonicalKnowledgeEntry:
+    source_refs = _merge_source_ref_tuple_values(
+        existing_entry.source_refs,
+        incoming_entry.source_refs,
+    )
+    enrichment = KnowledgeEnrichment(
+        questions=_merge_text_tuple_values(
+            existing_entry.enrichment.questions,
+            incoming_entry.enrichment.questions,
+        ),
+        paraphrases=_merge_text_tuple_values(
+            existing_entry.enrichment.paraphrases,
+            incoming_entry.enrichment.paraphrases,
+        ),
+        synonyms=_merge_text_tuple_values(
+            existing_entry.enrichment.synonyms,
+            incoming_entry.enrichment.synonyms,
+        ),
+        typo_queries=_merge_text_tuple_values(
+            existing_entry.enrichment.typo_queries,
+            incoming_entry.enrichment.typo_queries,
+        ),
+        colloquial_queries=_merge_text_tuple_values(
+            existing_entry.enrichment.colloquial_queries,
+            incoming_entry.enrichment.colloquial_queries,
+        ),
+        tags=_merge_text_tuple_values(
+            existing_entry.enrichment.tags,
+            incoming_entry.enrichment.tags,
+        ),
+        retrieval_guards=_merge_text_tuple_values(
+            existing_entry.enrichment.retrieval_guards,
+            incoming_entry.enrichment.retrieval_guards,
+        ),
+    )
+    metadata = dict(existing_entry.metadata)
+    merged_ids = _merge_text_tuple_values(
+        _text_tuple(metadata.get("merged_entry_ids")),
+        (existing_entry.id, incoming_entry.id),
+        _text_tuple(incoming_entry.metadata.get("merged_entry_ids")),
+    )
+    metadata["publication_guard"] = "exact_fingerprint_collapse"
+    metadata["merged_candidate_count"] = len(merged_ids)
+    metadata["merged_candidate_ids"] = list(merged_ids)
+    metadata["source_ref_count"] = len(source_refs)
+    return replace(
+        existing_entry,
+        source_refs=source_refs,
+        enrichment=enrichment,
+        metadata=metadata,
+    )
+
+
+def _final_publication_guard_collapse_exact_duplicates(
+    entries: Sequence[CanonicalKnowledgeEntry],
+) -> tuple[CanonicalKnowledgeEntry, ...]:
+    result: list[CanonicalKnowledgeEntry] = []
+    key_to_index: dict[tuple[str, str], int] = {}
+
+    for entry in entries:
+        fingerprints = (
+            (
+                "question",
+                _publication_text_fingerprint(entry.enrichment.questions[0])
+                if entry.enrichment.questions
+                else "",
+            ),
+            ("answer", _publication_text_fingerprint(entry.answer)),
+            (
+                "title_answer",
+                _publication_text_fingerprint(f"{entry.title} {entry.answer}"),
+            ),
+        )
+        target_index: int | None = None
+        for fingerprint in fingerprints:
+            if fingerprint[1] and fingerprint in key_to_index:
+                target_index = key_to_index[fingerprint]
+                break
+
+        if target_index is None:
+            target_index = len(result)
+            result.append(entry)
+        else:
+            result[target_index] = _merge_canonical_entries_structurally(
+                result[target_index],
+                entry,
+            )
+
+        for fingerprint in fingerprints:
+            if fingerprint[1]:
+                key_to_index[fingerprint] = target_index
+
+    return tuple(result)
+
+
 def _canonical_entries_from_preprocessing_result(
     *,
     project_id: str,
@@ -2881,7 +3108,7 @@ def _canonical_entries_from_preprocessing_result(
         entry.assert_publishable()
         entries.append(entry)
 
-    return tuple(entries)
+    return _final_publication_guard_collapse_exact_duplicates(entries)
 
 
 def _canonical_entries_from_knowledge_chunks(
@@ -4355,6 +4582,42 @@ class KnowledgeIngestionService:
                     ),
                 },
             )
+
+            async def persist_semantic_merge_progress(metrics: JsonObject) -> None:
+                await repo.update_document_preprocessing_status(
+                    document_id,
+                    mode=mode,
+                    status=PREPROCESSING_STATUS_PROCESSING,
+                    model=active_model,
+                    prompt_version=active_prompt_version,
+                    metrics={
+                        "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                        "stage": "semantic_merge_tightening",
+                        "status_message": (
+                            "Черновики сохранены, идёт уплотнение смысловых дублей."
+                        ),
+                        "technical_chunk_processed_count": len(technical_batches),
+                        "technical_chunk_total_count": len(technical_batches),
+                        "failed_part_count": 0,
+                        "raw_draft_count": raw_candidate_count,
+                        "compiled_entry_count": len(cleanup_result.entries),
+                        "deterministic_cleanup": cleanup_result.metrics,
+                        "semantic_merge_tightening": {
+                            **metrics,
+                            "raw_draft_count": raw_candidate_count,
+                        },
+                        "semantic_merge_fallback_used": (
+                            metrics.get("fallback_used") is True
+                        ),
+                        "online_answer_merge_enabled": True,
+                        "extraction_concurrency": extraction_concurrency,
+                        "elapsed_seconds": round(
+                            time.monotonic() - processing_started_monotonic,
+                            1,
+                        ),
+                    },
+                )
+
             (
                 tightened_entries,
                 tightened_source_excerpts,
@@ -4366,6 +4629,7 @@ class KnowledgeIngestionService:
                 entries=cleanup_result.entries,
                 source_excerpts_by_entry=cleanup_result.source_excerpts_by_entry,
                 existing_project_titles=existing_project_titles,
+                on_progress=persist_semantic_merge_progress,
             )
             semantic_merge_fallback_used = (
                 semantic_merge_tightening_metrics.get("fallback_used") is True
