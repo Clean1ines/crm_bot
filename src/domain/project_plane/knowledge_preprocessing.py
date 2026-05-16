@@ -43,6 +43,23 @@ SEMANTIC_MERGE_ACTION_MERGE = "merge"
 SEMANTIC_MERGE_ACTION_KEEP_SEPARATE = "keep_separate"
 ANSWER_RESOLUTION_ACTION_CONFLICT = "conflict"
 ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW = "needs_review"
+ANSWER_RESOLUTION_FORBIDDEN_OUTPUT_FIELDS: frozenset[str] = frozenset(
+    {
+        "candidate_ids",
+        "group_id",
+        "questions",
+        "synonyms",
+        "tags",
+        "source_refs",
+        "source_chunk_indexes",
+        "source_excerpt",
+        "embedding_text",
+        "metadata",
+        "cards",
+        "entries",
+        "canonical" + "_card",
+    }
+)
 
 
 class KnowledgePreprocessingValidationError(ValueError):
@@ -344,9 +361,18 @@ def _parse_semantic_merge_decision(
     index: int,
     max_answer_chars: int,
 ) -> KnowledgeSemanticMergeDecision:
-    group_id = _optional_text(payload.get("case_id")) or _required_text(
-        payload, "group_id", index=index
+    forbidden_fields = sorted(
+        str(key)
+        for key in payload
+        if str(key) in ANSWER_RESOLUTION_FORBIDDEN_OUTPUT_FIELDS
     )
+    if forbidden_fields:
+        raise KnowledgePreprocessingValidationError(
+            f"Semantic merge decision {index} contains forbidden fields: "
+            f"{', '.join(forbidden_fields)}"
+        )
+
+    case_id = _required_text(payload, "case_id", index=index)
     raw_action = _required_answer_resolution_action(payload.get("action"), index=index)
     action = cast(
         SemanticMergeAction,
@@ -354,7 +380,6 @@ def _parse_semantic_merge_decision(
         if raw_action == SEMANTIC_MERGE_ACTION_MERGE
         else SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
     )
-    candidate_ids = tuple(_string_list(payload.get("candidate_ids")))
     canonical_answer = _optional_text(payload.get("canonical_answer"))
     reason = _optional_text(payload.get("reason"))
     confidence = _clamped_float(payload.get("confidence"))
@@ -368,9 +393,9 @@ def _parse_semantic_merge_decision(
         canonical_answer = canonical_answer[:max_answer_chars].rstrip()
 
     return KnowledgeSemanticMergeDecision(
-        group_id=group_id,
+        group_id=case_id,
         action=action,
-        candidate_ids=candidate_ids,
+        candidate_ids=(),
         canonical_answer=canonical_answer,
         reason=reason,
         confidence=confidence,
@@ -386,6 +411,8 @@ def build_embedding_text(entry: KnowledgePreprocessingEntry) -> str:
         entry.title,
         entry.canonical_question,
         " ".join(entry.questions),
+        " ".join(entry.synonyms),
+        " ".join(entry.tags),
         entry.answer,
     ]
     return _compact_text(" ".join(part for part in parts if part))

@@ -93,6 +93,17 @@ def test_stage_k_groq_preprocessor_has_answer_only_resolution_contract() -> None
     assert "full canonical entries" not in source
 
 
+def test_answer_resolution_parser_does_not_read_candidate_ids_from_payload() -> None:
+    parser_source = _function_source(
+        ROOT / "src/domain/project_plane/knowledge_preprocessing.py",
+        "_parse_semantic_merge_decision",
+    )
+
+    assert '.get("candidate_ids")' not in parser_source
+    assert "_string_list(payload.get" not in parser_source
+    assert "candidate_ids=()" in parser_source
+
+
 def test_stage_k_ingestion_records_online_merge_compiler_metrics() -> None:
     source = _source(INGESTION_SERVICE)
 

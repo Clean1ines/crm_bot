@@ -1424,10 +1424,6 @@ def _compiled_answer_drafts_from_preprocessing_result(
 KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUPS = 24
 KCD_STAGE_K8_SEMANTIC_MERGE_MAX_GROUP_SIZE = 2
 KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS = 900
-KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS = 1000
-KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_QUESTION_LIMIT = 8
-KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_SYNONYM_LIMIT = 12
-KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_TAG_LIMIT = 8
 KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS = 3
 KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT = 3
 
@@ -1463,11 +1459,8 @@ def _semantic_merge_entry_text(entry: KnowledgePreprocessingEntry) -> str:
         part
         for part in (
             entry.title,
-            entry.answer,
-            entry.embedding_text,
+            entry.canonical_question,
             " ".join(_text_tuple(entry.questions)),
-            " ".join(_text_tuple(entry.synonyms)),
-            " ".join(_text_tuple(entry.tags)),
         )
         if _clean_optional_text(part)
     )
@@ -1493,30 +1486,12 @@ def _semantic_merge_token_similarity(
 
 
 def _semantic_merge_question_intent_text(entry: KnowledgePreprocessingEntry) -> str:
-    explicit_intent = " ".join(
-        part
-        for part in (
-            " ".join(_text_tuple(entry.questions)),
-            " ".join(_text_tuple(entry.synonyms)),
-            " ".join(_text_tuple(entry.tags)),
-        )
-        if _clean_optional_text(part)
-    )
-    if explicit_intent:
-        return " ".join(
-            part
-            for part in (entry.title, explicit_intent)
-            if _clean_optional_text(part)
-        )
-
     return " ".join(
         part
         for part in (
             entry.title,
-            _limit_compiled_text(
-                entry.answer,
-                max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
-            ),
+            entry.canonical_question,
+            " ".join(_text_tuple(entry.questions)),
         )
         if _clean_optional_text(part)
     )
