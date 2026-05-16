@@ -434,77 +434,62 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "file_name": file_name,
             "mode": mode,
             "existing_project_titles": compact_project_titles,
-            "suspect_groups": [group.to_payload() for group in groups],
+            "cases": [
+                group.to_answer_resolution_case().to_payload() for group in groups
+            ],
         }
 
         return (
-            "SEMANTIC MERGE TIGHTENING TASK:\n"
+            "ANSWER-ONLY SEMANTIC RESOLUTION TASK:\n"
             "Return exactly one JSON object and nothing else.\n\n"
             "Purpose:\n"
-            "- You receive groups of already grounded canonical-entry candidates.\n"
-            "- Each group is only a suspect duplicate group, not a command to merge.\n"
-            "- same answer intent / stable user information need is the only valid merge target.\n"
-            "- Decide whether candidates in each group are truly that same answer intent.\n"
-            "- Treat answer intent as: primary user question, realistic question samples, compact answer digest, tags, and grounded answer facts.\n"
-            "- Do not use embedding_text as the primary identity signal; it is only retrieval helper text.\n"
-            "- Merge only when the same user information need should retrieve one consolidated canonical answer.\n"
-            "- Keep separate when candidates are related but answer different intents, constraints, audiences, operations, policies, or stages.\n"
-            "- Shared generic vocabulary is never enough to merge.\n"
-            "- Groups are pairwise by design: compare the two candidates directly, not by broad topic similarity.\n\n"
-            "Schema:\n"
+            "- You are not a whole-card merge engine.\n"
+            "- You only resolve ambiguous answer fragments after deterministic merge rules failed.\n"
+            "- Each case contains one unresolved pair/group for the same suspected user intent.\n"
+            "- Decide whether the answers can become one authoritative answer, or must remain separate / conflict / needs_review.\n"
+            "- Use source_excerpt only as evidence for the answer decision.\n"
+            "- Do not create, edit, or return retrieval enrichment, source refs, metadata, or embedding text.\n\n"
+            "Input schema:\n"
+            "{\n"
+            '  "cases": [\n'
+            "    {\n"
+            '      "case_id": "...",\n'
+            '      "question_intent": "...",\n'
+            '      "answers": [\n'
+            '        {"id": "entry-0", "answer": "...", "source_excerpt": "..."}\n'
+            "      ]\n"
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Output schema:\n"
             "{\n"
             '  "decisions": [\n'
             "    {\n"
-            '      "group_id": "...",\n'
-            '      "action": "merge | keep_separate",\n'
-            '      "candidate_ids": ["..."],\n'
-            '      "survivor_title": "...",\n'
-            '      "merged_embedding_text": "...",\n'
-            '      "canonical_card": {\n'
-            '        "title": "...",\n'
-            '        "canonical_question": "...",\n'
-            '        "answer": "...",\n'
-            '        "questions": ["..."],\n'
-            '        "synonyms": ["..."],\n'
-            '        "tags": ["..."],\n'
-            '        "source_ref_ids": ["..."],\n'
-            '        "source_chunk_indexes": [0],\n'
-            '        "publishable": true,\n'
-            '        "publishable_classification": "publishable_customer_answer | assistant_behavior_rule | internal_instruction | eval_or_test_item | not_enough_evidence | noisy_or_non_answer",\n'
-            '        "publishable_reason": "..."\n'
-            "      }\n"
+            '      "case_id": "...",\n'
+            '      "action": "merge | keep_separate | conflict | needs_review",\n'
+            '      "canonical_answer": "...",\n'
+            '      "reason": "...",\n'
+            '      "confidence": 0.0\n'
             "    }\n"
             "  ]\n"
             "}\n\n"
             "Rules for action=merge:\n"
-            "- candidate_ids MUST contain all candidates being collapsed.\n"
-            "- survivor_title MUST be exactly one concise canonical title.\n"
-            "- canonical_card MUST contain one synthesized customer-facing card for the shared intent.\n"
-            "- canonical_card.answer MUST be synthesis, not concatenation.\n"
-            "- publishable_classification MUST be one of the listed labels; publishable must be true only for publishable_customer_answer.\n"
-            "- merged_embedding_text MUST be a compact replacement canonical retrieval text for the shared user question/intent.\n"
-            "- Do NOT concatenate candidate answers or candidate embedding_text values.\n"
-            "- Do NOT append old answer + new answer; return one compressed replacement.\n"
-            "- If candidates are A and A+B for the same intent, return A+B once, not A+A+B.\n"
-            "- It MUST be shorter than the combined candidate answer + embedding_text unless preserving distinct grounded constraints requires otherwise.\n"
-            "- Preserve grounded facts, limitations, product terms, handoff rules, prices, dates, and negative constraints exactly once.\n"
-            "- Remove exact and near-duplicate phrases, repeated sentences, repeated examples, repeated benefits, and repeated intent variants.\n"
-            "- If one candidate only adds a minor clarification to the same answer, fold that clarification into the canonical wording once.\n"
-            "- Do not invent facts.\n\n"
-            "Rules for action=keep_separate:\n"
-            "- Use when candidates are related but not the same answer intent / stable information need.\n"
-            "- Keep separate when the requested outcome, condition, audience, operation, or policy differs.\n"
-            "- candidate_ids MUST contain the candidates considered for that decision.\n"
-            "- survivor_title and merged_embedding_text MAY be empty.\n"
-            "- canonical_card MAY classify a group as non-publishable when it is not a customer answer.\n\n"
-            "Project-level title context:\n"
-            "- existing_project_titles are already published project answers.\n"
-            "- Prefer a survivor_title compatible with an existing project title when the meaning is the same.\n"
-            "- Do not merge with existing_project_titles here; only use them for naming consistency.\n\n"
+            "- Use merge only when all answers address the same specific user information need.\n"
+            "- canonical_answer must be one concise replacement answer, not concatenation.\n"
+            "- Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.\n"
+            "- Do not invent facts beyond answer/source_excerpt evidence.\n\n"
+            "Rules for non-merge actions:\n"
+            "- keep_separate when answers are related but not the same specific answer intent.\n"
+            "- conflict when answers contradict each other and a safe canonical answer cannot be produced.\n"
+            "- needs_review when evidence is insufficient or ambiguous.\n"
+            "- canonical_answer must be empty for keep_separate, conflict, and needs_review.\n\n"
+            "Forbidden output fields:\n"
+            "- Do not return questions, synonyms, tags, source_refs, source_excerpt, embedding_text, metadata, canonical_card, entries, cards, or full canonical entries.\n"
+            "- Do not return candidate_ids; the application maps case_id back to answers deterministically.\n\n"
             "STRICT OUTPUT CONTRACT:\n"
             "- Return exactly one JSON object.\n"
             "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n"
-            "- Do not return markdown, explanation, entries[], or free-form text outside schema.\n\n"
+            "- Do not return markdown, explanation, or free-form text outside schema.\n\n"
             "NOW PROCESS THIS JSON. Return ONLY the JSON result:\n"
             f"{json.dumps(merge_payload, ensure_ascii=False)}"
         )

@@ -37,8 +37,13 @@ PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
 SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v2"
 
 SemanticMergeAction: TypeAlias = Literal["merge", "keep_separate"]
+AnswerResolutionAction: TypeAlias = Literal[
+    "merge", "keep_separate", "conflict", "needs_review"
+]
 SEMANTIC_MERGE_ACTION_MERGE = "merge"
 SEMANTIC_MERGE_ACTION_KEEP_SEPARATE = "keep_separate"
+ANSWER_RESOLUTION_ACTION_CONFLICT = "conflict"
+ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW = "needs_review"
 
 
 class KnowledgePreprocessingValidationError(ValueError):
@@ -118,39 +123,82 @@ class KnowledgeQuestionIntentCard:
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgeAnswerResolutionOption:
+    id: str
+    answer: str
+    source_excerpt: str = ""
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "id": self.id,
+            "answer": self.answer,
+            "source_excerpt": self.source_excerpt,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeAnswerResolutionCase:
+    case_id: str
+    question_intent: str
+    answers: tuple[KnowledgeAnswerResolutionOption, ...]
+
+    def to_payload(self) -> JsonObject:
+        return {
+            "case_id": self.case_id,
+            "question_intent": self.question_intent,
+            "answers": [answer.to_payload() for answer in self.answers],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeAnswerResolutionDecision:
+    case_id: str
+    action: AnswerResolutionAction
+    canonical_answer: str = ""
+    reason: str = ""
+    confidence: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgeSemanticMergeCandidate:
     candidate_id: str
     title: str
     answer: str
-    embedding_text: str
+    embedding_text: str = ""
     questions: tuple[str, ...] = field(default_factory=tuple)
     synonyms: tuple[str, ...] = field(default_factory=tuple)
     tags: tuple[str, ...] = field(default_factory=tuple)
     source_ref_count: int = 0
+    source_excerpt: str = ""
+
+    def to_answer_resolution_option(self) -> KnowledgeAnswerResolutionOption:
+        return KnowledgeAnswerResolutionOption(
+            id=self.candidate_id,
+            answer=self.answer,
+            source_excerpt=self.source_excerpt,
+        )
 
     def to_payload(self) -> JsonObject:
-        return {
-            "candidate_id": self.candidate_id,
-            "title": self.title,
-            "answer": self.answer,
-            "embedding_text": self.embedding_text,
-            "questions": list(self.questions),
-            "synonyms": list(self.synonyms),
-            "tags": list(self.tags),
-            "source_ref_count": self.source_ref_count,
-        }
+        return self.to_answer_resolution_option().to_payload()
 
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeSemanticMergeGroup:
     group_id: str
     candidates: tuple[KnowledgeSemanticMergeCandidate, ...]
+    question_intent: str = ""
+
+    def to_answer_resolution_case(self) -> KnowledgeAnswerResolutionCase:
+        return KnowledgeAnswerResolutionCase(
+            case_id=self.group_id,
+            question_intent=self.question_intent,
+            answers=tuple(
+                candidate.to_answer_resolution_option() for candidate in self.candidates
+            ),
+        )
 
     def to_payload(self) -> JsonObject:
-        return {
-            "group_id": self.group_id,
-            "candidates": [candidate.to_payload() for candidate in self.candidates],
-        }
+        return self.to_answer_resolution_case().to_payload()
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,58 +458,43 @@ def _parse_semantic_merge_decision(
     index: int,
     max_embedding_text_chars: int,
 ) -> KnowledgeSemanticMergeDecision:
-    group_id = _required_text(payload, "group_id", index=index)
-    action = _required_semantic_merge_action(payload.get("action"), index=index)
-    candidate_ids = tuple(_string_list(payload.get("candidate_ids")))
-
-    if not candidate_ids:
-        raise KnowledgePreprocessingValidationError(
-            f"Semantic merge decision {index} must contain candidate_ids[]"
-        )
-
-    survivor_title = _optional_text(payload.get("survivor_title"))
-    merged_embedding_text = _optional_text(payload.get("merged_embedding_text"))
-    canonical_card = _parse_semantic_merge_canonical_card(
-        payload.get("canonical_card"),
-        index=index,
+    group_id = _optional_text(payload.get("case_id")) or _required_text(
+        payload, "group_id", index=index
     )
+    raw_action = _required_answer_resolution_action(payload.get("action"), index=index)
+    action = cast(
+        SemanticMergeAction,
+        SEMANTIC_MERGE_ACTION_MERGE
+        if raw_action == SEMANTIC_MERGE_ACTION_MERGE
+        else SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+    )
+    candidate_ids = tuple(_string_list(payload.get("candidate_ids")))
+    canonical_answer = _optional_text(payload.get("canonical_answer"))
+    legacy_answer = _optional_text(payload.get("merged_embedding_text"))
+    merged_answer = canonical_answer or legacy_answer
 
-    if canonical_card is not None and canonical_card.publishable:
-        if not canonical_card.title:
+    if action == SEMANTIC_MERGE_ACTION_MERGE:
+        if not merged_answer:
             raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} canonical_card missing title"
+                f"Semantic merge decision {index} missing canonical_answer"
             )
-        if not canonical_card.answer:
-            raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} canonical_card missing answer"
-            )
+        if not candidate_ids:
+            # Answer-only resolver output intentionally omits candidate_ids;
+            # application code maps case_id back to the original answer options.
+            candidate_ids = ()
+    elif not candidate_ids:
+        candidate_ids = ()
 
-    if action == SEMANTIC_MERGE_ACTION_MERGE and canonical_card is None:
-        if len(candidate_ids) < 2:
-            raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} must merge at least 2 candidates"
-            )
-        if not survivor_title:
-            raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} missing survivor_title"
-            )
-        if not merged_embedding_text:
-            raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} missing merged_embedding_text"
-            )
-
-    if len(merged_embedding_text) > max_embedding_text_chars:
-        merged_embedding_text = merged_embedding_text[
-            :max_embedding_text_chars
-        ].rstrip()
+    if len(merged_answer) > max_embedding_text_chars:
+        merged_answer = merged_answer[:max_embedding_text_chars].rstrip()
 
     return KnowledgeSemanticMergeDecision(
         group_id=group_id,
         action=action,
         candidate_ids=candidate_ids,
-        survivor_title=survivor_title,
-        merged_embedding_text=merged_embedding_text,
-        canonical_card=canonical_card,
+        survivor_title="",
+        merged_embedding_text=merged_answer,
+        canonical_card=None,
     )
 
 
@@ -648,6 +681,25 @@ def _optional_text(value: object) -> str:
     if isinstance(value, str | int | float):
         return _compact_text(str(value))
     return ""
+
+
+def _required_answer_resolution_action(
+    value: object,
+    *,
+    index: int,
+) -> AnswerResolutionAction:
+    action = _optional_text(value)
+    if action in {
+        SEMANTIC_MERGE_ACTION_MERGE,
+        SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        ANSWER_RESOLUTION_ACTION_CONFLICT,
+        ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW,
+    }:
+        return cast(AnswerResolutionAction, action)
+
+    raise KnowledgePreprocessingValidationError(
+        f"Semantic merge decision {index} has unsupported action: {action}"
+    )
 
 
 def _required_semantic_merge_action(

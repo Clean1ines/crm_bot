@@ -1302,7 +1302,7 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
     assert all(snippet not in online_section for snippet in forbidden_snippets)
 
 
-def test_online_merge_never_concats_answers_when_llm_returns_canonical_card():
+def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
     from src.application.services.knowledge_ingestion_service import (
         _apply_semantic_merge_tightening_decisions,
     )
@@ -1335,14 +1335,15 @@ def test_online_merge_never_concats_answers_when_llm_returns_canonical_card():
         group_id="group-1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
+        merged_embedding_text="Условия возврата зависят от ситуации и этапа работы.",
         canonical_card=KnowledgeSemanticMergeCanonicalCard(
-            title="Условия возврата",
-            canonical_question="Какие условия возврата?",
-            answer="Условия возврата зависят от ситуации и этапа работы.",
-            questions=("Как оформить возврат?", "Можно вернуть оплату?"),
-            synonyms=("возврат", "возврат средств"),
-            tags=("refund", "billing"),
-            source_chunk_indexes=(0, 1),
+            title="LLM title must be ignored",
+            canonical_question="LLM question must be ignored",
+            answer="LLM canonical_card answer must be ignored.",
+            questions=("LLM question must not overwrite",),
+            synonyms=("llm synonym",),
+            tags=("llm-tag",),
+            source_chunk_indexes=(999,),
         ),
     )
 
@@ -1359,7 +1360,6 @@ def test_online_merge_never_concats_answers_when_llm_returns_canonical_card():
     assert tightened[0].answer == "Условия возврата зависят от ситуации и этапа работы."
     assert "Условия возврата средств зависят от ситуации." not in tightened[0].answer
     assert tightened[0].questions == (
-        "Какие условия возврата?",
         "Как оформить возврат?",
         "Можно вернуть оплату?",
     )
@@ -1369,7 +1369,7 @@ def test_online_merge_never_concats_answers_when_llm_returns_canonical_card():
     assert len(source_excerpts[0]) == 2
 
 
-def test_non_publishable_llm_classification_is_not_published():
+def test_legacy_non_publishable_card_cannot_delete_answer_entry():
     from src.application.services.knowledge_ingestion_service import (
         _apply_semantic_merge_tightening_decisions,
     )
@@ -1403,7 +1403,7 @@ def test_non_publishable_llm_classification_is_not_published():
         decisions=(decision,),
     )
 
-    assert tightened == ()
+    assert tightened == (entry,)
 
 
 def test_publication_guard_collapses_exact_duplicate_answers():

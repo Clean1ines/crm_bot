@@ -101,7 +101,7 @@ def test_markdown_semantic_chunks_keep_rag_rule_examples_inside_section() -> Non
     assert "цену и сроки внедрения" in str(chunk["content"])
 
 
-def test_semantic_merge_uses_synthesized_canonical_card_not_concatenation() -> None:
+def test_semantic_merge_uses_answer_only_resolution_not_concatenation() -> None:
     entries = (
         KnowledgePreprocessingEntry(
             title="Возврат средств",
@@ -153,7 +153,7 @@ def test_semantic_merge_uses_synthesized_canonical_card_not_concatenation() -> N
     assert "Условия возврата зависят от ситуации. Условия возврата средств" not in (
         merged[0].answer
     )
-    assert merged[0].canonical_question == "Как работает возврат средств?"
+    assert merged[0].canonical_question == "Есть ли возврат средств?"
     assert "Можно ли вернуть оплату?" in merged[0].questions
     assert "вернуть оплату" in merged[0].synonyms
     assert source_excerpts == (

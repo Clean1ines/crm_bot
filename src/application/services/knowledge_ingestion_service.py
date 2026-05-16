@@ -1588,13 +1588,7 @@ def _semantic_merge_candidate_from_entry(
     index: int,
     entry: KnowledgePreprocessingEntry,
 ) -> KnowledgeSemanticMergeCandidate:
-    """Build a compact but answer-intent-aware retightening payload.
-
-    Retightening must decide whether entries answer the same user question.
-    Therefore the payload must include compact answer and enrichment fields.
-    Dropping questions/synonyms/tags makes the LLM compare vague topic text
-    instead of answer intent.
-    """
+    """Build an answer-only option for unresolved semantic resolution."""
 
     return KnowledgeSemanticMergeCandidate(
         candidate_id=_semantic_merge_candidate_id(index),
@@ -1603,23 +1597,10 @@ def _semantic_merge_candidate_from_entry(
             _clean_optional_text(entry.answer),
             max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
         ),
-        embedding_text=_limit_compiled_text(
-            _clean_optional_text(entry.embedding_text),
-            max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_EMBEDDING_TEXT_MAX_CHARS,
+        source_excerpt=_limit_compiled_text(
+            _merge_source_excerpt_text(entry),
+            max_chars=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_ANSWER_MAX_CHARS,
         ),
-        questions=_semantic_merge_limited_text_tuple(
-            entry.questions,
-            limit=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_QUESTION_LIMIT,
-        ),
-        synonyms=_semantic_merge_limited_text_tuple(
-            entry.synonyms,
-            limit=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_SYNONYM_LIMIT,
-        ),
-        tags=_semantic_merge_limited_text_tuple(
-            entry.tags,
-            limit=KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_TAG_LIMIT,
-        ),
-        source_ref_count=len(_source_excerpts_from_preprocessing_entry(entry)),
     )
 
 
@@ -1628,6 +1609,24 @@ class _SemanticMergeSuspectPair:
     left_index: int
     right_index: int
     score: float
+
+
+def _semantic_merge_question_intent(
+    *entries: KnowledgePreprocessingEntry,
+) -> str:
+    intent_parts: list[str] = []
+    for entry in entries:
+        primary = _clean_optional_text(
+            entry.canonical_question or _question_intent_primary_question(entry)
+        )
+        title = _clean_optional_text(entry.title)
+        for value in (primary, title):
+            if value and value not in intent_parts:
+                intent_parts.append(value)
+    return _limit_compiled_text(
+        " / ".join(intent_parts),
+        max_chars=280,
+    )
 
 
 def _semantic_merge_suspect_pairs_from_entries(
@@ -1674,6 +1673,9 @@ def _semantic_merge_suspect_groups_from_entries(
         groups.append(
             KnowledgeSemanticMergeGroup(
                 group_id=f"semantic-merge-pair-{digest}",
+                question_intent=_semantic_merge_question_intent(
+                    *(entries[index] for index in component)
+                ),
                 candidates=tuple(
                     _semantic_merge_candidate_from_entry(
                         index=index,
@@ -2111,67 +2113,27 @@ def _entry_with_semantic_merge_decision(
     entry: KnowledgePreprocessingEntry,
     decision: KnowledgeSemanticMergeDecision,
 ) -> KnowledgePreprocessingEntry:
-    card = decision.canonical_card
-    if card is not None and card.publishable:
-        title = _clean_optional_text(card.title) or entry.title
-        answer = _limit_compiled_text(
-            _clean_optional_text(card.answer) or entry.answer,
-            max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
-        )
-        questions = _merge_limited_text_tuple_values(
-            (card.canonical_question,),
-            entry.questions,
-            limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
-        )
-        synonyms = _merge_limited_text_tuple_values(
-            entry.synonyms,
-            limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
-        )
-        tags = _merge_limited_text_tuple_values(
-            entry.tags,
-            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
-        )
-        compatibility_entry = KnowledgePreprocessingEntry(
-            title=title,
-            answer=answer,
-            source_excerpt=entry.source_excerpt,
-            questions=questions,
-            synonyms=synonyms,
-            tags=tags,
-            canonical_question=_clean_optional_text(card.canonical_question)
-            or entry.canonical_question,
-        )
-        embedding_text = _limit_compiled_text(
-            build_embedding_text(compatibility_entry),
-            max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
-        )
-        return KnowledgePreprocessingEntry(
-            title=title,
-            answer=answer,
-            source_excerpt=entry.source_excerpt,
-            questions=questions,
-            synonyms=synonyms,
-            tags=tags,
-            embedding_text=embedding_text,
-            canonical_question=_clean_optional_text(card.canonical_question)
-            or entry.canonical_question,
-            source_chunk_indexes=_merge_int_tuple_values(
-                entry.source_chunk_indexes,
-                card.source_chunk_indexes,
-            ),
-        )
-
-    title = _clean_optional_text(decision.survivor_title) or entry.title
+    answer = _limit_compiled_text(
+        _clean_optional_text(decision.merged_embedding_text) or entry.answer,
+        max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
+    )
+    compatibility_entry = KnowledgePreprocessingEntry(
+        title=entry.title,
+        answer=answer,
+        source_excerpt=entry.source_excerpt,
+        questions=entry.questions,
+        synonyms=entry.synonyms,
+        tags=entry.tags,
+        canonical_question=entry.canonical_question,
+    )
     embedding_text = _limit_compiled_text(
-        _cleanup_semantic_merge_embedding_text(
-            decision.merged_embedding_text or entry.embedding_text
-        ),
+        build_embedding_text(compatibility_entry),
         max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
     )
 
     return KnowledgePreprocessingEntry(
-        title=title,
-        answer=entry.answer,
+        title=entry.title,
+        answer=answer,
         source_excerpt=entry.source_excerpt,
         questions=entry.questions,
         synonyms=entry.synonyms,
@@ -2185,7 +2147,7 @@ def _entry_with_semantic_merge_decision(
 def _semantic_merge_decision_is_publishable(
     decision: KnowledgeSemanticMergeDecision,
 ) -> bool:
-    return decision.canonical_card is None or decision.canonical_card.publishable
+    return True
 
 
 def _apply_semantic_merge_tightening_decisions(
@@ -2226,10 +2188,6 @@ def _apply_semantic_merge_tightening_decisions(
             if index in candidate_indexes or index in removed_indexes:
                 continue
             candidate_indexes.append(index)
-
-        if not _semantic_merge_decision_is_publishable(decision):
-            removed_indexes.update(candidate_indexes)
-            continue
 
         if len(candidate_indexes) < 2:
             continue
@@ -2355,6 +2313,23 @@ def _semantic_merge_trace_row(
     }
 
 
+def _semantic_merge_decisions_with_group_candidate_ids(
+    *,
+    group: KnowledgeSemanticMergeGroup,
+    decisions: Sequence[KnowledgeSemanticMergeDecision],
+) -> tuple[KnowledgeSemanticMergeDecision, ...]:
+    group_candidate_ids = tuple(
+        candidate.candidate_id for candidate in group.candidates
+    )
+    updated: list[KnowledgeSemanticMergeDecision] = []
+    for decision in decisions:
+        if decision.group_id != group.group_id or decision.candidate_ids:
+            updated.append(decision)
+            continue
+        updated.append(replace(decision, candidate_ids=group_candidate_ids))
+    return tuple(updated)
+
+
 async def _tighten_compiled_entries_with_semantic_merge(
     *,
     preprocessor: KnowledgePreprocessorPort,
@@ -2385,7 +2360,7 @@ async def _tighten_compiled_entries_with_semantic_merge(
         "processed_group_count": 0,
         "entry_count_before": len(entries),
         "existing_project_title_count": len(existing_project_titles),
-        "strategy": "generic_token_suspect_groups_plus_llm_canonical_card",
+        "strategy": "deterministic_first_answer_only_llm_resolver",
         "fallback_used": False,
         "llm_call_count": 0,
         "decision_count": 0,
@@ -2416,7 +2391,10 @@ async def _tighten_compiled_entries_with_semantic_merge(
                 existing_project_titles=existing_project_titles,
             )
             metrics["llm_call_count"] = _json_metric_int(metrics, "llm_call_count") + 1
-            group_decisions = tuple(execution.result.decisions)
+            group_decisions = _semantic_merge_decisions_with_group_candidate_ids(
+                group=group,
+                decisions=execution.result.decisions,
+            )
             decisions = (*decisions, *group_decisions)
             existing_trace = metrics.get("decision_trace")
             decision_trace = (
@@ -3913,7 +3891,10 @@ class KnowledgeIngestionService:
                 existing_project_titles=existing_project_titles,
             )
             llm_call_count = 1
-            decisions = first_execution.result.decisions
+            decisions = _semantic_merge_decisions_with_group_candidate_ids(
+                group=groups[0],
+                decisions=first_execution.result.decisions,
+            )
             model = first_execution.result.model
             prompt_version = first_execution.result.prompt_version
             if first_execution.usage is not None:
@@ -3935,7 +3916,13 @@ class KnowledgeIngestionService:
                     existing_project_titles=existing_project_titles,
                 )
                 llm_call_count += 1
-                decisions = (*decisions, *execution.result.decisions)
+                decisions = (
+                    *decisions,
+                    *_semantic_merge_decisions_with_group_candidate_ids(
+                        group=group,
+                        decisions=execution.result.decisions,
+                    ),
+                )
                 model = execution.result.model
                 prompt_version = execution.result.prompt_version
                 if execution.usage is not None:
