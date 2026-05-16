@@ -10,6 +10,7 @@ INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service
 KNOWLEDGE_PORT = ROOT / "src/application/ports/knowledge_port.py"
 KNOWLEDGE_PREPROCESSOR = ROOT / "src/infrastructure/llm/knowledge_preprocessor.py"
 FAQ_COMPILER_PROMPT = ROOT / "src/agent/prompts/knowledge_answer_compiler_faq.txt"
+ANSWER_RESOLUTION_PROMPT = ROOT / "src/agent/prompts/knowledge_answer_resolution.txt"
 
 
 def _source(path: Path) -> str:
@@ -84,13 +85,20 @@ def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
 
 def test_stage_k_groq_preprocessor_has_answer_only_resolution_contract() -> None:
     source = _source(KNOWLEDGE_PREPROCESSOR)
+    prompt_source = _source(ANSWER_RESOLUTION_PROMPT)
 
     assert "ANSWER_MERGE_PROMPT_FILE" not in source
     assert "merge_known" + "_answer" not in source
     assert "parse_answer" + "_merge_payload" not in source
-    assert '"cases"' in source
-    assert '"canonical_answer"' in source
-    assert "full canonical entries" not in source
+    assert "ANSWER-ONLY SEMANTIC RESOLUTION TASK" not in source
+    assert "ANSWER_RESOLUTION_PROMPT_FILE" in source
+    assert "_load_answer_resolution_prompt" in source
+
+    assert "ANSWER-ONLY SEMANTIC RESOLUTION TASK" in prompt_source
+    assert '"cases"' in prompt_source
+    assert '"canonical_answer"' in prompt_source
+    assert "candidate_ids" in prompt_source
+    assert "full canonical entries" not in prompt_source
 
 
 def test_answer_resolution_parser_does_not_read_candidate_ids_from_payload() -> None:
