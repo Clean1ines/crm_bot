@@ -1082,7 +1082,8 @@ const SourceUnitsModal: React.FC<{
 const semanticMergeTraceRows = (
   report: KnowledgeProcessingReport | undefined,
 ): KnowledgeProcessingMetrics[] => {
-  const semanticMetrics = metricObject(report?.metrics, 'semantic_merge_tightening');
+  const semanticMetrics = metricObject(report?.metrics, 'semantic_merge_tightening')
+    ?? metricObject(report?.metrics, 'semantic_retightening');
   return metricObjectArray(semanticMetrics, 'decision_trace');
 };
 
@@ -1316,7 +1317,7 @@ export const KnowledgePage: React.FC = () => {
       const document = documents.find((doc) => doc.id === report.document_id);
       const sourceCount = metricNumber(report.metrics, 'raw_source_chunk_count')
         ?? metricNumber(report.metrics, 'source_chunk_count')
-        ?? 0;
+        ?? (document && Number.isFinite(document.chunk_count) ? document.chunk_count : 0);
       return Boolean(document && isDocumentProcessing(document)) || sourceCount > 0;
     })
     .map((report) => report.document_id)
@@ -1894,6 +1895,16 @@ export const KnowledgePage: React.FC = () => {
                       />
                     )}
 
+                    {sourceUnitDocumentIds.includes(doc.id) && (
+                      <SourceUnitsSummary
+                        response={sourceUnits[doc.id]}
+                        isLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
+                        onOpen={() => openSourceUnitsModal(doc.id)}
+                      />
+                    )}
+
+                    <SemanticMergeTracePanel report={processingReport} />
+
                     {processingReport.actions.length > 0 && (
                       <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
                         <div className="mb-1 font-medium text-[var(--text-primary)]">
@@ -2043,6 +2054,19 @@ export const KnowledgePage: React.FC = () => {
           onFilterChange={(value) => setDraftFilter(draftsDocumentId, value)}
           onToggleDraft={(draftId) => toggleDraftExpanded(draftsDocumentId, draftId)}
           onClose={() => setDraftsDocumentId(null)}
+        />
+      )}
+
+      {sourceUnitsDocumentId && sourceUnitsDocument && (
+        <SourceUnitsModal
+          documentName={sourceUnitsDocument.file_name}
+          response={sourceUnitsModalResponse}
+          isLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnitsModalResponse)}
+          filter={sourceUnitsModalFilter}
+          expandedSourceUnitIds={sourceUnitsModalExpandedIds}
+          onFilterChange={(value) => setSourceUnitFilter(sourceUnitsDocumentId, value)}
+          onToggleSourceUnit={(sourceUnitId) => toggleSourceUnitExpanded(sourceUnitsDocumentId, sourceUnitId)}
+          onClose={() => setSourceUnitsDocumentId(null)}
         />
       )}
 
