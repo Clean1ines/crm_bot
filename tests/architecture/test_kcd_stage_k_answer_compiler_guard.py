@@ -95,18 +95,20 @@ def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
     assert "Не возвращай tags" in prompt_source
 
 
-def test_stage_k_ingestion_records_extractor_only_compiler_metrics() -> None:
+def test_stage_k_ingestion_records_online_merge_compiler_metrics() -> None:
     source = _source(INGESTION_SERVICE)
 
     assert "technical_compiler_call_count" in source
     assert "previous_title_carryover" in source
     assert "False" in source
     assert "one_meaning_at_a_time_merge" in source
-    assert "extractor_only_compiler_loop" in source
+    assert "extractor_only_compiler_loop" not in source
     assert "online_answer_merge_enabled" in source
+    assert "semantic_merge_tightening" in source
+    assert "semantic_merge_fallback_used" in source
     assert "llm_merge_call_count" in source
     assert "KCD_STAGE_K_COMPILER_VERSION" in source
-    assert "Knowledge answer compiler technical batch processed" in source
+    assert "Knowledge answer compiler technical batch completed" in source
     assert "technical_compiler_total_count" in source
     assert "compiled_entry_count" in source
     assert "status_message" in source

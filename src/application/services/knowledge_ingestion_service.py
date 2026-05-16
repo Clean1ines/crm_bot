@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import re
@@ -1289,6 +1290,7 @@ KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_QUESTION_LIMIT = 8
 KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_SYNONYM_LIMIT = 12
 KCD_STAGE_K8_SEMANTIC_MERGE_CANDIDATE_TAG_LIMIT = 8
 KCD_STAGE_K8_SEMANTIC_MERGE_MIN_TOKEN_CHARS = 3
+KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT = 3
 
 
 def _semantic_merge_candidate_id(index: int) -> str:
@@ -1546,6 +1548,130 @@ def _semantic_merge_suspect_groups_from_entries(
     return tuple(groups)
 
 
+def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
+    value = metrics.get(key)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return 0
+
+
+@dataclass(frozen=True, slots=True)
+class _MechanicalCleanupCompiledEntriesResult:
+    entries: tuple[KnowledgePreprocessingEntry, ...]
+    source_excerpts_by_entry: tuple[tuple[str, ...], ...]
+    metrics: JsonObject
+
+
+def _mechanically_cleanup_compiled_entries(
+    *,
+    entries: Sequence[KnowledgePreprocessingEntry],
+    source_excerpts_by_entry: Sequence[tuple[str, ...]],
+) -> _MechanicalCleanupCompiledEntriesResult:
+    source_excerpts = tuple(source_excerpts_by_entry)
+    if len(source_excerpts) != len(entries):
+        source_excerpts = tuple(
+            _source_excerpts_from_preprocessing_entry(entry) for entry in entries
+        )
+
+    deduped_question_variant_count = 0
+    deduped_synonym_count = 0
+    deduped_tag_count = 0
+    cleaned_entries: list[KnowledgePreprocessingEntry] = []
+    cleaned_source_excerpts: list[tuple[str, ...]] = []
+
+    for entry, entry_source_excerpts in zip(entries, source_excerpts, strict=True):
+        deduped_entry, field_metrics = _retighten_entry_with_deduped_fields(entry)
+        deduped_question_variant_count += _json_metric_int(
+            field_metrics, "deduped_question_variant_count"
+        )
+        deduped_synonym_count += _json_metric_int(
+            field_metrics, "deduped_synonym_count"
+        )
+        deduped_tag_count += _json_metric_int(field_metrics, "deduped_tag_count")
+        cleaned_entries.append(deduped_entry)
+        cleaned_source_excerpts.append(entry_source_excerpts)
+
+    retained_entries: list[KnowledgePreprocessingEntry] = []
+    retained_source_excerpts: list[tuple[str, ...]] = []
+    retained_merged_entry_counts: list[int] = []
+    index_by_exact_key: dict[tuple[str, str, str, str], int] = {}
+    exact_duplicate_candidate_collapse_count = 0
+
+    for entry, entry_source_excerpts in zip(
+        cleaned_entries, cleaned_source_excerpts, strict=True
+    ):
+        source_fingerprint = " | ".join(
+            _semantic_merge_text_fingerprint(excerpt)
+            for excerpt in entry_source_excerpts
+            if _semantic_merge_text_fingerprint(excerpt)
+        )
+        exact_key = (
+            _semantic_merge_text_fingerprint(entry.title),
+            _semantic_merge_text_fingerprint(entry.canonical_question),
+            _semantic_merge_text_fingerprint(entry.answer),
+            source_fingerprint,
+        )
+        existing_index = index_by_exact_key.get(exact_key)
+        if existing_index is None:
+            index_by_exact_key[exact_key] = len(retained_entries)
+            retained_entries.append(entry)
+            retained_source_excerpts.append(entry_source_excerpts)
+            retained_merged_entry_counts.append(1)
+            continue
+
+        existing_entry = retained_entries[existing_index]
+        merged_questions = _merge_limited_text_tuple_values(
+            _text_tuple(existing_entry.questions),
+            _text_tuple(entry.questions),
+            limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
+        )
+        merged_synonyms = _merge_limited_text_tuple_values(
+            _text_tuple(existing_entry.synonyms),
+            _text_tuple(entry.synonyms),
+            limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
+        )
+        merged_tags = _merge_limited_text_tuple_values(
+            _text_tuple(existing_entry.tags),
+            _text_tuple(entry.tags),
+            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
+        )
+        retained_entries[existing_index] = replace(
+            existing_entry,
+            questions=merged_questions,
+            synonyms=merged_synonyms,
+            tags=merged_tags,
+        )
+        retained_source_excerpts[existing_index] = _merge_text_tuple_values(
+            retained_source_excerpts[existing_index],
+            entry_source_excerpts,
+        )
+        retained_merged_entry_counts[existing_index] += 1
+        exact_duplicate_candidate_collapse_count += 1
+
+    metrics: JsonObject = {
+        "deduped_question_variant_count": deduped_question_variant_count,
+        "deduped_synonym_count": deduped_synonym_count,
+        "deduped_tag_count": deduped_tag_count,
+        "exact_duplicate_candidate_collapse_count": (
+            exact_duplicate_candidate_collapse_count
+        ),
+        "deterministic_cleanup_entry_count_before": len(entries),
+        "deterministic_cleanup_entry_count_after": len(retained_entries),
+        "merged_preprocessing_entry_counts": cast(
+            JsonValue, retained_merged_entry_counts
+        ),
+    }
+    return _MechanicalCleanupCompiledEntriesResult(
+        entries=tuple(retained_entries),
+        source_excerpts_by_entry=tuple(retained_source_excerpts),
+        metrics=metrics,
+    )
+
+
 def _semantic_merge_survivor_index(
     *,
     decision: KnowledgeSemanticMergeDecision,
@@ -1783,7 +1909,7 @@ def _apply_semantic_merge_tightening_decisions(
             merged_entry = _merge_entry_fields_deterministically(
                 existing_entry=merged_entry,
                 incoming_entry=updated_entries[index],
-                merged_answer=decision.merged_embedding_text,
+                merged_answer="",
             )
 
         merged_source_excerpts = _merge_text_tuple_values(
@@ -1864,8 +1990,13 @@ async def _tighten_compiled_entries_with_semantic_merge(
     }
 
     if not groups:
+        metrics["status"] = "completed"
         metrics["entry_count_after"] = len(entries)
         metrics["llm_call_count"] = 0
+        metrics["decision_count"] = 0
+        metrics["merge_decision_count"] = 0
+        metrics["keep_separate_decision_count"] = 0
+        metrics["invalid_merge_output_count"] = 0
         return tuple(entries), source_excerpts, metrics
 
     llm_call_count = 0
@@ -1888,11 +2019,16 @@ async def _tighten_compiled_entries_with_semantic_merge(
             llm_call_count += 1
             decisions = (*decisions, *execution.result.decisions)
     except Exception as exc:
-        metrics["skipped"] = True
+        metrics["status"] = "failed"
+        metrics["fallback_used"] = True
         metrics["error_type"] = type(exc).__name__
-        metrics["error"] = str(exc)[:240]
+        metrics["error_message"] = str(exc)[:240]
         metrics["entry_count_after"] = len(entries)
         metrics["llm_call_count"] = llm_call_count
+        metrics["decision_count"] = 0
+        metrics["merge_decision_count"] = 0
+        metrics["keep_separate_decision_count"] = 0
+        metrics["invalid_merge_output_count"] = 1
         return tuple(entries), source_excerpts, metrics
 
     tightened_entries, tightened_source_excerpts = (
@@ -1903,10 +2039,16 @@ async def _tighten_compiled_entries_with_semantic_merge(
         )
     )
 
+    metrics["status"] = "completed"
+    metrics["fallback_used"] = False
     metrics["decision_count"] = len(decisions)
     metrics["merge_decision_count"] = sum(
         1 for decision in decisions if decision.is_merge
     )
+    metrics["keep_separate_decision_count"] = sum(
+        1 for decision in decisions if not decision.is_merge
+    )
+    metrics["invalid_merge_output_count"] = 0
     metrics["entry_count_after"] = len(tightened_entries)
     metrics["collapsed_entry_count"] = len(entries) - len(tightened_entries)
     metrics["llm_call_count"] = llm_call_count
@@ -2702,6 +2844,12 @@ def _canonical_entries_from_preprocessing_result(
         stable_key = f"{document_id}:stage_k:{stable_key_digest[:24]}"
         entry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
         metadata: dict[str, object] = dict(draft.metadata)
+        merged_counts = result.metrics.get("merged_preprocessing_entry_counts")
+        if isinstance(merged_counts, list) and index < len(merged_counts):
+            merged_count = merged_counts[index]
+            if isinstance(merged_count, int) and merged_count > 1:
+                metadata["compiler_merge"] = "exact_duplicate_grouping"
+                metadata["merged_preprocessing_entry_count"] = merged_count
         metadata["source_ref_count"] = len(source_refs)
         metadata["compiler_index"] = index
 
@@ -3877,10 +4025,7 @@ class KnowledgeIngestionService:
                     "compiled_entry_count": 0,
                     "semantic_answer_count": 0,
                     "incoming_entry_count": 0,
-                    "previous_title_count": 0,
-                    "question_intent_shortlist_limit": (
-                        KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT
-                    ),
+                    "extraction_concurrency": KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT,
                     "llm_merge_call_count": 0,
                     "semantic_answer_merge_count": 0,
                     "answer_merge_call_count": 0,
@@ -3888,8 +4033,7 @@ class KnowledgeIngestionService:
                     "elapsed_seconds": 0,
                     "previous_title_carryover": False,
                     "one_meaning_at_a_time_merge": False,
-                    "extractor_only_compiler_loop": True,
-                    "online_answer_merge_enabled": False,
+                    "online_answer_merge_enabled": True,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
                         "raw_source_chunks_not_persisted_as_runtime_entries"
@@ -3897,163 +4041,272 @@ class KnowledgeIngestionService:
                 },
             )
 
-            for batch_index, technical_chunks in enumerate(technical_batches, start=1):
-                compiler_batch = compiler_batches[batch_index - 1]
-                if await repo.is_document_processing_cancelled(document_id):
-                    raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
+            progress_lock = asyncio.Lock()
+            completed_batch_count = 0
+            failed_batch_count = 0
+            raw_candidate_count = 0
+            entries_by_batch_index: dict[
+                int, tuple[KnowledgePreprocessingEntry, ...]
+            ] = {}
+            results_by_batch_index: dict[int, KnowledgePreprocessingResult] = {}
+            extraction_concurrency = KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT
+            extraction_semaphore = asyncio.Semaphore(extraction_concurrency)
 
-                await repo.mark_compiler_batch_processing(
-                    compiler_batch.id,
-                    attempt_count=compiler_batch.attempt_count + 1,
-                )
+            async def process_compiler_batch(
+                batch_index: int,
+                technical_chunks: list[JsonObject],
+                compiler_batch: CompilerBatch,
+            ) -> None:
+                nonlocal completed_batch_count
+                nonlocal failed_batch_count
+                nonlocal raw_candidate_count
+                nonlocal usage_event_count
+                nonlocal unknown_known_intent_id_count
+                nonlocal latest_result
 
-                previous_question_intents: tuple[KnowledgeQuestionIntentCard, ...] = ()
-                try:
-                    execution = await preprocessor.preprocess(
-                        mode=mode,
-                        chunks=technical_chunks,
-                        file_name=file_name,
-                        previous_question_intents=previous_question_intents,
+                async with extraction_semaphore:
+                    if await repo.is_document_processing_cancelled(document_id):
+                        raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
+
+                    await repo.mark_compiler_batch_processing(
+                        compiler_batch.id,
+                        attempt_count=compiler_batch.attempt_count + 1,
                     )
-                    if execution.usage is not None:
-                        await usage_repo.record_event(
-                            ModelUsageEventCreate.from_measurement(
+
+                    try:
+                        execution = await preprocessor.preprocess(
+                            mode=mode,
+                            chunks=technical_chunks,
+                            file_name=file_name,
+                            previous_question_intents=(),
+                        )
+                        if execution.usage is not None:
+                            await usage_repo.record_event(
+                                ModelUsageEventCreate.from_measurement(
+                                    project_id=project_id,
+                                    source="knowledge_preprocessing",
+                                    measurement=execution.usage,
+                                    document_id=document_id,
+                                )
+                            )
+
+                        safe_entries: list[KnowledgePreprocessingEntry] = []
+                        batch_unknown_known_intent_count = 0
+                        for incoming_entry in execution.result.entries:
+                            safe_entry = _entry_as_safe_new_fragment(incoming_entry)
+                            if safe_entry is not incoming_entry:
+                                batch_unknown_known_intent_count += 1
+                                logger.warning(
+                                    "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
+                                    extra={
+                                        "project_id": project_id,
+                                        "document_id": document_id,
+                                        "batch_index": batch_index,
+                                        "known_intent_id_set": bool(
+                                            incoming_entry.known_intent_id
+                                        ),
+                                    },
+                                )
+                            safe_entries.append(safe_entry)
+
+                        raw_candidates = (
+                            _raw_answer_candidates_from_preprocessing_entries(
                                 project_id=project_id,
-                                source="knowledge_preprocessing",
-                                measurement=execution.usage,
                                 document_id=document_id,
+                                compiler_run_id=compiler_run_id,
+                                batch_id=compiler_batch.id,
+                                batch_index=batch_index,
+                                entries=safe_entries,
+                                source_chunks=source_chunks,
+                                mode=mode,
                             )
                         )
-                        usage_event_count += 1
-
-                    latest_result = execution.result
-                    preprocessing_results.append(execution.result)
-
-                    safe_entries: list[KnowledgePreprocessingEntry] = []
-                    for incoming_entry in execution.result.entries:
-                        safe_entry = _entry_as_safe_new_fragment(incoming_entry)
-                        if safe_entry is not incoming_entry:
-                            unknown_known_intent_id_count += 1
-                            logger.warning(
-                                "Knowledge extractor returned deprecated known-intent match; keeping fragment separate",
-                                extra={
-                                    "project_id": project_id,
-                                    "document_id": document_id,
-                                    "batch_index": batch_index,
-                                    "known_intent_id": incoming_entry.known_intent_id,
-                                },
+                        await repo.add_answer_candidates(
+                            project_id=project_id,
+                            document_id=document_id,
+                            candidates=raw_candidates,
+                        )
+                        usage = execution.usage
+                        await repo.complete_compiler_batch(
+                            compiler_batch.id,
+                            model=execution.result.model,
+                            prompt_version=execution.result.prompt_version,
+                            tokens_input=usage.tokens_input if usage is not None else 0,
+                            tokens_output=usage.tokens_output
+                            if usage is not None and usage.tokens_output is not None
+                            else 0,
+                            tokens_total=usage.tokens_total if usage is not None else 0,
+                        )
+                    except Exception as exc:
+                        await repo.fail_compiler_batch(
+                            compiler_batch.id,
+                            error_type=type(exc).__name__,
+                            error_message=str(exc)[:500] or type(exc).__name__,
+                        )
+                        async with progress_lock:
+                            failed_batch_count += 1
+                            progress_metrics: JsonObject = {
+                                "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                                "stage": "technical_compiler_loop",
+                                "status_message": (
+                                    "Обработка части завершилась с ошибкой; "
+                                    "сохранённые черновики остаются доступными"
+                                ),
+                                "model": active_model,
+                                "prompt_version": active_prompt_version,
+                                "source_chunk_count": len(indexable_chunks),
+                                "technical_compiler_total_count": len(
+                                    technical_batches
+                                ),
+                                "technical_compiler_call_count": completed_batch_count,
+                                "technical_chunk_processed_count": completed_batch_count,
+                                "technical_chunk_total_count": len(technical_batches),
+                                "failed_part_count": failed_batch_count,
+                                "raw_draft_count": raw_candidate_count,
+                                "compiled_entry_count": sum(
+                                    len(entries)
+                                    for entries in entries_by_batch_index.values()
+                                ),
+                                "online_answer_merge_enabled": True,
+                                "extraction_concurrency": extraction_concurrency,
+                                "elapsed_seconds": round(
+                                    time.monotonic() - processing_started_monotonic,
+                                    1,
+                                ),
+                            }
+                            await repo.update_document_preprocessing_status(
+                                document_id,
+                                mode=mode,
+                                status=PREPROCESSING_STATUS_PROCESSING,
+                                model=active_model,
+                                prompt_version=active_prompt_version,
+                                metrics=progress_metrics,
                             )
-                        safe_entries.append(safe_entry)
-                        compiled_entries.append(safe_entry)
+                        logger.warning(
+                            "Knowledge answer compiler technical batch failed",
+                            extra={
+                                "project_id": project_id,
+                                "document_id": document_id,
+                                "batch_index": batch_index,
+                                "batch_count": len(technical_batches),
+                                "error_type": type(exc).__name__,
+                            },
+                        )
+                        raise
 
-                    raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
-                        project_id=project_id,
-                        document_id=document_id,
-                        compiler_run_id=compiler_run_id,
-                        batch_id=compiler_batch.id,
-                        batch_index=batch_index,
-                        entries=safe_entries,
-                        source_chunks=source_chunks,
-                        mode=mode,
-                    )
-                    await repo.add_answer_candidates(
-                        project_id=project_id,
-                        document_id=document_id,
-                        candidates=raw_candidates,
-                    )
-                    usage = execution.usage
-                    await repo.complete_compiler_batch(
-                        compiler_batch.id,
-                        model=execution.result.model,
-                        prompt_version=execution.result.prompt_version,
-                        tokens_input=usage.tokens_input if usage is not None else 0,
-                        tokens_output=usage.tokens_output
-                        if usage is not None and usage.tokens_output is not None
-                        else 0,
-                        tokens_total=usage.tokens_total if usage is not None else 0,
-                    )
-                except Exception as exc:
-                    await repo.fail_compiler_batch(
-                        compiler_batch.id,
-                        error_type=type(exc).__name__,
-                        error_message=str(exc)[:500] or type(exc).__name__,
-                    )
-                    raise
+                    async with progress_lock:
+                        completed_batch_count += 1
+                        raw_candidate_count += len(raw_candidates)
+                        if execution.usage is not None:
+                            usage_event_count += 1
+                        unknown_known_intent_id_count += (
+                            batch_unknown_known_intent_count
+                        )
+                        latest_result = execution.result
+                        preprocessing_results.append(execution.result)
+                        results_by_batch_index[batch_index] = execution.result
+                        entries_by_batch_index[batch_index] = tuple(safe_entries)
+                        compiled_count = sum(
+                            len(entries) for entries in entries_by_batch_index.values()
+                        )
+                        progress_metrics = {
+                            "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                            "stage": "technical_compiler_loop",
+                            "status_message": (
+                                "Документ разбирается. Черновики сохраняются "
+                                "после каждого шага."
+                            ),
+                            "model": active_model,
+                            "prompt_version": active_prompt_version,
+                            "source_chunk_count": len(indexable_chunks),
+                            "technical_compiler_total_count": len(technical_batches),
+                            "technical_source_char_budget": (
+                                KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
+                            ),
+                            "technical_compiler_call_count": completed_batch_count,
+                            "technical_chunk_processed_count": completed_batch_count,
+                            "technical_chunk_total_count": len(technical_batches),
+                            "failed_part_count": failed_batch_count,
+                            "raw_draft_count": raw_candidate_count,
+                            "compiled_entry_count": compiled_count,
+                            "semantic_answer_count": compiled_count,
+                            "incoming_entry_count": len(execution.result.entries),
+                            "llm_merge_call_count": llm_merge_call_count,
+                            "semantic_answer_merge_count": llm_merge_call_count,
+                            "answer_merge_call_count": llm_merge_call_count,
+                            "unknown_known_intent_id_count": unknown_known_intent_id_count,
+                            "merge_rejected_keep_separate_count": (
+                                merge_rejected_keep_separate_count
+                            ),
+                            "usage_event_count": usage_event_count,
+                            "online_answer_merge_enabled": True,
+                            "extraction_concurrency": extraction_concurrency,
+                            "source_refs_preserved_per_semantic_entry": True,
+                            "row_explosion_guard": (
+                                "raw_source_chunks_not_persisted_as_runtime_entries"
+                            ),
+                            "elapsed_seconds": round(
+                                time.monotonic() - processing_started_monotonic,
+                                1,
+                            ),
+                        }
+                        logger.info(
+                            "Knowledge answer compiler technical batch completed",
+                            extra={
+                                "project_id": project_id,
+                                "document_id": document_id,
+                                "batch_index": batch_index,
+                                "batch_count": len(technical_batches),
+                                "extraction_status": "completed",
+                                "raw_candidates_count": len(raw_candidates),
+                                "compiled_entry_count": compiled_count,
+                                "tokens": execution.usage.tokens_total
+                                if execution.usage is not None
+                                else 0,
+                                "elapsed_seconds": progress_metrics["elapsed_seconds"],
+                                "model": active_model,
+                            },
+                        )
+                        await repo.update_document_preprocessing_status(
+                            document_id,
+                            mode=mode,
+                            status=PREPROCESSING_STATUS_PROCESSING,
+                            model=active_model,
+                            prompt_version=active_prompt_version,
+                            metrics=progress_metrics,
+                        )
 
-                progress_metrics: JsonObject = {
-                    "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
-                    "stage": "technical_compiler_loop",
-                    "status_message": ("Извлекаем узкие смысловые ответы из документа"),
-                    "model": active_model,
-                    "prompt_version": active_prompt_version,
-                    "source_chunk_count": len(indexable_chunks),
-                    "technical_compiler_total_count": len(technical_batches),
-                    "technical_source_char_budget": (
-                        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
-                    ),
-                    "technical_compiler_call_count": batch_index,
-                    "technical_chunk_processed_count": batch_index,
-                    "technical_chunk_total_count": len(technical_batches),
-                    "compiled_entry_count": len(compiled_entries),
-                    "semantic_answer_count": len(compiled_entries),
-                    "incoming_entry_count": len(execution.result.entries),
-                    "previous_title_count": 0,
-                    "question_intent_card_count": 0,
-                    "question_intent_shortlist_count": len(previous_question_intents),
-                    "question_intent_shortlist_limit": (
-                        KCD_STAGE_K_QUESTION_INTENT_SHORTLIST_LIMIT
-                    ),
-                    "llm_merge_call_count": llm_merge_call_count,
-                    "semantic_answer_merge_count": llm_merge_call_count,
-                    "answer_merge_call_count": llm_merge_call_count,
-                    "unknown_known_intent_id_count": unknown_known_intent_id_count,
-                    "merge_rejected_keep_separate_count": (
-                        merge_rejected_keep_separate_count
-                    ),
-                    "usage_event_count": usage_event_count,
-                    "elapsed_seconds": round(
-                        time.monotonic() - processing_started_monotonic,
-                        1,
-                    ),
-                    "previous_title_carryover": False,
-                    "one_meaning_at_a_time_merge": False,
-                    "extractor_only_compiler_loop": True,
-                    "online_answer_merge_enabled": False,
-                    "source_refs_preserved_per_semantic_entry": True,
-                    "row_explosion_guard": (
-                        "raw_source_chunks_not_persisted_as_runtime_entries"
-                    ),
-                }
-                logger.info(
-                    "Knowledge answer compiler technical batch processed",
-                    extra={
-                        "project_id": project_id,
-                        "document_id": document_id,
-                        "batch_index": batch_index,
-                        "batch_count": len(technical_batches),
-                        "source_chunk_count": len(indexable_chunks),
-                        "previous_title_count": 0,
-                        "question_intent_shortlist_count": len(
-                            previous_question_intents
-                        ),
-                        "incoming_entry_count": len(execution.result.entries),
-                        "compiled_entry_count": len(compiled_entries),
-                        "llm_merge_call_count": llm_merge_call_count,
-                        "unknown_known_intent_id_count": unknown_known_intent_id_count,
-                        "merge_rejected_keep_separate_count": (
-                            merge_rejected_keep_separate_count
-                        ),
-                        "model": active_model,
-                    },
+            batch_tasks = [
+                asyncio.create_task(
+                    process_compiler_batch(
+                        batch_index,
+                        technical_chunks,
+                        compiler_batches[batch_index - 1],
+                    )
                 )
-                await repo.update_document_preprocessing_status(
-                    document_id,
-                    mode=mode,
-                    status=PREPROCESSING_STATUS_PROCESSING,
-                    model=active_model,
-                    prompt_version=active_prompt_version,
-                    metrics=progress_metrics,
+                for batch_index, technical_chunks in enumerate(
+                    technical_batches, start=1
                 )
+            ]
+            batch_task_results = await asyncio.gather(
+                *batch_tasks, return_exceptions=True
+            )
+            batch_errors = [
+                result for result in batch_task_results if isinstance(result, Exception)
+            ]
+            if batch_errors:
+                raise batch_errors[0]
+
+            compiled_entries = [
+                entry
+                for batch_index in sorted(entries_by_batch_index)
+                for entry in entries_by_batch_index[batch_index]
+            ]
+            latest_result = (
+                results_by_batch_index[max(results_by_batch_index)]
+                if results_by_batch_index
+                else latest_result
+            )
 
             if await repo.is_document_processing_cancelled(document_id):
                 raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
@@ -4061,17 +4314,79 @@ class KnowledgeIngestionService:
             if latest_result is None:
                 raise ValidationError("Knowledge preprocessing produced no results")
 
-            semantic_merge_tightening_metrics: JsonObject = {
-                "skipped": True,
-                "reason": "optional_post_pass_not_required_for_primary_faq_compilation",
-                "entry_count_after": len(compiled_entries),
-                "llm_call_count": 0,
-            }
+            source_excerpts_before_cleanup = tuple(
+                _source_excerpts_from_preprocessing_entry(entry)
+                for entry in compiled_entries
+            )
+            cleanup_result = _mechanically_cleanup_compiled_entries(
+                entries=compiled_entries,
+                source_excerpts_by_entry=source_excerpts_before_cleanup,
+            )
+            existing_project_titles = await _existing_project_titles_for_semantic_merge(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+            )
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_PROCESSING,
+                model=active_model,
+                prompt_version=active_prompt_version,
+                metrics={
+                    "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
+                    "stage": "semantic_merge_tightening",
+                    "status_message": (
+                        "Извлечение завершено, идёт уплотнение повторяющихся смыслов."
+                    ),
+                    "technical_chunk_processed_count": len(technical_batches),
+                    "technical_chunk_total_count": len(technical_batches),
+                    "failed_part_count": 0,
+                    "raw_draft_count": raw_candidate_count,
+                    "compiled_entry_count": len(cleanup_result.entries),
+                    "online_answer_merge_enabled": True,
+                    "extraction_concurrency": extraction_concurrency,
+                    **cleanup_result.metrics,
+                    "elapsed_seconds": round(
+                        time.monotonic() - processing_started_monotonic,
+                        1,
+                    ),
+                },
+            )
+            (
+                tightened_entries,
+                tightened_source_excerpts,
+                semantic_merge_tightening_metrics,
+            ) = await _tighten_compiled_entries_with_semantic_merge(
+                preprocessor=preprocessor,
+                mode=mode,
+                file_name=file_name,
+                entries=cleanup_result.entries,
+                source_excerpts_by_entry=cleanup_result.source_excerpts_by_entry,
+                existing_project_titles=existing_project_titles,
+            )
+            semantic_merge_fallback_used = (
+                semantic_merge_tightening_metrics.get("fallback_used") is True
+            )
+            if semantic_merge_fallback_used:
+                semantic_merge_tightening_metrics["status"] = "failed_fallback_used"
+                semantic_merge_tightening_metrics["published_fallback_entry_count"] = (
+                    len(tightened_entries)
+                )
+                semantic_merge_tightening_metrics["raw_draft_count"] = (
+                    raw_candidate_count
+                )
+            llm_merge_call_count = _json_metric_int(
+                semantic_merge_tightening_metrics, "llm_call_count"
+            )
+            merge_rejected_keep_separate_count = _json_metric_int(
+                semantic_merge_tightening_metrics, "keep_separate_decision_count"
+            )
 
             result = _preprocessing_result_from_entries(
                 mode=mode,
                 template=latest_result,
-                entries=compiled_entries,
+                entries=tightened_entries,
                 metrics={
                     "technical_compiler_call_count": len(preprocessing_results),
                     "technical_chunk_batch_size": (
@@ -4085,11 +4400,17 @@ class KnowledgeIngestionService:
                     "merge_rejected_keep_separate_count": (
                         merge_rejected_keep_separate_count
                     ),
-                    "compiled_entry_key_count": len(compiled_entries),
+                    "compiled_entry_key_count": len(tightened_entries),
+                    "raw_draft_count": raw_candidate_count,
+                    "deterministic_cleanup": cleanup_result.metrics,
+                    "merged_preprocessing_entry_counts": cleanup_result.metrics.get(
+                        "merged_preprocessing_entry_counts", []
+                    ),
                     "source_refs_preserved_per_semantic_entry": True,
                     "semantic_merge_tightening": semantic_merge_tightening_metrics,
-                    "extractor_only_compiler_loop": True,
-                    "online_answer_merge_enabled": False,
+                    "semantic_merge_fallback_used": semantic_merge_fallback_used,
+                    "online_answer_merge_enabled": True,
+                    "extraction_concurrency": extraction_concurrency,
                 },
             )
             canonical_entries = _canonical_entries_from_preprocessing_result(
@@ -4148,11 +4469,12 @@ class KnowledgeIngestionService:
                 technical_batches
             )
             preprocessing_metrics["semantic_answer_count"] = len(canonical_entries)
+            preprocessing_metrics["published_entry_count"] = len(canonical_entries)
             preprocessing_metrics["model"] = active_model
             preprocessing_metrics["prompt_version"] = active_prompt_version
             preprocessing_metrics["stage"] = "completed"
             preprocessing_metrics["status_message"] = (
-                "Документ обработан: смысловые ответы собраны и опубликованы"
+                "База знаний обновлена. Сырые черновики сохранены для проверки."
             )
             preprocessing_metrics["usage_event_count"] = usage_event_count
             preprocessing_metrics["llm_merge_call_count"] = llm_merge_call_count
@@ -4171,8 +4493,14 @@ class KnowledgeIngestionService:
             preprocessing_metrics["previous_title_carryover"] = False
             preprocessing_metrics["one_meaning_at_a_time_merge"] = False
             preprocessing_metrics["one_meaning_at_a_time_extraction"] = True
-            preprocessing_metrics["extractor_only_compiler_loop"] = True
-            preprocessing_metrics["online_answer_merge_enabled"] = False
+            preprocessing_metrics["online_answer_merge_enabled"] = True
+            preprocessing_metrics["extraction_concurrency"] = extraction_concurrency
+            preprocessing_metrics["raw_draft_count"] = raw_candidate_count
+            preprocessing_metrics["duplicates_collapsed_safely_count"] = (
+                _json_metric_int(
+                    cleanup_result.metrics, "exact_duplicate_candidate_collapse_count"
+                )
+            )
             preprocessing_metrics["source_refs_preserved_per_semantic_entry"] = True
             preprocessing_metrics["row_explosion_guard"] = (
                 "raw_source_chunks_not_persisted_as_runtime_entries"
