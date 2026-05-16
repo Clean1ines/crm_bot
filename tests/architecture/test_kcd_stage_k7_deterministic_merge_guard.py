@@ -69,7 +69,7 @@ def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
     )
 
 
-def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() -> None:
+def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> None:
     frontend_source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
     ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
@@ -78,8 +78,8 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() ->
     assert "publishedEntries" in frontend_source
     assert "rawDrafts" in frontend_source
     assert "answerResolutionCases" in frontend_source
-    assert "incomingSemanticEntryCount" in frontend_source
-    assert "resolvedByLlm" in frontend_source
+    assert "incomingAnswerCandidateCount" in frontend_source
+    assert "appliedAnswerResolutions" in frontend_source
 
     assert "knowledge.document.sourceChunksPrefix" in frontend_source
     assert "Published entries" in frontend_source
@@ -89,11 +89,11 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() ->
         "'knowledge.document.sourceChunksPrefix': 'Технические фрагменты:'" in ru_locale
     )
     assert (
-        "'knowledge.document.incomingAnswersPrefix': 'Новых смысловых ответов на последнем этапе:'"
+        "'knowledge.document.incomingAnswersPrefix': 'Новых кандидатов ответов на последнем этапе:'"
         in ru_locale
     )
     assert (
-        "'knowledge.document.answerResolutionsPrefix': 'Разрешено ответов:'"
+        "'knowledge.document.answerResolutionsPrefix': 'Объединено ответов:'"
         in ru_locale
     )
 

@@ -126,7 +126,9 @@ def _json_int_value(value: object) -> int | None:
     return None
 
 
-def _answer_resolution_report_status(metrics: JsonObject, *, is_processing: bool) -> str:
+def _answer_resolution_report_status(
+    metrics: JsonObject, *, is_processing: bool
+) -> str:
     status = str(metrics.get("status") or "")
     if status == "failed_fallback_published":
         return "failed"

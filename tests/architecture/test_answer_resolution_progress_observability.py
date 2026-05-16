@@ -21,9 +21,7 @@ def test_answer_resolution_progress_metrics_are_persisted_before_publication() -
     assert (
         '"processed_case_count"'
         in source[
-            source.index(
-                "async def _resolve_compiled_answer_cases"
-            ) : publish_index
+            source.index("async def _resolve_compiled_answer_cases") : publish_index
         ]
     )
     assert "on_progress=persist_answer_resolution_progress" in progress_slice

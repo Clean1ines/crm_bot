@@ -909,9 +909,7 @@ def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_sa
 
     source = Path(service_module.__file__).read_text()
     raw_save_index = source.index("await repo.add_answer_candidates")
-    merge_index = source.index(
-        "await _resolve_compiled_answer_cases", raw_save_index
-    )
+    merge_index = source.index("await _resolve_compiled_answer_cases", raw_save_index)
     publish_index = source.index(
         "canonical_entries = _canonical_entries_from_preprocessing_result",
         merge_index,
@@ -971,7 +969,7 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
     assert all(snippet not in online_section for snippet in forbidden_snippets)
 
 
-def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
+def test_answer_resolution_uses_only_resolver_answer_and_deterministic_fields():
     from src.application.services.knowledge_ingestion_service import (
         _apply_answer_resolution_decisions,
     )

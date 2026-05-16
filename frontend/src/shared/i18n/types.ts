@@ -634,7 +634,7 @@ export type TranslationKey =
   | 'knowledge.retightenReport.title'
   | 'knowledge.retightenReport.status'
   | 'knowledge.retightenReport.entries'
-  | 'knowledge.retightenReport.collapsed'
+  | 'knowledge.retightenReport.combinedEntries'
   | 'knowledge.retightenReport.groups'
   | 'knowledge.retightenReport.decisions'
   | 'knowledge.retightenReport.resolvedAnswers'

@@ -1426,7 +1426,9 @@ def _answer_resolution_question_intent_text(entry: KnowledgePreprocessingEntry) 
 def _answer_resolution_question_intent_tokens(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _answer_resolution_tokens_from_text(_answer_resolution_question_intent_text(entry))
+    return _answer_resolution_tokens_from_text(
+        _answer_resolution_question_intent_text(entry)
+    )
 
 
 def _answer_resolution_entry_pair_score(
@@ -1536,7 +1538,9 @@ def _answer_resolution_suspect_pairs_from_entries(
 
     for left_index, left_entry in enumerate(entries):
         for right_index in range(left_index + 1, len(entries)):
-            score = _answer_resolution_entry_pair_score(left_entry, entries[right_index])
+            score = _answer_resolution_entry_pair_score(
+                left_entry, entries[right_index]
+            )
             if score >= 0.24:
                 pairs.append(
                     _AnswerResolutionSuspectPair(
@@ -1566,9 +1570,9 @@ def _answer_resolution_cases_from_entries(
     ]:
         component = (pair.left_index, pair.right_index)
         digest = hashlib.sha256(
-            ",".join(_answer_resolution_candidate_id(index) for index in component).encode(
-                "utf-8"
-            )
+            ",".join(
+                _answer_resolution_candidate_id(index) for index in component
+            ).encode("utf-8")
         ).hexdigest()[:12]
         cases.append(
             KnowledgeAnswerResolutionCase(
@@ -1956,9 +1960,7 @@ def _answer_resolution_decision_is_too_noisy(
     if not decision.is_merge or not decision.canonical_answer:
         return False
 
-    cleanup = _cleanup_answer_resolution_text_with_metrics(
-        decision.canonical_answer
-    )
+    cleanup = _cleanup_answer_resolution_text_with_metrics(decision.canonical_answer)
     if cleanup.original_unit_count < 3:
         return False
 
@@ -2058,7 +2060,9 @@ def _apply_answer_resolution_decisions(
     removed_indexes: set[int] = set()
 
     for decision in decisions:
-        if not decision.is_merge and _answer_resolution_decision_is_publishable(decision):
+        if not decision.is_merge and _answer_resolution_decision_is_publishable(
+            decision
+        ):
             continue
 
         candidate_indexes: list[int] = []
@@ -2289,12 +2293,10 @@ async def _resolve_compiled_answer_cases(
         await publish_progress()
         return tuple(entries), source_excerpts, metrics
 
-    tightened_entries, tightened_source_excerpts = (
-        _apply_answer_resolution_decisions(
-            entries=entries,
-            decisions=decisions,
-            source_excerpts_by_entry=source_excerpts,
-        )
+    tightened_entries, tightened_source_excerpts = _apply_answer_resolution_decisions(
+        entries=entries,
+        decisions=decisions,
+        source_excerpts_by_entry=source_excerpts,
     )
 
     metrics["status"] = "completed"
@@ -3807,9 +3809,7 @@ class KnowledgeIngestionService:
                 return metrics
 
             metrics["status"] = "completed_with_warnings"
-            metrics["reason"] = (
-                "answer_resolution_failed_after_deterministic_cleanup"
-            )
+            metrics["reason"] = "answer_resolution_failed_after_deterministic_cleanup"
             metrics["entry_count_after"] = len(deterministic_plan.entries)
             metrics["collapsed_entry_count"] = len(
                 deterministic_plan.removed_source_indexes
@@ -4454,7 +4454,7 @@ class KnowledgeIngestionService:
                     "usage_event_count": 0,
                     "elapsed_seconds": 0,
                     "previous_title_carryover": False,
-                    "one_meaning_at_a_time_merge": False,
+                    "one_answer_at_a_time_resolution": False,
                     "answer_resolution_enabled": True,
                     "source_refs_preserved_per_semantic_entry": True,
                     "row_explosion_guard": (
@@ -4731,10 +4731,12 @@ class KnowledgeIngestionService:
                 entries=compiled_entries,
                 source_excerpts_by_entry=source_excerpts_before_cleanup,
             )
-            existing_project_titles = await _existing_project_titles_for_answer_resolution(
-                repo=repo,
-                project_id=project_id,
-                document_id=document_id,
+            existing_project_titles = (
+                await _existing_project_titles_for_answer_resolution(
+                    repo=repo,
+                    project_id=project_id,
+                    document_id=document_id,
+                )
             )
             await repo.update_document_preprocessing_status(
                 document_id,
@@ -4816,12 +4818,10 @@ class KnowledgeIngestionService:
             )
             if answer_resolution_fallback_published:
                 answer_resolution_metrics["status"] = "failed_fallback_published"
-                answer_resolution_metrics["published_fallback_entry_count"] = (
-                    len(tightened_entries)
+                answer_resolution_metrics["published_fallback_entry_count"] = len(
+                    tightened_entries
                 )
-                answer_resolution_metrics["raw_draft_count"] = (
-                    raw_candidate_count
-                )
+                answer_resolution_metrics["raw_draft_count"] = raw_candidate_count
             llm_answer_resolution_call_count = _json_metric_int(
                 answer_resolution_metrics, "llm_call_count"
             )
@@ -4956,7 +4956,7 @@ class KnowledgeIngestionService:
                 1,
             )
             preprocessing_metrics["previous_title_carryover"] = False
-            preprocessing_metrics["one_meaning_at_a_time_merge"] = False
+            preprocessing_metrics["one_answer_at_a_time_resolution"] = False
             preprocessing_metrics["one_meaning_at_a_time_extraction"] = True
             preprocessing_metrics["answer_resolution_enabled"] = True
             preprocessing_metrics["extraction_concurrency"] = extraction_concurrency

@@ -381,16 +381,16 @@ const retightenReportRows = (doc: Document): string[] => {
   const decisions = metricNumber(metrics, 'decision_count');
   const resolvedAnswers = metricNumber(metrics, 'resolved_answer_count');
   const rejectedNoisyResolutions = metricNumber(metrics, 'rejected_noisy_resolved_answer_count');
-  const collapsed = metricNumber(metrics, 'collapsed_entry_count');
+  const combinedEntries = metricNumber(metrics, 'collapsed_entry_count');
   const llmCalls = metricNumber(metrics, 'llm_call_count');
   const cleanupOriginalUnits = metricNumber(metrics, 'retighten_cleanup_original_unit_count');
   const cleanupRemovedUnits = metricNumber(metrics, 'retighten_cleanup_removed_unit_count');
-  const deterministicCollapsed = metricNumber(metrics, 'deterministic_collapsed_entry_count');
+  const deterministicCombined = metricNumber(metrics, 'deterministic_collapsed_entry_count');
   const deterministicExactAnswer = metricNumber(metrics, 'deterministic_exact_answer_merge_count');
   const deterministicContainment = metricNumber(metrics, 'deterministic_answer_containment_merge_count');
   const dedupedQuestions = metricNumber(metrics, 'deduped_question_variant_count');
   const suspiciousMeta = metricNumber(metrics, 'suspicious_meta_entry_count');
-  const llmCollapsed = metricNumber(metrics, 'llm_resolved_entry_count');
+  const answerResolutionCombined = metricNumber(metrics, 'llm_resolved_entry_count');
 
   if (statusText) {
     rows.push(t('knowledge.retightenReport.status', { status: statusText }));
@@ -401,20 +401,20 @@ const retightenReportRows = (doc: Document): string[] => {
       after: formatNumber(after),
     }));
   }
-  if (collapsed !== null) {
-    rows.push(t('knowledge.retightenReport.collapsed', { count: formatNumber(collapsed) }));
+  if (combinedEntries !== null) {
+    rows.push(t('knowledge.retightenReport.combinedEntries', { count: formatNumber(combinedEntries) }));
   }
-  if (deterministicCollapsed !== null) {
-    rows.push(`Без LLM схлопнуто очевидных дублей: ${formatNumber(deterministicCollapsed)}`);
+  if (deterministicCombined !== null) {
+    rows.push(`Детерминированно объединено очевидных дублей: ${formatNumber(deterministicCombined)}`);
   }
   if (deterministicExactAnswer !== null) {
-    rows.push(`Exact answer duplicates: ${formatNumber(deterministicExactAnswer)}`);
+    rows.push(`Объединено точных дублей ответов: ${formatNumber(deterministicExactAnswer)}`);
   }
   if (deterministicContainment !== null) {
-    rows.push(`Схлопнуто вложенных/почти одинаковых ответов: ${formatNumber(deterministicContainment)}`);
+    rows.push(`Объединено вложенных/почти одинаковых ответов: ${formatNumber(deterministicContainment)}`);
   }
-  if (llmCollapsed !== null) {
-    rows.push(`После LLM схлопнуто дополнительно: ${formatNumber(llmCollapsed)}`);
+  if (answerResolutionCombined !== null) {
+    rows.push(`Дополнительно объединено проверкой ответов: ${formatNumber(answerResolutionCombined)}`);
   }
   if (dedupedQuestions !== null) {
     rows.push(`Удалено повторов в вопросах/вариантах: ${formatNumber(dedupedQuestions)}`);
@@ -465,7 +465,7 @@ const sourceChunkCount = (doc: Document): number | null => (
   ?? (Number.isFinite(doc.chunk_count) && doc.chunk_count > 0 ? doc.chunk_count : null)
 );
 
-const incomingSemanticEntryCount = (doc: Document): number | null => (
+const incomingAnswerCandidateCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'incoming_entry_count')
   ?? metricNumber(doc.preprocessing_metrics, 'answer_candidate_count')
 );
@@ -481,12 +481,12 @@ const processingDetailRows = (doc: Document): string[] => {
   const failedParts = metricNumber(metrics, 'failed_part_count');
   const rawDrafts = metricNumber(metrics, 'raw_draft_count')
     ?? metricNumber(metrics, 'draft_answer_count');
-  const safelyCollapsed = metricNumber(metrics, 'duplicates_collapsed_safely_count')
+  const safelyCombined = metricNumber(metrics, 'duplicates_collapsed_safely_count')
     ?? metricNumber(metricObject(metrics, 'deterministic_cleanup'), 'exact_duplicate_candidate_collapse_count');
   const answerResolution = metricObject(metrics, 'answer_resolution');
   const resolutionPasses = answerResolution ? 1 : metricNumber(metrics, 'answer_resolution_pass_count');
   const answerResolutionCases = metricNumber(answerResolution, 'candidate_case_count');
-  const resolvedByLlm = metricNumber(answerResolution, 'resolved_answer_count');
+  const appliedAnswerResolutions = metricNumber(answerResolution, 'resolved_answer_count');
   const keptSeparate = metricNumber(answerResolution, 'kept_separate_count');
   const invalidResolverOutputs = metricNumber(answerResolution, 'invalid_resolution_output_count');
   const publishedEntries = metricNumber(metrics, 'canonical_entry_count')
@@ -498,11 +498,11 @@ const processingDetailRows = (doc: Document): string[] => {
   }
   if (failedParts !== null) rows.push(`Failed parts: ${formatNumber(failedParts)}`);
   if (rawDrafts !== null) rows.push(`Raw drafts saved: ${formatNumber(rawDrafts)}`);
-  if (safelyCollapsed !== null) rows.push(`Duplicates collapsed safely: ${formatNumber(safelyCollapsed)}`);
+  if (safelyCombined !== null) rows.push(`Duplicate answers combined safely: ${formatNumber(safelyCombined)}`);
   if (resolutionPasses !== null) rows.push(`Answer resolution passes: ${formatNumber(resolutionPasses)}`);
   if (answerResolutionCases !== null) rows.push(`Answer resolver cases: ${formatNumber(answerResolutionCases)}`);
-  if (resolvedByLlm !== null) rows.push(`Resolved by LLM: ${formatNumber(resolvedByLlm)}`);
-  if (keptSeparate !== null) rows.push(`Kept separate by LLM: ${formatNumber(keptSeparate)}`);
+  if (appliedAnswerResolutions !== null) rows.push(`Answer resolutions applied: ${formatNumber(appliedAnswerResolutions)}`);
+  if (keptSeparate !== null) rows.push(`Kept separate by resolver: ${formatNumber(keptSeparate)}`);
   if (invalidResolverOutputs !== null) rows.push(`Rejected/invalid resolver outputs: ${formatNumber(invalidResolverOutputs)}`);
   if (publishedEntries !== null) rows.push(`Published entries: ${formatNumber(publishedEntries)}`);
 
@@ -1946,8 +1946,8 @@ export const KnowledgePage: React.FC = () => {
                       {sourceChunkCount(doc) !== null && (
                         <div>{t('knowledge.document.sourceChunksPrefix')} {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
                       )}
-                      {incomingSemanticEntryCount(doc) !== null && (
-                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
+                      {incomingAnswerCandidateCount(doc) !== null && (
+                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingAnswerCandidateCount(doc) ?? 0)}</div>
                       )}
                       {answerResolutionCount(doc) !== null && (
                         <div>

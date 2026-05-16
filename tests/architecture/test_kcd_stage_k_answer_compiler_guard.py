@@ -112,13 +112,13 @@ def test_answer_resolution_parser_does_not_read_candidate_ids_from_payload() -> 
     assert "candidate_ids=()" in parser_source
 
 
-def test_stage_k_ingestion_records_online_merge_compiler_metrics() -> None:
+def test_stage_k_ingestion_records_answer_resolution_compiler_metrics() -> None:
     source = _source(INGESTION_SERVICE)
 
     assert "technical_compiler_call_count" in source
     assert "previous_title_carryover" in source
     assert "False" in source
-    assert "one_meaning_at_a_time_merge" in source
+    assert "one_answer_at_a_time_resolution" in source
     assert "extractor_only_compiler_loop" not in source
     assert "answer_resolution_enabled" in source
     assert "answer_resolution" in source
