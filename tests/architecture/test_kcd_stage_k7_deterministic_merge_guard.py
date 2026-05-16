@@ -73,23 +73,21 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() ->
     frontend_source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
     ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "technicalChunkProgressText" in frontend_source
+    assert "processingDetailRows" in frontend_source
     assert "sourceChunkCount" in frontend_source
-    assert "compiledEntryCount" in frontend_source
+    assert "publishedEntries" in frontend_source
+    assert "rawDrafts" in frontend_source
+    assert "mergeGroups" in frontend_source
     assert "incomingSemanticEntryCount" in frontend_source
     assert "semanticMergeCount" in frontend_source
 
     assert "knowledge.document.sourceChunksPrefix" in frontend_source
-    assert "knowledge.document.compiledAnswersPrefix" in frontend_source
+    assert "Published entries" in frontend_source
     assert "knowledge.document.incomingAnswersPrefix" in frontend_source
     assert "knowledge.document.semanticMergesPrefix" in frontend_source
 
     assert (
         "'knowledge.document.sourceChunksPrefix': 'Технические фрагменты:'" in ru_locale
-    )
-    assert (
-        "'knowledge.document.compiledAnswersPrefix': 'Собрано смысловых ответов:'"
-        in ru_locale
     )
     assert (
         "'knowledge.document.incomingAnswersPrefix': 'Новых смысловых ответов на последнем этапе:'"

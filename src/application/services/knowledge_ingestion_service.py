@@ -1597,6 +1597,7 @@ def _mechanically_cleanup_compiled_entries(
 
     retained_entries: list[KnowledgePreprocessingEntry] = []
     retained_source_excerpts: list[tuple[str, ...]] = []
+    retained_merged_entry_counts: list[int] = []
     index_by_exact_key: dict[tuple[str, str, str, str], int] = {}
     exact_duplicate_candidate_collapse_count = 0
 
@@ -1619,6 +1620,7 @@ def _mechanically_cleanup_compiled_entries(
             index_by_exact_key[exact_key] = len(retained_entries)
             retained_entries.append(entry)
             retained_source_excerpts.append(entry_source_excerpts)
+            retained_merged_entry_counts.append(1)
             continue
 
         existing_entry = retained_entries[existing_index]
@@ -1647,6 +1649,7 @@ def _mechanically_cleanup_compiled_entries(
             retained_source_excerpts[existing_index],
             entry_source_excerpts,
         )
+        retained_merged_entry_counts[existing_index] += 1
         exact_duplicate_candidate_collapse_count += 1
 
     metrics: JsonObject = {
@@ -1658,6 +1661,9 @@ def _mechanically_cleanup_compiled_entries(
         ),
         "deterministic_cleanup_entry_count_before": len(entries),
         "deterministic_cleanup_entry_count_after": len(retained_entries),
+        "merged_preprocessing_entry_counts": cast(
+            JsonValue, retained_merged_entry_counts
+        ),
     }
     return _MechanicalCleanupCompiledEntriesResult(
         entries=tuple(retained_entries),
@@ -1984,6 +1990,7 @@ async def _tighten_compiled_entries_with_semantic_merge(
     }
 
     if not groups:
+        metrics["status"] = "completed"
         metrics["entry_count_after"] = len(entries)
         metrics["llm_call_count"] = 0
         metrics["decision_count"] = 0
@@ -2012,11 +2019,16 @@ async def _tighten_compiled_entries_with_semantic_merge(
             llm_call_count += 1
             decisions = (*decisions, *execution.result.decisions)
     except Exception as exc:
-        metrics["skipped"] = True
+        metrics["status"] = "failed"
+        metrics["fallback_used"] = True
         metrics["error_type"] = type(exc).__name__
-        metrics["error"] = str(exc)[:240]
+        metrics["error_message"] = str(exc)[:240]
         metrics["entry_count_after"] = len(entries)
         metrics["llm_call_count"] = llm_call_count
+        metrics["decision_count"] = 0
+        metrics["merge_decision_count"] = 0
+        metrics["keep_separate_decision_count"] = 0
+        metrics["invalid_merge_output_count"] = 1
         return tuple(entries), source_excerpts, metrics
 
     tightened_entries, tightened_source_excerpts = (
@@ -2027,6 +2039,8 @@ async def _tighten_compiled_entries_with_semantic_merge(
         )
     )
 
+    metrics["status"] = "completed"
+    metrics["fallback_used"] = False
     metrics["decision_count"] = len(decisions)
     metrics["merge_decision_count"] = sum(
         1 for decision in decisions if decision.is_merge
@@ -2830,6 +2844,12 @@ def _canonical_entries_from_preprocessing_result(
         stable_key = f"{document_id}:stage_k:{stable_key_digest[:24]}"
         entry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
         metadata: dict[str, object] = dict(draft.metadata)
+        merged_counts = result.metrics.get("merged_preprocessing_entry_counts")
+        if isinstance(merged_counts, list) and index < len(merged_counts):
+            merged_count = merged_counts[index]
+            if isinstance(merged_count, int) and merged_count > 1:
+                metadata["compiler_merge"] = "exact_duplicate_grouping"
+                metadata["merged_preprocessing_entry_count"] = merged_count
         metadata["source_ref_count"] = len(source_refs)
         metadata["compiler_index"] = index
 
@@ -4345,8 +4365,17 @@ class KnowledgeIngestionService:
                 source_excerpts_by_entry=cleanup_result.source_excerpts_by_entry,
                 existing_project_titles=existing_project_titles,
             )
-            if semantic_merge_tightening_metrics.get("skipped") is True:
-                raise RuntimeError("semantic_merge_tightening_failed")
+            semantic_merge_fallback_used = (
+                semantic_merge_tightening_metrics.get("fallback_used") is True
+            )
+            if semantic_merge_fallback_used:
+                semantic_merge_tightening_metrics["status"] = "failed_fallback_used"
+                semantic_merge_tightening_metrics["published_fallback_entry_count"] = (
+                    len(tightened_entries)
+                )
+                semantic_merge_tightening_metrics["raw_draft_count"] = (
+                    raw_candidate_count
+                )
             llm_merge_call_count = _json_metric_int(
                 semantic_merge_tightening_metrics, "llm_call_count"
             )
@@ -4374,8 +4403,12 @@ class KnowledgeIngestionService:
                     "compiled_entry_key_count": len(tightened_entries),
                     "raw_draft_count": raw_candidate_count,
                     "deterministic_cleanup": cleanup_result.metrics,
+                    "merged_preprocessing_entry_counts": cleanup_result.metrics.get(
+                        "merged_preprocessing_entry_counts", []
+                    ),
                     "source_refs_preserved_per_semantic_entry": True,
                     "semantic_merge_tightening": semantic_merge_tightening_metrics,
+                    "semantic_merge_fallback_used": semantic_merge_fallback_used,
                     "online_answer_merge_enabled": True,
                     "extraction_concurrency": extraction_concurrency,
                 },
@@ -4436,6 +4469,7 @@ class KnowledgeIngestionService:
                 technical_batches
             )
             preprocessing_metrics["semantic_answer_count"] = len(canonical_entries)
+            preprocessing_metrics["published_entry_count"] = len(canonical_entries)
             preprocessing_metrics["model"] = active_model
             preprocessing_metrics["prompt_version"] = active_prompt_version
             preprocessing_metrics["stage"] = "completed"
