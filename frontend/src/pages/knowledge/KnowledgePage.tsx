@@ -345,7 +345,7 @@ const metricObject = (
 };
 
 const retightenMetrics = (doc: Document): KnowledgeProcessingMetrics | null => (
-  metricObject(doc.preprocessing_metrics, 'semantic_retightening')
+  metricObject(doc.preprocessing_metrics, 'answer_resolution')
 );
 
 const retightenStatusText = (metrics: KnowledgeProcessingMetrics): string | null => {
@@ -377,20 +377,20 @@ const retightenReportRows = (doc: Document): string[] => {
   const statusText = retightenStatusText(metrics);
   const before = metricNumber(metrics, 'entry_count_before');
   const after = metricNumber(metrics, 'entry_count_after');
-  const groups = metricNumber(metrics, 'candidate_group_count');
+  const groups = metricNumber(metrics, 'candidate_case_count');
   const decisions = metricNumber(metrics, 'decision_count');
-  const mergeDecisions = metricNumber(metrics, 'merge_decision_count');
-  const rejectedNoisyMerges = metricNumber(metrics, 'rejected_noisy_merge_decision_count');
-  const collapsed = metricNumber(metrics, 'collapsed_entry_count');
+  const resolvedAnswers = metricNumber(metrics, 'resolved_answer_count');
+  const rejectedNoisyResolutions = metricNumber(metrics, 'rejected_noisy_resolved_answer_count');
+  const combinedEntries = metricNumber(metrics, 'collapsed_entry_count');
   const llmCalls = metricNumber(metrics, 'llm_call_count');
   const cleanupOriginalUnits = metricNumber(metrics, 'retighten_cleanup_original_unit_count');
   const cleanupRemovedUnits = metricNumber(metrics, 'retighten_cleanup_removed_unit_count');
-  const deterministicCollapsed = metricNumber(metrics, 'deterministic_collapsed_entry_count');
+  const deterministicCombined = metricNumber(metrics, 'deterministic_collapsed_entry_count');
   const deterministicExactAnswer = metricNumber(metrics, 'deterministic_exact_answer_merge_count');
   const deterministicContainment = metricNumber(metrics, 'deterministic_answer_containment_merge_count');
   const dedupedQuestions = metricNumber(metrics, 'deduped_question_variant_count');
   const suspiciousMeta = metricNumber(metrics, 'suspicious_meta_entry_count');
-  const llmCollapsed = metricNumber(metrics, 'llm_collapsed_entry_count');
+  const answerResolutionCombined = metricNumber(metrics, 'llm_resolved_entry_count');
 
   if (statusText) {
     rows.push(t('knowledge.retightenReport.status', { status: statusText }));
@@ -401,20 +401,20 @@ const retightenReportRows = (doc: Document): string[] => {
       after: formatNumber(after),
     }));
   }
-  if (collapsed !== null) {
-    rows.push(t('knowledge.retightenReport.collapsed', { count: formatNumber(collapsed) }));
+  if (combinedEntries !== null) {
+    rows.push(t('knowledge.retightenReport.combinedEntries', { count: formatNumber(combinedEntries) }));
   }
-  if (deterministicCollapsed !== null) {
-    rows.push(`Без LLM схлопнуто очевидных дублей: ${formatNumber(deterministicCollapsed)}`);
+  if (deterministicCombined !== null) {
+    rows.push(`Детерминированно объединено очевидных дублей: ${formatNumber(deterministicCombined)}`);
   }
   if (deterministicExactAnswer !== null) {
-    rows.push(`Exact answer duplicates: ${formatNumber(deterministicExactAnswer)}`);
+    rows.push(`Объединено точных дублей ответов: ${formatNumber(deterministicExactAnswer)}`);
   }
   if (deterministicContainment !== null) {
-    rows.push(`Схлопнуто вложенных/почти одинаковых ответов: ${formatNumber(deterministicContainment)}`);
+    rows.push(`Объединено вложенных/почти одинаковых ответов: ${formatNumber(deterministicContainment)}`);
   }
-  if (llmCollapsed !== null) {
-    rows.push(`После LLM схлопнуто дополнительно: ${formatNumber(llmCollapsed)}`);
+  if (answerResolutionCombined !== null) {
+    rows.push(`Дополнительно объединено проверкой ответов: ${formatNumber(answerResolutionCombined)}`);
   }
   if (dedupedQuestions !== null) {
     rows.push(`Удалено повторов в вопросах/вариантах: ${formatNumber(dedupedQuestions)}`);
@@ -428,12 +428,12 @@ const retightenReportRows = (doc: Document): string[] => {
   if (decisions !== null) {
     rows.push(t('knowledge.retightenReport.decisions', { count: formatNumber(decisions) }));
   }
-  if (mergeDecisions !== null) {
-    rows.push(t('knowledge.retightenReport.mergeDecisions', { count: formatNumber(mergeDecisions) }));
+  if (resolvedAnswers !== null) {
+    rows.push(t('knowledge.retightenReport.resolvedAnswers', { count: formatNumber(resolvedAnswers) }));
   }
-  if (rejectedNoisyMerges !== null) {
-    rows.push(t('knowledge.retightenReport.rejectedNoisyMerges', {
-      count: formatNumber(rejectedNoisyMerges),
+  if (rejectedNoisyResolutions !== null) {
+    rows.push(t('knowledge.retightenReport.rejectedNoisyResolutions', {
+      count: formatNumber(rejectedNoisyResolutions),
     }));
   }
   if (llmCalls !== null) {
@@ -453,7 +453,7 @@ const retightenReportRows = (doc: Document): string[] => {
   return rows;
 };
 
-const SEMANTIC_MERGE_TIGHTENING_STEP_ID = 'semantic_merge_tightening';
+const ANSWER_RESOLUTION_STEP_ID = 'answer_resolution';
 
 const positiveMetric = (value: number | null): number | null => (
   value !== null && value > 0 ? value : null
@@ -465,7 +465,7 @@ const sourceChunkCount = (doc: Document): number | null => (
   ?? (Number.isFinite(doc.chunk_count) && doc.chunk_count > 0 ? doc.chunk_count : null)
 );
 
-const incomingSemanticEntryCount = (doc: Document): number | null => (
+const incomingAnswerCandidateCount = (doc: Document): number | null => (
   metricNumber(doc.preprocessing_metrics, 'incoming_entry_count')
   ?? metricNumber(doc.preprocessing_metrics, 'answer_candidate_count')
 );
@@ -481,14 +481,14 @@ const processingDetailRows = (doc: Document): string[] => {
   const failedParts = metricNumber(metrics, 'failed_part_count');
   const rawDrafts = metricNumber(metrics, 'raw_draft_count')
     ?? metricNumber(metrics, 'draft_answer_count');
-  const safelyCollapsed = metricNumber(metrics, 'duplicates_collapsed_safely_count')
+  const safelyCombined = metricNumber(metrics, 'duplicates_collapsed_safely_count')
     ?? metricNumber(metricObject(metrics, 'deterministic_cleanup'), 'exact_duplicate_candidate_collapse_count');
-  const semanticMerge = metricObject(metrics, 'semantic_merge_tightening');
-  const mergePasses = semanticMerge ? 1 : metricNumber(metrics, 'semantic_merge_pass_count');
-  const answerResolutionGroups = metricNumber(semanticMerge, 'candidate_group_count');
-  const resolvedByLlm = metricNumber(semanticMerge, 'merge_decision_count');
-  const keptSeparate = metricNumber(semanticMerge, 'keep_separate_decision_count');
-  const invalidResolverOutputs = metricNumber(semanticMerge, 'invalid_merge_output_count');
+  const answerResolution = metricObject(metrics, 'answer_resolution');
+  const resolutionPasses = answerResolution ? 1 : metricNumber(metrics, 'answer_resolution_pass_count');
+  const answerResolutionCases = metricNumber(answerResolution, 'candidate_case_count');
+  const appliedAnswerResolutions = metricNumber(answerResolution, 'resolved_answer_count');
+  const keptSeparate = metricNumber(answerResolution, 'kept_separate_count');
+  const invalidResolverOutputs = metricNumber(answerResolution, 'invalid_resolution_output_count');
   const publishedEntries = metricNumber(metrics, 'canonical_entry_count')
     ?? metricNumber(metrics, 'published_entry_count');
 
@@ -498,11 +498,11 @@ const processingDetailRows = (doc: Document): string[] => {
   }
   if (failedParts !== null) rows.push(`Failed parts: ${formatNumber(failedParts)}`);
   if (rawDrafts !== null) rows.push(`Raw drafts saved: ${formatNumber(rawDrafts)}`);
-  if (safelyCollapsed !== null) rows.push(`Duplicates collapsed safely: ${formatNumber(safelyCollapsed)}`);
-  if (mergePasses !== null) rows.push(`Semantic merge passes: ${formatNumber(mergePasses)}`);
-  if (answerResolutionGroups !== null) rows.push(`Answer resolver groups: ${formatNumber(answerResolutionGroups)}`);
-  if (resolvedByLlm !== null) rows.push(`Resolved by LLM: ${formatNumber(resolvedByLlm)}`);
-  if (keptSeparate !== null) rows.push(`Kept separate by LLM: ${formatNumber(keptSeparate)}`);
+  if (safelyCombined !== null) rows.push(`Duplicate answers combined safely: ${formatNumber(safelyCombined)}`);
+  if (resolutionPasses !== null) rows.push(`Answer resolution passes: ${formatNumber(resolutionPasses)}`);
+  if (answerResolutionCases !== null) rows.push(`Answer resolver cases: ${formatNumber(answerResolutionCases)}`);
+  if (appliedAnswerResolutions !== null) rows.push(`Answer resolutions applied: ${formatNumber(appliedAnswerResolutions)}`);
+  if (keptSeparate !== null) rows.push(`Kept separate by resolver: ${formatNumber(keptSeparate)}`);
   if (invalidResolverOutputs !== null) rows.push(`Rejected/invalid resolver outputs: ${formatNumber(invalidResolverOutputs)}`);
   if (publishedEntries !== null) rows.push(`Published entries: ${formatNumber(publishedEntries)}`);
 
@@ -1044,30 +1044,29 @@ const SourceUnitsModal: React.FC<{
   );
 };
 
-const semanticMergeTraceRows = (
+const answerResolutionTraceRows = (
   report: KnowledgeProcessingReport | undefined,
 ): KnowledgeProcessingMetrics[] => {
-  const semanticMetrics = metricObject(report?.metrics, 'semantic_merge_tightening')
-    ?? metricObject(report?.metrics, 'semantic_retightening');
-  return metricObjectArray(semanticMetrics, 'decision_trace');
+  const answerResolutionMetrics = metricObject(report?.metrics, 'answer_resolution');
+  return metricObjectArray(answerResolutionMetrics, 'decision_trace');
 };
 
-const SemanticMergeTracePanel: React.FC<{
+const AnswerResolutionTracePanel: React.FC<{
   report: KnowledgeProcessingReport;
 }> = ({ report }) => {
-  const traceRows = semanticMergeTraceRows(report);
+  const traceRows = answerResolutionTraceRows(report);
   if (traceRows.length === 0) return null;
 
   return (
     <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
       <div className="mb-2 font-medium text-[var(--text-primary)]">
-        Уплотнение смысловых дублей: {formatNumber(traceRows.length)} решений
+        Разрешение ответов: {formatNumber(traceRows.length)} решений
       </div>
       <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
         {traceRows.map((row, index) => {
-          const groupId = metricText(row, 'group_id') || `group-${index + 1}`;
+          const caseId = metricText(row, 'case_id') || `case-${index + 1}`;
           const action = metricText(row, 'action') || 'unknown';
-          const questionIntent = metricText(row, 'question_intent') || groupId;
+          const questionIntent = metricText(row, 'question_intent') || caseId;
           const canonicalAnswerPreview = metricText(row, 'canonical_answer_preview');
           const candidates = Array.isArray(row.candidates)
             ? row.candidates.filter((item): item is KnowledgeProcessingMetrics => (
@@ -1076,12 +1075,12 @@ const SemanticMergeTracePanel: React.FC<{
             : [];
 
           return (
-            <details key={`${groupId}-${index}`} className="rounded-lg bg-[var(--control-bg)] p-2">
+            <details key={`${caseId}-${index}`} className="rounded-lg bg-[var(--control-bg)] p-2">
               <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
                 {action} · {questionIntent}
               </summary>
               <div className="mt-2 space-y-2 text-[var(--text-muted)]">
-                <div>group_id: {groupId}</div>
+                <div>case_id: {caseId}</div>
                 {canonicalAnswerPreview && <div className="whitespace-pre-wrap">Итоговый answer: {canonicalAnswerPreview}</div>}
                 {candidates.length > 0 && (
                   <div>
@@ -1091,7 +1090,7 @@ const SemanticMergeTracePanel: React.FC<{
                         const title = metricText(candidate, 'title') || metricText(candidate, 'candidate_id') || `candidate-${candidateIndex + 1}`;
                         const preview = metricText(candidate, 'answer_preview');
                         return (
-                          <li key={`${groupId}-${candidateIndex}`}>
+                          <li key={`${caseId}-${candidateIndex}`}>
                             <span className="text-[var(--text-primary)]">{title}</span>
                             {preview ? <span> — {preview}</span> : null}
                           </li>
@@ -1840,7 +1839,7 @@ export const KnowledgePage: React.FC = () => {
                         {processingReport.steps.map((step) => (
                           <div
                             key={step.id}
-                            className={`flex items-start justify-between gap-3 ${step.id === SEMANTIC_MERGE_TIGHTENING_STEP_ID ? 'rounded-lg bg-[var(--control-bg)] px-2 py-1' : ''}`}
+                            className={`flex items-start justify-between gap-3 ${step.id === ANSWER_RESOLUTION_STEP_ID ? 'rounded-lg bg-[var(--control-bg)] px-2 py-1' : ''}`}
                           >
                             <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
                             <span className="text-right">
@@ -1868,7 +1867,7 @@ export const KnowledgePage: React.FC = () => {
                       />
                     )}
 
-                    <SemanticMergeTracePanel report={processingReport} />
+                    <AnswerResolutionTracePanel report={processingReport} />
 
                     {processingReport.actions.length > 0 && (
                       <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
@@ -1947,8 +1946,8 @@ export const KnowledgePage: React.FC = () => {
                       {sourceChunkCount(doc) !== null && (
                         <div>{t('knowledge.document.sourceChunksPrefix')} {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
                       )}
-                      {incomingSemanticEntryCount(doc) !== null && (
-                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingSemanticEntryCount(doc) ?? 0)}</div>
+                      {incomingAnswerCandidateCount(doc) !== null && (
+                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingAnswerCandidateCount(doc) ?? 0)}</div>
                       )}
                       {answerResolutionCount(doc) !== null && (
                         <div>

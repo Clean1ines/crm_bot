@@ -6,18 +6,18 @@ import json
 import pytest
 
 from src.application.services.knowledge_ingestion_service import (
-    _apply_semantic_merge_tightening_decisions,
+    _apply_answer_resolution_decisions,
     _mechanically_cleanup_compiled_entries,
-    _semantic_merge_decisions_with_group_candidate_ids,
-    _semantic_merge_suspect_groups_from_entries,
-    _tighten_compiled_entries_with_semantic_merge,
+    _answer_resolution_decisions_with_case_candidate_ids,
+    _answer_resolution_cases_from_entries,
+    _resolve_compiled_answer_cases,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingValidationError,
-    KnowledgeSemanticMergeDecision,
-    KnowledgeSemanticMergeExecutionResult,
-    parse_semantic_merge_tightening_payload,
+    KnowledgeAnswerResolutionDecision,
+    KnowledgeAnswerResolverExecutionResult,
+    parse_answer_resolution_payload,
 )
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 
@@ -90,7 +90,7 @@ def test_answer_only_group_payload_excludes_entry_enrichment_and_retrieval_field
         embedding_text="Вернёте деньги Решение по возврату принимает менеджер.",
     )
 
-    groups = _semantic_merge_suspect_groups_from_entries((left, right))
+    groups = _answer_resolution_cases_from_entries((left, right))
 
     assert len(groups) == 1
     payload = groups[0].to_payload()
@@ -125,13 +125,13 @@ def test_llm_prompt_payload_contains_only_answer_resolution_cases() -> None:
             embedding_text="another retrieval text must not leak",
         ),
     )
-    groups = _semantic_merge_suspect_groups_from_entries(entries)
+    groups = _answer_resolution_cases_from_entries(entries)
     preprocessor = GroqKnowledgePreprocessor(client=object(), model="test-model")
 
-    prompt = preprocessor._build_semantic_merge_tightening_prompt(
+    prompt = preprocessor._build_answer_resolution_prompt(
         mode="plain",
         file_name="faq.md",
-        groups=groups,
+        cases=groups,
         existing_project_titles=("Existing title",),
     )
     payload = _prompt_payload(prompt)
@@ -165,14 +165,14 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
             source_chunk_indexes=(1,),
         ),
     )
-    decision = KnowledgeSemanticMergeDecision(
-        group_id="group-1",
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
         canonical_answer="Возврат зависит от ситуации; решение принимает менеджер.",
     )
 
-    tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
+    tightened, source_excerpts = _apply_answer_resolution_decisions(
         entries=entries,
         decisions=(decision,),
         source_excerpts_by_entry=(("Источник A.",), ("Источник B.",)),
@@ -200,7 +200,7 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
 
 def test_answer_resolution_parser_rejects_forbidden_output_fields() -> None:
     with pytest.raises(KnowledgePreprocessingValidationError, match="forbidden fields"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -231,7 +231,7 @@ def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback
     None
 ):
     with pytest.raises(KnowledgePreprocessingValidationError, match="forbidden fields"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -246,7 +246,7 @@ def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback
         )
 
     with pytest.raises(KnowledgePreprocessingValidationError, match="case_id"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -262,7 +262,7 @@ def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback
 
 def test_answer_resolution_parser_rejects_candidate_ids_from_resolver_output() -> None:
     with pytest.raises(KnowledgePreprocessingValidationError, match="candidate_ids"):
-        parse_semantic_merge_tightening_payload(
+        parse_answer_resolution_payload(
             {
                 "decisions": [
                     {
@@ -279,7 +279,7 @@ def test_answer_resolution_parser_rejects_candidate_ids_from_resolver_output() -
 
 
 def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
-    group = _semantic_merge_suspect_groups_from_entries(
+    group = _answer_resolution_cases_from_entries(
         (
             _entry(
                 title="Возврат",
@@ -293,15 +293,15 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
             ),
         )
     )[0]
-    decision = KnowledgeSemanticMergeDecision(
-        group_id=group.group_id,
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id=group.group_id,
         action="merge",
         candidate_ids=(),
         canonical_answer="Итоговый ответ.",
     )
 
-    mapped = _semantic_merge_decisions_with_group_candidate_ids(
-        group=group,
+    mapped = _answer_resolution_decisions_with_case_candidate_ids(
+        answer_case=group,
         decisions=(decision,),
     )
 
@@ -311,9 +311,9 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
 
 
 class _FailingPreprocessor:
-    async def tighten_semantic_merges(
+    async def resolve_answer_cases(
         self, **_: object
-    ) -> KnowledgeSemanticMergeExecutionResult:
+    ) -> KnowledgeAnswerResolverExecutionResult:
         raise AssertionError(
             "LLM resolver must not be called after deterministic collapse"
         )
@@ -336,7 +336,7 @@ def test_deterministic_cleanup_collapses_exact_answers_before_llm_resolver() -> 
     )
 
     tightened, _, metrics = asyncio.run(
-        _tighten_compiled_entries_with_semantic_merge(
+        _resolve_compiled_answer_cases(
             preprocessor=_FailingPreprocessor(),
             mode="plain",
             file_name="faq.md",

@@ -758,8 +758,8 @@ async def test_structured_preprocessing_does_not_pass_known_question_intents_bet
 
     assert "previous_entry_titles" not in first_call
     assert "previous_entry_titles" not in second_call
-    assert first_call["previous_question_intents"] == ()
-    assert second_call["previous_question_intents"] == ()
+    assert "previous_question_intents" not in first_call
+    assert "previous_question_intents" not in second_call
     assert len(first_call["chunks"]) == 1
     assert len(second_call["chunks"]) == 1
 
@@ -844,150 +844,6 @@ async def test_structured_preprocessing_exact_duplicate_fragments_merge_with_sou
 
 
 @pytest.mark.asyncio
-async def test_faq_compilation_unknown_known_intent_id_keeps_fragment_separate_with_metric():
-    repo = _knowledge_repo(canonical_count=2)
-    first_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_answer_compiler_faq_v1",
-        model="llama-test",
-        entries=(
-            KnowledgePreprocessingEntry(
-                title="Стоимость сервиса",
-                answer="Базовое подключение стоит 100 рублей в месяц.",
-                source_excerpt="Базовое подключение стоит 100 рублей в месяц.",
-                questions=("Сколько стоит сервис?",),
-                synonyms=("Сколько стоит сервис?",),
-                canonical_question="Сколько стоит сервис?",
-            ),
-        ),
-        metrics={},
-    )
-    unknown_known_fragment = KnowledgePreprocessingEntry(
-        title="Сроки запуска",
-        answer="Запуск занимает два рабочих дня.",
-        source_excerpt="Запуск занимает два рабочих дня.",
-        questions=("Сколько длится запуск?",),
-        synonyms=("Сколько длится запуск?",),
-        canonical_question="Сколько длится запуск?",
-        match_kind="known",
-        known_intent_id="compiled-404",
-    )
-    second_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_answer_compiler_faq_v1",
-        model="llama-test",
-        entries=(unknown_known_fragment,),
-        metrics={},
-    )
-    preprocessor = Mock()
-    preprocessor.model_name = "llama-test"
-    preprocessor.preprocess = AsyncMock(
-        side_effect=[
-            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
-            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
-        ]
-    )
-
-    await KnowledgeIngestionService(object()).process_document(
-        project_id="project-1",
-        document_id="doc-unknown-known",
-        file_name="faq.md",
-        chunks=[
-            {"content": "Базовое подключение стоит 100 рублей в месяц."},
-            {"content": "Запуск занимает два рабочих дня."},
-        ],
-        mode="faq",
-        knowledge_repo_factory=Mock(return_value=repo),
-        model_usage_repo_factory=Mock(return_value=_usage_repo()),
-        preprocessor_factory=Mock(return_value=preprocessor),
-        logger=Mock(),
-    )
-
-    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert [entry.title for entry in entries] == ["Стоимость сервиса", "Сроки запуска"]
-    final_metrics = repo.update_document_preprocessing_status.await_args_list[
-        -1
-    ].kwargs["metrics"]
-    assert final_metrics["unknown_known_intent_id_count"] == 1
-    assert final_metrics["answer_resolution_keep_separate_count"] == 0
-
-
-@pytest.mark.asyncio
-async def test_faq_compilation_merge_not_allowed_keeps_incoming_as_safe_new_entry():
-    repo = _knowledge_repo(canonical_count=2)
-    first_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_answer_compiler_faq_v1",
-        model="llama-test",
-        entries=(
-            KnowledgePreprocessingEntry(
-                title="Стоимость сервиса",
-                answer="Базовое подключение стоит 100 рублей в месяц.",
-                source_excerpt="Базовое подключение стоит 100 рублей в месяц.",
-                questions=("Сколько стоит сервис?",),
-                synonyms=("Сколько стоит сервис?",),
-                canonical_question="Сколько стоит сервис?",
-            ),
-        ),
-        metrics={},
-    )
-    rejected_known_fragment = KnowledgePreprocessingEntry(
-        title="Поддержка 24/7",
-        answer="Премиум тариф включает круглосуточную поддержку менеджера.",
-        source_excerpt="Премиум тариф включает круглосуточную поддержку менеджера.",
-        questions=("Есть поддержка 24/7?",),
-        synonyms=("Есть поддержка 24/7?",),
-        canonical_question="Есть ли круглосуточная поддержка менеджера?",
-        match_kind="known",
-        known_intent_id="compiled-0",
-    )
-    second_result = KnowledgePreprocessingResult(
-        mode="faq",
-        prompt_version="knowledge_answer_compiler_faq_v1",
-        model="llama-test",
-        entries=(rejected_known_fragment,),
-        metrics={},
-    )
-    preprocessor = Mock()
-    preprocessor.model_name = "llama-test"
-    preprocessor.preprocess = AsyncMock(
-        side_effect=[
-            KnowledgePreprocessingExecutionResult(result=first_result, usage=None),
-            KnowledgePreprocessingExecutionResult(result=second_result, usage=None),
-        ]
-    )
-
-    await KnowledgeIngestionService(object()).process_document(
-        project_id="project-1",
-        document_id="doc-merge-rejected",
-        file_name="faq.md",
-        chunks=[
-            {"content": "Базовое подключение стоит 100 рублей в месяц."},
-            {"content": "Премиум тариф включает круглосуточную поддержку менеджера."},
-        ],
-        mode="faq",
-        knowledge_repo_factory=Mock(return_value=repo),
-        model_usage_repo_factory=Mock(return_value=_usage_repo()),
-        preprocessor_factory=Mock(return_value=preprocessor),
-        logger=Mock(),
-    )
-
-    entries = repo.add_canonical_entries.await_args.kwargs["entries"]
-    assert [entry.title for entry in entries] == ["Стоимость сервиса", "Поддержка 24/7"]
-    assert entries[0].answer == "Базовое подключение стоит 100 рублей в месяц."
-    assert (
-        entries[1].answer
-        == "Премиум тариф включает круглосуточную поддержку менеджера."
-    )
-    final_metrics = repo.update_document_preprocessing_status.await_args_list[
-        -1
-    ].kwargs["metrics"]
-    assert final_metrics["unknown_known_intent_id_count"] == 1
-    assert final_metrics["answer_resolution_keep_separate_count"] == 0
-    assert final_metrics["answer_resolution_enabled"] is True
-
-
-@pytest.mark.asyncio
 async def test_structured_preprocessing_failure_marks_document_error():
     repo = Mock()
     repo.delete_document_chunks = AsyncMock()
@@ -1044,7 +900,7 @@ def test_online_pipeline_defaults_to_parallel_extraction_and_merge_enabled():
     assert service_module.KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT == 3
     assert "asyncio.Semaphore(extraction_concurrency)" in source
     assert 'preprocessing_metrics["answer_resolution_enabled"] = True' in source
-    assert "semantic_merge_tightening_failed" in source
+    assert "answer_resolution_failed" in source
 
 
 def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_saved():
@@ -1053,9 +909,7 @@ def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_sa
 
     source = Path(service_module.__file__).read_text()
     raw_save_index = source.index("await repo.add_answer_candidates")
-    merge_index = source.index(
-        "await _tighten_compiled_entries_with_semantic_merge", raw_save_index
-    )
+    merge_index = source.index("await _resolve_compiled_answer_cases", raw_save_index)
     publish_index = source.index(
         "canonical_entries = _canonical_entries_from_preprocessing_result",
         merge_index,
@@ -1101,7 +955,7 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
     source = Path(service_module.__file__).read_text()
     online_section = source[
         source.index("def _mechanically_cleanup_compiled_entries") : source.index(
-            "async def _existing_project_titles_for_semantic_merge"
+            "async def _existing_project_titles_for_answer_resolution"
         )
     ]
 
@@ -1115,12 +969,12 @@ def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
     assert all(snippet not in online_section for snippet in forbidden_snippets)
 
 
-def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
+def test_answer_resolution_uses_only_resolver_answer_and_deterministic_fields():
     from src.application.services.knowledge_ingestion_service import (
-        _apply_semantic_merge_tightening_decisions,
+        _apply_answer_resolution_decisions,
     )
     from src.domain.project_plane.knowledge_preprocessing import (
-        KnowledgeSemanticMergeDecision,
+        KnowledgeAnswerResolutionDecision,
     )
 
     entries = (
@@ -1143,14 +997,14 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
             source_chunk_indexes=(1,),
         ),
     )
-    decision = KnowledgeSemanticMergeDecision(
-        group_id="group-1",
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
         action="merge",
         candidate_ids=("entry-0", "entry-1"),
         canonical_answer="Условия возврата зависят от ситуации и этапа работы.",
     )
 
-    tightened, source_excerpts = _apply_semantic_merge_tightening_decisions(
+    tightened, source_excerpts = _apply_answer_resolution_decisions(
         entries=entries,
         decisions=(decision,),
         source_excerpts_by_entry=(
@@ -1174,10 +1028,10 @@ def test_online_merge_uses_only_resolver_answer_and_deterministic_fields():
 
 def test_keep_separate_answer_resolution_does_not_delete_answer_entry():
     from src.application.services.knowledge_ingestion_service import (
-        _apply_semantic_merge_tightening_decisions,
+        _apply_answer_resolution_decisions,
     )
     from src.domain.project_plane.knowledge_preprocessing import (
-        KnowledgeSemanticMergeDecision,
+        KnowledgeAnswerResolutionDecision,
     )
 
     entry = KnowledgePreprocessingEntry(
@@ -1186,15 +1040,15 @@ def test_keep_separate_answer_resolution_does_not_delete_answer_entry():
         source_excerpt="Каждая тема должна быть отделена от других.",
         questions=("Как оформлять темы?",),
     )
-    decision = KnowledgeSemanticMergeDecision(
-        group_id="group-1",
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
         action="keep_separate",
         candidate_ids=("entry-0",),
         reason="not the same answer intent",
         confidence=0.7,
     )
 
-    tightened, _ = _apply_semantic_merge_tightening_decisions(
+    tightened, _ = _apply_answer_resolution_decisions(
         entries=(entry,),
         decisions=(decision,),
     )

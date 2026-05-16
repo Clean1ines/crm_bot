@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import cast
+from typing import Literal, cast
 
 import asyncpg
 from groq import APIConnectionError, APIError, APITimeoutError, RateLimitError
@@ -15,7 +15,6 @@ from src.application.rag_eval.dataset_generator import (
     LlmRagEvalDatasetGenerator,
     MAX_ENTRIES_PER_LLM_BATCH,
 )
-from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.reporter import RagQualityReporter
 from src.application.rag_eval.runner import RagEvalRunner, RagEvalTechnicalAnswerError
 from src.application.rag_eval.service import RagEvalService
@@ -32,7 +31,6 @@ from src.infrastructure.rag_eval.adapters import (
     RagServiceRagEvalRetriever,
 )
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
-from src.interfaces.composition.rag_eval_answerer import ProductionRagEvalAnswerer
 
 logger = get_logger(__name__)
 
@@ -40,6 +38,15 @@ RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "openai/gpt-oss-1
 RAG_EVAL_JUDGE_MODEL = os.getenv("RAG_EVAL_JUDGE_MODEL", "llama-3.1-8b-instant")
 RAG_EVAL_QUESTION_MAX_TOKENS = 6144
 RAG_EVAL_JUDGE_MAX_TOKENS = 2048
+
+
+RagEvalModeValue = Literal["retrieval_eval", "answer_quality_eval"]
+
+
+def _rag_eval_mode_from_payload(value: object) -> RagEvalModeValue:
+    if str(value or "").strip().lower() == "answer_quality_eval":
+        return "answer_quality_eval"
+    return "retrieval_eval"
 
 
 def _coerce_int(
@@ -477,12 +484,7 @@ async def _run_full_document_rag_eval(
         minimum=2048,
         maximum=6144,
     )
-    judge_max_tokens = _coerce_int(
-        payload.get("judge_llm_max_tokens"),
-        default=RAG_EVAL_JUDGE_MAX_TOKENS,
-        minimum=512,
-        maximum=4096,
-    )
+    eval_mode = _rag_eval_mode_from_payload(payload.get("eval_mode"))
 
     knowledge_repo = KnowledgeRepository(db_pool)
     rag_service = RAGService(
@@ -494,22 +496,40 @@ async def _run_full_document_rag_eval(
         model=RAG_EVAL_QUESTION_MODEL,
         max_tokens=question_max_tokens,
     )
-    judge_llm = GroqRagEvalJsonLlmAdapter(
-        model=RAG_EVAL_JUDGE_MODEL,
-        max_tokens=judge_max_tokens,
-    )
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=question_llm,
         model_name=RAG_EVAL_QUESTION_MODEL,
     )
-    answer_judge = LlmRagEvalAnswerJudge(llm=judge_llm)
 
-    runner = RagEvalRunner(
-        retriever=RagServiceRagEvalRetriever(rag_service),
-        answerer=ProductionRagEvalAnswerer(),
-        answer_judge=answer_judge,
-        retrieval_limit=retrieval_limit,
-    )
+    if eval_mode == "answer_quality_eval":
+        from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
+        from src.interfaces.composition.rag_eval_answerer import (
+            ProductionRagEvalAnswerer,
+        )
+
+        judge_max_tokens = _coerce_int(
+            payload.get("judge_llm_max_tokens"),
+            default=RAG_EVAL_JUDGE_MAX_TOKENS,
+            minimum=512,
+            maximum=4096,
+        )
+        judge_llm = GroqRagEvalJsonLlmAdapter(
+            model=RAG_EVAL_JUDGE_MODEL,
+            max_tokens=judge_max_tokens,
+        )
+        runner = RagEvalRunner(
+            retriever=RagServiceRagEvalRetriever(rag_service),
+            answerer=ProductionRagEvalAnswerer(),
+            answer_judge=LlmRagEvalAnswerJudge(llm=judge_llm),
+            mode=eval_mode,
+            retrieval_limit=retrieval_limit,
+        )
+    else:
+        runner = RagEvalRunner(
+            retriever=RagServiceRagEvalRetriever(rag_service),
+            mode=eval_mode,
+            retrieval_limit=retrieval_limit,
+        )
 
     service = RagEvalService(
         entry_source=rag_eval_repo,

@@ -986,7 +986,7 @@ class KnowledgeRepository:
 
         return tuple(entries)
 
-    async def apply_document_semantic_retightening(
+    async def apply_document_answer_resolution_retightening(
         self,
         *,
         project_id: str,
@@ -1038,8 +1038,8 @@ class KnowledgeRepository:
                         ensure_uuid(document_id),
                         _jsonb_object(
                             {
-                                "semantic_retightening_archived": True,
-                                "semantic_retightening_reason": (
+                                "answer_resolution_archived": True,
+                                "answer_resolution_reason": (
                                     "merged_into_survivor_entry"
                                 ),
                             }
@@ -1053,7 +1053,7 @@ class KnowledgeRepository:
                     embedding_text = _entry_embedding_text(entry)
                     embedding_text_version = _entry_embedding_text_version(entry)
                     metadata = dict(entry.metadata)
-                    metadata["semantic_retightening_metrics"] = dict(metrics)
+                    metadata["answer_resolution_metrics"] = dict(metrics)
 
                     await conn.execute(
                         """
@@ -1219,7 +1219,7 @@ class KnowledgeRepository:
                     """,
                     ensure_uuid(project_id),
                     ensure_uuid(document_id),
-                    _jsonb_object({"semantic_retightening": dict(metrics)}),
+                    _jsonb_object({"answer_resolution": dict(metrics)}),
                 )
 
         result: JsonObject = dict(metrics)

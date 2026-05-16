@@ -17,10 +17,10 @@ def assert_any(source: str, candidates: tuple[str, ...], *, label: str) -> None:
         raise AssertionError(f"expected at least one {label} marker: {candidates}")
 
 
-def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> None:
+def test_kcd_stage_k7_answer_resolution_is_deterministic_and_evidence_aware() -> None:
     source = INGESTION_SERVICE.read_text(encoding="utf-8")
 
-    assert "_apply_semantic_merge_tightening_decisions" in source
+    assert "_apply_answer_resolution_decisions" in source
     assert "semantic_answer_resolution_count" in source
 
     assert_any(
@@ -40,10 +40,10 @@ def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> No
         (
             "merged_entry_ids",
             "semantic_answer_resolution_count",
-            "semantic_merge",
+            "answer_resolution",
             "merge_count",
         ),
-        label="semantic merge accounting",
+        label="answer resolution accounting",
     )
 
 
@@ -69,7 +69,7 @@ def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
     )
 
 
-def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() -> None:
+def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> None:
     frontend_source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
     ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
@@ -77,24 +77,23 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() ->
     assert "sourceChunkCount" in frontend_source
     assert "publishedEntries" in frontend_source
     assert "rawDrafts" in frontend_source
-    assert "mergeGroups" in frontend_source
-    assert "incomingSemanticEntryCount" in frontend_source
-    assert "semanticMergeCount" in frontend_source
+    assert "answerResolutionCases" in frontend_source
+    assert "incomingAnswerCandidateCount" in frontend_source
+    assert "appliedAnswerResolutions" in frontend_source
 
     assert "knowledge.document.sourceChunksPrefix" in frontend_source
     assert "Published entries" in frontend_source
     assert "knowledge.document.incomingAnswersPrefix" in frontend_source
-    assert "knowledge.document.semanticMergesPrefix" in frontend_source
 
     assert (
         "'knowledge.document.sourceChunksPrefix': 'Технические фрагменты:'" in ru_locale
     )
     assert (
-        "'knowledge.document.incomingAnswersPrefix': 'Новых смысловых ответов на последнем этапе:'"
+        "'knowledge.document.incomingAnswersPrefix': 'Новых кандидатов ответов на последнем этапе:'"
         in ru_locale
     )
     assert (
-        "'knowledge.document.semanticMergesPrefix': 'Объединено смысловых повторов:'"
+        "'knowledge.document.answerResolutionsPrefix': 'Объединено ответов:'"
         in ru_locale
     )
 

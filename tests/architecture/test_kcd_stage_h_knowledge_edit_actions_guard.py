@@ -106,3 +106,4 @@ def test_stage_h_uses_existing_rag_eval_queue_type() -> None:
     assert "TASK_RUN_FULL_RAG_EVAL" in service
     assert "run_full_rag_eval" in service
     assert '"mode": "full_document"' in service
+    assert '"eval_mode": "retrieval_eval"' in service

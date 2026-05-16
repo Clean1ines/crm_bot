@@ -19,9 +19,8 @@ from src.domain.project_plane.knowledge_compilation import (
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
-    KnowledgeQuestionIntentCard,
-    KnowledgeSemanticMergeExecutionResult,
-    KnowledgeSemanticMergeGroup,
+    KnowledgeAnswerResolverExecutionResult,
+    KnowledgeAnswerResolutionCase,
 )
 from src.domain.project_plane.knowledge_views import (
     KnowledgeAnswerCandidateSummaryView,
@@ -227,7 +226,7 @@ class KnowledgeRepositoryPort(Protocol):
         document_id: str,
     ) -> tuple[CanonicalKnowledgeEntry, ...]: ...
 
-    async def apply_document_semantic_retightening(
+    async def apply_document_answer_resolution_retightening(
         self,
         *,
         project_id: str,
@@ -322,17 +321,16 @@ class KnowledgePreprocessorPort(Protocol):
         mode: KnowledgePreprocessingMode,
         chunks: list[JsonObject],
         file_name: str,
-        previous_question_intents: Sequence[KnowledgeQuestionIntentCard] = (),
     ) -> KnowledgePreprocessingExecutionResult: ...
 
-    async def tighten_semantic_merges(
+    async def resolve_answer_cases(
         self,
         *,
         mode: KnowledgePreprocessingMode,
         file_name: str,
-        groups: Sequence[KnowledgeSemanticMergeGroup],
+        cases: Sequence[KnowledgeAnswerResolutionCase],
         existing_project_titles: Sequence[str] = (),
-    ) -> KnowledgeSemanticMergeExecutionResult: ...
+    ) -> KnowledgeAnswerResolverExecutionResult: ...
 
 
 class KnowledgePreprocessorFactoryPort(Protocol):

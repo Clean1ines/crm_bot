@@ -9,7 +9,7 @@ def test_no_hardcoded_meta_question_dictionary() -> None:
     )
     section = source[
         source.index("def _mechanically_cleanup_compiled_entries") : source.index(
-            "async def _existing_project_titles_for_semantic_merge"
+            "async def _existing_project_titles_for_answer_resolution"
         )
     ]
 

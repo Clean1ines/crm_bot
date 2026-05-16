@@ -33,14 +33,14 @@ PREPROCESSING_STATUS_FAILED = "failed"
 PROMPT_VERSION_FAQ = "knowledge_answer_compiler_faq_v1"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
 PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
-SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v2"
+ANSWER_RESOLUTION_PROMPT_VERSION = "knowledge_answer_resolution_v1"
 
-SemanticMergeAction: TypeAlias = Literal["merge", "keep_separate"]
+AnswerResolutionDecisionAction: TypeAlias = Literal["merge", "keep_separate"]
 AnswerResolutionAction: TypeAlias = Literal[
     "merge", "keep_separate", "conflict", "needs_review"
 ]
-SEMANTIC_MERGE_ACTION_MERGE = "merge"
-SEMANTIC_MERGE_ACTION_KEEP_SEPARATE = "keep_separate"
+ANSWER_RESOLUTION_ACTION_MERGE = "merge"
+ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE = "keep_separate"
 ANSWER_RESOLUTION_ACTION_CONFLICT = "conflict"
 ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW = "needs_review"
 ANSWER_RESOLUTION_FORBIDDEN_OUTPUT_FIELDS: frozenset[str] = frozenset(
@@ -76,21 +76,7 @@ class KnowledgePreprocessingEntry:
     tags: tuple[str, ...] = field(default_factory=tuple)
     embedding_text: str = ""
     canonical_question: str = ""
-    match_kind: Literal["new", "known"] = "new"
-    known_intent_id: str = ""
     source_chunk_indexes: tuple[int, ...] = field(default_factory=tuple)
-
-    def to_chunk(self, *, entry_kind: KnowledgeEntryKind) -> JsonObject:
-        return {
-            "content": self.answer,
-            "entry_kind": entry_kind.value,
-            "title": self.title,
-            "source_excerpt": self.source_excerpt,
-            "questions": list(self.questions),
-            "synonyms": list(self.synonyms),
-            "tags": list(self.tags),
-            "embedding_text": self.embedding_text or build_embedding_text(self),
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,33 +87,11 @@ class KnowledgePreprocessingResult:
     entries: tuple[KnowledgePreprocessingEntry, ...]
     metrics: JsonObject = field(default_factory=dict)
 
-    def to_chunks(self) -> list[JsonObject]:
-        entry_kind = entry_kind_for_preprocessing_mode(self.mode)
-        return [entry.to_chunk(entry_kind=entry_kind) for entry in self.entries]
-
 
 @dataclass(frozen=True, slots=True)
 class KnowledgePreprocessingExecutionResult:
     result: KnowledgePreprocessingResult
     usage: ModelUsageMeasurement | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeQuestionIntentCard:
-    entry_id: str
-    title: str
-    primary_question: str
-    question_samples: tuple[str, ...] = field(default_factory=tuple)
-    answer_digest: str = ""
-    tags: tuple[str, ...] = field(default_factory=tuple)
-
-    def to_payload(self) -> JsonObject:
-        return {
-            "intent_id": self.entry_id,
-            "canonical_question": self.primary_question,
-            "question_variants": list(self.question_samples),
-            "answer_digest": self.answer_digest,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,30 +109,7 @@ class KnowledgeAnswerResolutionOption:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeAnswerResolutionCase:
-    case_id: str
-    question_intent: str
-    answers: tuple[KnowledgeAnswerResolutionOption, ...]
-
-    def to_payload(self) -> JsonObject:
-        return {
-            "case_id": self.case_id,
-            "question_intent": self.question_intent,
-            "answers": [answer.to_payload() for answer in self.answers],
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeAnswerResolutionDecision:
-    case_id: str
-    action: AnswerResolutionAction
-    canonical_answer: str = ""
-    reason: str = ""
-    confidence: float = 0.0
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeSemanticMergeCandidate:
+class KnowledgeAnswerResolutionCandidate:
     candidate_id: str
     answer: str
     source_excerpt: str = ""
@@ -185,50 +126,56 @@ class KnowledgeSemanticMergeCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeSemanticMergeGroup:
-    group_id: str
-    candidates: tuple[KnowledgeSemanticMergeCandidate, ...]
+class KnowledgeAnswerResolutionCase:
+    case_id: str
+    candidates: tuple[KnowledgeAnswerResolutionCandidate, ...]
     question_intent: str = ""
 
-    def to_answer_resolution_case(self) -> KnowledgeAnswerResolutionCase:
-        return KnowledgeAnswerResolutionCase(
-            case_id=self.group_id,
-            question_intent=self.question_intent,
-            answers=tuple(
-                candidate.to_answer_resolution_option() for candidate in self.candidates
-            ),
-        )
+    @property
+    def group_id(self) -> str:
+        return self.case_id
 
     def to_payload(self) -> JsonObject:
-        return self.to_answer_resolution_case().to_payload()
+        return {
+            "case_id": self.case_id,
+            "question_intent": self.question_intent,
+            "answers": [
+                candidate.to_answer_resolution_option().to_payload()
+                for candidate in self.candidates
+            ],
+        }
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeSemanticMergeDecision:
-    group_id: str
-    action: SemanticMergeAction
+class KnowledgeAnswerResolutionDecision:
+    case_id: str
+    action: AnswerResolutionDecisionAction
     candidate_ids: tuple[str, ...]
     canonical_answer: str = ""
     reason: str = ""
     confidence: float = 0.0
 
     @property
+    def group_id(self) -> str:
+        return self.case_id
+
+    @property
     def is_merge(self) -> bool:
-        return self.action == SEMANTIC_MERGE_ACTION_MERGE
+        return self.action == ANSWER_RESOLUTION_ACTION_MERGE
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeSemanticMergeTighteningResult:
+class KnowledgeAnswerResolutionResult:
     mode: KnowledgePreprocessingMode
     prompt_version: str
     model: str
-    decisions: tuple[KnowledgeSemanticMergeDecision, ...]
+    decisions: tuple[KnowledgeAnswerResolutionDecision, ...]
     metrics: JsonObject = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeSemanticMergeExecutionResult:
-    result: KnowledgeSemanticMergeTighteningResult
+class KnowledgeAnswerResolverExecutionResult:
+    result: KnowledgeAnswerResolutionResult
     usage: ModelUsageMeasurement | None = None
 
 
@@ -273,10 +220,6 @@ def parse_preprocessing_payload(
 ) -> KnowledgePreprocessingResult:
     parsed = _coerce_json_object(payload, "Preprocessing")
     entries_payload = parsed.get("fragments")
-    legacy_entries_schema = False
-    if entries_payload is None:
-        entries_payload = parsed.get("entries")
-        legacy_entries_schema = True
     if not isinstance(entries_payload, list):
         raise KnowledgePreprocessingValidationError(
             "Preprocessing payload must contain fragments[]"
@@ -288,11 +231,7 @@ def parse_preprocessing_payload(
             raise KnowledgePreprocessingValidationError(
                 f"Fragment {index} must be an object"
             )
-        entries.append(
-            _parse_entry(
-                item, mode=mode, index=index, legacy_schema=legacy_entries_schema
-            )
-        )
+        entries.append(_parse_entry(item, mode=mode, index=index))
 
     metrics = parsed.get("metrics")
     return KnowledgePreprocessingResult(
@@ -306,37 +245,37 @@ def parse_preprocessing_payload(
     )
 
 
-def parse_semantic_merge_tightening_payload(
+def parse_answer_resolution_payload(
     payload: object,
     *,
     mode: KnowledgePreprocessingMode,
     model: str,
-    prompt_version: str = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
+    prompt_version: str = ANSWER_RESOLUTION_PROMPT_VERSION,
     max_answer_chars: int = 2400,
-) -> KnowledgeSemanticMergeTighteningResult:
+) -> KnowledgeAnswerResolutionResult:
     if isinstance(payload, str):
         parsed = _loads_json_object(payload)
     elif isinstance(payload, Mapping):
         parsed = payload
     else:
         raise KnowledgePreprocessingValidationError(
-            "Semantic merge tightening payload must be a JSON object"
+            "Answer resolution payload must be a JSON object"
         )
 
     decisions_payload = parsed.get("decisions")
     if not isinstance(decisions_payload, list):
         raise KnowledgePreprocessingValidationError(
-            "Semantic merge tightening payload must contain decisions[]"
+            "Answer resolution payload must contain decisions[]"
         )
 
-    decisions: list[KnowledgeSemanticMergeDecision] = []
+    decisions: list[KnowledgeAnswerResolutionDecision] = []
     for index, item in enumerate(decisions_payload):
         if not isinstance(item, Mapping):
             raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} must be an object"
+                f"Answer resolution decision {index} must be an object"
             )
         decisions.append(
-            _parse_semantic_merge_decision(
+            _parse_answer_resolution_decision(
                 item,
                 index=index,
                 max_answer_chars=max_answer_chars,
@@ -344,7 +283,7 @@ def parse_semantic_merge_tightening_payload(
         )
 
     metrics = parsed.get("metrics")
-    return KnowledgeSemanticMergeTighteningResult(
+    return KnowledgeAnswerResolutionResult(
         mode=mode,
         prompt_version=prompt_version,
         model=model,
@@ -355,12 +294,12 @@ def parse_semantic_merge_tightening_payload(
     )
 
 
-def _parse_semantic_merge_decision(
+def _parse_answer_resolution_decision(
     payload: Mapping[object, object],
     *,
     index: int,
     max_answer_chars: int,
-) -> KnowledgeSemanticMergeDecision:
+) -> KnowledgeAnswerResolutionDecision:
     forbidden_fields = sorted(
         str(key)
         for key in payload
@@ -368,32 +307,32 @@ def _parse_semantic_merge_decision(
     )
     if forbidden_fields:
         raise KnowledgePreprocessingValidationError(
-            f"Semantic merge decision {index} contains forbidden fields: "
+            f"Answer resolution decision {index} contains forbidden fields: "
             f"{', '.join(forbidden_fields)}"
         )
 
     case_id = _required_text(payload, "case_id", index=index)
     raw_action = _required_answer_resolution_action(payload.get("action"), index=index)
     action = cast(
-        SemanticMergeAction,
-        SEMANTIC_MERGE_ACTION_MERGE
-        if raw_action == SEMANTIC_MERGE_ACTION_MERGE
-        else SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        AnswerResolutionDecisionAction,
+        ANSWER_RESOLUTION_ACTION_MERGE
+        if raw_action == ANSWER_RESOLUTION_ACTION_MERGE
+        else ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE,
     )
     canonical_answer = _optional_text(payload.get("canonical_answer"))
     reason = _optional_text(payload.get("reason"))
     confidence = _clamped_float(payload.get("confidence"))
 
-    if action == SEMANTIC_MERGE_ACTION_MERGE and not canonical_answer:
+    if action == ANSWER_RESOLUTION_ACTION_MERGE and not canonical_answer:
         raise KnowledgePreprocessingValidationError(
-            f"Semantic merge decision {index} missing canonical_answer"
+            f"Answer resolution decision {index} missing canonical_answer"
         )
 
     if len(canonical_answer) > max_answer_chars:
         canonical_answer = canonical_answer[:max_answer_chars].rstrip()
 
-    return KnowledgeSemanticMergeDecision(
-        group_id=case_id,
+    return KnowledgeAnswerResolutionDecision(
+        case_id=case_id,
         action=action,
         candidate_ids=(),
         canonical_answer=canonical_answer,
@@ -457,19 +396,8 @@ def _parse_entry(
     *,
     mode: KnowledgePreprocessingMode,
     index: int,
-    legacy_schema: bool = False,
 ) -> KnowledgePreprocessingEntry:
-    match_payload = payload.get("match")
-    match_kind = "new"
-    known_intent_id = ""
-    if isinstance(match_payload, Mapping):
-        raw_match_kind = _optional_text(match_payload.get("kind"))
-        if raw_match_kind in {"new", "known"}:
-            match_kind = raw_match_kind
-        known_intent_id = _optional_text(match_payload.get("known_intent_id"))
     variants = _string_list(payload.get("question_variants"))
-    if not variants:
-        variants = _string_list(payload.get("questions"))
     canonical_question = _optional_text(payload.get("canonical_question"))
     if not canonical_question and variants:
         canonical_question = variants[0]
@@ -482,17 +410,11 @@ def _parse_entry(
     source_excerpt = _required_text(payload, "source_excerpt", index=index)
 
     questions = _dedupe_texts((canonical_question, *variants))
-    if legacy_schema:
-        synonyms = tuple(_string_list(payload.get("synonyms")))
-        tags = tuple(_string_list(payload.get("tags")))
-    else:
-        synonyms = questions
-        tags = ()
+    synonyms = questions
+    tags: tuple[str, ...] = ()
     source_chunk_indexes = tuple(
         _non_negative_ints(payload.get("source_chunk_indexes"))
     )
-    embedding_text = _optional_text(payload.get("embedding_text"))
-
     if mode == MODE_PRICE_LIST:
         _reject_price_list_noisy_synonyms(synonyms, index=index)
 
@@ -503,68 +425,21 @@ def _parse_entry(
         questions=questions,
         synonyms=synonyms,
         tags=tags,
-        embedding_text=embedding_text,
+        embedding_text="",
         canonical_question=canonical_question,
-        match_kind=cast(Literal["new", "known"], match_kind),
-        known_intent_id=known_intent_id,
         source_chunk_indexes=source_chunk_indexes,
     )
-    if legacy_schema:
-        _validate_query_surface(entry, mode=mode, index=index)
-
-    if not entry.embedding_text:
-        return KnowledgePreprocessingEntry(
-            title=entry.title,
-            answer=entry.answer,
-            source_excerpt=entry.source_excerpt,
-            questions=entry.questions,
-            synonyms=entry.synonyms,
-            tags=entry.tags,
-            embedding_text=build_embedding_text(entry),
-            canonical_question=entry.canonical_question,
-            match_kind=entry.match_kind,
-            known_intent_id=entry.known_intent_id,
-            source_chunk_indexes=entry.source_chunk_indexes,
-        )
-
-    return entry
-
-
-def _validate_query_surface(
-    entry: KnowledgePreprocessingEntry,
-    *,
-    mode: KnowledgePreprocessingMode,
-    index: int,
-) -> None:
-    """Require dense query surface from LLM preprocessing.
-
-    This is intentionally enforced at the domain boundary because weak LLM
-    output silently degrades retrieval quality for arbitrary customer phrasing.
-    The generated phrases may paraphrase user intent, but must remain grounded
-    in the source-backed entry.
-    """
-
-    min_questions = 3
-    min_synonyms = 5
-    min_tags = 2
-
-    if len(entry.questions) < min_questions:
-        raise KnowledgePreprocessingValidationError(
-            f"Entry {index} in mode={mode} must contain at least "
-            f"{min_questions} grounded questions"
-        )
-
-    if len(entry.synonyms) < min_synonyms:
-        raise KnowledgePreprocessingValidationError(
-            f"Entry {index} in mode={mode} must contain at least "
-            f"{min_synonyms} grounded synonyms"
-        )
-
-    if len(entry.tags) < min_tags:
-        raise KnowledgePreprocessingValidationError(
-            f"Entry {index} in mode={mode} must contain at least "
-            f"{min_tags} topical tags"
-        )
+    return KnowledgePreprocessingEntry(
+        title=entry.title,
+        answer=entry.answer,
+        source_excerpt=entry.source_excerpt,
+        questions=entry.questions,
+        synonyms=entry.synonyms,
+        tags=entry.tags,
+        embedding_text=build_embedding_text(entry),
+        canonical_question=entry.canonical_question,
+        source_chunk_indexes=entry.source_chunk_indexes,
+    )
 
 
 def _required_text(
@@ -612,32 +487,32 @@ def _required_answer_resolution_action(
 ) -> AnswerResolutionAction:
     action = _optional_text(value)
     if action in {
-        SEMANTIC_MERGE_ACTION_MERGE,
-        SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        ANSWER_RESOLUTION_ACTION_MERGE,
+        ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE,
         ANSWER_RESOLUTION_ACTION_CONFLICT,
         ANSWER_RESOLUTION_ACTION_NEEDS_REVIEW,
     }:
         return cast(AnswerResolutionAction, action)
 
     raise KnowledgePreprocessingValidationError(
-        f"Semantic merge decision {index} has unsupported action: {action}"
+        f"Answer resolution decision {index} has unsupported action: {action}"
     )
 
 
-def _required_semantic_merge_action(
+def _required_answer_resolution_decision_action(
     value: object,
     *,
     index: int,
-) -> SemanticMergeAction:
+) -> AnswerResolutionDecisionAction:
     action = _optional_text(value)
     if action in {
-        SEMANTIC_MERGE_ACTION_MERGE,
-        SEMANTIC_MERGE_ACTION_KEEP_SEPARATE,
+        ANSWER_RESOLUTION_ACTION_MERGE,
+        ANSWER_RESOLUTION_ACTION_KEEP_SEPARATE,
     }:
-        return cast(SemanticMergeAction, action)
+        return cast(AnswerResolutionDecisionAction, action)
 
     raise KnowledgePreprocessingValidationError(
-        f"Semantic merge decision {index} has unsupported action: {action}"
+        f"Answer resolution decision {index} has unsupported action: {action}"
     )
 
 
