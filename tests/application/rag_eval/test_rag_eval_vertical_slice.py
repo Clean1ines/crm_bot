@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+import asyncio
 import json
 
 import pytest
@@ -336,3 +337,93 @@ async def test_llm_dataset_generator_falls_back_when_question_json_is_malformed(
     assert question.metadata["variant_style"] == (
         "deterministic_fallback_after_invalid_llm_json"
     )
+
+
+@pytest.mark.asyncio
+async def test_llm_dataset_generator_runs_batches_in_parallel_and_tracks_json_failures() -> (
+    None
+):
+    class ParallelJsonLlm:
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+            self.calls_by_entry: dict[str, int] = {}
+
+        async def complete_json(
+            self,
+            *,
+            system_prompt: str,
+            user_prompt: str,
+            schema_name: str,
+        ) -> Mapping[str, object]:
+            entry_id = "chunk_1"
+            if "chunk_2" in user_prompt:
+                entry_id = "chunk_2"
+            if "chunk_3" in user_prompt:
+                entry_id = "chunk_3"
+
+            self.calls_by_entry[entry_id] = self.calls_by_entry.get(entry_id, 0) + 1
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                await asyncio.sleep(0.01)
+                if entry_id == "chunk_2" and self.calls_by_entry[entry_id] == 1:
+                    raise json.JSONDecodeError(
+                        "Expecting ',' delimiter",
+                        '{"questions":[{"question":"broken"}',
+                        31,
+                    )
+                return {
+                    "questions": [
+                        {
+                            "question": f"Что проверить для {entry_id}?",
+                            "question_type": "direct",
+                            "expected_entry_ids": [entry_id],
+                            "expected_answer_summary": f"Факт {entry_id}",
+                            "should_answer": True,
+                            "should_escalate": False,
+                            "difficulty": 1,
+                            "severity": "medium",
+                            "metadata": {
+                                "fact_id": f"fact_{entry_id}",
+                                "fact_summary": f"Факт {entry_id}",
+                                "variant_style": "direct",
+                                "source_chunk_ids": [entry_id],
+                            },
+                        }
+                    ]
+                }
+            finally:
+                self.active -= 1
+
+    llm = ParallelJsonLlm()
+    generator = LlmRagEvalDatasetGenerator(
+        llm=llm,
+        max_concurrency=2,
+        max_batch_attempts=2,
+    )
+    progress: list[Mapping[str, object]] = []
+
+    dataset = await generator.generate_dataset(
+        project_id="00000000-0000-0000-0000-000000000001",
+        document_id="00000000-0000-0000-0000-000000000002",
+        chunks=[
+            RagEvalEvidenceEntry(id="chunk_1", content="Факт один про тариф."),
+            RagEvalEvidenceEntry(id="chunk_2", content="Факт два про оплату."),
+            RagEvalEvidenceEntry(id="chunk_3", content="Факт три про SLA."),
+        ],
+        metrics_callback=lambda item: progress.append(item) or noop_async(),
+    )
+
+    assert dataset.status == "ready"
+    assert dataset.total_questions == 3
+    assert llm.max_active == 2
+    assert llm.calls_by_entry["chunk_2"] == 2
+    assert dataset.metadata["json_parse_failures"] == 1
+    assert dataset.metadata["retry_count"] == 1
+    assert progress[-1]["processed_batches"] == 3
+    assert progress[-1]["json_parse_failures"] == 1
+
+
+async def noop_async() -> None:
+    return None

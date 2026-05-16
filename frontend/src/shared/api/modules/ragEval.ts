@@ -62,6 +62,15 @@ export interface RagEvalProgressPayload {
   source_chunk_count?: number;
   processed_batches?: number;
   total_batches?: number;
+  successful_batches?: number;
+  failed_batches?: number;
+  skipped_batches?: number;
+  json_parse_failures?: number;
+  provider_failures?: number;
+  retry_count?: number;
+  failed_retrieval_count?: number;
+  dataset_generation_concurrency?: number;
+  retrieval_concurrency?: number;
   dataset_id?: string;
   run_id?: string;
   report_id?: string;

@@ -33,7 +33,7 @@ _RAG_EVAL_LAST_CALL_MONOTONIC = 0.0
 
 
 def _rag_eval_llm_min_delay_seconds() -> float:
-    raw = os.getenv("RAG_EVAL_LLM_MIN_DELAY_SECONDS", "20").strip()
+    raw = os.getenv("RAG_EVAL_LLM_MIN_DELAY_SECONDS", "0").strip()
     try:
         value = float(raw)
     except ValueError:
@@ -42,7 +42,7 @@ def _rag_eval_llm_min_delay_seconds() -> float:
 
 
 async def _throttle_rag_eval_llm_call() -> None:
-    """Serialize RAG-eval LLM calls per process to reduce Groq TPM 429s.
+    """Optionally pace RAG-eval LLM calls per process to reduce Groq TPM 429s.
 
     This throttle is intentionally local to the RAG-eval JSON adapter. It does
     not affect the production chatbot response generator.

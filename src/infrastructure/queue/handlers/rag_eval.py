@@ -117,6 +117,17 @@ def _optional_int(value: object, *, minimum: int, maximum: int) -> int | None:
     return max(minimum, min(maximum, parsed))
 
 
+RAG_EVAL_DATASET_CONCURRENCY = _coerce_int(
+    os.getenv("RAG_EVAL_DATASET_CONCURRENCY"), default=2, minimum=1, maximum=8
+)
+RAG_EVAL_RETRIEVAL_CONCURRENCY = _coerce_int(
+    os.getenv("RAG_EVAL_RETRIEVAL_CONCURRENCY"), default=4, minimum=1, maximum=16
+)
+RAG_EVAL_DATASET_BATCH_ATTEMPTS = _coerce_int(
+    os.getenv("RAG_EVAL_DATASET_BATCH_ATTEMPTS"), default=2, minimum=1, maximum=5
+)
+
+
 def _payload_text(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     text = str(value or "").strip()
@@ -225,6 +236,10 @@ async def _write_rag_eval_progress(
             "total_batches": progress.get("total_batches"),
             "processed_questions": progress.get("processed_questions"),
             "total_questions": progress.get("total_questions"),
+            "failed_batches": progress.get("failed_batches"),
+            "json_parse_failures": progress.get("json_parse_failures"),
+            "retry_count": progress.get("retry_count"),
+            "failed_retrieval_count": progress.get("failed_retrieval_count"),
             "message": progress.get("message"),
         },
     )
@@ -270,7 +285,7 @@ def _build_rag_eval_answer_progress(
         **dict(base_progress),
         "stage": "answer_generation",
         "status": "running",
-        "message": "Checking generated questions against project knowledge",
+        "message": "Running retrieval checks against project knowledge",
         "generated_questions": base_progress.get("target_questions"),
         "target_questions": base_progress.get("target_questions"),
         "processed_questions": processed_questions,
@@ -531,9 +546,30 @@ async def _run_full_document_rag_eval(
         model=RAG_EVAL_QUESTION_MODEL,
         max_tokens=question_max_tokens,
     )
+    dataset_concurrency = _coerce_int(
+        payload.get("dataset_concurrency"),
+        default=RAG_EVAL_DATASET_CONCURRENCY,
+        minimum=1,
+        maximum=8,
+    )
+    retrieval_concurrency = _coerce_int(
+        payload.get("retrieval_concurrency"),
+        default=RAG_EVAL_RETRIEVAL_CONCURRENCY,
+        minimum=1,
+        maximum=16,
+    )
+    dataset_batch_attempts = _coerce_int(
+        payload.get("dataset_batch_attempts"),
+        default=RAG_EVAL_DATASET_BATCH_ATTEMPTS,
+        minimum=1,
+        maximum=5,
+    )
+
     dataset_generator = LlmRagEvalDatasetGenerator(
         llm=question_llm,
         model_name=RAG_EVAL_QUESTION_MODEL,
+        max_concurrency=dataset_concurrency,
+        max_batch_attempts=dataset_batch_attempts,
     )
     judge_llm: GroqRagEvalJsonLlmAdapter | None = None
 
@@ -574,6 +610,7 @@ async def _run_full_document_rag_eval(
         reporter=RagQualityReporter(),
         store=rag_eval_repo,
         report_sink=None,
+        run_concurrency=retrieval_concurrency,
     )
 
     source_entry_count = len(chunks)
@@ -591,6 +628,9 @@ async def _run_full_document_rag_eval(
         "retrieval_limit": retrieval_limit,
         "eval_mode": eval_mode,
         "total_batches": total_batches,
+        "dataset_generation_concurrency": dataset_concurrency,
+        "retrieval_concurrency": retrieval_concurrency,
+        "dataset_batch_attempts": dataset_batch_attempts,
         **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
         "updated_at": _utc_now_iso(),
     }
@@ -613,22 +653,39 @@ async def _run_full_document_rag_eval(
         target_questions: int,
         processed_batches: int,
     ) -> None:
+        await _on_dataset_metrics(
+            {
+                "generated_questions": generated_questions,
+                "target_questions": target_questions,
+                "processed_batches": processed_batches,
+                "total_batches": total_batches,
+            }
+        )
+
+    async def _on_dataset_metrics(metrics: Mapping[str, object]) -> None:
         nonlocal current_control_progress
+        generated_questions = _json_metric_int(metrics.get("generated_questions"))
+        target_questions = _json_metric_int(metrics.get("target_questions"))
+        processed_batches = _json_metric_int(metrics.get("processed_batches"))
+        metric_total_batches = (
+            _json_metric_int(metrics.get("total_batches")) or total_batches
+        )
         safe_target = max(target_questions, 1)
-        safe_batches = max(total_batches, 1)
+        safe_batches = max(metric_total_batches, 1)
         batch_percent = min(max(processed_batches, 0) / safe_batches, 1.0)
         question_percent = min(max(generated_questions, 0) / safe_target, 1.0)
         percent = round(max(batch_percent, question_percent) * 60.0, 2)
 
         progress = {
             **base_progress,
+            **dict(metrics),
             "stage": "dataset_generation",
             "status": "running",
-            "message": "Generating RAG eval questions from document entries",
+            "message": "Generating RAG eval questions from document entries in parallel",
             "generated_questions": generated_questions,
             "target_questions": target_questions,
             "processed_batches": processed_batches,
-            "total_batches": total_batches,
+            "total_batches": metric_total_batches,
             "percent": percent,
             **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
             "updated_at": _utc_now_iso(),
@@ -644,12 +701,23 @@ async def _run_full_document_rag_eval(
         processed_questions: int,
         total_questions: int,
     ) -> None:
+        await _on_run_metrics(
+            {
+                "processed_questions": processed_questions,
+                "total_questions": total_questions,
+            }
+        )
+
+    async def _on_run_metrics(metrics: Mapping[str, object]) -> None:
         nonlocal current_control_progress
+        processed_questions = _json_metric_int(metrics.get("processed_questions"))
+        total_questions = _json_metric_int(metrics.get("total_questions"))
         progress = _build_rag_eval_answer_progress(
             base_progress=base_progress,
             processed_questions=processed_questions,
             total_questions=total_questions,
         )
+        progress.update(dict(metrics))
         progress.update(
             _rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm)
         )
@@ -700,9 +768,11 @@ async def _run_full_document_rag_eval(
             run, report = await service.generate_dataset_and_run(
                 project_id=project_id,
                 document_id=document_id,
-                progress_callback=_on_dataset_progress,
+                progress_callback=None,
                 control_callback=_control_callback,
                 run_progress_callback=_on_run_progress,
+                dataset_metrics_callback=_on_dataset_metrics,
+                run_metrics_callback=_on_run_metrics,
             )
         else:
             run, report = resumed
@@ -749,6 +819,16 @@ async def _run_full_document_rag_eval(
             "total_questions": len(run.results),
             "processed_batches": total_batches,
             "total_batches": total_batches,
+            "failed_batches": current_control_progress.get("failed_batches", 0),
+            "json_parse_failures": current_control_progress.get(
+                "json_parse_failures", 0
+            ),
+            "provider_failures": current_control_progress.get("provider_failures", 0),
+            "retry_count": current_control_progress.get("retry_count", 0),
+            "skipped_batches": current_control_progress.get("skipped_batches", 0),
+            "failed_retrieval_count": current_control_progress.get(
+                "failed_retrieval_count", 0
+            ),
             "percent": 100.0,
             **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
             "updated_at": _utc_now_iso(),
