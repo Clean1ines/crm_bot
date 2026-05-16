@@ -114,7 +114,7 @@ def test_parse_preprocessing_payload_accepts_dense_query_surface() -> None:
     assert len(entry.tags) == 2
     assert "Can I get a refund?" in entry.embedding_text
     assert "Refund requests are reviewed" in entry.embedding_text
-    assert "billing" not in entry.embedding_text
+    assert "billing" in entry.embedding_text
 
 
 def test_price_list_still_rejects_broad_noisy_synonyms() -> None:
@@ -185,9 +185,8 @@ def test_parse_semantic_merge_tightening_payload_accepts_merge_decision() -> Non
         {
             "decisions": [
                 {
-                    "group_id": "manager_handoff",
+                    "case_id": "manager_handoff",
                     "action": "merge",
-                    "candidate_ids": ["entry-a", "entry-b"],
                     "canonical_answer": (
                         "Передача диалога менеджеру, handoff, запрос на человека, "
                         "ассистент не принимает критические решения."
@@ -207,7 +206,7 @@ def test_parse_semantic_merge_tightening_payload_accepts_merge_decision() -> Non
     assert result.prompt_version == SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION
     assert result.metrics["source"] == "unit-test"
     assert decision.is_merge
-    assert decision.candidate_ids == ("entry-a", "entry-b")
+    assert decision.candidate_ids == ()
     assert "handoff" in decision.canonical_answer
     assert decision.reason == "same answer intent"
     assert decision.confidence == 0.91
@@ -218,9 +217,8 @@ def test_parse_semantic_merge_tightening_payload_accepts_keep_separate() -> None
         {
             "decisions": [
                 {
-                    "group_id": "pricing",
+                    "case_id": "pricing",
                     "action": "keep_separate",
-                    "candidate_ids": ["entry-a", "entry-b"],
                 }
             ]
         },
@@ -245,9 +243,8 @@ def test_parse_semantic_merge_tightening_payload_requires_canonical_answer_for_m
             {
                 "decisions": [
                     {
-                        "group_id": "startup",
+                        "case_id": "startup",
                         "action": "merge",
-                        "candidate_ids": ["entry-a", "entry-b"],
                         "reason": "missing answer",
                     }
                 ]

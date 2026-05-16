@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from src.application.services.knowledge_ingestion_service import (
     _apply_semantic_merge_tightening_decisions,
     _mechanically_cleanup_compiled_entries,
@@ -12,6 +14,7 @@ from src.application.services.knowledge_ingestion_service import (
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
+    KnowledgePreprocessingValidationError,
     KnowledgeSemanticMergeDecision,
     KnowledgeSemanticMergeExecutionResult,
     parse_semantic_merge_tightening_payload,
@@ -189,41 +192,90 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
     assert source_excerpts == (("Источник A.", "Источник B."),)
     assert entry.embedding_text == (
         "Возврат Как оформить возврат? Как оформить возврат? "
-        "Можно вернуть деньги? Вернёте оплату? Возврат зависит от ситуации; "
-        "решение принимает менеджер."
+        "Можно вернуть деньги? Вернёте оплату? возврат вернуть оплату billing refund "
+        "Возврат зависит от ситуации; решение принимает менеджер."
     )
     assert "LLM" not in entry.embedding_text
 
 
-def test_answer_resolution_parser_ignores_forbidden_legacy_fields() -> None:
-    result = parse_semantic_merge_tightening_payload(
-        {
-            "decisions": [
-                {
-                    "case_id": "case-1",
-                    "action": "merge",
-                    "canonical_answer": "Итоговый ответ.",
-                    "reason": "same answer",
-                    "confidence": 0.9,
-                    "questions": ["LLM question"],
-                    "synonyms": ["LLM synonym"],
-                    "tags": ["LLM tag"],
-                    "source_refs": ["ref"],
-                    "embedding_text": "LLM embedding",
-                    "metadata": {"unsafe": True},
-                    "cards": [{"answer": "ignored"}],
-                    "entries": [{"answer": "ignored"}],
-                }
-            ]
-        },
-        mode="plain",
-        model="test-model",
-    )
+def test_answer_resolution_parser_rejects_forbidden_output_fields() -> None:
+    with pytest.raises(KnowledgePreprocessingValidationError, match="forbidden fields"):
+        parse_semantic_merge_tightening_payload(
+            {
+                "decisions": [
+                    {
+                        "case_id": "case-1",
+                        "action": "merge",
+                        "canonical_answer": "Итоговый ответ.",
+                        "reason": "same answer",
+                        "confidence": 0.9,
+                        "questions": ["LLM question"],
+                        "synonyms": ["LLM synonym"],
+                        "tags": ["LLM tag"],
+                        "source_refs": ["ref"],
+                        "source_chunk_indexes": [0],
+                        "source_excerpt": "LLM evidence overwrite",
+                        "embedding_text": "LLM embedding",
+                        "metadata": {"unsafe": True},
+                        "cards": [{"answer": "ignored"}],
+                        "entries": [{"answer": "ignored"}],
+                    }
+                ]
+            },
+            mode="plain",
+            model="test-model",
+        )
 
-    decision = result.decisions[0]
-    assert decision.group_id == "case-1"
-    assert decision.is_merge
-    assert decision.canonical_answer == "Итоговый ответ."
+
+def test_answer_resolution_parser_requires_case_id_and_rejects_group_id_fallback() -> (
+    None
+):
+    with pytest.raises(KnowledgePreprocessingValidationError, match="forbidden fields"):
+        parse_semantic_merge_tightening_payload(
+            {
+                "decisions": [
+                    {
+                        "group_id": "legacy-group",
+                        "action": "merge",
+                        "canonical_answer": "Итоговый ответ.",
+                    }
+                ]
+            },
+            mode="plain",
+            model="test-model",
+        )
+
+    with pytest.raises(KnowledgePreprocessingValidationError, match="case_id"):
+        parse_semantic_merge_tightening_payload(
+            {
+                "decisions": [
+                    {
+                        "action": "merge",
+                        "canonical_answer": "Итоговый ответ.",
+                    }
+                ]
+            },
+            mode="plain",
+            model="test-model",
+        )
+
+
+def test_answer_resolution_parser_rejects_candidate_ids_from_resolver_output() -> None:
+    with pytest.raises(KnowledgePreprocessingValidationError, match="candidate_ids"):
+        parse_semantic_merge_tightening_payload(
+            {
+                "decisions": [
+                    {
+                        "case_id": "case-1",
+                        "action": "merge",
+                        "candidate_ids": ["entry-0", "entry-1"],
+                        "canonical_answer": "Итоговый ответ.",
+                    }
+                ]
+            },
+            mode="plain",
+            model="test-model",
+        )
 
 
 def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
