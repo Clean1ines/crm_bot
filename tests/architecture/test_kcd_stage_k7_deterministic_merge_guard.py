@@ -17,10 +17,10 @@ def assert_any(source: str, candidates: tuple[str, ...], *, label: str) -> None:
         raise AssertionError(f"expected at least one {label} marker: {candidates}")
 
 
-def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> None:
+def test_kcd_stage_k7_answer_resolution_is_deterministic_and_evidence_aware() -> None:
     source = INGESTION_SERVICE.read_text(encoding="utf-8")
 
-    assert "_apply_semantic_merge_tightening_decisions" in source
+    assert "_apply_answer_resolution_decisions" in source
     assert "semantic_answer_resolution_count" in source
 
     assert_any(
@@ -40,10 +40,10 @@ def test_kcd_stage_k7_semantic_merge_is_deterministic_and_evidence_aware() -> No
         (
             "merged_entry_ids",
             "semantic_answer_resolution_count",
-            "semantic_merge",
+            "answer_resolution",
             "merge_count",
         ),
-        label="semantic merge accounting",
+        label="answer resolution accounting",
     )
 
 
@@ -77,7 +77,7 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() ->
     assert "sourceChunkCount" in frontend_source
     assert "publishedEntries" in frontend_source
     assert "rawDrafts" in frontend_source
-    assert "answerResolutionGroups" in frontend_source
+    assert "answerResolutionCases" in frontend_source
     assert "incomingSemanticEntryCount" in frontend_source
     assert "resolvedByLlm" in frontend_source
 
@@ -93,7 +93,7 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_semantic_counts() ->
         in ru_locale
     )
     assert (
-        "'knowledge.document.semanticMergesPrefix': 'Объединено смысловых повторов:'"
+        "'knowledge.document.answerResolutionsPrefix': 'Разрешено ответов:'"
         in ru_locale
     )
 

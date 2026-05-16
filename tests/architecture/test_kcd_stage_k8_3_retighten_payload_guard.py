@@ -43,7 +43,7 @@ def test_existing_document_retighten_dispatches_one_suspect_group_per_llm_call()
 
 def test_compiled_ingestion_tightening_reports_actual_llm_call_count() -> None:
     source = SERVICE.read_text(encoding="utf-8")
-    body = _function_body(source, "_tighten_compiled_entries_with_semantic_merge")
+    body = _function_body(source, "_resolve_compiled_answer_cases")
 
     assert "cases=groups" not in body
     assert "for group in groups:" in body

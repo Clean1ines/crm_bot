@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.application.services.knowledge_ingestion_service import (
-    _apply_semantic_merge_tightening_decisions,
+    _apply_answer_resolution_decisions,
     _compiler_source_chunks_for_preprocessing,
     _raw_answer_candidates_from_preprocessing_entries,
 )
@@ -100,7 +100,7 @@ def test_markdown_semantic_chunks_keep_rag_rule_examples_inside_section() -> Non
     assert "цену и сроки внедрения" in str(chunk["content"])
 
 
-def test_semantic_merge_uses_answer_only_resolution_not_concatenation() -> None:
+def test_answer_resolution_uses_answer_only_resolution_not_concatenation() -> None:
     entries = (
         KnowledgePreprocessingEntry(
             title="Возврат средств",
@@ -128,7 +128,7 @@ def test_semantic_merge_uses_answer_only_resolution_not_concatenation() -> None:
         canonical_answer="Возврат средств зависит от ситуации и этапа работы.",
     )
 
-    merged, source_excerpts = _apply_semantic_merge_tightening_decisions(
+    merged, source_excerpts = _apply_answer_resolution_decisions(
         entries=entries,
         decisions=(decision,),
     )

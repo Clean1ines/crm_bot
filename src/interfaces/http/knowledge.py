@@ -334,7 +334,7 @@ async def retighten_knowledge_document(
     queue_repo=Depends(get_queue_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Queues semantic merge tightening for an already processed document."""
+    """Queues answer resolution tightening for an already processed document."""
     service = KnowledgeService(
         project_repo,
         user_repo,
@@ -349,7 +349,7 @@ async def retighten_knowledge_document(
             model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
         ),
     )
-    return await service.retighten_document_semantic_merges(
+    return await service.retighten_document_answer_resolution(
         project_id,
         document_id,
         authorization,
