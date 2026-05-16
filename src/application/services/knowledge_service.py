@@ -10,6 +10,8 @@ from src.application.dto.knowledge_dto import (
     KnowledgeProcessingStepDto,
     KnowledgePreviewRequestDto,
     KnowledgePreviewResponseDto,
+    KnowledgeSourceUnitDto,
+    KnowledgeSourceUnitsResponseDto,
     KnowledgeUploadJobPayloadDto,
     KnowledgeUploadRequestDto,
     KnowledgeUploadResultDto,
@@ -34,6 +36,7 @@ from src.application.ports.knowledge_port import (
 )
 from src.application.ports.logger_port import LoggerPort
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.knowledge_compilation import AnswerCandidate
 from src.domain.project_plane.knowledge_views import (
     KnowledgeCompilerBatchView,
     KnowledgeSearchResultView,
@@ -86,6 +89,41 @@ def _json_int_metric(metrics: JsonObject, key: str) -> int:
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
     return 0
+
+
+def _candidate_source_indexes_for_report(candidate: object) -> tuple[int, ...]:
+    metadata = getattr(candidate, "metadata", {})
+    source_refs = getattr(candidate, "source_refs", ())
+    indexes: list[int] = []
+
+    if isinstance(metadata, Mapping):
+        raw_indexes = metadata.get("source_chunk_indexes")
+        if isinstance(raw_indexes, list | tuple):
+            for raw_index in raw_indexes:
+                parsed = _json_int_value(raw_index)
+                if parsed is not None and parsed not in indexes:
+                    indexes.append(parsed)
+
+    if isinstance(source_refs, Sequence):
+        for source_ref in source_refs:
+            raw_index = getattr(source_ref, "source_index", None)
+            parsed = _json_int_value(raw_index)
+            if parsed is not None and parsed not in indexes:
+                indexes.append(parsed)
+
+    return tuple(indexes)
+
+
+def _json_int_value(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
 
 
 def _semantic_merge_report_status(metrics: JsonObject, *, is_processing: bool) -> str:
@@ -432,6 +470,70 @@ class KnowledgeService:
             total_count=len(raw_candidates),
         )
 
+    async def source_units(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+        limit: int = 1000,
+    ) -> KnowledgeSourceUnitsResponseDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+
+        source_chunks = await repo.list_document_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        raw_candidates = await repo.list_document_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+        )
+
+        candidates_by_source_index: dict[int, list[AnswerCandidate]] = {}
+        for candidate in raw_candidates:
+            for source_index in _candidate_source_indexes_for_report(candidate):
+                candidates_by_source_index.setdefault(source_index, []).append(
+                    candidate
+                )
+
+        normalized_limit = max(1, min(int(limit), 1000))
+        units = tuple(
+            KnowledgeSourceUnitDto.from_source_chunk(
+                source_chunk,
+                related_candidates=tuple(
+                    candidate
+                    for candidate in candidates_by_source_index.get(
+                        source_chunk.source_index,
+                        [],
+                    )
+                ),
+            )
+            for source_chunk in source_chunks[:normalized_limit]
+        )
+
+        logger.info(
+            "Knowledge source units listed",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "source_unit_count": len(units),
+                "total_count": len(source_chunks),
+            },
+        )
+        return KnowledgeSourceUnitsResponseDto(
+            document_id=document_id,
+            source_units=units,
+            total_count=len(source_chunks),
+        )
+
     async def processing_report(
         self,
         project_id: str,
@@ -473,13 +575,24 @@ class KnowledgeService:
             else {}
         )
         semantic_metrics = _semantic_merge_metrics(document_metrics)
+        current_stage = str(document_metrics.get("stage") or "")
         semantic_status = _semantic_merge_report_status(
             semantic_metrics,
             is_processing=is_processing,
         )
+        if (
+            current_stage == "semantic_merge_tightening"
+            and semantic_status == "waiting"
+        ):
+            semantic_status = "processing"
         semantic_total = _json_int_metric(semantic_metrics, "suspect_group_count")
         semantic_current = _json_int_metric(semantic_metrics, "processed_group_count")
-        current_stage = str(document_metrics.get("stage") or "")
+        semantic_final_count = (
+            _json_int_metric(semantic_metrics, "final_entry_count")
+            or _json_int_metric(semantic_metrics, "entry_count_after")
+            or _json_int_metric(document_metrics, "canonical_entry_count")
+            or _json_int_metric(document_metrics, "published_entry_count")
+        )
 
         steps = (
             KnowledgeProcessingStepDto(
@@ -523,10 +636,20 @@ class KnowledgeService:
             KnowledgeProcessingStepDto(
                 id="publish",
                 label="Публикация в базу знаний",
-                status="completed" if published_answer_count > 0 else "pending",
+                status=(
+                    "completed"
+                    if published_answer_count > 0
+                    else "waiting"
+                    if current_stage == "semantic_merge_tightening" and is_processing
+                    else "pending"
+                ),
                 current=published_answer_count,
-                total=max(candidate_summary.raw_count, published_answer_count),
-                message=f"Опубликовано ответов: {published_answer_count}",
+                total=max(semantic_final_count, published_answer_count),
+                message=(
+                    "Ожидаем завершения уплотнения смысловых дублей"
+                    if current_stage == "semantic_merge_tightening" and is_processing
+                    else f"Опубликовано ответов: {published_answer_count}"
+                ),
             ),
         )
 

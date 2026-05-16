@@ -2,7 +2,11 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
-from src.domain.project_plane.knowledge_compilation import AnswerCandidate, SourceRef
+from src.domain.project_plane.knowledge_compilation import (
+    AnswerCandidate,
+    SourceChunk,
+    SourceRef,
+)
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
     KnowledgeSearchTraceView,
@@ -452,6 +456,108 @@ class KnowledgeAnswerDraftsResponseDto:
         return {
             "document_id": self.document_id,
             "drafts": [draft.to_dict() for draft in self.drafts],
+            "total_count": self.total_count,
+        }
+
+
+def _candidate_source_indexes(candidate: AnswerCandidate) -> tuple[int, ...]:
+    indexes: list[int] = []
+    for index in _metadata_int_list(candidate.metadata, "source_chunk_indexes"):
+        if index not in indexes:
+            indexes.append(index)
+
+    for source_ref in candidate.source_refs:
+        if (
+            source_ref.source_index is not None
+            and source_ref.source_index not in indexes
+        ):
+            indexes.append(source_ref.source_index)
+
+    return tuple(indexes)
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSourceUnitDto:
+    id: str
+    source_index: int
+    title: str
+    content: str
+    page: int | None
+    start_offset: int | None
+    end_offset: int | None
+    metadata: JsonObject
+    draft_count: int
+    draft_titles: tuple[str, ...]
+    draft_ids: tuple[str, ...]
+
+    @classmethod
+    def from_source_chunk(
+        cls,
+        source_chunk: SourceChunk,
+        *,
+        related_candidates: tuple[AnswerCandidate, ...] = (),
+    ) -> "KnowledgeSourceUnitDto":
+        draft_titles: list[str] = []
+        draft_ids: list[str] = []
+        for candidate in related_candidates:
+            title = " ".join((candidate.title or candidate.topic_key).strip().split())
+            if title and title not in draft_titles:
+                draft_titles.append(title)
+            if candidate.id not in draft_ids:
+                draft_ids.append(candidate.id)
+
+        metadata: JsonObject = {
+            str(key): json_value_from_unknown(value)
+            for key, value in source_chunk.metadata.items()
+        }
+
+        return cls(
+            id=source_chunk.id,
+            source_index=source_chunk.source_index,
+            title=source_chunk.section_title
+            or f"Source unit {source_chunk.source_index}",
+            content=source_chunk.content,
+            page=source_chunk.page,
+            start_offset=source_chunk.start_offset,
+            end_offset=source_chunk.end_offset,
+            metadata=metadata,
+            draft_count=len(related_candidates),
+            draft_titles=tuple(draft_titles),
+            draft_ids=tuple(draft_ids),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "id": self.id,
+            "source_index": self.source_index,
+            "title": self.title,
+            "content": self.content,
+            "metadata": self.metadata,
+            "draft_count": self.draft_count,
+            "draft_titles": list(self.draft_titles),
+            "draft_ids": list(self.draft_ids),
+        }
+        if self.page is not None:
+            payload["page"] = self.page
+        if self.start_offset is not None:
+            payload["start_offset"] = self.start_offset
+        if self.end_offset is not None:
+            payload["end_offset"] = self.end_offset
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSourceUnitsResponseDto:
+    document_id: str
+    source_units: tuple[KnowledgeSourceUnitDto, ...]
+    total_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "document_id": self.document_id,
+            "source_units": [
+                source_unit.to_dict() for source_unit in self.source_units
+            ],
             "total_count": self.total_count,
         }
 
