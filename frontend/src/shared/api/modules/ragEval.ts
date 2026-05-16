@@ -11,8 +11,8 @@ export interface RagEvalFullRunAcceptedResponse {
 export interface RagEvalDocumentStatusResponse {
   ok: boolean;
   document: Record<string, unknown>;
-  run: Record<string, unknown> | null;
-  report: Record<string, unknown> | null;
+  run: (Record<string, unknown> & { results?: RagEvalResultSummary[] }) | null;
+  report: (Record<string, unknown> & { results?: RagEvalResultSummary[] }) | null;
 }
 
 export interface RagEvalLatestReportResponse {
@@ -26,6 +26,30 @@ export interface RagEvalRunAcceptedResponse {
   run_id?: string;
   report?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+export interface RagEvalResultSummary {
+  result_id: string;
+  run_id: string;
+  question_id: string;
+  question: string;
+  question_type: string;
+  expected_entry_ids: string[];
+  retrieved_entry_ids: string[];
+  top1_hit?: boolean;
+  top3_hit?: boolean;
+  top5_hit?: boolean;
+  expected_entry_found?: boolean;
+  wrong_entry_top1: boolean;
+  answer_supported: boolean;
+  should_answer_passed: boolean;
+  hallucination_risk: string;
+  score: number;
+  notes?: string;
+  latency_ms?: number;
+  created_at?: string;
+  classification: Record<string, unknown> | null;
+  proposed_actions: RagEvalProposedActionSummary[];
 }
 
 export interface RagEvalProgressPayload {
@@ -43,6 +67,11 @@ export interface RagEvalProgressPayload {
   report_id?: string;
   score?: number;
   readiness?: string;
+  tokens_input?: number;
+  tokens_output?: number;
+  tokens_total?: number;
+  question_tokens_total?: number;
+  judge_tokens_total?: number;
   updated_at?: string;
   message?: string;
   [key: string]: unknown;
@@ -85,8 +114,23 @@ export interface RagEvalJobActionResponse {
   job: RagEvalJob;
 }
 
+export const RAG_EVAL_PROPOSED_ACTION_TYPES = [
+  'attach_question_to_entry',
+  'create_entry_from_failure',
+  'rebuild_embedding',
+  'rerun_eval',
+] as const;
+
+export type RagEvalProposedActionType = (typeof RAG_EVAL_PROPOSED_ACTION_TYPES)[number];
+
+const RAG_EVAL_PROPOSED_ACTION_TYPE_VALUES = new Set<string>(RAG_EVAL_PROPOSED_ACTION_TYPES);
+
+export const isRagEvalProposedActionType = (value: string): value is RagEvalProposedActionType => (
+  RAG_EVAL_PROPOSED_ACTION_TYPE_VALUES.has(value)
+);
+
 export interface RagEvalProposedActionSummary {
-  action_type: string;
+  action_type: RagEvalProposedActionType;
   target_entry_id: string | null;
   reason: string;
   payload: Record<string, unknown>;
@@ -123,7 +167,7 @@ export interface KnowledgeEditActionExecutionSummary {
 }
 
 interface RunDocumentEvalOptions {
-  mode?: 'quick' | 'standard' | 'deep' | 'paranoid';
+  mode?: 'quick' | 'standard' | 'deep' | 'paranoid' | 'retrieval_eval' | 'answer_quality_eval';
 }
 
 const encode = (value: string): string => encodeURIComponent(value);

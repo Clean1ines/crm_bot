@@ -9,7 +9,7 @@ import pytest
 from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
 from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
 from src.application.rag_eval.runner import RagEvalRunner
-from src.application.rag_eval.schemas import RagEvalEvidenceEntry
+from src.application.rag_eval.schemas import RagEvalEvidenceEntry, RagEvalQuestion
 
 
 class FakeJsonLlm:
@@ -100,6 +100,28 @@ class FakeRetriever:
         ]
 
 
+class ForbiddenAnswerer:
+    async def answer(
+        self,
+        *,
+        project_id: str,
+        question: str,
+        evidence: list[RagEvalEvidenceEntry],
+    ) -> str:
+        raise AssertionError("answerer must not run in retrieval_eval mode")
+
+
+class ForbiddenJudge:
+    async def judge_answer(
+        self,
+        *,
+        question: RagEvalQuestion,
+        retrieved_entries: list[RagEvalEvidenceEntry],
+        answer_text: str,
+    ):
+        raise AssertionError("judge must not run in retrieval_eval mode")
+
+
 class FakeAnswerer:
     async def answer(
         self,
@@ -139,7 +161,90 @@ async def test_llm_dataset_generator_creates_eval_artifact_without_topic_hardcod
 
 
 @pytest.mark.asyncio
-async def test_runner_combines_retrieval_metrics_and_llm_judge() -> None:
+async def test_runner_defaults_to_deterministic_retrieval_eval_without_answer_llms() -> (
+    None
+):
+    runner = RagEvalRunner(
+        retriever=FakeRetriever(),
+        answerer=ForbiddenAnswerer(),
+        answer_judge=ForbiddenJudge(),
+    )
+
+    result = await runner.run_question(
+        run_id="run_1",
+        project_id="project_1",
+        question=RagEvalQuestion(
+            id="question_1",
+            dataset_id="dataset_1",
+            project_id="project_1",
+            document_id="document_1",
+            question="Сколько занимает подключение?",
+            question_type="direct",
+            expected_entry_ids=["chunk_1"],
+            expected_answer_summary="Подключение занимает 1 рабочий день.",
+            should_answer=True,
+        ),
+    )
+
+    assert result.top1_hit is True
+    assert result.top3_hit is True
+    assert result.top5_hit is True
+    assert result.expected_entry_found is True
+    assert result.wrong_entry_top1 is False
+    assert result.answer_text == ""
+    assert result.score == 1.0
+    assert result.judge_json["mode"] == "retrieval_eval"
+
+
+@pytest.mark.asyncio
+async def test_runner_marks_retrieval_miss_as_enrichment_candidate() -> None:
+    class MissRetriever:
+        async def retrieve(
+            self,
+            *,
+            project_id: str,
+            question: str,
+            limit: int,
+        ) -> list[RagEvalEvidenceEntry]:
+            return [RagEvalEvidenceEntry(id="chunk_other", content="Другая тема.")]
+
+    runner = RagEvalRunner(retriever=MissRetriever())
+
+    result = await runner.run_question(
+        run_id="run_1",
+        project_id="project_1",
+        question=RagEvalQuestion(
+            id="question_1",
+            dataset_id="dataset_1",
+            project_id="project_1",
+            document_id="document_1",
+            question="Как быстро подключают?",
+            question_type="paraphrase",
+            expected_entry_ids=["chunk_1"],
+            expected_answer_summary="Подключение занимает 1 рабочий день.",
+            should_answer=True,
+        ),
+    )
+
+    assert result.top1_hit is False
+    assert result.expected_entry_found is False
+    assert result.wrong_entry_top1 is True
+    assert result.score == 0.0
+    assert result.classification is not None
+    assert result.classification.type.value == "wrong_entry_top1"
+    assert [action.action_type.value for action in result.proposed_actions] == [
+        "attach_question_to_entry",
+        "rebuild_embedding",
+        "rerun_eval",
+    ]
+    assert result.proposed_actions[0].target_entry_id == "chunk_1"
+    assert result.proposed_actions[0].payload["question"] == "Как быстро подключают?"
+
+
+@pytest.mark.asyncio
+async def test_runner_answer_quality_mode_combines_retrieval_metrics_and_llm_judge() -> (
+    None
+):
     generator = LlmRagEvalDatasetGenerator(llm=FakeJsonLlm())
     dataset = await generator.generate_dataset(
         project_id="00000000-0000-0000-0000-000000000001",
@@ -156,6 +261,7 @@ async def test_runner_combines_retrieval_metrics_and_llm_judge() -> None:
         retriever=FakeRetriever(),
         answerer=FakeAnswerer(),
         answer_judge=LlmRagEvalAnswerJudge(llm=FakeJsonLlm()),
+        mode="answer_quality_eval",
     )
 
     direct_result = await runner.run_question(

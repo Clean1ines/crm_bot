@@ -297,6 +297,7 @@ class KnowledgeEditActionService:
                     "document_id": document_id,
                     "requested_by": actor_user_id,
                     "mode": "full_document",
+                    "eval_mode": "retrieval_eval",
                     "retrieval_limit": 5,
                     "source": "knowledge_edit_action",
                     "source_action_id": action_id,
