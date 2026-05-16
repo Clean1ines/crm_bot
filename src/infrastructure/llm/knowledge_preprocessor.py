@@ -14,9 +14,11 @@ from groq import (
 )
 
 from src.application.ports.knowledge_port import KnowledgePreprocessorPort
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
+    MODE_INSTRUCTION,
+    MODE_PRICE_LIST,
     ANSWER_MERGE_PROMPT_VERSION,
     KnowledgeAnswerMergeExecutionResult,
     KnowledgePreprocessingEntry,
@@ -446,14 +448,87 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "file_name": file_name,
             "mode": mode,
             "chunks": [
-                {
-                    "index": index,
-                    "content": str(chunk.get("content") or "")[: self._max_chunk_chars],
-                }
+                _structured_source_chunk_payload(
+                    chunk=chunk,
+                    index=index,
+                    max_content_chars=self._max_chunk_chars,
+                )
                 for index, chunk in enumerate(chunks[: self._max_chunks])
             ],
         }
         return f"{instruction}\n{json.dumps(source_payload, ensure_ascii=False)}"
+
+
+def _truncated_text(value: object, *, max_chars: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip()
+
+
+def _structured_child_payload(value: object, *, max_chars: int) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+
+    payload: JsonObject = {}
+    for key in ("title", "body", "source_excerpt"):
+        if key in value:
+            payload[key] = _truncated_text(value.get(key), max_chars=max_chars)
+    for key in ("section_path", "start_offset", "end_offset"):
+        if key in value:
+            payload[key] = json_value_from_unknown(value.get(key))
+    return payload
+
+
+def _structured_source_chunk_payload(
+    *,
+    chunk: JsonObject,
+    index: int,
+    max_content_chars: int,
+) -> JsonObject:
+    payload: JsonObject = {
+        "index": index,
+        "content": _truncated_text(
+            chunk.get("content"),
+            max_chars=max_content_chars,
+        ),
+    }
+    passthrough_keys = (
+        "id",
+        "source_format",
+        "semantic_unit_id",
+        "semantic_unit_role_hint",
+        "section_title",
+        "section_body",
+        "section_path",
+        "source_excerpt",
+        "source_refs",
+        "start_offset",
+        "end_offset",
+    )
+    for key in passthrough_keys:
+        if key not in chunk:
+            continue
+
+        value = chunk[key]
+        if key in {"section_body", "source_excerpt"}:
+            payload[key] = _truncated_text(value, max_chars=max_content_chars)
+        else:
+            payload[key] = json_value_from_unknown(value)
+
+    children = chunk.get("children")
+    if isinstance(children, list):
+        child_payloads: list[JsonObject] = []
+        for child in children[:12]:
+            child_payload = _structured_child_payload(
+                child,
+                max_chars=max(300, max_content_chars),
+            )
+            if child_payload:
+                child_payloads.append(child_payload)
+        payload["children"] = json_value_from_unknown(child_payloads)
+
+    return payload
 
 
 def _log_llm_response(
@@ -500,9 +575,9 @@ def _log_llm_response(
 
 
 def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
-    if mode != MODE_FAQ:
+    if mode not in {MODE_FAQ, MODE_PRICE_LIST, MODE_INSTRUCTION}:
         raise KnowledgePreprocessingValidationError(
-            f"Knowledge answer compiler is only available for FAQ mode, got: {mode}"
+            f"Knowledge answer compiler is unavailable for mode: {mode}"
         )
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
 

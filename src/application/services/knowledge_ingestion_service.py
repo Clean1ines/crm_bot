@@ -83,6 +83,13 @@ from src.domain.project_plane.knowledge_compilation import (
     SourceChunk,
     SourceRef,
 )
+from src.domain.project_plane.knowledge_acquisition import (
+    MarkdownKnowledgeSubsection,
+    SemanticSourceUnit,
+)
+from src.application.services.markdown_structure_extractor import (
+    MarkdownStructureExtractor,
+)
 
 
 _PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
@@ -620,6 +627,123 @@ def _json_chunks_from_source_chunks(
             chunk["end_offset"] = source_chunk.end_offset
         chunks.append(chunk)
     return chunks
+
+
+def _is_markdown_file(file_name: str) -> bool:
+    return file_name.lower().strip().endswith(".md")
+
+
+def _source_text_from_json_chunks(chunks: Sequence[JsonObject]) -> str:
+    parts: list[str] = []
+    for chunk in chunks:
+        content = _chunk_content(chunk)
+        if content:
+            parts.append(content)
+    return "\n\n".join(parts).strip()
+
+
+def _markdown_child_payload(child: MarkdownKnowledgeSubsection) -> JsonObject:
+    return {
+        "title": child.title,
+        "body": child.body,
+        "source_excerpt": child.source_excerpt,
+        "section_path": list(child.span.section_path),
+        "start_offset": child.span.start_offset,
+        "end_offset": child.span.end_offset,
+    }
+
+
+def _json_object_from_metadata(metadata: Mapping[str, object]) -> JsonObject:
+    result: JsonObject = {}
+    for key, value in metadata.items():
+        result[str(key)] = json_value_from_unknown(value)
+    return result
+
+
+def _json_array_field_item_count(
+    chunks: Sequence[JsonObject],
+    field_name: str,
+) -> int:
+    total = 0
+    for chunk in chunks:
+        value = chunk.get(field_name)
+        if isinstance(value, list):
+            total += len(value)
+    return total
+
+
+def _json_chunk_from_semantic_unit(
+    *,
+    unit: SemanticSourceUnit,
+    index: int,
+) -> JsonObject:
+    source_excerpt = unit.source_excerpt
+    content = unit.to_markdown()
+    return {
+        "id": unit.id,
+        "index": index,
+        "content": content,
+        "source_format": unit.source_format,
+        "semantic_unit_id": unit.id,
+        "semantic_unit_role_hint": unit.role_hint.value,
+        "section_title": unit.title,
+        "section_body": unit.body,
+        "section_path": list(unit.section_path),
+        "source_excerpt": source_excerpt,
+        "start_offset": unit.source_span.start_offset,
+        "end_offset": unit.source_span.end_offset,
+        "children": [_markdown_child_payload(child) for child in unit.children],
+        "source_refs": [
+            {
+                "source_index": index,
+                "section_path": list(unit.source_span.section_path),
+                "start_offset": unit.source_span.start_offset,
+                "end_offset": unit.source_span.end_offset,
+                "excerpt": source_excerpt,
+            }
+        ],
+        "metadata": {
+            **_json_object_from_metadata(unit.metadata),
+            "kad_v1_semantic_source_unit": True,
+            "markdown_section_child_count": len(unit.children),
+        },
+    }
+
+
+def _markdown_semantic_source_chunks(
+    *,
+    file_name: str,
+    chunks: Sequence[JsonObject],
+) -> list[JsonObject]:
+    source_text = _source_text_from_json_chunks(chunks)
+    if not source_text:
+        return list(chunks)
+    if not re.search(r"(?m)^##\s+\S", source_text):
+        return list(chunks)
+
+    extractor = MarkdownStructureExtractor()
+    document = extractor.extract(document_title=file_name, source_text=source_text)
+    units = extractor.to_semantic_units(document)
+    if not units:
+        return list(chunks)
+
+    return [
+        _json_chunk_from_semantic_unit(unit=unit, index=index)
+        for index, unit in enumerate(units)
+    ]
+
+
+def _compiler_source_chunks_for_preprocessing(
+    *,
+    file_name: str,
+    chunks: list[JsonObject],
+    mode: KnowledgePreprocessingMode,
+) -> list[JsonObject]:
+    if mode == MODE_PLAIN:
+        return chunks
+    if not _is_markdown_file(file_name):
+        return chunks
+    return _markdown_semantic_source_chunks(file_name=file_name, chunks=chunks)
 
 
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
@@ -2219,18 +2343,24 @@ def _merge_entry_fields_deterministically(
         _text_tuple(merged_question_variants),
         limit=KCD_STAGE_K_MERGED_QUESTION_LIMIT,
     )
+    merged_synonyms = _merge_limited_text_tuple_values(
+        _text_tuple(existing_entry.synonyms),
+        _text_tuple(incoming_entry.synonyms),
+        limit=KCD_STAGE_K_MERGED_SYNONYM_LIMIT,
+    )
+    merged_tags = _merge_limited_text_tuple_values(
+        _text_tuple(existing_entry.tags),
+        _text_tuple(incoming_entry.tags),
+        limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
+    )
     compatibility_entry = KnowledgePreprocessingEntry(
         title=_clean_optional_text(existing_entry.title)
         or _clean_optional_text(incoming_entry.title),
         answer=answer,
         source_excerpt=source_excerpt,
         questions=merged_questions,
-        synonyms=merged_questions[:KCD_STAGE_K_MERGED_SYNONYM_LIMIT],
-        tags=_merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.tags),
-            _text_tuple(incoming_entry.tags),
-            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
-        ),
+        synonyms=merged_synonyms,
+        tags=merged_tags,
         canonical_question=existing_entry.canonical_question
         or _question_intent_primary_question(existing_entry),
     )
@@ -2245,12 +2375,8 @@ def _merge_entry_fields_deterministically(
         answer=answer,
         source_excerpt=source_excerpt,
         questions=merged_questions,
-        synonyms=merged_questions[:KCD_STAGE_K_MERGED_SYNONYM_LIMIT],
-        tags=_merge_limited_text_tuple_values(
-            _text_tuple(existing_entry.tags),
-            _text_tuple(incoming_entry.tags),
-            limit=KCD_STAGE_K_MERGED_TAG_LIMIT,
-        ),
+        synonyms=merged_synonyms,
+        tags=merged_tags,
         embedding_text=embedding_text,
         canonical_question=compatibility_entry.canonical_question,
         source_chunk_indexes=_merge_int_tuple_values(
@@ -2436,41 +2562,12 @@ def _retighten_merge_entries_deterministically(
 def _retighten_entry_is_suspicious_meta(
     entry: KnowledgePreprocessingEntry,
 ) -> bool:
-    text = _semantic_merge_text_fingerprint(
-        " ".join(
-            part
-            for part in (
-                entry.title,
-                entry.answer,
-                entry.source_excerpt,
-                entry.embedding_text,
-            )
-            if _clean_optional_text(part)
-        )
-    )
-    if not text:
-        return False
+    """KAD v1 forbids keyword dictionaries for semantic/meta filtering.
 
-    suspicious_markers: tuple[str, ...] = (
-        "kazhdaya tema dolzhna byt otdelena",
-        "ne smeshivat",
-        "eti voprosy nuzhno ispolzovat",
-        "testirovaniya preview",
-        "chastye voprosy i pravilnye otvety",
-        "spisok pohozhih voprosov",
-    )
-    # Cyrillic-safe fingerprints. The latin markers above are harmless when
-    # input is transliterated by tests or future fixtures; the real checks below
-    # cover current Russian production data.
-    suspicious_markers = suspicious_markers + (
-        _semantic_merge_text_fingerprint("Каждая тема должна быть отделена"),
-        _semantic_merge_text_fingerprint("Не смешивать"),
-        _semantic_merge_text_fingerprint("Эти вопросы нужно использовать"),
-        _semantic_merge_text_fingerprint("тестирования preview"),
-        _semantic_merge_text_fingerprint("Частые вопросы и правильные ответы"),
-        _semantic_merge_text_fingerprint("список похожих вопросов"),
-    )
-    return any(marker and marker in text for marker in suspicious_markers)
+    Deterministic code may dedupe and validate structure, but it must not
+    classify meta/test/RAG/business roles by hardcoded terms.
+    """
+    return False
 
 
 def _deterministic_retighten_existing_document_plan(
@@ -4136,6 +4233,11 @@ class KnowledgeIngestionService:
             await repo.update_document_status(document_id, "error", message)
             raise ValidationError(message)
 
+        compiler_source_chunks = _compiler_source_chunks_for_preprocessing(
+            file_name=file_name,
+            chunks=indexable_chunks,
+            mode=mode,
+        )
         source_chunks = _source_chunks_from_json_chunks(
             project_id=project_id,
             document_id=document_id,
@@ -4205,7 +4307,7 @@ class KnowledgeIngestionService:
             preprocessor = preprocessor_factory()
             active_model = preprocessor.model_name
             technical_batches = tuple(
-                _technical_chunk_batches_for_answer_compiler(indexable_chunks)
+                _technical_chunk_batches_for_answer_compiler(compiler_source_chunks)
             )
             compiler_batches = _compiler_batches_from_technical_batches(
                 project_id=project_id,
@@ -4243,7 +4345,23 @@ class KnowledgeIngestionService:
                     ),
                     "model": active_model,
                     "prompt_version": active_prompt_version,
-                    "source_chunk_count": len(indexable_chunks),
+                    "source_chunk_count": len(compiler_source_chunks),
+                    "raw_source_chunk_count": len(indexable_chunks),
+                    "markdown_semantic_units_total": (
+                        len(compiler_source_chunks)
+                        if _is_markdown_file(file_name)
+                        else 0
+                    ),
+                    "markdown_semantic_units_processed": 0,
+                    "markdown_child_sections_total": (
+                        _json_array_field_item_count(
+                            compiler_source_chunks,
+                            "children",
+                        )
+                        if _is_markdown_file(file_name)
+                        else 0
+                    ),
+                    "markdown_section_aware_batching": _is_markdown_file(file_name),
                     "technical_compiler_total_count": len(technical_batches),
                     "technical_source_char_budget": (
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
@@ -4447,7 +4565,17 @@ class KnowledgeIngestionService:
                             ),
                             "model": active_model,
                             "prompt_version": active_prompt_version,
-                            "source_chunk_count": len(indexable_chunks),
+                            "source_chunk_count": len(compiler_source_chunks),
+                            "raw_source_chunk_count": len(indexable_chunks),
+                            "markdown_semantic_units_total": (
+                                len(compiler_source_chunks)
+                                if _is_markdown_file(file_name)
+                                else 0
+                            ),
+                            "markdown_semantic_units_processed": completed_batch_count,
+                            "markdown_section_aware_batching": _is_markdown_file(
+                                file_name
+                            ),
                             "technical_compiler_total_count": len(technical_batches),
                             "technical_source_char_budget": (
                                 KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
@@ -4719,6 +4847,23 @@ class KnowledgeIngestionService:
 
             preprocessing_metrics: JsonObject = dict(result.metrics)
             preprocessing_metrics["raw_source_chunk_count"] = len(indexable_chunks)
+            preprocessing_metrics["markdown_semantic_units_total"] = (
+                len(compiler_source_chunks) if _is_markdown_file(file_name) else 0
+            )
+            preprocessing_metrics["markdown_semantic_units_processed"] = (
+                len(compiler_source_chunks) if _is_markdown_file(file_name) else 0
+            )
+            preprocessing_metrics["markdown_child_sections_total"] = (
+                _json_array_field_item_count(
+                    compiler_source_chunks,
+                    "children",
+                )
+                if _is_markdown_file(file_name)
+                else 0
+            )
+            preprocessing_metrics["markdown_section_aware_batching"] = (
+                _is_markdown_file(file_name)
+            )
             preprocessing_metrics["llm_entry_count"] = len(result.entries)
             preprocessing_metrics["canonical_entry_count"] = len(canonical_entries)
             preprocessing_metrics["answer_compiler"] = KCD_STAGE_K_COMPILER_VERSION
