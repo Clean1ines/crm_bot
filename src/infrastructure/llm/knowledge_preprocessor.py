@@ -50,6 +50,7 @@ KCD_LLM_RESPONSE_LOG_CHUNK_CHARS = 3500
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
 FAQ_COMPILER_PROMPT_FILE = "knowledge_answer_compiler_faq.txt"
+ANSWER_RESOLUTION_PROMPT_FILE = "knowledge_answer_resolution.txt"
 
 GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
 GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -326,60 +327,8 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             ],
         }
 
-        return (
-            "ANSWER-ONLY SEMANTIC RESOLUTION TASK:\n"
-            "Return exactly one JSON object and nothing else.\n\n"
-            "Purpose:\n"
-            "- You are not a full-entry merge engine.\n"
-            "- You only resolve ambiguous answer fragments after deterministic merge rules failed.\n"
-            "- Each case contains one unresolved pair/group for the same suspected user intent.\n"
-            "- Decide whether the answers can become one authoritative answer, or must remain separate / conflict / needs_review.\n"
-            "- Use source_excerpt only as evidence for the answer decision.\n"
-            "- Do not create, edit, or return retrieval enrichment, source refs, metadata, or derived retrieval fields.\n\n"
-            "Input schema:\n"
-            "{\n"
-            '  "cases": [\n'
-            "    {\n"
-            '      "case_id": "...",\n'
-            '      "question_intent": "...",\n'
-            '      "answers": [\n'
-            '        {"id": "entry-0", "answer": "...", "source_excerpt": "..."}\n'
-            "      ]\n"
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
-            "Output schema:\n"
-            "{\n"
-            '  "decisions": [\n'
-            "    {\n"
-            '      "case_id": "...",\n'
-            '      "action": "merge | keep_separate | conflict | needs_review",\n'
-            '      "canonical_answer": "...",\n'
-            '      "reason": "...",\n'
-            '      "confidence": 0.0\n'
-            "    }\n"
-            "  ]\n"
-            "}\n\n"
-            "Rules for action=merge:\n"
-            "- Use merge only when all answers address the same specific user information need.\n"
-            "- canonical_answer must be one concise replacement answer, not concatenation.\n"
-            "- Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.\n"
-            "- Do not invent facts beyond answer/source_excerpt evidence.\n\n"
-            "Rules for non-merge actions:\n"
-            "- keep_separate when answers are related but not the same specific answer intent.\n"
-            "- conflict when answers contradict each other and a safe canonical answer cannot be produced.\n"
-            "- needs_review when evidence is insufficient or ambiguous.\n"
-            "- canonical_answer must be empty for keep_separate, conflict, and needs_review.\n\n"
-            "Forbidden output fields:\n"
-            "- Do not return retrieval enrichment, evidence lists, source indexes, metadata, cards, entries, or retrieval text.\n"
-            "- Do not return candidate_ids; the application maps case_id back to answers deterministically.\n\n"
-            "STRICT OUTPUT CONTRACT:\n"
-            "- Return exactly one JSON object.\n"
-            "- The first non-whitespace character must be { and the last non-whitespace character must be }.\n"
-            "- Do not return markdown, explanation, or free-form text outside schema.\n\n"
-            "NOW PROCESS THIS JSON. Return ONLY the JSON result:\n"
-            f"{json.dumps(merge_payload, ensure_ascii=False)}"
-        )
+        instruction = _load_answer_resolution_prompt()
+        return f"{instruction}{json.dumps(merge_payload, ensure_ascii=False)}"
 
     def _build_prompt(
         self,
@@ -526,6 +475,10 @@ def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
             f"Knowledge answer compiler is unavailable for mode: {mode}"
         )
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
+
+
+def _load_answer_resolution_prompt() -> str:
+    return (PROMPTS_DIR / ANSWER_RESOLUTION_PROMPT_FILE).read_text(encoding="utf-8")
 
 
 def _first_question(entry: KnowledgePreprocessingEntry) -> str:
