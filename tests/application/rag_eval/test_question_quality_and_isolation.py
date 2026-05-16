@@ -373,6 +373,7 @@ async def test_runner_rejects_technical_answer_fallback_before_judge() -> None:
         retriever=_RetrieverForTechnicalAnswer(),
         answerer=_TechnicalAnswerer(),
         answer_judge=_JudgeMustNotRun(),
+        mode="answer_quality_eval",
     )
 
     with pytest.raises(RagEvalTechnicalAnswerError):

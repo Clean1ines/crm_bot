@@ -18,6 +18,7 @@ import { getErrorMessage } from '@shared/api/core/errors';
 
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
+  isRagEvalProposedActionType,
   ragEvalApi,
   type KnowledgeEditActionExecutionSummary,
   type RagEvalActionableResult,
@@ -27,6 +28,8 @@ import {
   type RagEvalJobProgressResponse,
   type RagEvalJobsResponse,
   type RagEvalProgressPayload,
+  type RagEvalProposedActionType,
+  type RagEvalResultSummary,
 } from '@shared/api/modules/ragEval';
 
 interface Document {
@@ -45,6 +48,22 @@ const PAUSED_STATUSES = new Set(['paused', 'manual_pause', 'manual-pause']);
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'done', 'succeeded', 'success', 'failed', 'cancelled']);
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
+
+const formatDurationMs = (durationMs: number): string => {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}ч ${minutes}м`;
+  if (minutes > 0) return `${minutes}м ${seconds}с`;
+  return `${seconds}с`;
+};
+
+const timestampMs = (value: unknown): number | null => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 
 const getRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === 'object' && !Array.isArray(value)
@@ -144,6 +163,10 @@ const asBoolean = (value: unknown, fallback = false): boolean => (
   typeof value === 'boolean' ? value : fallback
 );
 
+const getEvalResults = (value: unknown): RagEvalResultSummary[] => (
+  Array.isArray(value) ? value as RagEvalResultSummary[] : []
+);
+
 const getActionableResults = (report: Record<string, unknown>): RagEvalActionableResult[] => {
   const parsed = parseJsonValue(report.actionable_results);
   if (!Array.isArray(parsed)) return [];
@@ -158,15 +181,18 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
       const proposedActions = Array.isArray(rawActions)
         ? rawActions.map((rawAction) => {
           const action = getRecord(rawAction);
+          const actionType = String(action.action_type || '').trim();
+          if (!isRagEvalProposedActionType(actionType)) return null;
+
           const targetEntryId = String(action.target_entry_id || '').trim();
 
           return {
-            action_type: String(action.action_type || '').trim(),
+            action_type: actionType,
             target_entry_id: targetEntryId || null,
             reason: String(action.reason || '').trim(),
             payload: getRecord(action.payload),
           };
-        }).filter((action) => action.action_type)
+        }).filter((action): action is NonNullable<typeof action> => action !== null)
         : [];
 
       const classification = getRecord(item.classification);
@@ -191,32 +217,38 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
     .filter((item): item is RagEvalActionableResult => item !== null);
 };
 
-const actionTypeLabel = (value: string): string => {
-  if (value === 'attach_question_to_entry') return t('ragEval.actionType.attachQuestionToEntry');
-  if (value === 'rebuild_entry_embedding') return t('ragEval.actionType.rebuildEntryEmbedding');
-  if (value === 'rerun_eval') return t('ragEval.actionType.rerunEval');
-  if (value === 'create_entry_from_failure') return t('ragEval.actionType.createEntryFromFailure');
-  return value || t('ragEval.actionType.fallback');
+const assertNeverActionType = (value: never): never => {
+  throw new Error(`Unhandled RAG eval proposed action type: ${value}`);
 };
 
-const actionTypeDescription = (value: string): string => {
-  if (value === 'attach_question_to_entry') {
-    return t('ragEval.actionDescription.attachQuestionToEntry');
+const actionTypeLabel = (value: RagEvalProposedActionType): string => {
+  switch (value) {
+    case 'attach_question_to_entry':
+      return t('ragEval.actionType.attachQuestionToEntry');
+    case 'rebuild_embedding':
+      return t('ragEval.actionType.rebuildEntryEmbedding');
+    case 'rerun_eval':
+      return t('ragEval.actionType.rerunEval');
+    case 'create_entry_from_failure':
+      return t('ragEval.actionType.createEntryFromFailure');
   }
 
-  if (value === 'rebuild_entry_embedding') {
-    return t('ragEval.actionDescription.rebuildEntryEmbedding');
+  return assertNeverActionType(value);
+};
+
+const actionTypeDescription = (value: RagEvalProposedActionType): string => {
+  switch (value) {
+    case 'attach_question_to_entry':
+      return t('ragEval.actionDescription.attachQuestionToEntry');
+    case 'rebuild_embedding':
+      return t('ragEval.actionDescription.rebuildEntryEmbedding');
+    case 'rerun_eval':
+      return t('ragEval.actionDescription.rerunEval');
+    case 'create_entry_from_failure':
+      return t('ragEval.actionDescription.createEntryFromFailure');
   }
 
-  if (value === 'rerun_eval') {
-    return t('ragEval.actionDescription.rerunEval');
-  }
-
-  if (value === 'create_entry_from_failure') {
-    return t('ragEval.actionDescription.createEntryFromFailure');
-  }
-
-  return t('ragEval.actionDescription.fallback');
+  return assertNeverActionType(value);
 };
 
 const formatResultScore = (score: number): string => {
@@ -500,6 +532,100 @@ const StatPill: React.FC<{ label: string; value: string | number }> = ({ label, 
   </div>
 );
 
+
+const resultStatusLabel = (result: RagEvalResultSummary): string => {
+  if (result.top1_hit) return t('ragEval.results.status.pass');
+  if (result.expected_entry_found) return t('ragEval.results.status.weak');
+  if (result.wrong_entry_top1) return t('ragEval.results.status.dangerous');
+  return t('ragEval.results.status.fail');
+};
+
+const resultStatusClass = (result: RagEvalResultSummary): string => {
+  if (result.top1_hit) return 'border-emerald-500/30 bg-emerald-500/5 text-emerald-600';
+  if (result.expected_entry_found) return 'border-amber-500/30 bg-amber-500/5 text-amber-600';
+  return 'border-red-500/30 bg-red-500/5 text-red-600';
+};
+
+const RagEvalResultsPanel: React.FC<{
+  results: RagEvalResultSummary[];
+  loading?: boolean;
+}> = ({ results, loading = false }) => (
+  <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.results.title')}</h2>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">{t('ragEval.results.description')}</p>
+      </div>
+      <div className="rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">
+        {formatNumber(results.length)}
+      </div>
+    </div>
+
+    {loading && !results.length ? (
+      <div className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        {t('ragEval.results.loading')}
+      </div>
+    ) : results.length ? (
+      <div className="space-y-2">
+        {results.map((result, index) => {
+          const retrievedIds = Array.isArray(result.retrieved_entry_ids) ? result.retrieved_entry_ids : [];
+          const expectedIds = Array.isArray(result.expected_entry_ids) ? result.expected_entry_ids : [];
+          return (
+            <details
+              key={result.result_id || `${result.question_id}-${index}`}
+              className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-3"
+            >
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                      {index + 1}. {result.question || t('ragEval.results.noQuestion')}
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--text-muted)]">
+                      {t('ragEval.results.expectedPrefix')} {expectedIds.join(', ') || '—'} · {t('ragEval.results.retrievedPrefix')} {retrievedIds.join(', ') || '—'}
+                    </div>
+                  </div>
+                  <span className={`inline-flex shrink-0 rounded-full border px-2 py-1 text-xs font-semibold ${resultStatusClass(result)}`}>
+                    {resultStatusLabel(result)} · {formatResultScore(result.score)}
+                  </span>
+                </div>
+              </summary>
+
+              <div className="mt-3 grid gap-3 text-sm text-[var(--text-secondary)] lg:grid-cols-2">
+                <div className="rounded-lg bg-[var(--surface-elevated)] p-3">
+                  <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.results.questionTitle')}</div>
+                  <div className="mt-1 text-[var(--text-primary)]">{result.question || t('ragEval.results.noQuestion')}</div>
+                </div>
+                <div className="rounded-lg bg-[var(--surface-elevated)] p-3">
+                  <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.results.metricsTitle')}</div>
+                  <div className="mt-1 grid gap-1 text-xs">
+                    <div>top1: {String(Boolean(result.top1_hit))}</div>
+                    <div>top3: {String(Boolean(result.top3_hit))}</div>
+                    <div>top5: {String(Boolean(result.top5_hit))}</div>
+                    <div>{t('ragEval.results.found')}: {String(Boolean(result.expected_entry_found))}</div>
+                    <div>{t('ragEval.results.wrongTop1')}: {String(Boolean(result.wrong_entry_top1))}</div>
+                  </div>
+                </div>
+                <div className="rounded-lg bg-[var(--surface-elevated)] p-3 lg:col-span-2">
+                  <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.results.detailsTitle')}</div>
+                  <div className="mt-1 text-xs">
+                    <div>{t('ragEval.results.typePrefix')} {result.question_type || '—'}</div>
+                    <div>{t('ragEval.results.latencyPrefix')} {typeof result.latency_ms === 'number' ? `${result.latency_ms} мс` : '—'}</div>
+                    {result.notes && <div>{t('ragEval.results.notesPrefix')} {result.notes}</div>}
+                  </div>
+                </div>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    ) : (
+      <p className="text-sm text-[var(--text-muted)]">{t('ragEval.results.empty')}</p>
+    )}
+  </section>
+);
+
 const JobProgressCard: React.FC<{
   job: RagEvalJob | null;
   progress: RagEvalProgressPayload | null;
@@ -540,6 +666,12 @@ const JobProgressCard: React.FC<{
   const processedBatches = asNumber(mergedProgress.processed_batches);
   const totalBatches = asNumber(mergedProgress.total_batches);
   const sourceChunkCount = asNumber(mergedProgress.source_chunk_count);
+  const tokenTotal = asNumber(mergedProgress.tokens_total);
+  const questionTokenTotal = asNumber(mergedProgress.question_tokens_total);
+  const judgeTokenTotal = asNumber(mergedProgress.judge_tokens_total);
+  const startedAt = timestampMs(job.created_at);
+  const observedAt = timestampMs(mergedProgress.updated_at) ?? timestampMs(job.updated_at) ?? timestampMs(job.locked_at);
+  const elapsedMs = startedAt === null || observedAt === null ? 0 : observedAt - startedAt;
 
   const active = isJobActive(job);
   const paused = isJobPaused(job);
@@ -612,9 +744,13 @@ const JobProgressCard: React.FC<{
         {progressMessage(mergedProgress, stage)}
       </p>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatPill label={t('ragEval.stats.elapsed')} value={startedAt === null ? '—' : formatDurationMs(elapsedMs)} />
         <StatPill label={t('ragEval.stats.questionsReady')} value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
         <StatPill label={t('ragEval.stats.answersChecked')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
+        <StatPill label={t('ragEval.stats.tokensSpent')} value={tokenTotal ? formatNumber(tokenTotal) : '—'} />
+        <StatPill label={t('ragEval.stats.questionTokens')} value={questionTokenTotal ? formatNumber(questionTokenTotal) : '—'} />
+        <StatPill label={t('ragEval.stats.judgeTokens')} value={judgeTokenTotal ? formatNumber(judgeTokenTotal) : '—'} />
         <StatPill label={t('ragEval.stats.fragmentGroups')} value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
         <StatPill label={t('ragEval.stats.fragments')} value={sourceChunkCount || '—'} />
         <StatPill label={t('ragEval.stats.attempts')} value={`${job.attempts}/${job.max_attempts}`} />
@@ -818,6 +954,9 @@ export const RagEvalPage: React.FC = () => {
   const actionableResults = useMemo(() => getActionableResults(latestReport), [latestReport]);
   const latestRun = statusQuery.data?.run ?? null;
   const latestRunRecord = getRecord(latestRun);
+  const latestRunResults = getEvalResults(latestRunRecord.results);
+  const latestReportResults = getEvalResults(latestReport.results);
+  const visibleResults = latestRunResults.length ? latestRunResults : latestReportResults;
   const progressJob = progressQuery.data?.job ?? visibleJob;
   const progressPayload = progressJob?.progress ?? visibleJob?.progress ?? (
     progressJob
@@ -917,6 +1056,11 @@ export const RagEvalPage: React.FC = () => {
         onCancel={() => {
           if (progressJob?.id) cancelMutation.mutate(progressJob.id);
         }}
+      />
+
+      <RagEvalResultsPanel
+        results={visibleResults}
+        loading={statusQuery.isLoading || Boolean(progressJob && !isJobTerminal(progressJob))}
       />
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">

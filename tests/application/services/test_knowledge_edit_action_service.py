@@ -58,6 +58,7 @@ def test_stage_h_service_triggers_embedding_rebuild_and_eval_rerun() -> None:
     assert "TASK_RUN_FULL_RAG_EVAL" in service
     assert '"retrieval_limit": 5' in service
     assert '"mode": "full_document"' in service
+    assert '"eval_mode": "retrieval_eval"' in service
 
 
 def test_stage_h_repository_preserves_entry_version_audit() -> None:

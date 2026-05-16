@@ -36,6 +36,17 @@ def _metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
     return 0
 
 
+def _result_mode(result: RagEvalResult) -> str:
+    mode = result.judge_json.get("mode")
+    return str(mode or "answer_quality_eval")
+
+
+def _all_retrieval_eval(results: list[RagEvalResult]) -> bool:
+    return bool(results) and all(
+        _result_mode(result) == "retrieval_eval" for result in results
+    )
+
+
 class RagQualityReporter:
     def build_report(self, *, run: RagEvalRun) -> RagQualityReport:
         metrics = self._metrics(run.results)
@@ -78,11 +89,17 @@ class RagQualityReporter:
                 "top1_rate": 0.0,
                 "top3_rate": 0.0,
                 "top5_rate": 0.0,
+                "expected_entry_found_rate": 0.0,
                 "answer_supported_rate": 0.0,
                 SHOULD_ANSWER_RATE_KEY: 0.0,
                 "high_hallucination_risk": 0,
                 "wrong_entry_top1": 0,
+                "retrieval_eval_count": 0,
             }
+
+        retrieval_eval_count = sum(
+            _result_mode(result) == "retrieval_eval" for result in results
+        )
 
         return {
             "score": round(sum(result.score for result in results) / total * 100, 2),
@@ -96,6 +113,10 @@ class RagQualityReporter:
             "top5_rate": round(
                 sum(result.top5_hit for result in results) / total * 100, 2
             ),
+            "expected_entry_found_rate": round(
+                sum(result.expected_entry_found for result in results) / total * 100,
+                2,
+            ),
             "answer_supported_rate": round(
                 sum(result.answer_supported for result in results) / total * 100,
                 2,
@@ -108,16 +129,18 @@ class RagQualityReporter:
                 1 for result in results if result.hallucination_risk == "high"
             ),
             "wrong_entry_top1": sum(result.wrong_entry_top1 for result in results),
+            "retrieval_eval_count": retrieval_eval_count,
             "by_question_type": dict(
                 Counter(result.question.question_type for result in results)
             ),
         }
 
     def _readiness(self, score: float, results: list[RagEvalResult]) -> str:
+        retrieval_only = _all_retrieval_eval(results)
         high_risk = any(result.hallucination_risk == "high" for result in results)
         wrong_top1_count = sum(result.wrong_entry_top1 for result in results)
 
-        if score < 75 or high_risk or wrong_top1_count >= 3:
+        if score < 75 or (high_risk and not retrieval_only) or wrong_top1_count >= 3:
             return "not_ready"
         if score < 90 or wrong_top1_count:
             return "needs_review"
@@ -126,14 +149,22 @@ class RagQualityReporter:
     def _strengths(self, metrics: JsonObject) -> list[str]:
         strengths: list[str] = []
 
+        retrieval_only = _metric_int(metrics, "retrieval_eval_count") == _metric_int(
+            metrics, "total"
+        )
+
         if _metric_float(metrics, "top3_rate") >= 85:
             strengths.append("RAG хорошо находит ожидаемые источники в top-3.")
 
-        if _metric_float(metrics, "answer_supported_rate") >= 85:
-            strengths.append("Ответы в основном опираются на найденные данные.")
+        if retrieval_only:
+            if _metric_float(metrics, "expected_entry_found_rate") >= 85:
+                strengths.append("Retrieval покрывает большинство ожидаемых entry.")
+        else:
+            if _metric_float(metrics, "answer_supported_rate") >= 85:
+                strengths.append("Ответы в основном опираются на найденные данные.")
 
-        if _metric_int(metrics, "high_hallucination_risk") == 0:
-            strengths.append("Не обнаружено ответов с высоким риском галлюцинации.")
+            if _metric_int(metrics, "high_hallucination_risk") == 0:
+                strengths.append("Не обнаружено ответов с высоким риском галлюцинации.")
 
         return strengths or [
             "Сильные стороны пока не подтверждены автоматической проверкой."
@@ -151,15 +182,27 @@ class RagQualityReporter:
                 f"{wrong_top1} вопросов получили неправильный chunk на первом месте."
             )
 
-        high_risk = _metric_int(metrics, "high_hallucination_risk")
-        if high_risk:
-            problems.append(f"{high_risk} ответов имеют высокий риск галлюцинации.")
+        if not _all_retrieval_eval(results):
+            high_risk = _metric_int(metrics, "high_hallucination_risk")
+            if high_risk:
+                problems.append(f"{high_risk} ответов имеют высокий риск галлюцинации.")
 
-        unsupported = [result for result in results if not result.answer_supported]
-        if unsupported:
-            problems.append(
-                f"{len(unsupported)} ответов не подтверждены retrieved evidence."
+            unsupported = [result for result in results if not result.answer_supported]
+            if unsupported:
+                problems.append(
+                    f"{len(unsupported)} ответов не подтверждены retrieved evidence."
+                )
+        else:
+            not_found = sum(
+                1
+                for result in results
+                if result.question.expected_entry_ids
+                and not result.expected_entry_found
             )
+            if not_found:
+                problems.append(
+                    f"{not_found} вопросов не нашли ожидаемый knowledge entry."
+                )
 
         return problems or ["Критичных проблем автоматическая проверка не нашла."]
 
@@ -178,7 +221,9 @@ class RagQualityReporter:
                 "Разделить похожие темы в базе знаний или добавить более явные заголовки/FAQ."
             )
 
-        if _metric_int(metrics, "high_hallucination_risk"):
+        if not _all_retrieval_eval(results) and _metric_int(
+            metrics, "high_hallucination_risk"
+        ):
             recommendations.append(
                 "Усилить no-answer policy: при отсутствии evidence бот должен честно говорить, что информации нет."
             )
