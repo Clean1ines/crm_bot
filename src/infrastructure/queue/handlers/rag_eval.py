@@ -49,6 +49,41 @@ def _rag_eval_mode_from_payload(value: object) -> RagEvalModeValue:
     return "retrieval_eval"
 
 
+def _json_metric_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
+
+def _rag_eval_usage_progress(
+    *,
+    question_llm: GroqRagEvalJsonLlmAdapter,
+    judge_llm: GroqRagEvalJsonLlmAdapter | None = None,
+) -> dict[str, object]:
+    question_usage = question_llm.usage_snapshot()
+    judge_usage = judge_llm.usage_snapshot() if judge_llm is not None else {}
+    return {
+        "question_tokens_input": _json_metric_int(question_usage.get("tokens_input")),
+        "question_tokens_output": _json_metric_int(question_usage.get("tokens_output")),
+        "question_tokens_total": _json_metric_int(question_usage.get("tokens_total")),
+        "judge_tokens_input": _json_metric_int(judge_usage.get("tokens_input")),
+        "judge_tokens_output": _json_metric_int(judge_usage.get("tokens_output")),
+        "judge_tokens_total": _json_metric_int(judge_usage.get("tokens_total")),
+        "tokens_input": _json_metric_int(question_usage.get("tokens_input"))
+        + _json_metric_int(judge_usage.get("tokens_input")),
+        "tokens_output": _json_metric_int(question_usage.get("tokens_output"))
+        + _json_metric_int(judge_usage.get("tokens_output")),
+        "tokens_total": _json_metric_int(question_usage.get("tokens_total"))
+        + _json_metric_int(judge_usage.get("tokens_total")),
+    }
+
+
 def _coerce_int(
     value: object,
     *,
@@ -500,6 +535,7 @@ async def _run_full_document_rag_eval(
         llm=question_llm,
         model_name=RAG_EVAL_QUESTION_MODEL,
     )
+    judge_llm: GroqRagEvalJsonLlmAdapter | None = None
 
     if eval_mode == "answer_quality_eval":
         from src.application.rag_eval.judge import LlmRagEvalAnswerJudge
@@ -553,7 +589,9 @@ async def _run_full_document_rag_eval(
         "source_entry_count": source_entry_count,
         "target_questions": full_document_target,
         "retrieval_limit": retrieval_limit,
+        "eval_mode": eval_mode,
         "total_batches": total_batches,
+        **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
         "updated_at": _utc_now_iso(),
     }
 
@@ -592,6 +630,7 @@ async def _run_full_document_rag_eval(
             "processed_batches": processed_batches,
             "total_batches": total_batches,
             "percent": percent,
+            **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
             "updated_at": _utc_now_iso(),
         }
         current_control_progress = progress
@@ -610,6 +649,9 @@ async def _run_full_document_rag_eval(
             base_progress=base_progress,
             processed_questions=processed_questions,
             total_questions=total_questions,
+        )
+        progress.update(
+            _rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm)
         )
         current_control_progress = progress
         await _write_rag_eval_progress(
@@ -708,6 +750,7 @@ async def _run_full_document_rag_eval(
             "processed_batches": total_batches,
             "total_batches": total_batches,
             "percent": 100.0,
+            **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
             "updated_at": _utc_now_iso(),
         },
     )

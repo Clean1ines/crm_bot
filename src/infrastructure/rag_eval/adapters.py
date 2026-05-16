@@ -62,6 +62,12 @@ async def _throttle_rag_eval_llm_call() -> None:
         _RAG_EVAL_LAST_CALL_MONOTONIC = time.monotonic()
 
 
+def _usage_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return max(0, value)
+
+
 class GroqRagEvalJsonLlmAdapter:
     """Groq-backed JSON-only LLM adapter for RAG eval generation and judging."""
 
@@ -77,6 +83,16 @@ class GroqRagEvalJsonLlmAdapter:
         self._model = model or settings.GROQ_MODEL
         self._temperature = temperature
         self._max_tokens = max(256, max_tokens)
+        self._tokens_input = 0
+        self._tokens_output = 0
+        self._tokens_total = 0
+
+    def usage_snapshot(self) -> JsonObject:
+        return {
+            "tokens_input": self._tokens_input,
+            "tokens_output": self._tokens_output,
+            "tokens_total": self._tokens_total,
+        }
 
     async def complete_json(
         self,
@@ -97,6 +113,12 @@ class GroqRagEvalJsonLlmAdapter:
                 max_tokens=self._max_tokens,
             )
             content = str(response.choices[0].message.content or "")
+            self._record_usage(
+                response=response,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                content=content,
+            )
             payload = _extract_json_object(content)
             if not isinstance(payload, Mapping):
                 raise ValueError(f"{schema_name} response is not a JSON object")
@@ -122,6 +144,30 @@ class GroqRagEvalJsonLlmAdapter:
                 },
             )
             raise
+
+    def _record_usage(
+        self,
+        *,
+        response: object,
+        system_prompt: str,
+        user_prompt: str,
+        content: str,
+    ) -> None:
+        usage = getattr(response, "usage", None)
+        prompt_tokens = _usage_int(getattr(usage, "prompt_tokens", None))
+        completion_tokens = _usage_int(getattr(usage, "completion_tokens", None))
+        total_tokens = _usage_int(getattr(usage, "total_tokens", None))
+
+        if prompt_tokens is None:
+            prompt_tokens = max(1, (len(system_prompt) + len(user_prompt) + 3) // 4)
+        if completion_tokens is None:
+            completion_tokens = max(1, (len(content) + 3) // 4)
+        if total_tokens is None:
+            total_tokens = prompt_tokens + completion_tokens
+
+        self._tokens_input += prompt_tokens
+        self._tokens_output += completion_tokens
+        self._tokens_total += total_tokens
 
 
 class RagServiceRagEvalRetriever:
