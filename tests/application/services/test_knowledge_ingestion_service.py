@@ -1517,3 +1517,82 @@ async def test_structured_preprocessing_failure_marks_document_error():
     )
 
     repo.update_document_status.assert_awaited()
+
+
+def test_online_pipeline_defaults_to_parallel_extraction_and_merge_enabled():
+    from pathlib import Path
+    import src.application.services.knowledge_ingestion_service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    assert service_module.KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT == 3
+    assert "asyncio.Semaphore(extraction_concurrency)" in source
+    assert 'preprocessing_metrics["online_answer_merge_enabled"] = True' in source
+    assert "semantic_merge_tightening_failed" in source
+
+
+def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_saved():
+    from pathlib import Path
+    import src.application.services.knowledge_ingestion_service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    raw_save_index = source.index("await repo.add_answer_candidates")
+    merge_index = source.index(
+        "await _tighten_compiled_entries_with_semantic_merge", raw_save_index
+    )
+    publish_index = source.index(
+        "canonical_entries = _canonical_entries_from_preprocessing_result",
+        merge_index,
+    )
+
+    assert raw_save_index < merge_index < publish_index
+    assert "entries=tightened_entries" in source[merge_index:publish_index]
+    assert "entries=compiled_entries" not in source[merge_index:publish_index]
+
+
+def test_mechanical_cleanup_dedupes_exact_question_variants_without_semantic_dictionary():
+    from src.application.services.knowledge_ingestion_service import (
+        _mechanically_cleanup_compiled_entries,
+    )
+
+    entry = KnowledgePreprocessingEntry(
+        title="Возврат средств",
+        answer="Возврат оформляется через менеджера.",
+        source_excerpt="Возврат оформляется через менеджера.",
+        questions=("Как оформить возврат?", " Как оформить возврат? "),
+        synonyms=("Возврат", "возврат"),
+        tags=("refund", "refund"),
+        canonical_question="Как оформить возврат?",
+    )
+
+    result = _mechanically_cleanup_compiled_entries(
+        entries=(entry, entry),
+        source_excerpts_by_entry=((entry.source_excerpt,), (entry.source_excerpt,)),
+    )
+
+    assert len(result.entries) == 1
+    assert result.entries[0].questions == ("Как оформить возврат?",)
+    assert result.entries[0].synonyms == ("Возврат",)
+    assert result.entries[0].tags == ("refund",)
+    assert result.metrics["exact_duplicate_candidate_collapse_count"] == 1
+    assert result.metrics["deduped_question_variant_count"] == 0
+
+
+def test_online_ingestion_merge_logic_has_no_meta_question_filter_dictionary():
+    from pathlib import Path
+    import src.application.services.knowledge_ingestion_service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    online_section = source[
+        source.index("def _mechanically_cleanup_compiled_entries") : source.index(
+            "async def _existing_project_titles_for_semantic_merge"
+        )
+    ]
+
+    forbidden_snippets = (
+        "suspicious_meta",
+        "meta_entry",
+        "Возможные вопросы пользователей",
+        "служеб",
+        "метавопрос",
+    )
+    assert all(snippet not in online_section for snippet in forbidden_snippets)
