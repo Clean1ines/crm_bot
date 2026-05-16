@@ -10,7 +10,6 @@ INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service
 KNOWLEDGE_PORT = ROOT / "src/application/ports/knowledge_port.py"
 KNOWLEDGE_PREPROCESSOR = ROOT / "src/infrastructure/llm/knowledge_preprocessor.py"
 FAQ_COMPILER_PROMPT = ROOT / "src/agent/prompts/knowledge_answer_compiler_faq.txt"
-ANSWER_MERGE_PROMPT = ROOT / "src/agent/prompts/knowledge_answer_merge.txt"
 
 
 def _source(path: Path) -> str:
@@ -57,14 +56,13 @@ def test_stage_k_process_document_does_not_combine_raw_and_structured_runtime_ro
     )
 
 
-def test_stage_k_preprocessor_port_uses_answer_merge_not_embedding_text_merge() -> None:
+def test_stage_k_preprocessor_port_has_no_legacy_known_answer_path() -> None:
     source = _source(KNOWLEDGE_PORT)
 
     assert "previous_entry_titles" not in source
-    assert "async def merge_known_answer(" in source
-    assert "known_intent: KnowledgePreprocessingEntry" in source
-    assert "incoming_fragment: KnowledgePreprocessingEntry" in source
-    assert "KnowledgeAnswerMergeExecutionResult" in source
+    assert "async def merge_known" + "_answer(" not in source
+    assert "KnowledgeAnswerMerge" + "ExecutionResult" not in source
+    assert "tighten_semantic_merges" in source
 
 
 def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
@@ -84,15 +82,15 @@ def test_stage_k_groq_preprocessor_prompt_has_question_first_contract() -> None:
     assert "Не возвращай match, kind, known_intent_id" in prompt_source
 
 
-def test_stage_k_groq_preprocessor_has_answer_merge_contract() -> None:
+def test_stage_k_groq_preprocessor_has_answer_only_resolution_contract() -> None:
     source = _source(KNOWLEDGE_PREPROCESSOR)
-    prompt_source = _source(ANSWER_MERGE_PROMPT)
 
-    assert "ANSWER_MERGE_PROMPT_FILE" in source
-    assert "merge_known_answer" in source
-    assert "parse_answer_merge_payload" in source
-    assert "EMBEDDING TEXT MERGE TASK" not in source
-    assert "Не возвращай tags" in prompt_source
+    assert "ANSWER_MERGE_PROMPT_FILE" not in source
+    assert "merge_known" + "_answer" not in source
+    assert "parse_answer" + "_merge_payload" not in source
+    assert '"cases"' in source
+    assert '"canonical_answer"' in source
+    assert "full canonical entries" not in source
 
 
 def test_stage_k_ingestion_records_online_merge_compiler_metrics() -> None:
@@ -103,10 +101,10 @@ def test_stage_k_ingestion_records_online_merge_compiler_metrics() -> None:
     assert "False" in source
     assert "one_meaning_at_a_time_merge" in source
     assert "extractor_only_compiler_loop" not in source
-    assert "online_answer_merge_enabled" in source
+    assert "answer_resolution_enabled" in source
     assert "semantic_merge_tightening" in source
     assert "semantic_merge_fallback_used" in source
-    assert "llm_merge_call_count" in source
+    assert "llm_answer_resolution_call_count" in source
     assert "KCD_STAGE_K_COMPILER_VERSION" in source
     assert "Knowledge answer compiler technical batch completed" in source
     assert "technical_compiler_total_count" in source
@@ -120,11 +118,9 @@ def test_runtime_prompts_preserve_user_language() -> None:
     response_prompt = _source(prompts_dir / "response_prompt.txt")
     intent_prompt = _source(prompts_dir / "intent_prompt.txt")
     interpretation_prompt = _source(prompts_dir / "interpretation_block.txt")
-    merge_prompt = _source(prompts_dir / "knowledge_answer_merge.txt")
 
     assert "Если клиент пишет по-русски, отвечай по-русски" in response_prompt
     assert "Не переходи на английский" in response_prompt
     assert "Верни только JSON" in intent_prompt
     assert "Значения enum оставляй строго на английском" in intent_prompt
     assert "ПРАВИЛА ИНТЕРПРЕТАЦИИ ПАМЯТИ" in interpretation_prompt
-    assert "Не переводи русский источник на английский" in merge_prompt

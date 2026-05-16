@@ -19,8 +19,6 @@ from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     MODE_INSTRUCTION,
     MODE_PRICE_LIST,
-    ANSWER_MERGE_PROMPT_VERSION,
-    KnowledgeAnswerMergeExecutionResult,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
@@ -30,7 +28,6 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeSemanticMergeGroup,
     KnowledgeSemanticMergeTighteningResult,
     SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
-    parse_answer_merge_payload,
     parse_preprocessing_payload,
     parse_semantic_merge_tightening_payload,
     prompt_version_for_mode,
@@ -53,7 +50,6 @@ KCD_LLM_RESPONSE_LOG_CHUNK_CHARS = 3500
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
 FAQ_COMPILER_PROMPT_FILE = "knowledge_answer_compiler_faq.txt"
-ANSWER_MERGE_PROMPT_FILE = "knowledge_answer_merge.txt"
 
 GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
 GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -214,85 +210,6 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             )
             raise
 
-    async def merge_known_answer(
-        self,
-        *,
-        mode: KnowledgePreprocessingMode,
-        file_name: str,
-        known_intent: KnowledgePreprocessingEntry,
-        incoming_fragment: KnowledgePreprocessingEntry,
-    ) -> KnowledgeAnswerMergeExecutionResult:
-        prompt_version = ANSWER_MERGE_PROMPT_VERSION
-        prompt = self._build_answer_merge_prompt(
-            mode=mode,
-            file_name=file_name,
-            known_intent=known_intent,
-            incoming_fragment=incoming_fragment,
-        )
-
-        max_tokens = 1600
-        request_model = self._model_for_json_request(
-            task="answer_merge",
-            prompt=prompt,
-            max_tokens=max_tokens,
-        )
-
-        try:
-            response = await self._client.chat.completions.create(
-                model=request_model,
-                messages=[
-                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content or ""
-            _log_llm_response(
-                task="answer_merge",
-                mode=mode,
-                model=request_model,
-                prompt_version=prompt_version,
-                content=content,
-                response=response,
-            )
-            merge_allowed, answer, question_variants = parse_answer_merge_payload(
-                content
-            )
-            return KnowledgeAnswerMergeExecutionResult(
-                merge_allowed=merge_allowed,
-                answer=answer,
-                question_variants=question_variants,
-                usage=_response_usage_measurement(
-                    response=response,
-                    model=request_model,
-                    prompt=prompt,
-                    content=content,
-                ),
-            )
-        except (
-            APIConnectionError,
-            APIError,
-            APITimeoutError,
-            RateLimitError,
-            AttributeError,
-            IndexError,
-            TypeError,
-            ValueError,
-            KnowledgePreprocessingValidationError,
-        ) as exc:
-            logger.warning(
-                "Knowledge answer merge failed",
-                extra={
-                    "mode": mode,
-                    "model": self._model,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:300],
-                },
-            )
-            raise
-
     async def tighten_semantic_merges(
         self,
         *,
@@ -376,7 +293,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             KnowledgePreprocessingValidationError,
         ) as exc:
             logger.warning(
-                "Knowledge semantic merge tightening failed",
+                "Knowledge semantic answer resolution failed",
                 extra={
                     "mode": mode,
                     "model": self._model,
@@ -386,36 +303,6 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 },
             )
             raise
-
-    def _build_answer_merge_prompt(
-        self,
-        *,
-        mode: KnowledgePreprocessingMode,
-        file_name: str,
-        known_intent: KnowledgePreprocessingEntry,
-        incoming_fragment: KnowledgePreprocessingEntry,
-    ) -> str:
-        instruction = _load_answer_merge_prompt()
-        merge_payload = {
-            "file_name": file_name,
-            "mode": mode,
-            "known_intent": {
-                "intent_id": incoming_fragment.known_intent_id,
-                "canonical_question": known_intent.canonical_question
-                or _first_question(known_intent),
-                "question_variants": list(known_intent.questions),
-                "answer": known_intent.answer,
-            },
-            "incoming_fragment": {
-                "canonical_question": incoming_fragment.canonical_question
-                or _first_question(incoming_fragment),
-                "question_variants": list(incoming_fragment.questions),
-                "answer_fragment": incoming_fragment.answer,
-                "source_excerpt": incoming_fragment.source_excerpt,
-                "source_chunk_indexes": list(incoming_fragment.source_chunk_indexes),
-            },
-        }
-        return f"{instruction}\n{json.dumps(merge_payload, ensure_ascii=False)}"
 
     def _build_semantic_merge_tightening_prompt(
         self,
@@ -443,12 +330,12 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "ANSWER-ONLY SEMANTIC RESOLUTION TASK:\n"
             "Return exactly one JSON object and nothing else.\n\n"
             "Purpose:\n"
-            "- You are not a whole-card merge engine.\n"
+            "- You are not a full-entry merge engine.\n"
             "- You only resolve ambiguous answer fragments after deterministic merge rules failed.\n"
             "- Each case contains one unresolved pair/group for the same suspected user intent.\n"
             "- Decide whether the answers can become one authoritative answer, or must remain separate / conflict / needs_review.\n"
             "- Use source_excerpt only as evidence for the answer decision.\n"
-            "- Do not create, edit, or return retrieval enrichment, source refs, metadata, or embedding text.\n\n"
+            "- Do not create, edit, or return retrieval enrichment, source refs, metadata, or derived retrieval fields.\n\n"
             "Input schema:\n"
             "{\n"
             '  "cases": [\n'
@@ -484,7 +371,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "- needs_review when evidence is insufficient or ambiguous.\n"
             "- canonical_answer must be empty for keep_separate, conflict, and needs_review.\n\n"
             "Forbidden output fields:\n"
-            "- Do not return questions, synonyms, tags, source_refs, source_excerpt, embedding_text, metadata, canonical_card, entries, cards, or full canonical entries.\n"
+            "- Do not return retrieval enrichment, evidence lists, source indexes, metadata, cards, entries, or retrieval text.\n"
             "- Do not return candidate_ids; the application maps case_id back to answers deterministically.\n\n"
             "STRICT OUTPUT CONTRACT:\n"
             "- Return exactly one JSON object.\n"
@@ -639,10 +526,6 @@ def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
             f"Knowledge answer compiler is unavailable for mode: {mode}"
         )
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
-
-
-def _load_answer_merge_prompt() -> str:
-    return (PROMPTS_DIR / ANSWER_MERGE_PROMPT_FILE).read_text(encoding="utf-8")
 
 
 def _first_question(entry: KnowledgePreprocessingEntry) -> str:

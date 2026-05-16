@@ -31,7 +31,6 @@ PREPROCESSING_STATUS_COMPLETED = "completed"
 PREPROCESSING_STATUS_FAILED = "failed"
 
 PROMPT_VERSION_FAQ = "knowledge_answer_compiler_faq_v1"
-ANSWER_MERGE_PROMPT_VERSION = "knowledge_answer_merge_v1"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
 PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
 SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION = "knowledge_semantic_merge_tightening_v2"
@@ -97,14 +96,6 @@ class KnowledgePreprocessingExecutionResult:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeAnswerMergeExecutionResult:
-    merge_allowed: bool
-    answer: str
-    question_variants: tuple[str, ...] = field(default_factory=tuple)
-    usage: ModelUsageMeasurement | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class KnowledgeQuestionIntentCard:
     entry_id: str
     title: str
@@ -162,13 +153,7 @@ class KnowledgeAnswerResolutionDecision:
 @dataclass(frozen=True, slots=True)
 class KnowledgeSemanticMergeCandidate:
     candidate_id: str
-    title: str
     answer: str
-    embedding_text: str = ""
-    questions: tuple[str, ...] = field(default_factory=tuple)
-    synonyms: tuple[str, ...] = field(default_factory=tuple)
-    tags: tuple[str, ...] = field(default_factory=tuple)
-    source_ref_count: int = 0
     source_excerpt: str = ""
 
     def to_answer_resolution_option(self) -> KnowledgeAnswerResolutionOption:
@@ -202,28 +187,13 @@ class KnowledgeSemanticMergeGroup:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgeSemanticMergeCanonicalCard:
-    title: str
-    canonical_question: str
-    answer: str
-    questions: tuple[str, ...] = field(default_factory=tuple)
-    synonyms: tuple[str, ...] = field(default_factory=tuple)
-    tags: tuple[str, ...] = field(default_factory=tuple)
-    source_ref_ids: tuple[str, ...] = field(default_factory=tuple)
-    source_chunk_indexes: tuple[int, ...] = field(default_factory=tuple)
-    publishable: bool = True
-    publishable_reason: str = ""
-    publishable_classification: str = "publishable_customer_answer"
-
-
-@dataclass(frozen=True, slots=True)
 class KnowledgeSemanticMergeDecision:
     group_id: str
     action: SemanticMergeAction
     candidate_ids: tuple[str, ...]
-    survivor_title: str = ""
-    merged_embedding_text: str = ""
-    canonical_card: KnowledgeSemanticMergeCanonicalCard | None = None
+    canonical_answer: str = ""
+    reason: str = ""
+    confidence: float = 0.0
 
     @property
     def is_merge(self) -> bool:
@@ -319,31 +289,13 @@ def parse_preprocessing_payload(
     )
 
 
-def parse_answer_merge_payload(payload: object) -> tuple[bool, str, tuple[str, ...]]:
-    parsed = _coerce_json_object(payload, "Answer merge")
-    merge_allowed = parsed.get("merge_allowed")
-    if not isinstance(merge_allowed, bool):
-        raise KnowledgePreprocessingValidationError(
-            "Answer merge payload must contain boolean merge_allowed"
-        )
-    answer = _optional_text(parsed.get("answer"))
-    question_variants = tuple(_string_list(parsed.get("question_variants")))
-    if not merge_allowed:
-        return False, "", ()
-    if not answer:
-        raise KnowledgePreprocessingValidationError(
-            "Answer merge payload must contain answer when merge_allowed=true"
-        )
-    return True, answer, question_variants
-
-
 def parse_semantic_merge_tightening_payload(
     payload: object,
     *,
     mode: KnowledgePreprocessingMode,
     model: str,
     prompt_version: str = SEMANTIC_MERGE_TIGHTENING_PROMPT_VERSION,
-    max_embedding_text_chars: int = 2400,
+    max_answer_chars: int = 2400,
 ) -> KnowledgeSemanticMergeTighteningResult:
     if isinstance(payload, str):
         parsed = _loads_json_object(payload)
@@ -370,7 +322,7 @@ def parse_semantic_merge_tightening_payload(
             _parse_semantic_merge_decision(
                 item,
                 index=index,
-                max_embedding_text_chars=max_embedding_text_chars,
+                max_answer_chars=max_answer_chars,
             )
         )
 
@@ -386,77 +338,11 @@ def parse_semantic_merge_tightening_payload(
     )
 
 
-def _semantic_merge_int_tuple(value: object) -> tuple[int, ...]:
-    raw_values: tuple[object, ...]
-    if isinstance(value, list | tuple):
-        raw_values = tuple(value)
-    else:
-        raw_values = (value,)
-
-    result: list[int] = []
-    for item in raw_values:
-        parsed: int | None = None
-        if isinstance(item, bool) or item is None:
-            parsed = None
-        elif isinstance(item, int):
-            parsed = item
-        elif isinstance(item, float) and item.is_integer():
-            parsed = int(item)
-        elif isinstance(item, str) and item.strip().isdigit():
-            parsed = int(item.strip())
-        if parsed is not None and parsed not in result:
-            result.append(parsed)
-    return tuple(result)
-
-
-def _parse_semantic_merge_canonical_card(
-    payload: object,
-    *,
-    index: int,
-) -> KnowledgeSemanticMergeCanonicalCard | None:
-    if payload is None:
-        return None
-    if not isinstance(payload, Mapping):
-        raise KnowledgePreprocessingValidationError(
-            f"Semantic merge decision {index} canonical_card must be an object"
-        )
-
-    publishable = payload.get("publishable")
-    if publishable is None:
-        publishable = True
-    if not isinstance(publishable, bool):
-        raise KnowledgePreprocessingValidationError(
-            f"Semantic merge decision {index} canonical_card.publishable must be boolean"
-        )
-
-    classification = _optional_text(payload.get("publishable_classification"))
-    if not classification:
-        classification = (
-            "publishable_customer_answer" if publishable else "not_enough_evidence"
-        )
-
-    return KnowledgeSemanticMergeCanonicalCard(
-        title=_optional_text(payload.get("title")),
-        canonical_question=_optional_text(payload.get("canonical_question")),
-        answer=_optional_text(payload.get("answer")),
-        questions=tuple(_string_list(payload.get("questions"))),
-        synonyms=tuple(_string_list(payload.get("synonyms"))),
-        tags=tuple(_string_list(payload.get("tags"))),
-        source_ref_ids=tuple(_string_list(payload.get("source_ref_ids"))),
-        source_chunk_indexes=_semantic_merge_int_tuple(
-            payload.get("source_chunk_indexes")
-        ),
-        publishable=publishable,
-        publishable_reason=_optional_text(payload.get("publishable_reason")),
-        publishable_classification=classification,
-    )
-
-
 def _parse_semantic_merge_decision(
     payload: Mapping[object, object],
     *,
     index: int,
-    max_embedding_text_chars: int,
+    max_answer_chars: int,
 ) -> KnowledgeSemanticMergeDecision:
     group_id = _optional_text(payload.get("case_id")) or _required_text(
         payload, "group_id", index=index
@@ -470,31 +356,24 @@ def _parse_semantic_merge_decision(
     )
     candidate_ids = tuple(_string_list(payload.get("candidate_ids")))
     canonical_answer = _optional_text(payload.get("canonical_answer"))
-    legacy_answer = _optional_text(payload.get("merged_embedding_text"))
-    merged_answer = canonical_answer or legacy_answer
+    reason = _optional_text(payload.get("reason"))
+    confidence = _clamped_float(payload.get("confidence"))
 
-    if action == SEMANTIC_MERGE_ACTION_MERGE:
-        if not merged_answer:
-            raise KnowledgePreprocessingValidationError(
-                f"Semantic merge decision {index} missing canonical_answer"
-            )
-        if not candidate_ids:
-            # Answer-only resolver output intentionally omits candidate_ids;
-            # application code maps case_id back to the original answer options.
-            candidate_ids = ()
-    elif not candidate_ids:
-        candidate_ids = ()
+    if action == SEMANTIC_MERGE_ACTION_MERGE and not canonical_answer:
+        raise KnowledgePreprocessingValidationError(
+            f"Semantic merge decision {index} missing canonical_answer"
+        )
 
-    if len(merged_answer) > max_embedding_text_chars:
-        merged_answer = merged_answer[:max_embedding_text_chars].rstrip()
+    if len(canonical_answer) > max_answer_chars:
+        canonical_answer = canonical_answer[:max_answer_chars].rstrip()
 
     return KnowledgeSemanticMergeDecision(
         group_id=group_id,
         action=action,
         candidate_ids=candidate_ids,
-        survivor_title="",
-        merged_embedding_text=merged_answer,
-        canonical_card=None,
+        canonical_answer=canonical_answer,
+        reason=reason,
+        confidence=confidence,
     )
 
 
@@ -681,6 +560,22 @@ def _optional_text(value: object) -> str:
     if isinstance(value, str | int | float):
         return _compact_text(str(value))
     return ""
+
+
+def _clamped_float(value: object) -> float:
+    parsed: float
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if isinstance(value, int | float):
+        parsed = float(value)
+    elif isinstance(value, str):
+        try:
+            parsed = float(value.strip())
+        except ValueError:
+            return 0.0
+    else:
+        return 0.0
+    return max(0.0, min(1.0, parsed))
 
 
 def _required_answer_resolution_action(
