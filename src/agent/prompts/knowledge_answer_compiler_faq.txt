@@ -1,115 +1,106 @@
 ЖЁСТКИЙ JSON-КОНТРАКТ:
-- Верни ровно один JSON-объект.
-- Не используй markdown, code fences, комментарии, пояснения, префиксы или суффиксы.
-- Первый непробельный символ должен быть {.
-- Последний непробельный символ должен быть }.
-- Если в текущем source unit нет подтверждённых ответных фрагментов, верни {"fragments": []}.
+Верни ровно 1 JSON-объект. Без markdown/code fences/комментариев/пояснений/префиксов/суффиксов. Первый символ "{", последний "}".
+Если grounded fragments нет: {"fragments": []}.
 
-Ты извлекаешь grounded answer fragments из текущего source unit документа.
+РОЛЬ:
+Ты извлекаешь grounded answer fragments из текущего source unit.
 
-Работай только с chunks из входного JSON.
-Не используй внешние знания.
-Не используй информацию из других частей документа.
-Не сравнивай текущий текст с предыдущими ответами.\nНе сравнивай текущий source unit с предыдущими ответами.
-Не выполняй межсекционную дедупликацию.
+ГРАНИЦА:
+Источник истины = только chunks из входного JSON.
+Запрещено: внешние знания; другие части документа; сравнение с прошлыми ответами; межсекционная дедупликация; canonical publication; выдуманные факты/цены/сроки/условия/каналы/интеграции/доступность.
+Не сравнивай текущий текст с предыдущими ответами.
+Не сравнивай текущий source unit с предыдущими ответами.
 Не объединяй результат с предыдущими ответами.
-Не делай canonical publication.
-Не выдумывай факты, цены, сроки, функции, гарантии, условия, каналы связи, интеграции или доступность.
 
-Входной source JSON содержит:
-- file_name: имя документа;
-- mode: режим обработки;
-- chunks: один или несколько source units.
+ВХОД:
+{
+  "file_name": "...",
+  "mode": "...",
+  "chunks": [
+    {
+      "index": 0,
+      "content": "...",
+      "section_title": "...?",
+      "section_body": "...?",
+      "children": [...?],
+      "section_path": [...?],
+      "source_excerpt": "...?",
+      "source_refs": [...?]
+    }
+  ]
+}
 
-Chunk может быть:
-- обычным техническим текстовым фрагментом;
-- структурированным Markdown source unit с section_title, section_body, children, section_path, source_excerpt, source_refs.
-
-Answer fragment — это полный самодостаточный ответный фрагмент, который:
-- отвечает на один конкретный user intent;
-- полностью подтверждён текущим source unit;
-- может быть отдельно сохранён как raw answer candidate;
-- может использовать весь source unit как evidence, если весь source unit нужен для полного ответа;
-- может иметь source_excerpt, полностью совпадающий с answer_fragment;
-- может иметь source_excerpt, полностью совпадающий со всем source unit.
-
-Один chunk может дать несколько fragments.\nОдин source unit может дать:
-- ноль fragments, если в нём нет самостоятельного ответа;
-- один fragment, если весь source unit отвечает на один intent;
-- несколько fragments, если один source unit содержит несколько самостоятельных grounded intents.
-
-Если один и тот же source_excerpt подтверждает несколько разных user intents, можно использовать один и тот же source_excerpt в нескольких fragments.
+ЕДИНИЦА СМЫСЛА:
+fragment = полный самодостаточный grounded answer на 1 конкретный клиентский вопрос / user intent.
+Один fragment отвечает на один конкретный клиентский вопрос или один конкретный user intent.
+Один chunk может дать несколько fragments.
+Один source unit может дать 0 / 1 / N fragments.
+Один и тот же source_excerpt может подтверждать несколько разных fragments.
+answer_fragment может быть длинным.
+answer_fragment может полностью совпадать с source_excerpt.
+source_excerpt может быть всей секцией/source unit, если это нужно для проверки ответа.
 
 ЯЗЫК:
-- Если текущий source text на русском, все поля title, canonical_question, question_variants и answer_fragment должны быть на русском.
-- Если текущий source text на английском, эти поля должны быть на английском.
-- Не переводи русский источник на английский.
-- Не используй английские generic-заголовки вроде "Product Description", "Product Capabilities", "Product Features", если source text русский.
-- Термины AI, CRM, Telegram, API, SaaS, LLM, RAG можно оставить как термины, но фраза вокруг них должна быть на языке source text.
-- source_excerpt всегда копируй дословно из текущего source text.
+Определи язык source text.
+Если source text русский → title/canonical_question/question_variants/answer_fragment на русском.
+Если source text английский → эти поля на английском.
+Не переводи русский источник на английский.
+Не используй generic English titles для русского source.
+Термины AI/CRM/Telegram/API/SaaS/LLM/RAG можно оставить, но фраза вокруг них = язык source.
+source_excerpt всегда дословно из source text.
 
-ОБЩИЕ ПРАВИЛА ИЗВЛЕЧЕНИЯ:
-1. Один fragment отвечает на один конкретный клиентский вопрос или один конкретный user intent.
-2. answer_fragment должен быть полным ответом на canonical_question, а не кратким обрывком.
-3. answer_fragment может быть длинным, если для полного ответа нужны правила, условия, списки, примеры или ограничения.
-4. source_excerpt должен дословно подтверждать answer_fragment.
-5. Не создавай fragment, где answer_fragment не отвечает на canonical_question.
-6. Не создавай fragment из вопроса, заголовка или пункта списка, если в текущем source unit нет ответа на этот intent.
-7. Не превращай пример в отдельную карточку, если пример только иллюстрирует родительское правило.
-8. Не превращай проверочный вопрос в production answer, если он является частью тестового набора.
-9. Если секция сама является знанием о тестировании, правилах, проверке, RAG-поиске, поведении системы или структуре базы знаний — можно создать fragment об этой секции как об отдельном знании.
-10. Если source unit содержит несколько самостоятельных Q/A блоков, извлеки несколько fragments.
-11. Если source unit содержит одно правило с примерами, извлеки один fragment про правило, а примеры включи в answer_fragment.
-12. Если source unit содержит тестовый набор, извлеки один fragment про то, как использовать этот тестовый набор, а вложенные вопросы оставь внутри answer_fragment/source_excerpt.
-13. Если source unit содержит FAQ container с самостоятельными child Q/A, извлеки fragments по этим child Q/A.
-14. Не создавай общий обзорный fragment, если source unit явно содержит несколько самостоятельных ответов.
-15. Не дроби один цельный ответ на несколько fragments только потому, что внутри есть список.
+АЛГОРИТМ:
+1. Прочитай текущий chunk/source unit.
+2. Если есть Markdown-поля section_title/section_body/children → определи section_shape.
+3. Найди самостоятельные grounded intents.
+4. Для каждого intent создай полный answer_fragment.
+5. Выбери дословный source_excerpt, достаточный для проверки answer_fragment.
+6. Сгенерируй 4+ question_variants того же intent.
+7. Проверь запреты.
+8. Верни JSON.
 
-MARKDOWN-СТРУКТУРА:
-Если chunk содержит section_title, section_body и children:
-- Сначала определи роль текущей секции по структуре и содержанию.
-- section_title — это контекст source unit.
-- section_body — текст родительской секции.
-- children — вложенные подразделы, обычно Markdown ###.
+section_shape ∈ faq_container | single_answer | test_suite | instruction_reference | mixed | unknown.
+section_shape нужен только для стратегии; возвращай его только в metrics.
 
-Допустимые section_shape:
-- faq_container;
-- single_answer;
-- test_suite;
-- instruction_reference;
-- mixed;
-- unknown.
+СТРАТЕГИИ:
 
-section_shape нужен только для выбора стратегии извлечения. Не возвращай section_shape вне metrics.
+faq_container:
+- children = самостоятельные Q/A блоки → fragment на каждый child.
+- canonical_question обычно из смысла child title.
+- answer_fragment полностью отвечает через child body.
+- source_excerpt обычно полный child subsection.
+- parent section_title = контекст, не fragment, если parent body не даёт отдельный ответ.
 
-FAQ CONTAINER:
-- Если children являются самостоятельными Q/A блоками, создай отдельный fragment для каждого child.
-- canonical_question обычно соответствует смыслу child title.
-- answer_fragment должен полностью отвечать на canonical_question, используя child body.
-- source_excerpt обычно равен полному child subsection.
-- parent section_title сохраняй как контекст, но не превращай сам по себе в fragment, если parent body не содержит отдельного ответа.
-
-SINGLE ANSWER / RULE / REFERENCE:
-- Если вся секция отвечает на один intent, создай один fragment.
-- answer_fragment должен включать всё, что нужно для полного ответа: правило, условия, списки, примеры, запреты, исключения.
+single_answer / rule / reference:
+- вся секция отвечает на 1 intent → 1 fragment.
+- answer_fragment включает нужные правила, условия, списки, примеры, запреты, исключения.
 - source_excerpt может быть всей секцией.
-- Не создавай отдельные fragments из пунктов списка, если они только примеры или части одного правила.
+- пункты списка не дробить, если это части/примеры одного правила.
 
-TEST SUITE:
-- Если секция содержит тестовые вопросы, группы вопросов, expected topics, preview/eval checks или проверочные сценарии, не превращай вложенные вопросы в отдельные customer FAQ answers.
-- Создай fragment о самом тестовом наборе, если source unit объясняет, как он используется или что проверяет.
-- canonical_question должен спрашивать про тестирование/проверку базы знаний/preview/eval, а не повторять отдельный проверочный вопрос из списка.
-- answer_fragment должен содержать или суммировать группы вопросов, ожидаемые темы и назначение теста.
+test_suite:
+- тестовые вопросы / группы / expected topics / preview / eval / проверочные сценарии НЕ превращать в customer FAQ answers.
+- если секция объясняет тестирование/проверку/preview/eval → 1 fragment об этом знании.
+- canonical_question спрашивает про тестирование/проверку базы знаний/preview/eval.
+- answer_fragment содержит назначение, группы вопросов, expected topics.
 - source_excerpt может быть всей test-suite секцией.
 
-MIXED:
-- Если parent body содержит самостоятельное знание, можно создать parent fragment.
-- Child fragments создавай только там, где child содержит самостоятельный topic/question и полный grounded answer.
-- Не создавай fragments из headings alone.
-- Не создавай fragments из examples, если они не являются самостоятельными ответами.
+mixed:
+- parent body даёт самостоятельное знание → можно parent fragment.
+- child fragment только если child содержит самостоятельный topic/question + полный grounded answer.
+- headings alone не fragments.
+- examples не fragments, если они только иллюстрируют родительский ответ.
 
-Верни JSON строго в этом формате:
+ЗАПРЕТЫ:
+- Не создавай fragment, если answer_fragment не отвечает на canonical_question.
+- Не создавай fragment из вопроса/заголовка/пункта списка без ответа.
+- Не превращай пример в отдельную карточку, если пример иллюстрирует родительское правило.
+- Не превращай проверочный вопрос в production answer, если это часть test suite.
+- Не создавай общий обзорный fragment, если source unit явно содержит несколько самостоятельных ответов.
+- Не дроби цельный rule/test/reference answer только из-за списка.
+- Не возвращай match, kind, known_intent_id, tags, synonyms, embedding_text.
+- Не возвращай поля вне схемы.
 
+СХЕМА ВЫВОДА:
 {
   "fragments": [
     {
@@ -131,32 +122,22 @@ MIXED:
   }
 }
 
-Требования к полям:
-- title обязателен.
-- title должен быть конкретным, не названием всего документа, кроме случаев когда вся секция является одним знанием.
-- canonical_question обязателен.
-- canonical_question должен соответствовать answer_fragment.
-- question_variants должны содержать минимум 4 строки.
-- Все question_variants должны спрашивать тот же intent, что canonical_question.
-- answer_fragment обязателен.
-- answer_fragment должен быть полным ответом на canonical_question.
-- answer_fragment может полностью совпадать с source_excerpt.
-- source_excerpt обязателен.
-- source_excerpt должен дословно присутствовать в текущем source text.
-- source_excerpt может быть всей секцией, если вся секция нужна как evidence.
-- source_chunk_indexes обязателен.
-- source_chunk_indexes должны ссылаться только на indexes из chunks.
-- Не возвращай поля вне схемы.
-- Не возвращай match, kind, known_intent_id, tags, synonyms или embedding_text.
+ПОЛЕВЫЕ ИНВАРИАНТЫ:
+title обязателен, конкретен.
+canonical_question обязателен и соответствует answer_fragment.
+question_variants: минимум 4, тот же intent.
+answer_fragment обязателен, полный, grounded.
+source_excerpt обязателен, дословно есть в source text, может быть всей секцией.
+source_chunk_indexes обязателен, только индексы из chunks.
 
-Проверка перед ответом:
-- каждый fragment отвечает на один intent;
-- каждый answer_fragment полностью отвечает на canonical_question;
-- каждый answer_fragment подтверждён source_excerpt;
-- разные самостоятельные intents не смешаны в одном fragment;
-- один цельный rule/test/reference answer не раздроблен на примеры;
-- FAQ children извлечены отдельно только если child содержит самостоятельный ответ;
-- test-suite questions не превращены в customer FAQ answers;
-- если source text русский, output-поля не на английском.
+САМОПРОВЕРКА:
+fragment ↔ 1 intent.
+answer_fragment полностью отвечает на canonical_question.
+answer_fragment подтверждён source_excerpt.
+самостоятельные intents не смешаны.
+цельный rule/test/reference не раздроблен на примеры.
+FAQ children извлечены отдельно только при самостоятельном ответе.
+test-suite questions не стали customer FAQ answers.
+язык output = язык source.
 
 ОБРАБОТАЙ SOURCE JSON НИЖЕ. ВЕРНИ ТОЛЬКО JSON:
