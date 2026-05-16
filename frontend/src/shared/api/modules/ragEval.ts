@@ -114,8 +114,23 @@ export interface RagEvalJobActionResponse {
   job: RagEvalJob;
 }
 
+export const RAG_EVAL_PROPOSED_ACTION_TYPES = [
+  'attach_question_to_entry',
+  'create_entry_from_failure',
+  'rebuild_embedding',
+  'rerun_eval',
+] as const;
+
+export type RagEvalProposedActionType = (typeof RAG_EVAL_PROPOSED_ACTION_TYPES)[number];
+
+const RAG_EVAL_PROPOSED_ACTION_TYPE_VALUES = new Set<string>(RAG_EVAL_PROPOSED_ACTION_TYPES);
+
+export const isRagEvalProposedActionType = (value: string): value is RagEvalProposedActionType => (
+  RAG_EVAL_PROPOSED_ACTION_TYPE_VALUES.has(value)
+);
+
 export interface RagEvalProposedActionSummary {
-  action_type: string;
+  action_type: RagEvalProposedActionType;
   target_entry_id: string | null;
   reason: string;
   payload: Record<string, unknown>;

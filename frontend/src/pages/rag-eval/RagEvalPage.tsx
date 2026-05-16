@@ -18,6 +18,7 @@ import { getErrorMessage } from '@shared/api/core/errors';
 
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
+  isRagEvalProposedActionType,
   ragEvalApi,
   type KnowledgeEditActionExecutionSummary,
   type RagEvalActionableResult,
@@ -27,6 +28,7 @@ import {
   type RagEvalJobProgressResponse,
   type RagEvalJobsResponse,
   type RagEvalProgressPayload,
+  type RagEvalProposedActionType,
   type RagEvalResultSummary,
 } from '@shared/api/modules/ragEval';
 
@@ -179,15 +181,18 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
       const proposedActions = Array.isArray(rawActions)
         ? rawActions.map((rawAction) => {
           const action = getRecord(rawAction);
+          const actionType = String(action.action_type || '').trim();
+          if (!isRagEvalProposedActionType(actionType)) return null;
+
           const targetEntryId = String(action.target_entry_id || '').trim();
 
           return {
-            action_type: String(action.action_type || '').trim(),
+            action_type: actionType,
             target_entry_id: targetEntryId || null,
             reason: String(action.reason || '').trim(),
             payload: getRecord(action.payload),
           };
-        }).filter((action) => action.action_type)
+        }).filter((action): action is NonNullable<typeof action> => action !== null)
         : [];
 
       const classification = getRecord(item.classification);
@@ -212,32 +217,38 @@ const getActionableResults = (report: Record<string, unknown>): RagEvalActionabl
     .filter((item): item is RagEvalActionableResult => item !== null);
 };
 
-const actionTypeLabel = (value: string): string => {
-  if (value === 'attach_question_to_entry') return t('ragEval.actionType.attachQuestionToEntry');
-  if (value === 'rebuild_entry_embedding') return t('ragEval.actionType.rebuildEntryEmbedding');
-  if (value === 'rerun_eval') return t('ragEval.actionType.rerunEval');
-  if (value === 'create_entry_from_failure') return t('ragEval.actionType.createEntryFromFailure');
-  return value || t('ragEval.actionType.fallback');
+const assertNeverActionType = (value: never): never => {
+  throw new Error(`Unhandled RAG eval proposed action type: ${value}`);
 };
 
-const actionTypeDescription = (value: string): string => {
-  if (value === 'attach_question_to_entry') {
-    return t('ragEval.actionDescription.attachQuestionToEntry');
+const actionTypeLabel = (value: RagEvalProposedActionType): string => {
+  switch (value) {
+    case 'attach_question_to_entry':
+      return t('ragEval.actionType.attachQuestionToEntry');
+    case 'rebuild_embedding':
+      return t('ragEval.actionType.rebuildEntryEmbedding');
+    case 'rerun_eval':
+      return t('ragEval.actionType.rerunEval');
+    case 'create_entry_from_failure':
+      return t('ragEval.actionType.createEntryFromFailure');
   }
 
-  if (value === 'rebuild_entry_embedding') {
-    return t('ragEval.actionDescription.rebuildEntryEmbedding');
+  return assertNeverActionType(value);
+};
+
+const actionTypeDescription = (value: RagEvalProposedActionType): string => {
+  switch (value) {
+    case 'attach_question_to_entry':
+      return t('ragEval.actionDescription.attachQuestionToEntry');
+    case 'rebuild_embedding':
+      return t('ragEval.actionDescription.rebuildEntryEmbedding');
+    case 'rerun_eval':
+      return t('ragEval.actionDescription.rerunEval');
+    case 'create_entry_from_failure':
+      return t('ragEval.actionDescription.createEntryFromFailure');
   }
 
-  if (value === 'rerun_eval') {
-    return t('ragEval.actionDescription.rerunEval');
-  }
-
-  if (value === 'create_entry_from_failure') {
-    return t('ragEval.actionDescription.createEntryFromFailure');
-  }
-
-  return t('ragEval.actionDescription.fallback');
+  return assertNeverActionType(value);
 };
 
 const formatResultScore = (score: number): string => {
