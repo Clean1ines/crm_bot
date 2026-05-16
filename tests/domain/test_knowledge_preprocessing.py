@@ -43,7 +43,9 @@ def test_preprocessing_prompt_versions_are_current() -> None:
     )
 
 
-def test_parse_preprocessing_payload_accepts_fragment_schema_and_derives_embedding_text() -> None:
+def test_parse_preprocessing_payload_accepts_fragment_schema_and_derives_embedding_text() -> (
+    None
+):
     result = parse_preprocessing_payload(
         {"fragments": [_valid_entry()]},
         mode=MODE_FAQ,
@@ -191,9 +193,7 @@ def test_parse_answer_resolution_payload_accepts_keep_separate() -> None:
     assert decision.canonical_answer == ""
 
 
-def test_parse_answer_resolution_payload_requires_canonical_answer_for_merge() -> (
-    None
-):
+def test_parse_answer_resolution_payload_requires_canonical_answer_for_merge() -> None:
     with pytest.raises(
         KnowledgePreprocessingValidationError,
         match="canonical_answer",

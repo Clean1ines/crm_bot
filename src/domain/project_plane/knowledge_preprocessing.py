@@ -78,6 +78,7 @@ class KnowledgePreprocessingEntry:
     canonical_question: str = ""
     source_chunk_indexes: tuple[int, ...] = field(default_factory=tuple)
 
+
 @dataclass(frozen=True, slots=True)
 class KnowledgePreprocessingResult:
     mode: KnowledgePreprocessingMode
@@ -85,6 +86,7 @@ class KnowledgePreprocessingResult:
     model: str
     entries: tuple[KnowledgePreprocessingEntry, ...]
     metrics: JsonObject = field(default_factory=dict)
+
 
 @dataclass(frozen=True, slots=True)
 class KnowledgePreprocessingExecutionResult:
@@ -175,7 +177,6 @@ class KnowledgeAnswerResolutionResult:
 class KnowledgeAnswerResolverExecutionResult:
     result: KnowledgeAnswerResolutionResult
     usage: ModelUsageMeasurement | None = None
-
 
 
 def entry_kind_for_preprocessing_mode(
