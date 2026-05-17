@@ -44,7 +44,7 @@ class _BatchGenerationResult:
 
 MAX_ENTRIES_PER_LLM_BATCH = 1
 MAX_CHUNK_CHARS = 700
-MIN_VARIANTS_PER_FACT = 5
+MIN_QUESTION_VARIANTS_PER_ENTRY = 8
 MIN_EVAL_SOURCE_CONTENT_CHARS = 16
 MIN_CONTAINED_EVAL_SOURCE_CHARS = 24
 
@@ -99,45 +99,36 @@ def is_document_structure_eval_question(question: str) -> bool:
 
 
 RAG_EVAL_QUESTION_QUALITY_RULES = """
-Generate real client/user questions about the product facts, not questions about
-the source document structure.
+Generate real client/user question variants for a single published runtime
+knowledge entry, not a scientific dataset and not questions about source
+document structure.
 
 Strictly forbidden:
+- decomposing the entry into separate atomic eval facts;
+- rewriting or improving the answer text;
 - questions about section numbers, headings, fragments, paragraphs, first part,
   "what is written in section X", "is there section X";
 - questions whose answer is merely that a section exists;
 - questions asking where information is located in the document;
 - questions copied from built-in test sections;
-- near-duplicate questions that test the same fact many times.
+- near-duplicate questions that repeat existing enrichment questions/synonyms.
 
-Forbidden Russian shapes:
-- "что сказано в разделе ..."
-- "есть ли в документе раздел ..."
-- "о чём речь в первой части ..."
-- "в каком разделе указано ..."
-- "где указано ..."
-- "этот фрагмент ..."
-
-If the chunk contains test questions, negative tests, preview checks, expected
-topics, or RAG-search rules, do not treat that text as product facts for new
-questions. Use it only as guidance for boundaries.
-
-For one source fact generate at most:
-- one direct question;
-- one natural paraphrase;
-- one risky/boundary question when useful.
+Allowed useful variants:
+- semantic paraphrases;
+- synonymic phrasings;
+- typo/misspelling variants;
+- colloquial client wording;
+- short/incomplete questions;
+- vague but still entry-related questions.
 """
 
 
 class LlmRagEvalDatasetGenerator:
-    """Generates a universal fact/variant RAG eval dataset from document entries.
+    """Generates retrieval-only user question variants per canonical entry.
 
-    The LLM must:
-    1. extract atomic facts from each chunk;
-    2. generate multiple user-question variants for every extracted fact;
-    3. return strict JSON only.
-
-    Application code validates taxonomy, entry ids and JSON shape.
+    The LLM receives exactly one runtime canonical entry and returns compact
+    JSON with non-duplicate user question variants. Application code, not the
+    LLM, attaches expected_entry_ids, expected_answer_summary and metadata.
     """
 
     def __init__(
@@ -210,6 +201,7 @@ class LlmRagEvalDatasetGenerator:
         json_parse_failures = 0
         provider_failures = 0
         retry_count = 0
+        fallback_used_count = 0
 
         async def emit_progress() -> None:
             deduped_count = len(self._dedupe(questions))
@@ -231,6 +223,7 @@ class LlmRagEvalDatasetGenerator:
                         "json_parse_failures": json_parse_failures,
                         "provider_failures": provider_failures,
                         "retry_count": retry_count,
+                        "fallback_used_count": fallback_used_count,
                         "dataset_generation_concurrency": self._max_concurrency,
                         "dataset_batch_attempts": self._max_batch_attempts,
                     }
@@ -280,6 +273,7 @@ class LlmRagEvalDatasetGenerator:
                 json_parse_failures += result.json_parse_failures
                 provider_failures += result.provider_failures
                 retry_count += result.retry_count
+                fallback_used_count += 1 if result.used_fallback else 0
                 questions.extend(result.questions)
                 await emit_progress()
         except Exception:
@@ -292,12 +286,12 @@ class LlmRagEvalDatasetGenerator:
         dataset.total_questions = len(dataset.questions)
         dataset.status = "ready"
         dataset.metadata = {
-            "generation_strategy": "parallel_llm_fact_variant_coverage_batches",
+            "generation_strategy": "parallel_llm_entry_question_variant_batches",
             "source_entry_count": len(chunks),
             "canonical_eval_unit_count": len(eval_chunks),
             "useful_entry_count": sum(len(batch) for batch in batches),
             "llm_batches": total_batches,
-            "min_variants_per_fact": MIN_VARIANTS_PER_FACT,
+            "min_question_variants_per_entry": MIN_QUESTION_VARIANTS_PER_ENTRY,
             "dataset_generation_concurrency": self._max_concurrency,
             "dataset_batch_attempts": self._max_batch_attempts,
             "successful_batches": completed_batches - failed_batches - skipped_batches,
@@ -306,6 +300,7 @@ class LlmRagEvalDatasetGenerator:
             "json_parse_failures": json_parse_failures,
             "provider_failures": provider_failures,
             "retry_count": retry_count,
+            "fallback_used_count": fallback_used_count,
         }
 
         await emit_progress()
@@ -356,6 +351,9 @@ class LlmRagEvalDatasetGenerator:
                     response=response,
                     valid_entry_ids=valid_entry_ids,
                     related_entry_ids_by_id=related_entry_ids_by_id,
+                    source_entries_by_id={
+                        chunk.id: chunk for chunk in batch if chunk.id
+                    },
                     json_parse_failures=json_parse_failures,
                     provider_failures=provider_failures,
                     retry_count=retry_count,
@@ -393,6 +391,7 @@ class LlmRagEvalDatasetGenerator:
             response=fallback_payload,
             valid_entry_ids=valid_entry_ids,
             related_entry_ids_by_id=related_entry_ids_by_id,
+            source_entries_by_id={chunk.id: chunk for chunk in batch if chunk.id},
             json_parse_failures=json_parse_failures,
             provider_failures=provider_failures,
             retry_count=retry_count,
@@ -418,6 +417,7 @@ class LlmRagEvalDatasetGenerator:
         response: Mapping[str, object],
         valid_entry_ids: set[str],
         related_entry_ids_by_id: Mapping[str, list[str]],
+        source_entries_by_id: Mapping[str, RagEvalEvidenceEntry],
         json_parse_failures: int,
         provider_failures: int,
         retry_count: int,
@@ -445,6 +445,7 @@ class LlmRagEvalDatasetGenerator:
                 payload=item,
                 valid_entry_ids=valid_entry_ids,
                 related_entry_ids_by_id=related_entry_ids_by_id,
+                source_entries_by_id=source_entries_by_id,
             )
             if question is not None and not is_document_structure_eval_question(
                 question.question
@@ -509,20 +510,18 @@ class LlmRagEvalDatasetGenerator:
         return text[:max_chars].rstrip() + "..."
 
     def _system_prompt(self) -> str:
-        question_types = ",".join(sorted(ALLOWED_QUESTION_TYPES))
         return (
-            "Role: generate RAG eval questions from one KB entry. "
-            "Output: one compact valid JSON object only, top-level key questions. "
-            "No markdown, prose, comments, code fences, or reasoning. "
-            "Use source language. Extract every atomic answerable fact. "
-            f"For each fact emit >= {MIN_VARIANTS_PER_FACT} meaning-diverse questions when possible. "
-            "Variant styles: direct, paraphrase, vague, typo/slang, client_context, edge_case. "
-            "Add unknown/similar_wrong/risky/contradiction only when grounded and useful. "
-            f"Allowed question_type values: {question_types}. "
-            "Each item needs question, question_type, expected_entry_ids, expected_answer_summary, "
-            "should_answer, should_escalate, difficulty, severity, metadata. "
-            "metadata must include fact_id, fact_summary, variant_style, source_chunk_ids. "
-            "Same fact variants reuse same fact_id and fact_summary."
+            "Role: generate non-duplicate user question variants for exactly one "
+            "published/runtime canonical knowledge entry. "
+            'Output compact valid JSON only: {"questions":[...]} with no markdown, '
+            "prose, comments, code fences, or reasoning. "
+            "Each question item must contain question, variant_style and reason. "
+            "Allowed variant_style values: paraphrase, synonymic, typo, colloquial, short, vague. "
+            "Generate semantic paraphrases, synonymic phrasings, typo/misspelling variants, "
+            "colloquial client wording, short/incomplete questions and vague-but-still-relevant questions. "
+            "Do not extract atomic facts. Do not rewrite the answer. Do not invent facts. "
+            "Do not duplicate existing questions or existing synonyms from the entry enrichment. "
+            "The backend will attach expected_entry_id, expected_answer_summary, should_answer and metadata."
         )
 
     def _user_prompt(
@@ -534,16 +533,8 @@ class LlmRagEvalDatasetGenerator:
         batch_index: int,
         total_batches: int | None = None,
     ) -> str:
-        chunks_json = json.dumps(
-            [
-                {
-                    "id": chunk.id,
-                    "src": chunk.source,
-                    "text": self._clip(chunk.content),
-                    "m": self._prompt_metadata(chunk.metadata),
-                }
-                for chunk in chunks
-            ],
+        entries_json = json.dumps(
+            [self._prompt_entry(chunk) for chunk in chunks],
             ensure_ascii=False,
             separators=(",", ":"),
         )
@@ -551,21 +542,15 @@ class LlmRagEvalDatasetGenerator:
             {
                 "questions": [
                     {
-                        "question": "будет ли бот отвечать ночью?",
-                        "question_type": "paraphrase",
-                        "expected_entry_ids": ["entry_id"],
-                        "expected_answer_summary": "Ассистент отвечает в любое время суток, если проект и инфраструктура работают.",
-                        "should_answer": True,
-                        "should_escalate": False,
-                        "difficulty": 2,
-                        "severity": "medium",
-                        "metadata": {
-                            "fact_id": "assistant_24_7_if_project_and_infra_work",
-                            "fact_summary": "Ассистент может отвечать в любое время суток при работающих проекте и инфраструктуре.",
-                            "variant_style": "semantic_paraphrase",
-                            "source_chunk_ids": ["entry_id"],
-                        },
-                    }
+                        "question": "бот ночью ответит?",
+                        "variant_style": "short",
+                        "reason": "Short natural client wording for the same entry.",
+                    },
+                    {
+                        "question": "а если написать не в рабочее время, ассистент среагирует?",
+                        "variant_style": "colloquial",
+                        "reason": "Conversational paraphrase that should retrieve this entry.",
+                    },
                 ]
             },
             ensure_ascii=False,
@@ -578,25 +563,40 @@ class LlmRagEvalDatasetGenerator:
         )
 
         lines = [
-            f"p={project_id}",
-            f"d={document_id}",
-            f"b={batch_label}",
-            "Return JSON only. Minify.",
+            f"project_id={project_id}",
+            f"document_id={document_id}",
+            f"entry_batch={batch_label}",
+            "Return compact JSON only. Minify.",
             f"schema_example={example_json}",
-            "Rules:",
-            "- Extract all atomic facts from chunks.",
-            f"- For each fact emit >= {MIN_VARIANTS_PER_FACT} variants when possible.",
-            "- Required variants: direct, paraphrase, vague, typo/slang, client_context, edge_case.",
-            "- Same fact => same metadata.fact_id and metadata.fact_summary.",
-            "- Answerable => should_answer=true and expected_entry_ids uses only input ids.",
-            "- Unsupported adjacent trap => should_answer=false and expected_entry_ids=[].",
-            "- expected_answer_summary = compact user-facing business/product fact, not document-structure prose.",
-            "- Do not generate questions about section numbers, headings, markdown structure, or whether the document contains a section.",
-            "- Reject meta-document facts like 'Document contains a section titled ...' as eval targets.",
-            "- Do not invent ids. No reasoning.",
-            f"chunks={chunks_json}",
+            "Task:",
+            "- Generate non-duplicate user question variants for this entry.",
+            "- Use the entry answer as meaning boundary, not as text to rewrite.",
+            "- Use existing_questions and existing_synonyms only to avoid duplicates.",
+            "- Include paraphrase, synonymic, typo, colloquial, short and vague variants when useful.",
+            "- Vague variants must still belong to this exact entry.",
+            "Strictly forbidden:",
+            "- Do not decompose this entry into separate fact-level eval items.",
+            "- Do not extract atomic facts at all.",
+            "- Do not rewrite answer.",
+            "- Do not return expected_entry_ids, should_answer or expected_answer_summary.",
+            "- Do not duplicate existing_questions or existing_synonyms.",
+            f"entries={entries_json}",
         ]
         return chr(10).join(lines)
+
+    def _prompt_entry(self, chunk: RagEvalEvidenceEntry) -> dict[str, object]:
+        return {
+            "id": chunk.id,
+            "title": self._metadata_text(chunk.metadata, "title"),
+            "answer": self._clip(chunk.content),
+            "enrichment": {
+                "questions": self._compact_prompt_value(chunk.metadata.get("questions"))
+                or [],
+                "synonyms": self._compact_prompt_value(chunk.metadata.get("synonyms"))
+                or [],
+            },
+            "tags": self._compact_prompt_value(chunk.metadata.get("tags")) or [],
+        }
 
     def _prompt_metadata(self, metadata: Mapping[str, object]) -> dict[str, object]:
         keep = {
@@ -638,6 +638,18 @@ class LlmRagEvalDatasetGenerator:
             return None
         return text[:160]
 
+    def _question_type_from_variant_style(
+        self, variant_style: str
+    ) -> RagEvalQuestionType:
+        normalized = variant_style.strip().lower()
+        if normalized in {"short", "vague"}:
+            return "short_vague"
+        if normalized in {"typo", "colloquial", "synonymic", "paraphrase"}:
+            return "paraphrase"
+        if normalized in ALLOWED_QUESTION_TYPES:
+            return cast(RagEvalQuestionType, normalized)
+        return "paraphrase"
+
     def _question_from_payload(
         self,
         *,
@@ -647,64 +659,65 @@ class LlmRagEvalDatasetGenerator:
         payload: Mapping[str, object],
         valid_entry_ids: set[str],
         related_entry_ids_by_id: Mapping[str, list[str]],
+        source_entries_by_id: Mapping[str, RagEvalEvidenceEntry],
     ) -> RagEvalQuestion | None:
         question = str(payload.get("question") or "").strip()
-        question_type = str(payload.get("question_type") or "").strip()
-        severity = str(payload.get("severity") or "medium").strip()
-
         if not question:
             return None
 
-        if question_type not in ALLOWED_QUESTION_TYPES:
-            return None
-
-        if severity not in ALLOWED_SEVERITIES:
-            severity = "medium"
-
-        expected_entry_ids = self._expand_related_entry_ids(
-            self._string_list(payload.get("expected_entry_ids")),
-            valid_entry_ids=valid_entry_ids,
-            related_entry_ids_by_id=related_entry_ids_by_id,
-        )
-
-        raw_should_answer = payload.get("should_answer")
-        should_answer = (
-            raw_should_answer
-            if isinstance(raw_should_answer, bool)
-            else bool(expected_entry_ids)
-        )
-
-        if should_answer and not expected_entry_ids:
+        source_chunk_id = ""
+        if source_entries_by_id:
+            source_chunk_id = next(iter(source_entries_by_id.keys()))
+        source_entry = source_entries_by_id.get(source_chunk_id)
+        if not source_chunk_id or source_chunk_id not in valid_entry_ids:
             return None
 
         metadata = self._metadata(payload.get("metadata"))
-        source_chunk_ids = self._expand_related_entry_ids(
-            self._string_list(metadata.get("source_chunk_ids")),
+        metadata_variant_style = str(metadata.get("variant_style") or "").strip()
+        variant_style = str(
+            payload.get("variant_style")
+            or metadata_variant_style
+            or payload.get("question_type")
+            or "paraphrase"
+        ).strip()
+        raw_question_type = str(payload.get("question_type") or "").strip()
+        question_type = (
+            cast(RagEvalQuestionType, raw_question_type)
+            if raw_question_type in ALLOWED_QUESTION_TYPES
+            else self._question_type_from_variant_style(variant_style)
+        )
+        expected_entry_ids = self._expand_related_entry_ids(
+            [source_chunk_id],
             valid_entry_ids=valid_entry_ids,
             related_entry_ids_by_id=related_entry_ids_by_id,
         )
-        if not source_chunk_ids and expected_entry_ids:
-            source_chunk_ids = list(expected_entry_ids)
+        if not expected_entry_ids:
+            return None
 
-        if source_chunk_ids:
-            metadata["source_chunk_ids"] = source_chunk_ids
+        metadata["source_chunk_id"] = source_chunk_id
+        metadata["expected_entry_id"] = source_chunk_id
+        metadata["source_chunk_ids"] = list(expected_entry_ids)
+        metadata["variant_style"] = variant_style or question_type
+        reason = str(payload.get("reason") or "").strip()
+        if reason:
+            metadata["variant_reason"] = reason[:500]
+
+        expected_answer_summary = ""
+        if source_entry is not None:
+            expected_answer_summary = self._fallback_expected_answer_summary(
+                source_entry
+            )
+        if not expected_answer_summary:
+            expected_answer_summary = str(
+                payload.get("expected_answer_summary") or ""
+            ).strip()
+        expected_answer_summary = expected_answer_summary[:1200]
 
         if not str(metadata.get("fact_id") or "").strip():
-            metadata["fact_id"] = self._fallback_fact_id(
-                str(payload.get("expected_answer_summary") or question)
-            )
+            metadata["fact_id"] = self._fallback_fact_id(source_chunk_id)
 
         if not str(metadata.get("fact_summary") or "").strip():
-            metadata["fact_summary"] = str(
-                payload.get("expected_answer_summary") or ""
-            ).strip()[:500]
-
-        if not str(metadata.get("variant_style") or "").strip():
-            metadata["variant_style"] = question_type
-
-        expected_answer_summary = str(
-            payload.get("expected_answer_summary") or ""
-        ).strip()[:1200]
+            metadata["fact_summary"] = expected_answer_summary[:500]
 
         if self._is_low_quality_question(
             question=question,
@@ -719,13 +732,13 @@ class LlmRagEvalDatasetGenerator:
             project_id=project_id,
             document_id=document_id,
             question=question[:1000],
-            question_type=cast(RagEvalQuestionType, question_type),
+            question_type=question_type,
             expected_entry_ids=expected_entry_ids,
             expected_answer_summary=expected_answer_summary,
-            should_answer=bool(should_answer),
-            should_escalate=bool(payload.get("should_escalate")),
-            difficulty=self._difficulty(payload.get("difficulty")),
-            severity=cast(RagEvalSeverity, severity),
+            should_answer=True,
+            should_escalate=False,
+            difficulty=2,
+            severity="medium",
             metadata=metadata,
         )
 

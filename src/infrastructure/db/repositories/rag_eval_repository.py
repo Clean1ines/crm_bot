@@ -409,6 +409,62 @@ class RagEvalRepository:
                     [self._question_record(question) for question in dataset.questions],
                 )
 
+    async def save_questions(self, *, questions: list[RagEvalQuestion]) -> None:
+        if not questions:
+            return
+
+        async with self.pool.acquire() as conn:
+            await conn.executemany(
+                """
+                INSERT INTO rag_eval_questions (
+                    id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    question,
+                    question_type,
+                    expected_entry_ids,
+                    expected_answer_summary,
+                    should_answer,
+                    should_escalate,
+                    difficulty,
+                    severity,
+                    source,
+                    metadata,
+                    created_at
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3::uuid,
+                    $4::uuid,
+                    $5,
+                    $6,
+                    $7::jsonb,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
+                    $14::jsonb,
+                    $15
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                    question = EXCLUDED.question,
+                    question_type = EXCLUDED.question_type,
+                    expected_entry_ids = EXCLUDED.expected_entry_ids,
+                    expected_answer_summary = EXCLUDED.expected_answer_summary,
+                    should_answer = EXCLUDED.should_answer,
+                    should_escalate = EXCLUDED.should_escalate,
+                    difficulty = EXCLUDED.difficulty,
+                    severity = EXCLUDED.severity,
+                    source = EXCLUDED.source,
+                    metadata = EXCLUDED.metadata
+                """,
+                [self._question_record(question) for question in questions],
+            )
+
     async def create_run(self, *, run: RagEvalRun) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
