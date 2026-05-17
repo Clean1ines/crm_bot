@@ -788,6 +788,22 @@ const EvalFiltersBar: React.FC<{
   </div>
 );
 
+const fragmentReviewStatusLabel = (value: RagEvalReviewGroup['review_status']): string => {
+  if (value === 'queued') return 'Ожидает проверки';
+  if (value === 'generating_questions') return 'Генерируем вопросы';
+  if (value === 'checking_retrieval') return 'Проверяем поиск';
+  if (value === 'ready_for_review') return 'Готов к ревью';
+  if (value === 'failed') return 'Ошибка проверки';
+  return 'Готов к ревью';
+};
+
+const fragmentReviewStatusClass = (value: RagEvalReviewGroup['review_status']): string => {
+  if (value === 'ready_for_review') return 'bg-emerald-500/10 text-emerald-600';
+  if (value === 'failed') return 'bg-red-500/10 text-red-600';
+  if (value === 'checking_retrieval') return 'bg-amber-500/10 text-amber-600';
+  return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
+};
+
 const FragmentReviewCard: React.FC<{
   group: RagEvalReviewGroup;
   onOpenQuestion: (question: RagEvalReviewQuestion, group: RagEvalReviewGroup) => void;
@@ -797,7 +813,15 @@ const FragmentReviewCard: React.FC<{
     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div>
         <h3 className="text-lg font-semibold text-[var(--text-primary)]">Фрагмент · {group.title}</h3>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">Статус поиска: {group.status}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className={`rounded-full px-2 py-1 text-xs font-semibold ${fragmentReviewStatusClass(group.review_status)}`}>
+            {fragmentReviewStatusLabel(group.review_status)}
+          </span>
+          <span className="text-sm text-[var(--text-muted)]">Статус поиска: {group.status}</span>
+        </div>
+        {group.review_status === 'failed' && group.error && (
+          <p className="mt-2 text-sm text-red-500">{group.error}</p>
+        )}
       </div>
       <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">{formatNumber(group.problem_count)} проблем</span>
     </div>
@@ -822,6 +846,11 @@ const FragmentReviewCard: React.FC<{
     </div>
     <div className="mt-4 space-y-2">
       <div className="text-sm font-semibold text-[var(--text-primary)]">Сгенерированные вопросы</div>
+      {group.questions.length === 0 && (
+        <div className="rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-muted)]">
+          Карточка появится здесь, когда вопросы фрагмента будут сгенерированы и проверены.
+        </div>
+      )}
       {group.questions.slice(0, 8).map((question) => (
         <button key={question.question_id} type="button" onClick={() => onOpenQuestion(question, group)} className="flex w-full items-center justify-between gap-3 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-left text-sm hover:bg-[var(--surface-elevated)]">
           <span className="min-w-0 truncate text-[var(--text-primary)]">{questionStatusIcon(question.retrieval_status)} {question.effective_question}</span>
@@ -1134,13 +1163,6 @@ export const RagEvalPage: React.FC = () => {
   const activeDocumentId = selectedDocumentId || processedDocuments[0]?.id || '';
   const activeDocument = processedDocuments.find((doc) => doc.id === activeDocumentId) || null;
 
-  const reviewQuery = useQuery({
-    queryKey: ['rag-eval-latest-review', activeDocumentId],
-    queryFn: async () => ragEvalApi.getLatestReview(activeDocumentId),
-    enabled: !!activeDocumentId,
-    retry: false,
-  });
-
   const statusQuery = useQuery({
     queryKey: ['rag-eval-status', activeDocumentId],
     queryFn: async () => ragEvalApi.getStatus(activeDocumentId),
@@ -1150,6 +1172,20 @@ export const RagEvalPage: React.FC = () => {
       const data = query.state.data as RagEvalDocumentStatusResponse | undefined;
       const status = String(data?.run?.status || '');
       return ACTIVE_RUN_STATUSES.has(status) ? 5000 : false;
+    },
+  });
+
+  const reviewQuery = useQuery({
+    queryKey: ['rag-eval-latest-review', activeDocumentId],
+    queryFn: async () => ragEvalApi.getLatestReview(activeDocumentId),
+    enabled: !!activeDocumentId,
+    retry: false,
+    refetchInterval: (query) => {
+      const statusRun = statusQuery.data?.run as Record<string, unknown> | undefined;
+      const latestReview = query.state.data?.review;
+      const reviewRun = latestReview?.run as Record<string, unknown> | undefined;
+      const status = String(reviewRun?.status || statusRun?.status || '');
+      return ACTIVE_RUN_STATUSES.has(status) ? 3000 : false;
     },
   });
 

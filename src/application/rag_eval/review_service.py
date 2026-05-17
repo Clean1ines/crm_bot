@@ -63,6 +63,10 @@ class RagEvalReviewRepositoryPort(Protocol):
         reviewed_by: str,
     ) -> None: ...
 
+    async def load_review_group_projections(
+        self, *, run_id: str
+    ) -> list[JsonObject]: ...
+
 
 class KnowledgeReviewEditRepositoryPort(Protocol):
     async def create_or_get_knowledge_edit_action(
@@ -306,6 +310,14 @@ class RagEvalReviewService:
         run_id = _required_text(run.get("id"), "run_id")
         project_id = _required_text(run.get("project_id"), "project_id")
         document_id = _required_text(run.get("document_id"), "document_id")
+        projections = await self.review_repo.load_review_group_projections(
+            run_id=run_id
+        )
+        if projections:
+            return build_review_payload_from_projections(
+                run=run, projections=projections
+            )
+
         results = await self.review_repo.load_run_results(run_id=run_id)
         entries = await self.review_repo.load_document_entries(
             project_id=project_id,
@@ -318,6 +330,139 @@ class RagEvalReviewService:
             entries=entries,
             reviews=reviews,
         )
+
+
+def build_review_payload_from_projections(
+    *,
+    run: JsonObject,
+    projections: list[JsonObject],
+) -> dict[str, object]:
+    groups: list[dict[str, object]] = []
+    reliable = weak = confused = missing = improvements = checked = questions_total = 0
+
+    for projection in projections:
+        payload = projection.get("review_payload")
+        group: dict[str, object] = (
+            dict(payload) if isinstance(payload, dict) and payload else {}
+        )
+        if not group:
+            group = {
+                "entry_id": str(projection.get("source_chunk_id") or ""),
+                "title": str(projection.get("source_chunk_id") or "Фрагмент"),
+                "content": "",
+                "existing_questions": [],
+                "question_count": _object_int(projection.get("questions_total")),
+                "problem_count": _object_int(projection.get("missing_count"))
+                + _object_int(projection.get("weak_count"))
+                + _object_int(projection.get("confused_count")),
+                "improvement_count": _object_int(projection.get("improvement_count")),
+                "status": _group_status(
+                    problem_count=_object_int(projection.get("missing_count"))
+                    + _object_int(projection.get("weak_count"))
+                    + _object_int(projection.get("confused_count")),
+                    question_count=_object_int(projection.get("questions_total")),
+                ),
+                "issue_summary": "Фрагмент ещё проверяется.",
+                "questions": [],
+                "proposed_improvements": [],
+            }
+        group["review_status"] = str(projection.get("status") or "queued")
+        group["error"] = str(projection.get("error") or "")
+        groups.append(group)
+
+        reliable += _object_int(projection.get("reliable_count"))
+        weak += _object_int(projection.get("weak_count"))
+        confused += _object_int(projection.get("confused_count"))
+        missing += _object_int(projection.get("missing_count"))
+        improvements += _object_int(projection.get("improvement_count"))
+        checked += _object_int(projection.get("checked_questions"))
+        questions_total += _object_int(projection.get("questions_total"))
+
+    groups.sort(
+        key=lambda item: (
+            _object_int(item.get("problem_count")),
+            _object_int(item.get("improvement_count")),
+            _object_int(item.get("question_count")),
+        ),
+        reverse=True,
+    )
+    problem_total = weak + confused + missing
+    score = round((reliable / checked) * 100, 1) if checked else 0.0
+
+    return {
+        "run": run,
+        "summary": {
+            "title": "Проверка поиска по документу",
+            "score": score,
+            "readiness": _readiness_label(score),
+            "fragments_total": len(groups),
+            "questions_total": questions_total,
+            "reliable_questions": reliable,
+            "weak_questions": weak,
+            "confused_questions": confused,
+            "missing_questions": missing,
+            "problem_questions": problem_total,
+            "improvements_total": improvements,
+            "good_fragments": sum(
+                1 for group in groups if _object_int(group.get("problem_count")) == 0
+            ),
+            "unstable_fragments": sum(
+                1
+                for group in groups
+                if 0
+                < _object_int(group.get("problem_count"))
+                < _object_int(group.get("question_count"))
+            ),
+            "bad_fragments": sum(
+                1
+                for group in groups
+                if _object_int(group.get("problem_count"))
+                >= _object_int(group.get("question_count"))
+                and _object_int(group.get("question_count")) > 0
+            ),
+            "human_summary": _human_summary(
+                score=score,
+                problem_total=problem_total,
+                groups=groups,
+                problem_type_counts={},
+            ),
+        },
+        "problem_map": {
+            "most_problematic_fragments": groups[:5],
+            "best_fragments": [
+                group
+                for group in groups
+                if _object_int(group.get("problem_count")) == 0
+            ][:5],
+            "problem_types": [],
+        },
+        "groups": groups,
+        "filters": {
+            "statuses": [
+                "all",
+                "problematic",
+                "wrong_top1",
+                "missing",
+                "good_candidates",
+                "fallback",
+                "typo_short_vague",
+            ],
+            "sorts": [
+                "most_problematic",
+                "most_questions",
+                "worst_confusion",
+                "best_candidates",
+            ],
+        },
+        "diagnostics": {
+            "run_id": str(run["id"]),
+            "dataset_id": str(run["dataset_id"]),
+            "retriever_version": str(run.get("retriever_version") or ""),
+            "reranker_version": str(run.get("reranker_version") or ""),
+            "generator_model": str(run.get("generator_model") or ""),
+            "projection": "rag_eval_review_groups",
+        },
+    }
 
 
 def build_review_payload(
