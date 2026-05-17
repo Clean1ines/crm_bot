@@ -106,7 +106,7 @@ const stageLabel = (stage: string): string => {
   if (stage === 'queued') return t('ragEval.stage.queued');
   if (stage === 'started') return t('ragEval.stage.started');
   if (stage === 'dataset_generation') return t('ragEval.stage.datasetGeneration');
-  if (stage === 'retrieval_checks') return t('ragEval.stage.retrievalChecks');
+  if (stage === 'retrieval_checks' || stage === 'fragment_review_streaming') return t('ragEval.stage.retrievalChecks');
   if (stage === 'answer_generation') return t('ragEval.stage.answerGeneration');
   if (stage === 'running') return t('ragEval.stage.running');
   if (stage === 'completed' || stage === 'done') return t('ragEval.stage.completed');
@@ -129,7 +129,7 @@ const statusLabel = (status: string): string => {
 const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
   const rawMessage = typeof progress.message === 'string' ? progress.message : '';
   if (stage === 'dataset_generation') return t('ragEval.stageDescription.datasetGeneration');
-  if (stage === 'retrieval_checks') return t('ragEval.stageDescription.retrievalChecks');
+  if (stage === 'retrieval_checks' || stage === 'fragment_review_streaming') return t('ragEval.stageDescription.retrievalChecks');
   if (stage === 'answer_generation') return t('ragEval.stageDescription.answerGeneration');
   if (stage === 'paused') return t('ragEval.stageDescription.paused');
   if (stage === 'cancelled') return t('ragEval.stageDescription.cancelled');
@@ -990,7 +990,11 @@ const JobProgressCard: React.FC<{
   const progressStage = String(mergedProgress.stage || '');
   const stage = terminal ? effectiveStatus : progressStage || effectiveStatus;
   const entriesTotal = asNumber(mergedProgress.entries_total || mergedProgress.source_entry_count || mergedProgress.source_chunk_count);
-  const entriesProcessed = asNumber(mergedProgress.entries_processed);
+  const entriesReady = asNumber(mergedProgress.entries_ready_for_review || mergedProgress.fragments_ready_for_review || mergedProgress.entries_processed);
+  const entriesQueued = asNumber(mergedProgress.entries_queued);
+  const entriesGenerating = asNumber(mergedProgress.entries_generating);
+  const entriesChecking = asNumber(mergedProgress.entries_checking);
+  const entriesFailed = asNumber(mergedProgress.entries_failed);
   const activeGenerationWorkers = asNumber(mergedProgress.active_generation_workers);
   const activeRetrievalWorkers = asNumber(mergedProgress.active_retrieval_workers);
   const generatedQuestions = asNumber(mergedProgress.generated_questions);
@@ -1004,10 +1008,7 @@ const JobProgressCard: React.FC<{
   const fallbackUsedCount = asNumber(mergedProgress.fallback_used_count);
   const questionModel = typeof mergedProgress.question_model === 'string' ? mergedProgress.question_model : '';
   const lastUpdateSecondsAgo = asNumber(mergedProgress.last_update_seconds_ago);
-  const processedBatches = asNumber(mergedProgress.processed_batches);
-  const totalBatches = asNumber(mergedProgress.total_batches);
   const sourceChunkCount = asNumber(mergedProgress.source_chunk_count);
-  const skippedBatches = asNumber(mergedProgress.skipped_batches);
   const jsonParseFailures = asNumber(mergedProgress.json_parse_failures);
   const providerFailures = asNumber(mergedProgress.provider_failures);
   const retryCount = asNumber(mergedProgress.retry_count);
@@ -1088,8 +1089,11 @@ const JobProgressCard: React.FC<{
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatPill label="Фрагменты: готово / всего" value={entriesTotal ? `${entriesProcessed}/${entriesTotal}` : entriesProcessed || '—'} />
-        <StatPill label="Сейчас обрабатывается фрагментов" value={activeGenerationWorkers} />
+        <StatPill label="Фрагменты: готовы к ревью / всего" value={entriesTotal ? `${entriesReady}/${entriesTotal}` : entriesReady || '—'} />
+        <StatPill label="Фрагменты в очереди" value={entriesQueued} />
+        <StatPill label="Генерируем фрагментов" value={entriesGenerating || activeGenerationWorkers} />
+        <StatPill label="Проверяем поиск по фрагментам" value={entriesChecking} />
+        <StatPill label="Фрагменты с ошибкой" value={entriesFailed} />
         <StatPill label="Вопросы созданы" value={generatedQuestions} />
         <StatPill label="Вопросы проверены" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
         <StatPill label="Вопросы в очереди" value={queuedQuestions} />
@@ -1102,12 +1106,10 @@ const JobProgressCard: React.FC<{
         <StatPill label="Модель вопросов" value={questionModel || '—'} />
         <StatPill label="Fallback использован" value={`${fallbackUsedCount} раз`} />
         <StatPill label={t('ragEval.stats.elapsed')} value={startedAt === null ? '—' : formatDurationMs(elapsedMs)} />
-        <StatPill label="Техн: группы" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
         <StatPill label={t('ragEval.stats.jsonFailures')} value={jsonParseFailures} />
         <StatPill label={t('ragEval.stats.providerFailures')} value={providerFailures} />
         <StatPill label={t('ragEval.stats.retries')} value={retryCount} />
-        <StatPill label={t('ragEval.stats.skippedBatches')} value={skippedBatches} />
-        <StatPill label={t('ragEval.stats.fragments')} value={sourceChunkCount || '—'} />
+        <StatPill label={t('ragEval.stats.fragments')} value={sourceChunkCount || entriesTotal || '—'} />
         <StatPill label={t('ragEval.stats.attempts')} value={`${job.attempts}/${job.max_attempts}`} />
       </div>
 

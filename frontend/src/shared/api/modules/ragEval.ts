@@ -58,6 +58,12 @@ export interface RagEvalProgressPayload {
   percent?: number;
   entries_total?: number;
   entries_processed?: number;
+  entries_queued?: number;
+  entries_generating?: number;
+  entries_checking?: number;
+  entries_ready_for_review?: number;
+  entries_failed?: number;
+  fragments_ready_for_review?: number;
   active_generation_workers?: number;
   active_retrieval_workers?: number;
   generated_questions?: number;
