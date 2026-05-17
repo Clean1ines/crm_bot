@@ -804,12 +804,32 @@ const fragmentReviewStatusClass = (value: RagEvalReviewGroup['review_status']): 
   return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
 };
 
+const asReviewQuestions = (value: unknown): RagEvalReviewQuestion[] => (
+  Array.isArray(value)
+    ? value.filter((item): item is RagEvalReviewQuestion => Boolean(item) && typeof item === 'object')
+    : []
+);
+
+type RagEvalReviewRetrievedEntryItem = RagEvalReviewQuestion['retrieved_entries'][number];
+
+const asRetrievedEntries = (value: unknown): RagEvalReviewRetrievedEntryItem[] => (
+  Array.isArray(value)
+    ? value.filter((item): item is RagEvalReviewRetrievedEntryItem => Boolean(item) && typeof item === 'object')
+    : []
+);
+
 const FragmentReviewCard: React.FC<{
   group: RagEvalReviewGroup;
   onOpenQuestion: (question: RagEvalReviewQuestion, group: RagEvalReviewGroup) => void;
   onAcceptGroup: (group: RagEvalReviewGroup) => void;
-}> = ({ group, onOpenQuestion, onAcceptGroup }) => (
-  <article className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
+}> = ({ group, onOpenQuestion, onAcceptGroup }) => {
+  const existingQuestions = asStringList(group.existing_questions);
+  const proposedImprovements = asStringList(group.proposed_improvements);
+  const questions = asReviewQuestions(group.questions);
+  const firstQuestion = questions[0] ?? null;
+
+  return (
+    <article className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div>
         <h3 className="text-lg font-semibold text-[var(--text-primary)]">Фрагмент · {group.title}</h3>
@@ -833,25 +853,25 @@ const FragmentReviewCard: React.FC<{
       <div>
         <div className="text-sm font-semibold text-[var(--text-primary)]">Уже есть вопросы</div>
         <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-          {group.existing_questions.slice(0, 4).map((item) => <li key={item}>— {item}</li>)}
-          {!group.existing_questions.length && <li className="text-[var(--text-muted)]">Нет сохранённых вопросов.</li>}
+          {existingQuestions.slice(0, 4).map((item) => <li key={item}>— {item}</li>)}
+          {!existingQuestions.length && <li className="text-[var(--text-muted)]">Нет сохранённых вопросов.</li>}
         </ul>
       </div>
       <div>
         <div className="text-sm font-semibold text-[var(--text-primary)]">Предложение системы</div>
         <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-          {group.proposed_improvements.map((item) => <li key={item}>— {item}</li>)}
+          {proposedImprovements.map((item) => <li key={item}>— {item}</li>)}
         </ul>
       </div>
     </div>
     <div className="mt-4 space-y-2">
       <div className="text-sm font-semibold text-[var(--text-primary)]">Сгенерированные вопросы</div>
-      {group.questions.length === 0 && (
+      {questions.length === 0 && (
         <div className="rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-muted)]">
           Карточка появится здесь, когда вопросы фрагмента будут сгенерированы и проверены.
         </div>
       )}
-      {group.questions.slice(0, 8).map((question) => (
+      {questions.slice(0, 8).map((question) => (
         <button key={question.question_id} type="button" onClick={() => onOpenQuestion(question, group)} className="flex w-full items-center justify-between gap-3 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-left text-sm hover:bg-[var(--surface-elevated)]">
           <span className="min-w-0 truncate text-[var(--text-primary)]">{questionStatusIcon(question.retrieval_status)} {question.effective_question}</span>
           <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${questionStatusClass(question.retrieval_status)}`}>{question.retrieval_status_label}</span>
@@ -859,12 +879,13 @@ const FragmentReviewCard: React.FC<{
       ))}
     </div>
     <div className="mt-4 flex flex-wrap gap-2">
-      <button type="button" onClick={() => group.questions[0] && onOpenQuestion(group.questions[0], group)} className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Рассмотреть вопросы</button>
+      <button type="button" onClick={() => firstQuestion && onOpenQuestion(firstQuestion, group)} className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Рассмотреть вопросы</button>
       <button type="button" onClick={() => onAcceptGroup(group)} className="rounded-xl bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white">Принять хорошие</button>
       <button type="button" className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Пересобрать</button>
     </div>
   </article>
-);
+  );
+};
 
 const QuestionReviewDrawer: React.FC<{
   question: RagEvalReviewQuestion | null;
@@ -878,6 +899,9 @@ const QuestionReviewDrawer: React.FC<{
   const [editValue, setEditValue] = useState('');
   if (!question || !group) return null;
   const currentEditValue = editValue || question.effective_question;
+  const retrievedEntries = asRetrievedEntries(question.retrieved_entries);
+  const proposedImprovements = asStringList(question.proposed_improvements);
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
       <aside className="h-full w-full max-w-xl overflow-auto bg-[var(--surface-elevated)] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
@@ -901,8 +925,8 @@ const QuestionReviewDrawer: React.FC<{
           <section>
             <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что нашёл поиск</h4>
             <ol className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
-              {question.retrieved_entries.map((entry, index) => <li key={`${entry.id}-${index}`} className="rounded-xl bg-[var(--control-bg)] p-3">{index + 1}. {entry.title || entry.id}<p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{entry.content}</p></li>)}
-              {!question.retrieved_entries.length && <li className="rounded-xl bg-[var(--control-bg)] p-3">Поиск не вернул фрагменты.</li>}
+              {retrievedEntries.map((entry, index) => <li key={`${entry.id}-${index}`} className="rounded-xl bg-[var(--control-bg)] p-3">{index + 1}. {entry.title || entry.id}<p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{entry.content}</p></li>)}
+              {!retrievedEntries.length && <li className="rounded-xl bg-[var(--control-bg)] p-3">Поиск не вернул фрагменты.</li>}
             </ol>
           </section>
           <section>
@@ -912,7 +936,7 @@ const QuestionReviewDrawer: React.FC<{
           <section>
             <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что можно сделать</h4>
             <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-              {question.proposed_improvements.map((item) => <li key={item}>☑ {item}</li>)}
+              {proposedImprovements.map((item) => <li key={item}>☑ {item}</li>)}
               <li>☐ Отклонить как плохой вопрос</li>
             </ul>
           </section>
