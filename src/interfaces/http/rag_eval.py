@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 from typing import Annotated, Literal, TypedDict, cast
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from src.application.services.knowledge_edit_action_service import (
     KnowledgeEditActionExecutionResult,
@@ -60,6 +62,16 @@ def _rag_eval_mode_from_query(mode: str) -> RagEvalModeValue:
     if normalized == "answer_quality_eval":
         return "answer_quality_eval"
     return "retrieval_eval"
+
+
+class RagEvalQuestionReviewRequest(BaseModel):
+    status: Literal["accepted", "rejected"]
+    reason: str = Field(default="", max_length=1000)
+
+
+class RagEvalQuestionEditRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+
 
 
 class DocumentHealth(TypedDict):
@@ -199,6 +211,274 @@ async def _document_health(
         "status": str(row["status"]),
         "file_name": str(row["file_name"]),
         "entry_count": int(row["entry_count"] or 0),
+    }
+
+
+async def _review_project_id(payload: dict[str, object] | None) -> str:
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="RAG eval review not found",
+        )
+    project_id = str(payload.get("project_id") or "").strip()
+    if not project_id:
+        run = payload.get("run")
+        if isinstance(run, dict):
+            project_id = str(run.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="RAG eval review is missing project_id",
+        )
+    return project_id
+
+
+@router.get("/runs/{run_id}/review")
+async def get_rag_eval_run_review(
+    run_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    rag_eval_repo = RagEvalRepository(pool)
+    review = await rag_eval_repo.get_run_review(run_id=run_id)
+    project_id = await _review_project_id(review)
+
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    return {"ok": True, "review": review}
+
+
+@router.get("/documents/{document_id}/latest-review")
+async def get_latest_rag_eval_review(
+    document_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    resolved_document_id = await _resolve_document_id(pool, document_id)
+    health = await _document_health(pool, resolved_document_id)
+    project_id = health["project_id"]
+
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    rag_eval_repo = RagEvalRepository(pool)
+    review = await rag_eval_repo.get_latest_review(
+        project_id=project_id,
+        document_id=resolved_document_id,
+    )
+
+    return {"ok": True, "document": health, "review": review}
+
+
+async def _question_project_id(pool: asyncpg.Pool, question_id: str) -> str:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT project_id
+            FROM rag_eval_questions
+            WHERE id = $1
+            """,
+            question_id,
+        )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RAG eval question not found: {question_id}",
+        )
+    return str(row["project_id"])
+
+
+@router.post("/questions/{question_id}/review")
+async def review_rag_eval_question(
+    question_id: str,
+    request: RagEvalQuestionReviewRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    project_id = await _question_project_id(pool, question_id)
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    rag_eval_repo = RagEvalRepository(pool)
+    review = await rag_eval_repo.upsert_question_review(
+        question_id=question_id,
+        status=request.status,
+        reason=request.reason,
+        reviewed_by=current_user_id,
+    )
+    if review is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RAG eval question result not found: {question_id}",
+        )
+    return {"ok": True, "review": review}
+
+
+@router.patch("/questions/{question_id}")
+async def edit_rag_eval_question(
+    question_id: str,
+    request: RagEvalQuestionEditRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    project_id = await _question_project_id(pool, question_id)
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    rag_eval_repo = RagEvalRepository(pool)
+    review = await rag_eval_repo.edit_question_review(
+        question_id=question_id,
+        question=" ".join(request.question.split()),
+        reviewed_by=current_user_id,
+    )
+    if review is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"RAG eval question result not found: {question_id}",
+        )
+    return {"ok": True, "review": review}
+
+
+@router.post("/runs/{run_id}/apply-accepted")
+async def apply_accepted_rag_eval_questions(
+    run_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    pool: asyncpg.Pool = Depends(get_pool),
+    project_repo: ProjectRepository = Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+    queue_repo: QueueRepository = Depends(get_queue_repo),
+) -> dict[str, object]:
+    rag_eval_repo = RagEvalRepository(pool)
+    run = await rag_eval_repo.get_run_summary(run_id=run_id)
+    project_id = await _review_project_id(run)
+
+    await _require_project_rag_eval_access(
+        project_id=project_id,
+        current_user_id=current_user_id,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    accepted_reviews = await rag_eval_repo.load_accepted_question_reviews(run_id=run_id)
+    if not accepted_reviews:
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "applied_questions": 0,
+            "failed_questions": 0,
+            "queued_rerun_job_id": None,
+        }
+
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
+    )
+
+    knowledge_repo = KnowledgeRepository(pool)
+    applied_review_ids: list[str] = []
+    failures: list[dict[str, object]] = []
+
+    for index, review in enumerate(accepted_reviews):
+        review_id = str(review["review_id"])
+        result_id = str(review["result_id"])
+        question_id = str(review["question_id"])
+        document_id = str(review["document_id"])
+        target_entry_id = str(review["target_entry_id"])
+        question = str(review["question"]).strip()
+        action_id = f"rqapply_{review_id}_{uuid4().hex[:8]}"
+        try:
+            stored = await knowledge_repo.create_or_get_knowledge_edit_action(
+                action_id=action_id,
+                project_id=project_id,
+                document_id=document_id,
+                source_result_id=result_id,
+                source_run_id=run_id,
+                source_question_id=question_id,
+                action_index=1000 + index,
+                actor_user_id=current_user_id,
+                action_type="attach_question_to_entry",
+                target_entry_id=target_entry_id,
+                reason="Accepted from RAG Eval Review Console.",
+                payload={"question": question, "review_id": review_id},
+            )
+            stored_action_id = str(stored.get("id") or action_id)
+            if str(stored.get("status") or "") != "applied":
+                await knowledge_repo.attach_question_to_entry(
+                    action_id=stored_action_id,
+                    project_id=project_id,
+                    document_id=document_id,
+                    target_entry_id=target_entry_id,
+                    question=question,
+                    reason="Accepted from RAG Eval Review Console.",
+                    actor_user_id=current_user_id,
+                )
+                await knowledge_repo.rebuild_entry_embedding(
+                    action_id=stored_action_id,
+                    project_id=project_id,
+                    document_id=document_id,
+                    target_entry_id=target_entry_id,
+                )
+                await knowledge_repo.mark_knowledge_edit_action_applied(
+                    stored_action_id,
+                    result_payload={"question_id": question_id, "review_id": review_id},
+                )
+            applied_review_ids.append(review_id)
+        except Exception as exc:
+            failures.append({"review_id": review_id, "question_id": question_id, "error": str(exc)})
+
+    await rag_eval_repo.mark_question_reviews_applied(
+        review_ids=applied_review_ids,
+        reviewed_by=current_user_id,
+    )
+
+    queued_rerun_job_id = None
+    if applied_review_ids:
+        queued_rerun_job_id = await queue_repo.enqueue(
+            TASK_RUN_FULL_RAG_EVAL,
+            {
+                "project_id": project_id,
+                "document_id": str(run["document_id"]),
+                "requested_by": current_user_id,
+                "mode": "full_document",
+                "eval_mode": "retrieval_eval",
+                "retrieval_limit": 5,
+                "source": "rag_eval_review_console",
+                "source_run_id": run_id,
+            },
+            max_attempts=20,
+        )
+
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "applied_questions": len(applied_review_ids),
+        "failed_questions": len(failures),
+        "failures": failures,
+        "queued_rerun_job_id": queued_rerun_job_id,
     }
 
 
