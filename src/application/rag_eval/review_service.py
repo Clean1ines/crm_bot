@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
-from uuid import uuid4
 
 from src.application.rag_eval.failure_classification import KnowledgeEditAction
 from src.application.rag_eval.review_schemas import RagEvalApplyAcceptedSummary
@@ -209,7 +208,11 @@ class RagEvalReviewService:
                 "queued_rerun_job_id": None,
             }
 
+        # Risk: accepted-question application is still orchestrated synchronously
+        # here; deterministic action ids and existing-action checks keep repeated
+        # apply calls from duplicating production questions/actions.
         applied_review_ids: list[str] = []
+        reviews_to_mark_applied: list[str] = []
         failures: list[JsonObject] = []
 
         for index, review in enumerate(accepted_reviews):
@@ -224,7 +227,7 @@ class RagEvalReviewService:
                 "target_entry_id",
             )
             question = _required_text(review.get("question"), "question")
-            action_id = f"rqapply_{_safe_id(review_id)}_{uuid4().hex[:8]}"
+            action_id = f"rqapply_{_safe_id(review_id)}"
 
             try:
                 stored = await self.knowledge_repo.create_or_get_knowledge_edit_action(
@@ -242,30 +245,34 @@ class RagEvalReviewService:
                     payload={"question": question, "review_id": review_id},
                 )
                 stored_action_id = _required_text(stored.get("id"), "action_id")
-                if str(stored.get("status") or "") != "applied":
-                    await self.knowledge_repo.attach_question_to_entry(
-                        action_id=stored_action_id,
-                        project_id=project_id,
-                        document_id=target_document_id,
-                        target_entry_id=target_entry_id,
-                        question=question,
-                        reason="Accepted from RAG Eval Review Console.",
-                        actor_user_id=actor_user_id,
-                    )
-                    await self.knowledge_repo.rebuild_entry_embedding(
-                        action_id=stored_action_id,
-                        project_id=project_id,
-                        document_id=target_document_id,
-                        target_entry_id=target_entry_id,
-                    )
-                    await self.knowledge_repo.mark_knowledge_edit_action_applied(
-                        stored_action_id,
-                        result_payload={
-                            "question_id": question_id,
-                            "review_id": review_id,
-                        },
-                    )
+                if str(stored.get("status") or "") == "applied":
+                    reviews_to_mark_applied.append(review_id)
+                    continue
+
+                await self.knowledge_repo.attach_question_to_entry(
+                    action_id=stored_action_id,
+                    project_id=project_id,
+                    document_id=target_document_id,
+                    target_entry_id=target_entry_id,
+                    question=question,
+                    reason="Accepted from RAG Eval Review Console.",
+                    actor_user_id=actor_user_id,
+                )
+                await self.knowledge_repo.rebuild_entry_embedding(
+                    action_id=stored_action_id,
+                    project_id=project_id,
+                    document_id=target_document_id,
+                    target_entry_id=target_entry_id,
+                )
+                await self.knowledge_repo.mark_knowledge_edit_action_applied(
+                    stored_action_id,
+                    result_payload={
+                        "question_id": question_id,
+                        "review_id": review_id,
+                    },
+                )
                 applied_review_ids.append(review_id)
+                reviews_to_mark_applied.append(review_id)
             except Exception as exc:
                 failures.append(
                     {
@@ -276,7 +283,7 @@ class RagEvalReviewService:
                 )
 
         await self.review_repo.mark_question_reviews_applied(
-            review_ids=applied_review_ids,
+            review_ids=reviews_to_mark_applied,
             reviewed_by=actor_user_id,
         )
 
@@ -313,9 +320,13 @@ class RagEvalReviewService:
         projections = await self.review_repo.load_review_group_projections(
             run_id=run_id
         )
-        if projections:
+
+        if projections and not _run_is_completed(run):
+            reviews = await self.review_repo.load_question_reviews(run_id=run_id)
             return build_review_payload_from_projections(
-                run=run, projections=projections
+                run=run,
+                projections=projections,
+                reviews=reviews,
             )
 
         results = await self.review_repo.load_run_results(run_id=run_id)
@@ -324,6 +335,18 @@ class RagEvalReviewService:
             document_id=document_id,
         )
         reviews = await self.review_repo.load_question_reviews(run_id=run_id)
+
+        if projections and _projections_cover_completed_run(
+            projections=projections,
+            entries=entries,
+            results=results,
+        ):
+            return build_review_payload_from_projections(
+                run=run,
+                projections=projections,
+                reviews=reviews,
+            )
+
         return build_review_payload(
             run=run,
             results=results,
@@ -336,6 +359,7 @@ def build_review_payload_from_projections(
     *,
     run: JsonObject,
     projections: list[JsonObject],
+    reviews: dict[str, JsonObject] | None = None,
 ) -> dict[str, object]:
     groups: list[dict[str, object]] = []
     reliable = weak = confused = missing = improvements = checked = questions_total = 0
@@ -368,6 +392,7 @@ def build_review_payload_from_projections(
             }
         group["review_status"] = str(projection.get("status") or "queued")
         group["error"] = str(projection.get("error") or "")
+        _overlay_question_reviews(group=group, reviews=reviews or {})
         groups.append(group)
 
         reliable += _object_int(projection.get("reliable_count"))
@@ -463,6 +488,64 @@ def build_review_payload_from_projections(
             "projection": "rag_eval_review_groups",
         },
     }
+
+
+def _run_is_completed(run: Mapping[str, object]) -> bool:
+    return str(run.get("status") or "").strip().lower() in {
+        "completed",
+        "done",
+        "succeeded",
+        "success",
+    }
+
+
+def _projections_cover_completed_run(
+    *,
+    projections: list[JsonObject],
+    entries: list[RagEvalEvidenceEntry],
+    results: list[RagEvalResult],
+) -> bool:
+    terminal_group_count = sum(
+        1
+        for projection in projections
+        if str(projection.get("status") or "") in {"ready_for_review", "failed"}
+    )
+    entry_ids = {entry.id for entry in entries}
+    result_entry_ids = {
+        _expected_entry_id(result)
+        for result in results
+        if _expected_entry_id(result) != "unassigned"
+    }
+    expected_group_count = len(entry_ids or result_entry_ids)
+    checked_questions = sum(
+        _object_int(projection.get("checked_questions")) for projection in projections
+    )
+
+    if expected_group_count and terminal_group_count < expected_group_count:
+        return False
+    return checked_questions >= len(results)
+
+
+def _overlay_question_reviews(
+    *,
+    group: dict[str, object],
+    reviews: dict[str, JsonObject],
+) -> None:
+    questions = group.get("questions")
+    if not isinstance(questions, list):
+        return
+
+    for question in questions:
+        if not isinstance(question, dict):
+            continue
+        question_id = str(question.get("question_id") or "").strip()
+        review = reviews.get(question_id)
+        if review is None:
+            continue
+        question["review"] = review
+        edited_question = str(review.get("edited_question") or "").strip()
+        if edited_question:
+            question["effective_question"] = edited_question
 
 
 def build_review_payload(

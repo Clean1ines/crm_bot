@@ -39,29 +39,9 @@ CREATE INDEX IF NOT EXISTS idx_rag_eval_question_reviews_run_status
 CREATE INDEX IF NOT EXISTS idx_rag_eval_question_reviews_document
     ON rag_eval_question_reviews(project_id, document_id, updated_at DESC);
 
-CREATE TABLE IF NOT EXISTS rag_eval_report_snapshots (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL REFERENCES rag_eval_runs(id) ON DELETE CASCADE,
-    dataset_id TEXT NOT NULL REFERENCES rag_eval_datasets(id) ON DELETE CASCADE,
-    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    document_id UUID NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
-    score DOUBLE PRECISION NOT NULL DEFAULT 0,
-    readiness TEXT NOT NULL DEFAULT 'needs_review',
-    summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-    problem_map_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-
-    CONSTRAINT ck_rag_eval_report_snapshots_summary_object CHECK (jsonb_typeof(summary_json) = 'object'),
-    CONSTRAINT ck_rag_eval_report_snapshots_problem_map_object CHECK (jsonb_typeof(problem_map_json) = 'object')
-);
-
-CREATE INDEX IF NOT EXISTS idx_rag_eval_report_snapshots_document_created
-    ON rag_eval_report_snapshots(project_id, document_id, created_at DESC);
 
 COMMENT ON TABLE rag_eval_question_reviews IS
     'Human review lifecycle for generated RAG eval questions before production enrichment changes are applied.';
 
-COMMENT ON TABLE rag_eval_report_snapshots IS
-    'Optional structured RAG eval review snapshots for product UI/report history.';
 
 COMMIT;
