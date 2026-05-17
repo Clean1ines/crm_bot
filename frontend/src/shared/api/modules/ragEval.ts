@@ -186,6 +186,127 @@ export interface KnowledgeEditActionExecutionSummary {
   queued_rerun_job_ids: string[];
 }
 
+
+export type RagEvalQuestionReviewStatus = 'candidate' | 'accepted' | 'rejected' | 'edited' | 'applied';
+
+export interface RagEvalQuestionReviewState {
+  id?: string;
+  question_id?: string;
+  status: RagEvalQuestionReviewStatus;
+  original_question?: string;
+  edited_question?: string;
+  review_reason?: string;
+  reviewed_by?: string;
+  reviewed_at?: string | null;
+}
+
+export interface RagEvalReviewRetrievedEntry {
+  id: string;
+  title: string;
+  content: string;
+}
+
+export interface RagEvalReviewQuestion {
+  result_id: string;
+  question_id: string;
+  question: string;
+  effective_question: string;
+  question_type: string;
+  question_type_label: string;
+  retrieval_status: 'reliable' | 'weak' | 'confused' | 'missing';
+  retrieval_status_label: string;
+  expected_entry_ids: string[];
+  retrieved_entry_ids: string[];
+  retrieved_entries: RagEvalReviewRetrievedEntry[];
+  score: number;
+  top1_hit: boolean;
+  top3_hit: boolean;
+  top5_hit: boolean;
+  expected_entry_found: boolean;
+  wrong_entry_top1: boolean;
+  fallback_generated: boolean;
+  review: RagEvalQuestionReviewState;
+  why_it_matters: string;
+  proposed_improvements: string[];
+  diagnostics: Record<string, unknown>;
+}
+
+export interface RagEvalReviewGroup {
+  entry_id: string;
+  title: string;
+  content: string;
+  existing_questions: string[];
+  question_count: number;
+  problem_count: number;
+  improvement_count: number;
+  status: string;
+  issue_summary: string;
+  questions: RagEvalReviewQuestion[];
+  proposed_improvements: string[];
+}
+
+export interface RagEvalReviewSummary {
+  title: string;
+  score: number;
+  readiness: string;
+  fragments_total: number;
+  questions_total: number;
+  reliable_questions: number;
+  weak_questions: number;
+  confused_questions: number;
+  missing_questions: number;
+  problem_questions: number;
+  improvements_total: number;
+  good_fragments: number;
+  unstable_fragments: number;
+  bad_fragments: number;
+  human_summary: string;
+}
+
+export interface RagEvalProblemTypeSummary {
+  type: string;
+  label: string;
+  count: number;
+}
+
+export interface RagEvalReviewPayload {
+  run: Record<string, unknown>;
+  summary: RagEvalReviewSummary;
+  problem_map: {
+    most_problematic_fragments: RagEvalReviewGroup[];
+    best_fragments: RagEvalReviewGroup[];
+    problem_types: RagEvalProblemTypeSummary[];
+  };
+  groups: RagEvalReviewGroup[];
+  filters: Record<string, unknown>;
+  diagnostics: Record<string, unknown>;
+}
+
+export interface RagEvalLatestReviewResponse {
+  ok: boolean;
+  document: Record<string, unknown>;
+  review: RagEvalReviewPayload | null;
+}
+
+export interface RagEvalRunReviewResponse {
+  ok: boolean;
+  review: RagEvalReviewPayload | null;
+}
+
+export interface RagEvalQuestionReviewResponse {
+  ok: boolean;
+  review: RagEvalQuestionReviewState;
+}
+
+export interface RagEvalApplyAcceptedResponse {
+  ok: boolean;
+  run_id: string;
+  applied_questions: number;
+  failed_questions: number;
+  queued_rerun_job_id: string | null;
+  failures?: Array<Record<string, unknown>>;
+}
+
 interface RunDocumentEvalOptions {
   mode?: 'quick' | 'standard' | 'deep' | 'paranoid' | 'retrieval_eval' | 'answer_quality_eval';
 }
@@ -198,6 +319,57 @@ const unwrap = async <T>(promise: Promise<{ data: T }>): Promise<T> => {
 };
 
 export const ragEvalApi = {
+
+  async getLatestReview(documentId: string): Promise<RagEvalLatestReviewResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalLatestReviewResponse>(
+        `/api/rag-eval/documents/${encode(documentId)}/latest-review`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async getRunReview(runId: string): Promise<RagEvalRunReviewResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalRunReviewResponse>(
+        `/api/rag-eval/runs/${encode(runId)}/review`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async reviewQuestion(questionId: string, status: 'accepted' | 'rejected', reason = ''): Promise<RagEvalQuestionReviewResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalQuestionReviewResponse>(
+        `/api/rag-eval/questions/${encode(questionId)}/review`,
+        {
+          method: 'POST',
+          body: { status, reason },
+        },
+      ),
+    );
+  },
+
+  async editQuestion(questionId: string, question: string): Promise<RagEvalQuestionReviewResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalQuestionReviewResponse>(
+        `/api/rag-eval/questions/${encode(questionId)}`,
+        {
+          method: 'PATCH',
+          body: { question },
+        },
+      ),
+    );
+  },
+
+  async applyAcceptedQuestions(runId: string): Promise<RagEvalApplyAcceptedResponse> {
+    return unwrap(
+      authedJsonRequest<RagEvalApplyAcceptedResponse>(
+        `/api/rag-eval/runs/${encode(runId)}/apply-accepted`,
+        { method: 'POST' },
+      ),
+    );
+  },
   async getLatestReport(documentId: string): Promise<RagEvalLatestReportResponse> {
     return unwrap(
       authedJsonRequest<RagEvalLatestReportResponse>(

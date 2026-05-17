@@ -30,6 +30,9 @@ import {
   type RagEvalProgressPayload,
   type RagEvalProposedActionType,
   type RagEvalResultSummary,
+  type RagEvalReviewGroup,
+  type RagEvalReviewPayload,
+  type RagEvalReviewQuestion,
 } from '@shared/api/modules/ragEval';
 
 interface Document {
@@ -628,6 +631,302 @@ const RagEvalResultsPanel: React.FC<{
   </section>
 );
 
+type EvalReviewFilter = 'all' | 'problematic' | 'wrong_top1' | 'missing' | 'good_candidates' | 'fallback' | 'typo_short_vague';
+type EvalReviewSort = 'most_problematic' | 'most_questions' | 'worst_confusion' | 'best_candidates';
+
+const REVIEW_FILTERS: Array<{ id: EvalReviewFilter; label: string }> = [
+  { id: 'all', label: 'Все фрагменты' },
+  { id: 'problematic', label: 'Только проблемные' },
+  { id: 'wrong_top1', label: 'Только wrong top-1' },
+  { id: 'missing', label: 'Только не найденные' },
+  { id: 'good_candidates', label: 'Хорошие кандидаты' },
+  { id: 'fallback', label: 'Fallback-generated' },
+  { id: 'typo_short_vague', label: 'Typo / short / vague' },
+];
+
+const REVIEW_SORTS: Array<{ id: EvalReviewSort; label: string }> = [
+  { id: 'most_problematic', label: 'Сначала самые проблемные' },
+  { id: 'most_questions', label: 'Сначала больше вопросов' },
+  { id: 'worst_confusion', label: 'Сначала worst top-1 confusion' },
+  { id: 'best_candidates', label: 'Сначала хорошие кандидаты' },
+];
+
+const questionIsProblem = (question: RagEvalReviewQuestion): boolean => question.retrieval_status !== 'reliable';
+
+const groupMatchesFilter = (group: RagEvalReviewGroup, filter: EvalReviewFilter): boolean => {
+  if (filter === 'all') return true;
+  if (filter === 'problematic') return group.problem_count > 0;
+  if (filter === 'wrong_top1') return group.questions.some((question) => question.wrong_entry_top1);
+  if (filter === 'missing') return group.questions.some((question) => question.retrieval_status === 'missing');
+  if (filter === 'good_candidates') return group.questions.some((question) => questionIsProblem(question) && question.review.status !== 'rejected');
+  if (filter === 'fallback') return group.questions.some((question) => question.fallback_generated);
+  if (filter === 'typo_short_vague') return group.questions.some((question) => question.question_type === 'short_vague');
+  return true;
+};
+
+const sortReviewGroups = (groups: RagEvalReviewGroup[], sort: EvalReviewSort): RagEvalReviewGroup[] => {
+  const copy = [...groups];
+  copy.sort((left, right) => {
+    if (sort === 'most_questions') return right.question_count - left.question_count;
+    if (sort === 'worst_confusion') {
+      const rightConfused = right.questions.filter((question) => question.wrong_entry_top1).length;
+      const leftConfused = left.questions.filter((question) => question.wrong_entry_top1).length;
+      return rightConfused - leftConfused || right.problem_count - left.problem_count;
+    }
+    if (sort === 'best_candidates') return right.improvement_count - left.improvement_count || right.problem_count - left.problem_count;
+    return right.problem_count - left.problem_count || right.improvement_count - left.improvement_count;
+  });
+  return copy;
+};
+
+const questionStatusClass = (statusValue: RagEvalReviewQuestion['retrieval_status']): string => {
+  if (statusValue === 'reliable') return 'bg-emerald-500/10 text-emerald-600';
+  if (statusValue === 'weak') return 'bg-amber-500/10 text-amber-600';
+  return 'bg-red-500/10 text-red-600';
+};
+
+const questionStatusIcon = (statusValue: RagEvalReviewQuestion['retrieval_status']): string => {
+  if (statusValue === 'reliable') return '✅';
+  if (statusValue === 'weak') return '⚠️';
+  return '❌';
+};
+
+const DocumentEvalOverviewCard: React.FC<{ review: RagEvalReviewPayload; documentName: string; onShowProblems: () => void }> = ({ review, documentName, onShowProblems }) => {
+  const summary = review.summary;
+  return (
+    <section className="overflow-hidden rounded-3xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-7">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-medium text-[var(--accent-primary)]">Проверка завершена</p>
+          <h2 className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">Проверка поиска по документу</h2>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">{documentName}</p>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <span className="rounded-full bg-[var(--accent-primary)]/10 px-3 py-1 text-sm font-semibold text-[var(--accent-primary)]">Статус: {summary.readiness}</span>
+            <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">Готовность: {summary.score} / 100</span>
+          </div>
+          <p className="mt-4 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{summary.human_summary}</p>
+        </div>
+        <div className="rounded-2xl bg-[var(--control-bg)] p-4 text-center">
+          <div className="text-4xl font-semibold text-[var(--text-primary)]">{summary.score}</div>
+          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">качество поиска</div>
+        </div>
+      </div>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <StatPill label="Фрагментов" value={formatNumber(summary.fragments_total)} />
+        <StatPill label="Вопросов" value={formatNumber(summary.questions_total)} />
+        <StatPill label="Проблем поиска" value={formatNumber(summary.problem_questions)} />
+        <StatPill label="Найдено хорошо" value={formatNumber(summary.reliable_questions)} />
+        <StatPill label="Нестабильно" value={formatNumber(summary.weak_questions)} />
+        <StatPill label="Не найдено" value={formatNumber(summary.missing_questions)} />
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" onClick={onShowProblems} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white">Разобрать {formatNumber(summary.problem_questions)} проблем</button>
+        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">Показать хорошие вопросы для добавления</button>
+        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">Показать фрагменты, которые путаются</button>
+      </div>
+    </section>
+  );
+};
+
+const EvalProblemMap: React.FC<{ review: RagEvalReviewPayload }> = ({ review }) => (
+  <section className="grid gap-4 lg:grid-cols-3">
+    <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">Самые проблемные фрагменты</h3>
+      <div className="mt-3 space-y-3">
+        {review.problem_map.most_problematic_fragments.filter((group) => group.problem_count > 0).slice(0, 4).map((group) => (
+          <div key={group.entry_id} className="rounded-xl bg-[var(--control-bg)] p-3">
+            <div className="text-sm font-semibold text-[var(--text-primary)]">{group.title}</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">{formatNumber(group.question_count)} вопросов · {formatNumber(group.problem_count)} проблем</div>
+            <p className="mt-2 text-xs text-[var(--text-secondary)]">{group.issue_summary}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">Лучшие фрагменты</h3>
+      <div className="mt-3 space-y-3">
+        {review.problem_map.best_fragments.slice(0, 4).map((group) => (
+          <div key={group.entry_id} className="rounded-xl bg-emerald-500/5 p-3">
+            <div className="text-sm font-semibold text-[var(--text-primary)]">{group.title}</div>
+            <div className="mt-1 text-xs text-emerald-600">{formatNumber(group.question_count)}/{formatNumber(group.question_count)} вопросов найдены правильно</div>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">Типы проблем</h3>
+      <div className="mt-3 space-y-2">
+        {review.problem_map.problem_types.map((item) => (
+          <div key={item.type} className="flex items-center justify-between rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm">
+            <span className="text-[var(--text-secondary)]">{item.label}</span>
+            <span className="font-semibold text-[var(--text-primary)]">{formatNumber(item.count)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+const EvalFiltersBar: React.FC<{
+  filter: EvalReviewFilter;
+  sort: EvalReviewSort;
+  onFilterChange: (value: EvalReviewFilter) => void;
+  onSortChange: (value: EvalReviewSort) => void;
+}> = ({ filter, sort, onFilterChange, onSortChange }) => (
+  <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
+    <div className="flex flex-wrap gap-2">
+      {REVIEW_FILTERS.map((item) => (
+        <button key={item.id} type="button" onClick={() => onFilterChange(item.id)} className={`rounded-full px-3 py-1.5 text-sm font-medium ${filter === item.id ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-secondary)]'}`}>{item.label}</button>
+      ))}
+    </div>
+    <label className="mt-3 block max-w-sm text-sm text-[var(--text-secondary)]">
+      Сортировка
+      <select value={sort} onChange={(event) => onSortChange(event.target.value as EvalReviewSort)} className="mt-1 w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none">
+        {REVIEW_SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select>
+    </label>
+  </div>
+);
+
+const FragmentReviewCard: React.FC<{
+  group: RagEvalReviewGroup;
+  onOpenQuestion: (question: RagEvalReviewQuestion, group: RagEvalReviewGroup) => void;
+  onAcceptGroup: (group: RagEvalReviewGroup) => void;
+}> = ({ group, onOpenQuestion, onAcceptGroup }) => (
+  <article className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
+    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Фрагмент · {group.title}</h3>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">Статус поиска: {group.status}</p>
+      </div>
+      <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">{formatNumber(group.problem_count)} проблем</span>
+    </div>
+    <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4">
+      <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Ответ / знание</div>
+      <p className="mt-2 line-clamp-4 text-sm leading-6 text-[var(--text-secondary)]">{group.content || 'Текст фрагмента не найден в текущем поисковом представлении.'}</p>
+    </div>
+    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div>
+        <div className="text-sm font-semibold text-[var(--text-primary)]">Уже есть вопросы</div>
+        <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
+          {group.existing_questions.slice(0, 4).map((item) => <li key={item}>— {item}</li>)}
+          {!group.existing_questions.length && <li className="text-[var(--text-muted)]">Нет сохранённых вопросов.</li>}
+        </ul>
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-[var(--text-primary)]">Предложение системы</div>
+        <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
+          {group.proposed_improvements.map((item) => <li key={item}>— {item}</li>)}
+        </ul>
+      </div>
+    </div>
+    <div className="mt-4 space-y-2">
+      <div className="text-sm font-semibold text-[var(--text-primary)]">Сгенерированные вопросы</div>
+      {group.questions.slice(0, 8).map((question) => (
+        <button key={question.question_id} type="button" onClick={() => onOpenQuestion(question, group)} className="flex w-full items-center justify-between gap-3 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-left text-sm hover:bg-[var(--surface-elevated)]">
+          <span className="min-w-0 truncate text-[var(--text-primary)]">{questionStatusIcon(question.retrieval_status)} {question.effective_question}</span>
+          <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${questionStatusClass(question.retrieval_status)}`}>{question.retrieval_status_label}</span>
+        </button>
+      ))}
+    </div>
+    <div className="mt-4 flex flex-wrap gap-2">
+      <button type="button" onClick={() => group.questions[0] && onOpenQuestion(group.questions[0], group)} className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Рассмотреть вопросы</button>
+      <button type="button" onClick={() => onAcceptGroup(group)} className="rounded-xl bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white">Принять хорошие</button>
+      <button type="button" className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Пересобрать</button>
+    </div>
+  </article>
+);
+
+const QuestionReviewDrawer: React.FC<{
+  question: RagEvalReviewQuestion | null;
+  group: RagEvalReviewGroup | null;
+  onClose: () => void;
+  onAccept: (questionId: string) => void;
+  onReject: (questionId: string) => void;
+  onEdit: (questionId: string, value: string) => void;
+  mutating: boolean;
+}> = ({ question, group, onClose, onAccept, onReject, onEdit, mutating }) => {
+  const [editValue, setEditValue] = useState('');
+  if (!question || !group) return null;
+  const currentEditValue = editValue || question.effective_question;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={onClose}>
+      <aside className="h-full w-full max-w-xl overflow-auto bg-[var(--surface-elevated)] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-[var(--accent-primary)]">Вопрос-кандидат</p>
+            <h3 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">“{question.effective_question}”</h3>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-[var(--border-primary)] px-3 py-1 text-sm text-[var(--text-primary)]">Закрыть</button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-secondary)]">
+            <div>Тип: <span className="font-semibold text-[var(--text-primary)]">{question.question_type_label}</span></div>
+            <div className="mt-1">Статус: <span className="font-semibold text-[var(--text-primary)]">{question.retrieval_status_label}</span></div>
+            <div className="mt-1">Review state: <span className="font-semibold text-[var(--text-primary)]">{question.review.status}</span></div>
+          </div>
+          <section>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Ожидался фрагмент</h4>
+            <p className="mt-2 rounded-xl bg-[var(--control-bg)] p-3 text-sm leading-6 text-[var(--text-secondary)]">{group.content || group.title}</p>
+          </section>
+          <section>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что нашёл поиск</h4>
+            <ol className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
+              {question.retrieved_entries.map((entry, index) => <li key={`${entry.id}-${index}`} className="rounded-xl bg-[var(--control-bg)] p-3">{index + 1}. {entry.title || entry.id}<p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{entry.content}</p></li>)}
+              {!question.retrieved_entries.length && <li className="rounded-xl bg-[var(--control-bg)] p-3">Поиск не вернул фрагменты.</li>}
+            </ol>
+          </section>
+          <section>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Почему это проблема</h4>
+            <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{question.why_it_matters}</p>
+          </section>
+          <section>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что можно сделать</h4>
+            <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
+              {question.proposed_improvements.map((item) => <li key={item}>☑ {item}</li>)}
+              <li>☐ Отклонить как плохой вопрос</li>
+            </ul>
+          </section>
+          <section>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Редактировать формулировку</h4>
+            <textarea value={currentEditValue} onChange={(event) => setEditValue(event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-3 text-sm text-[var(--text-primary)] outline-none" />
+          </section>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={mutating} onClick={() => onAccept(question.question_id)} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Принять</button>
+            <button type="button" disabled={mutating} onClick={() => onEdit(question.question_id, currentEditValue)} className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] disabled:opacity-50">Сохранить редакцию</button>
+            <button type="button" disabled={mutating} onClick={() => onReject(question.question_id)} className="rounded-xl border border-red-500/30 px-4 py-2 text-sm font-semibold text-red-500 disabled:opacity-50">Отклонить</button>
+          </div>
+          <details className="rounded-xl border border-[var(--border-primary)] p-3">
+            <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">Диагностика</summary>
+            <div className="mt-3"><ReportJsonBlock value={question.diagnostics} /></div>
+          </details>
+        </div>
+      </aside>
+    </div>
+  );
+};
+
+const ApplyAcceptedQuestionsPanel: React.FC<{ acceptedCount: number; onApply: () => void; applying: boolean }> = ({ acceptedCount, onApply, applying }) => (
+  <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Apply / Improve Workflow</h3>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">Eval не улучшает базу сам: применяются только вопросы, которые человек принял.</p>
+      </div>
+      <button type="button" onClick={onApply} disabled={!acceptedCount || applying} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+        {applying ? 'Применяем...' : `Добавить к фрагментам (${formatNumber(acceptedCount)})`}
+      </button>
+    </div>
+  </section>
+);
+
+const TechnicalDiagnosticsDisclosure: React.FC<{ value: unknown }> = ({ value }) => (
+  <details className="rounded-2xl border border-[var(--border-primary)] bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
+    <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">Техническая диагностика</summary>
+    <div className="mt-3"><ReportJsonBlock value={value} /></div>
+  </details>
+);
+
 const JobProgressCard: React.FC<{
   job: RagEvalJob | null;
   progress: RagEvalProgressPayload | null;
@@ -799,6 +1098,10 @@ export const RagEvalPage: React.FC = () => {
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
   const [lastQueued, setLastQueued] = useState<RagEvalFullRunAcceptedResponse | null>(null);
   const [lastActionExecutionSummary, setLastActionExecutionSummary] = useState<KnowledgeEditActionExecutionSummary | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<EvalReviewFilter>('all');
+  const [reviewSort, setReviewSort] = useState<EvalReviewSort>('most_problematic');
+  const [selectedReviewQuestion, setSelectedReviewQuestion] = useState<RagEvalReviewQuestion | null>(null);
+  const [selectedReviewGroup, setSelectedReviewGroup] = useState<RagEvalReviewGroup | null>(null);
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -830,6 +1133,13 @@ export const RagEvalPage: React.FC = () => {
 
   const activeDocumentId = selectedDocumentId || processedDocuments[0]?.id || '';
   const activeDocument = processedDocuments.find((doc) => doc.id === activeDocumentId) || null;
+
+  const reviewQuery = useQuery({
+    queryKey: ['rag-eval-latest-review', activeDocumentId],
+    queryFn: async () => ragEvalApi.getLatestReview(activeDocumentId),
+    enabled: !!activeDocumentId,
+    retry: false,
+  });
 
   const statusQuery = useQuery({
     queryKey: ['rag-eval-status', activeDocumentId],
@@ -885,6 +1195,7 @@ export const RagEvalPage: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ['rag-eval-status', activeDocumentId] });
     await queryClient.invalidateQueries({ queryKey: ['rag-eval-jobs', activeDocumentId] });
     await queryClient.invalidateQueries({ queryKey: ['rag-eval-job-progress'] });
+    await queryClient.invalidateQueries({ queryKey: ['rag-eval-latest-review', activeDocumentId] });
   };
 
   const applyJobMutationResult = (job: RagEvalJob) => {
@@ -976,6 +1287,43 @@ export const RagEvalPage: React.FC = () => {
     },
   });
 
+  const reviewQuestionMutation = useMutation({
+    mutationFn: async ({ questionId, status: nextStatus }: { questionId: string; status: 'accepted' | 'rejected' }) => ragEvalApi.reviewQuestion(questionId, nextStatus),
+    onSuccess: async () => {
+      toast.success('Решение по вопросу сохранено');
+      setSelectedReviewQuestion(null);
+      setSelectedReviewGroup(null);
+      await invalidateEvalQueries();
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Не удалось сохранить решение по вопросу'));
+    },
+  });
+
+  const editQuestionMutation = useMutation({
+    mutationFn: async ({ questionId, question }: { questionId: string; question: string }) => ragEvalApi.editQuestion(questionId, question),
+    onSuccess: async () => {
+      toast.success('Формулировка сохранена');
+      setSelectedReviewQuestion(null);
+      setSelectedReviewGroup(null);
+      await invalidateEvalQueries();
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Не удалось отредактировать вопрос'));
+    },
+  });
+
+  const applyAcceptedMutation = useMutation({
+    mutationFn: async (runId: string) => ragEvalApi.applyAcceptedQuestions(runId),
+    onSuccess: async (result) => {
+      toast.success(`Применено вопросов: ${formatNumber(result.applied_questions)}`);
+      await invalidateEvalQueries();
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Не удалось применить принятые вопросы'));
+    },
+  });
+
   const latestReportPayload = statusQuery.data?.report ?? null;
   const latestReport = getRecord(latestReportPayload);
   const actionableResults = useMemo(() => getActionableResults(latestReport), [latestReport]);
@@ -990,6 +1338,19 @@ export const RagEvalPage: React.FC = () => {
       ? { percent: progressJob.percent, status: getJobStatus(progressJob) }
       : null
   );
+  const review = reviewQuery.data?.review ?? null;
+  const reviewGroups = useMemo(() => {
+    if (!review) return [];
+    return sortReviewGroups(
+      review.groups.filter((group) => groupMatchesFilter(group, reviewFilter)),
+      reviewSort,
+    );
+  }, [review, reviewFilter, reviewSort]);
+  const acceptedReviewCount = useMemo(() => (
+    review?.groups.reduce((total, group) => total + group.questions.filter((question) => question.review.status === 'accepted' || question.review.status === 'edited').length, 0) ?? 0
+  ), [review]);
+  const reviewRunId = String(review?.run.id || '');
+
   const isControlMutating = pauseMutation.isPending || resumeMutation.isPending || cancelMutation.isPending;
   const executingResultId = executeActionsMutation.isPending
     ? executeActionsMutation.variables ?? null
@@ -1085,10 +1446,60 @@ export const RagEvalPage: React.FC = () => {
         }}
       />
 
-      <RagEvalResultsPanel
-        results={visibleResults}
-        loading={statusQuery.isLoading || Boolean(progressJob && !isJobTerminal(progressJob))}
-      />
+      {reviewQuery.isLoading && !review ? (
+        <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Загружаем review console...
+        </section>
+      ) : review ? (
+        <>
+          <DocumentEvalOverviewCard
+            review={review}
+            documentName={activeDocument?.file_name || String(review.run.document_id || '')}
+            onShowProblems={() => setReviewFilter('problematic')}
+          />
+          <EvalProblemMap review={review} />
+          <EvalFiltersBar
+            filter={reviewFilter}
+            sort={reviewSort}
+            onFilterChange={setReviewFilter}
+            onSortChange={setReviewSort}
+          />
+          <div className="space-y-4">
+            {reviewGroups.map((group) => (
+              <FragmentReviewCard
+                key={group.entry_id}
+                group={group}
+                onOpenQuestion={(question, nextGroup) => {
+                  setSelectedReviewQuestion(question);
+                  setSelectedReviewGroup(nextGroup);
+                }}
+                onAcceptGroup={(nextGroup) => {
+                  const candidate = nextGroup.questions.find((question) => questionIsProblem(question) && question.review.status !== 'accepted');
+                  if (candidate) reviewQuestionMutation.mutate({ questionId: candidate.question_id, status: 'accepted' });
+                }}
+              />
+            ))}
+            {!reviewGroups.length && (
+              <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
+                По выбранному фильтру фрагментов нет.
+              </section>
+            )}
+          </div>
+          <ApplyAcceptedQuestionsPanel
+            acceptedCount={acceptedReviewCount}
+            applying={applyAcceptedMutation.isPending}
+            onApply={() => {
+              if (reviewRunId) applyAcceptedMutation.mutate(reviewRunId);
+            }}
+          />
+          <TechnicalDiagnosticsDisclosure value={review.diagnostics} />
+        </>
+      ) : (
+        <RagEvalResultsPanel
+          results={visibleResults}
+          loading={statusQuery.isLoading || Boolean(progressJob && !isJobTerminal(progressJob))}
+        />
+      )}
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
         <div className="mb-4 flex items-start gap-3">
@@ -1156,6 +1567,21 @@ export const RagEvalPage: React.FC = () => {
         executionSummary={lastActionExecutionSummary}
         executingResultId={executingResultId}
         onExecute={(resultId) => executeActionsMutation.mutate(resultId)}
+      />
+
+
+      <QuestionReviewDrawer
+        key={selectedReviewQuestion?.question_id || 'closed'}
+        question={selectedReviewQuestion}
+        group={selectedReviewGroup}
+        mutating={reviewQuestionMutation.isPending || editQuestionMutation.isPending}
+        onClose={() => {
+          setSelectedReviewQuestion(null);
+          setSelectedReviewGroup(null);
+        }}
+        onAccept={(questionId) => reviewQuestionMutation.mutate({ questionId, status: 'accepted' })}
+        onReject={(questionId) => reviewQuestionMutation.mutate({ questionId, status: 'rejected' })}
+        onEdit={(questionId, value) => editQuestionMutation.mutate({ questionId, question: value })}
       />
     </div>
   );

@@ -268,6 +268,77 @@ def _actionable_result_summary(result: RagEvalResult) -> JsonObject:
     }
 
 
+def _first_text(items: object) -> str:
+    for item in _json_list(items):
+        text = str(item).strip()
+        if text:
+            return text
+    return ""
+
+
+def _review_status_from_result(result: RagEvalResult) -> str:
+    if result.top1_hit:
+        return "reliable"
+    if result.expected_entry_found:
+        return "weak"
+    if result.wrong_entry_top1:
+        return "confused"
+    return "missing"
+
+
+def _review_status_label(status: str) -> str:
+    labels = {
+        "reliable": "Надёжно находится",
+        "weak": "Находится, но слабо",
+        "confused": "Путается с другим фрагментом",
+        "missing": "Не находится",
+    }
+    return labels.get(status, "Нужна проверка")
+
+
+def _readiness_label(score: float) -> str:
+    if score >= 90:
+        return "Готово к использованию"
+    if score >= 80:
+        return "Почти готово"
+    if score >= 60:
+        return "Требует улучшений"
+    return "Проблемная база"
+
+
+def _question_type_label(value: str) -> str:
+    labels = {
+        "direct": "прямой вопрос",
+        "paraphrase": "переформулировка",
+        "short_vague": "короткий/vague вопрос",
+        "similar_wrong": "похожий фрагмент",
+        "unknown": "неизвестный вопрос",
+        "risky": "рискованный вопрос",
+        "contradiction": "противоречие",
+    }
+    return labels.get(value, value or "вопрос")
+
+
+def _human_action_summary(result: RagEvalResult) -> list[str]:
+    if not result.proposed_actions:
+        if result.top1_hit:
+            return ["Изменения не требуются."]
+        return ["Проверить формулировку и решить, стоит ли добавить её к фрагменту."]
+
+    summaries: list[str] = []
+    for action in result.proposed_actions:
+        if action.action_type.value == "attach_question_to_entry":
+            question = str(action.payload.get("question") or result.question.question).strip()
+            summaries.append(f'Добавить вопрос «{question}» к ожидаемому фрагменту.')
+        elif action.action_type.value == "rebuild_embedding":
+            summaries.append("Пересобрать embedding этого фрагмента после изменения вопросов.")
+        elif action.action_type.value == "rerun_eval":
+            summaries.append("Запустить повторную проверку, чтобы подтвердить улучшение.")
+        elif action.action_type.value == "create_entry_from_failure":
+            summaries.append("Разобрать вручную: возможно, нужна новая запись базы знаний.")
+    return summaries
+
+
 class RagEvalRepository:
     """Postgres adapter for automatic RAG quality evaluation artifacts.
 
@@ -987,6 +1058,564 @@ class RagEvalRepository:
                 if _is_actionable_result(result)
             ],
         }
+
+    async def get_run_review(self, *, run_id: str) -> JsonObject | None:
+        run = await self.get_run_summary(run_id=run_id)
+        if run is None:
+            return None
+        results = await self.load_run_results(run_id=run_id)
+        entries = await self.load_document_entries(
+            project_id=str(run["project_id"]),
+            document_id=str(run["document_id"]),
+        )
+        reviews = await self.load_question_reviews(run_id=run_id)
+        return self._build_review_payload(run=run, results=results, entries=entries, reviews=reviews)
+
+    async def get_latest_review(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> JsonObject | None:
+        run = await self.get_latest_run_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if run is None:
+            return None
+        run_id = str(run["id"])
+        results = await self.load_run_results(run_id=run_id)
+        entries = await self.load_document_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        reviews = await self.load_question_reviews(run_id=run_id)
+        return self._build_review_payload(run=run, results=results, entries=entries, reviews=reviews)
+
+    async def get_run_summary(self, *, run_id: str) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    r.id,
+                    r.dataset_id,
+                    r.project_id,
+                    r.document_id,
+                    r.status,
+                    r.started_at,
+                    r.finished_at,
+                    r.retriever_version,
+                    r.reranker_version,
+                    r.generator_model,
+                    COUNT(rr.id)::int AS result_count
+                FROM rag_eval_runs AS r
+                LEFT JOIN rag_eval_results AS rr ON rr.run_id = r.id
+                WHERE r.id = $1
+                GROUP BY
+                    r.id,
+                    r.dataset_id,
+                    r.project_id,
+                    r.document_id,
+                    r.status,
+                    r.started_at,
+                    r.finished_at,
+                    r.retriever_version,
+                    r.reranker_version,
+                    r.generator_model
+                """,
+                run_id,
+            )
+
+        if row is None:
+            return None
+        return self._run_summary_from_row(row)
+
+    async def load_question_reviews(self, *, run_id: str) -> dict[str, JsonObject]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                FROM rag_eval_question_reviews
+                WHERE run_id = $1
+                """,
+                run_id,
+            )
+        return {str(row["question_id"]): self._question_review_from_row(row) for row in rows}
+
+    async def upsert_question_review(
+        self,
+        *,
+        question_id: str,
+        status: str,
+        reason: str,
+        reviewed_by: str,
+    ) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                WITH source AS (
+                    SELECT
+                        q.id AS question_id,
+                        rr.run_id,
+                        q.dataset_id,
+                        q.project_id,
+                        q.document_id,
+                        COALESCE(q.metadata->>'source_chunk_id', q.expected_entry_ids->>0) AS source_chunk_id,
+                        q.question AS original_question
+                    FROM rag_eval_questions AS q
+                    JOIN rag_eval_results AS rr ON rr.question_id = q.id
+                    WHERE q.id = $1
+                    ORDER BY rr.created_at DESC
+                    LIMIT 1
+                )
+                INSERT INTO rag_eval_question_reviews (
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at
+                )
+                SELECT
+                    'rqrev_' || replace(source.question_id, '-', '_'),
+                    source.question_id,
+                    source.run_id,
+                    source.dataset_id,
+                    source.project_id,
+                    source.document_id,
+                    source.source_chunk_id,
+                    $2,
+                    source.original_question,
+                    $3,
+                    $4,
+                    now()
+                FROM source
+                ON CONFLICT (question_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    review_reason = EXCLUDED.review_reason,
+                    reviewed_by = EXCLUDED.reviewed_by,
+                    reviewed_at = EXCLUDED.reviewed_at,
+                    updated_at = now()
+                RETURNING
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                """,
+                question_id,
+                status,
+                reason,
+                reviewed_by,
+            )
+        return self._question_review_from_row(row) if row is not None else None
+
+    async def edit_question_review(
+        self,
+        *,
+        question_id: str,
+        question: str,
+        reviewed_by: str,
+    ) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                WITH source AS (
+                    SELECT
+                        q.id AS question_id,
+                        rr.run_id,
+                        q.dataset_id,
+                        q.project_id,
+                        q.document_id,
+                        COALESCE(q.metadata->>'source_chunk_id', q.expected_entry_ids->>0) AS source_chunk_id,
+                        q.question AS original_question
+                    FROM rag_eval_questions AS q
+                    JOIN rag_eval_results AS rr ON rr.question_id = q.id
+                    WHERE q.id = $1
+                    ORDER BY rr.created_at DESC
+                    LIMIT 1
+                )
+                INSERT INTO rag_eval_question_reviews (
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    reviewed_by,
+                    reviewed_at
+                )
+                SELECT
+                    'rqrev_' || replace(source.question_id, '-', '_'),
+                    source.question_id,
+                    source.run_id,
+                    source.dataset_id,
+                    source.project_id,
+                    source.document_id,
+                    source.source_chunk_id,
+                    'edited',
+                    source.original_question,
+                    $2,
+                    $3,
+                    now()
+                FROM source
+                ON CONFLICT (question_id) DO UPDATE SET
+                    status = 'edited',
+                    edited_question = EXCLUDED.edited_question,
+                    reviewed_by = EXCLUDED.reviewed_by,
+                    reviewed_at = EXCLUDED.reviewed_at,
+                    updated_at = now()
+                RETURNING
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                """,
+                question_id,
+                question,
+                reviewed_by,
+            )
+        return self._question_review_from_row(row) if row is not None else None
+
+    async def load_accepted_question_reviews(self, *, run_id: str) -> list[JsonObject]:
+        reviews = await self.load_question_reviews(run_id=run_id)
+        results = await self.load_run_results(run_id=run_id)
+        accepted: list[JsonObject] = []
+        for result in results:
+            review = reviews.get(result.question_id)
+            if review is None or review.get("status") not in {"accepted", "edited"}:
+                continue
+            target_entry_id = result.question.expected_entry_ids[0] if result.question.expected_entry_ids else ""
+            if not target_entry_id:
+                continue
+            edited = str(review.get("edited_question") or "").strip()
+            accepted.append(
+                {
+                    "review_id": str(review["id"]),
+                    "question_id": result.question_id,
+                    "result_id": result.id,
+                    "run_id": result.run_id,
+                    "dataset_id": result.question.dataset_id,
+                    "project_id": result.question.project_id,
+                    "document_id": result.question.document_id,
+                    "target_entry_id": target_entry_id,
+                    "question": edited or result.question.question,
+                    "status": str(review["status"]),
+                }
+            )
+        return accepted
+
+    async def mark_question_reviews_applied(self, *, review_ids: list[str], reviewed_by: str) -> None:
+        if not review_ids:
+            return
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE rag_eval_question_reviews
+                SET status = 'applied',
+                    reviewed_by = $2,
+                    reviewed_at = now(),
+                    updated_at = now()
+                WHERE id = ANY($1::text[])
+                """,
+                review_ids,
+                reviewed_by,
+            )
+
+    def _run_summary_from_row(self, row: Mapping[str, object]) -> JsonObject:
+        started_at = row["started_at"]
+        finished_at = row["finished_at"]
+        return {
+            "id": str(row["id"]),
+            "dataset_id": str(row["dataset_id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]),
+            "status": str(row["status"]),
+            "started_at": started_at.isoformat() if hasattr(started_at, "isoformat") else str(started_at),
+            "finished_at": finished_at.isoformat() if hasattr(finished_at, "isoformat") else (str(finished_at) if finished_at is not None else None),
+            "retriever_version": str(row["retriever_version"]),
+            "reranker_version": str(row["reranker_version"]),
+            "generator_model": str(row["generator_model"] or ""),
+            "result_count": _row_int_value(row, "result_count", 0),
+        }
+
+    def _question_review_from_row(self, row: Mapping[str, object]) -> JsonObject:
+        reviewed_at = row.get("reviewed_at")
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        return {
+            "id": str(row["id"]),
+            "question_id": str(row["question_id"]),
+            "run_id": str(row["run_id"]),
+            "dataset_id": str(row["dataset_id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]),
+            "source_chunk_id": str(row.get("source_chunk_id") or ""),
+            "status": str(row["status"]),
+            "original_question": str(row["original_question"] or ""),
+            "edited_question": str(row.get("edited_question") or ""),
+            "review_reason": str(row.get("review_reason") or ""),
+            "reviewed_by": str(row.get("reviewed_by") or ""),
+            "reviewed_at": reviewed_at.isoformat() if hasattr(reviewed_at, "isoformat") else None,
+            "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+            "updated_at": updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at),
+        }
+
+    def _build_review_payload(
+        self,
+        *,
+        run: JsonObject,
+        results: list[RagEvalResult],
+        entries: list[RagEvalEvidenceEntry],
+        reviews: dict[str, JsonObject],
+    ) -> JsonObject:
+        entry_map = {entry.id: entry for entry in entries}
+        groups_by_entry: dict[str, JsonObject] = {}
+        reliable = weak = confused = missing = improvements = 0
+        problem_type_counts: dict[str, int] = {}
+
+        for result in results:
+            expected_id = result.question.expected_entry_ids[0] if result.question.expected_entry_ids else "unassigned"
+            entry = entry_map.get(expected_id)
+            group = groups_by_entry.setdefault(expected_id, self._empty_review_group(expected_id, entry))
+            status_key = _review_status_from_result(result)
+            if status_key == "reliable":
+                reliable += 1
+            elif status_key == "weak":
+                weak += 1
+            elif status_key == "confused":
+                confused += 1
+            else:
+                missing += 1
+            if result.proposed_actions:
+                improvements += 1
+
+            q_type = result.question.question_type
+            if status_key != "reliable":
+                problem_type_counts[q_type] = problem_type_counts.get(q_type, 0) + 1
+
+            retrieved_ids = [str(item) for item in _json_list(result.judge_json.get("retrieved_entry_ids"))] or [entry.id for entry in result.retrieved_entries]
+            retrieved_entries = [
+                {
+                    "id": retrieved_id,
+                    "title": str(entry_map[retrieved_id].metadata.get("title") or "") if retrieved_id in entry_map else retrieved_id,
+                    "content": entry_map[retrieved_id].content if retrieved_id in entry_map else "",
+                }
+                for retrieved_id in retrieved_ids[:5]
+            ]
+            review = reviews.get(result.question_id)
+            question_payload: JsonObject = {
+                "result_id": result.id,
+                "question_id": result.question_id,
+                "question": result.question.question,
+                "effective_question": str(review.get("edited_question") or result.question.question) if review else result.question.question,
+                "question_type": result.question.question_type,
+                "question_type_label": _question_type_label(result.question.question_type),
+                "retrieval_status": status_key,
+                "retrieval_status_label": _review_status_label(status_key),
+                "expected_entry_ids": list(result.question.expected_entry_ids),
+                "retrieved_entry_ids": retrieved_ids,
+                "retrieved_entries": retrieved_entries,
+                "score": result.score,
+                "top1_hit": result.top1_hit,
+                "top3_hit": result.top3_hit,
+                "top5_hit": result.top5_hit,
+                "expected_entry_found": result.expected_entry_found,
+                "wrong_entry_top1": result.wrong_entry_top1,
+                "fallback_generated": result.question.source != "llm_generated",
+                "review": review or {"status": "candidate"},
+                "why_it_matters": self._why_question_matters(result, status_key),
+                "proposed_improvements": _human_action_summary(result),
+                "diagnostics": {
+                    "classification": _json_value(result.classification.to_json()) if result.classification is not None else None,
+                    "proposed_actions": [_actionable_action_summary(action) for action in result.proposed_actions],
+                    "latency_ms": result.latency_ms,
+                    "notes": result.notes,
+                },
+            }
+            questions = group["questions"]
+            if isinstance(questions, list):
+                questions.append(question_payload)
+            group["question_count"] = int(group["question_count"]) + 1
+            if status_key != "reliable":
+                group["problem_count"] = int(group["problem_count"]) + 1
+            if result.proposed_actions:
+                group["improvement_count"] = int(group["improvement_count"]) + 1
+
+        for group in groups_by_entry.values():
+            problem_count = int(group["problem_count"])
+            question_count = int(group["question_count"])
+            group["status"] = self._group_status(problem_count=problem_count, question_count=question_count)
+            group["issue_summary"] = self._group_issue_summary(group)
+            group["proposed_improvements"] = self._group_proposals(group)
+
+        groups = sorted(
+            groups_by_entry.values(),
+            key=lambda item: (int(item["problem_count"]), int(item["improvement_count"]), int(item["question_count"])),
+            reverse=True,
+        )
+        total = len(results)
+        problem_total = weak + confused + missing
+        score = round((reliable / total) * 100, 1) if total else 0.0
+        good_fragments = sum(1 for group in groups if int(group["problem_count"]) == 0 and int(group["question_count"]) > 0)
+        unstable_fragments = sum(1 for group in groups if 0 < int(group["problem_count"]) < int(group["question_count"]))
+        bad_fragments = sum(1 for group in groups if int(group["problem_count"]) >= int(group["question_count"]) and int(group["question_count"]) > 0)
+
+        return {
+            "run": run,
+            "summary": {
+                "title": "Проверка поиска по документу",
+                "score": score,
+                "readiness": _readiness_label(score),
+                "fragments_total": len(groups),
+                "questions_total": total,
+                "reliable_questions": reliable,
+                "weak_questions": weak,
+                "confused_questions": confused,
+                "missing_questions": missing,
+                "problem_questions": problem_total,
+                "improvements_total": improvements,
+                "good_fragments": good_fragments,
+                "unstable_fragments": unstable_fragments,
+                "bad_fragments": bad_fragments,
+                "human_summary": self._human_summary(score=score, problem_total=problem_total, groups=groups, problem_type_counts=problem_type_counts),
+            },
+            "problem_map": {
+                "most_problematic_fragments": groups[:5],
+                "best_fragments": [group for group in groups if int(group["problem_count"]) == 0][:5],
+                "problem_types": [
+                    {"type": key, "label": _question_type_label(key), "count": count}
+                    for key, count in sorted(problem_type_counts.items(), key=lambda item: item[1], reverse=True)
+                ],
+            },
+            "groups": groups,
+            "filters": {
+                "statuses": ["all", "problematic", "wrong_top1", "missing", "good_candidates", "fallback", "typo_short_vague"],
+                "sorts": ["most_problematic", "most_questions", "worst_confusion", "best_candidates"],
+            },
+            "diagnostics": {
+                "run_id": str(run["id"]),
+                "dataset_id": str(run["dataset_id"]),
+                "retriever_version": str(run.get("retriever_version") or ""),
+                "reranker_version": str(run.get("reranker_version") or ""),
+                "generator_model": str(run.get("generator_model") or ""),
+            },
+        }
+
+    def _empty_review_group(self, entry_id: str, entry: RagEvalEvidenceEntry | None) -> JsonObject:
+        metadata = entry.metadata if entry is not None else {}
+        return {
+            "entry_id": entry_id,
+            "title": str(metadata.get("title") or f"Фрагмент {entry_id}"),
+            "content": entry.content if entry is not None else "",
+            "existing_questions": [str(item) for item in _json_list(metadata.get("questions")) if str(item).strip()],
+            "question_count": 0,
+            "problem_count": 0,
+            "improvement_count": 0,
+            "status": "Нужна проверка",
+            "issue_summary": "",
+            "questions": [],
+            "proposed_improvements": [],
+        }
+
+    def _group_status(self, *, problem_count: int, question_count: int) -> str:
+        if question_count == 0 or problem_count == 0:
+            return "Надёжно находится"
+        if problem_count >= question_count:
+            return "Почти не находится"
+        return "Требует улучшений"
+
+    def _group_issue_summary(self, group: JsonObject) -> str:
+        problem_count = int(group["problem_count"])
+        question_count = int(group["question_count"])
+        if problem_count == 0:
+            return f"{question_count}/{question_count} вопросов нашли правильный фрагмент."
+        return f"{problem_count} из {question_count} вопросов показали проблему поиска."
+
+    def _group_proposals(self, group: JsonObject) -> list[str]:
+        questions = group.get("questions")
+        if not isinstance(questions, list):
+            return []
+        add_count = sum(1 for item in questions if isinstance(item, dict) and item.get("retrieval_status") != "reliable")
+        if add_count <= 0:
+            return ["Изменения не требуются."]
+        return [
+            f"Рассмотреть {add_count} вопросов-кандидатов для добавления к фрагменту.",
+            "После принятия вопросов пересобрать embedding фрагмента.",
+        ]
+
+    def _why_question_matters(self, result: RagEvalResult, status_key: str) -> str:
+        if status_key == "reliable":
+            return "Такой пользовательский вопрос уже уверенно ведёт к правильному фрагменту."
+        if status_key == "weak":
+            return "Правильный фрагмент найден, но не первым: пользователь может получить менее точный ответ."
+        if status_key == "confused":
+            return "Поиск первым выбрал другой фрагмент, поэтому похожие знания конкурируют между собой."
+        return "Правильный фрагмент не попал в результаты поиска по этой формулировке."
+
+    def _human_summary(
+        self,
+        *,
+        score: float,
+        problem_total: int,
+        groups: list[JsonObject],
+        problem_type_counts: dict[str, int],
+    ) -> str:
+        if problem_total == 0:
+            return "Поиск по документу работает стабильно: проверочные вопросы находят ожидаемые фрагменты."
+        leading_type = next(iter(problem_type_counts), "")
+        leading_label = _question_type_label(leading_type) if leading_type else "сложные формулировки"
+        problematic_titles = [str(group.get("title") or "фрагмент") for group in groups if int(group.get("problem_count") or 0) > 0][:2]
+        fragments_text = ", ".join(problematic_titles) if problematic_titles else "несколько фрагментов"
+        if score >= 80:
+            return f"Поиск в целом работает, но требует улучшений: чаще всего проседают {leading_label}, особенно в фрагментах {fragments_text}."
+        return f"База пока не готова к публикации: {problem_total} вопросов показали проблемы, основной риск — {leading_label}."
 
     def _entry_from_row(self, row: Mapping[str, object]) -> RagEvalEvidenceEntry:
         source_refs = _source_ref_views_from_payload(row.get("source_refs"))
