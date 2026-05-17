@@ -217,6 +217,27 @@ class FakeStore:
     async def save_report(self, *, report: RagQualityReport) -> None:
         self.saved_reports.append(report)
 
+    async def upsert_review_group(
+        self,
+        *,
+        run_id: str,
+        dataset_id: str,
+        project_id: str,
+        document_id: str,
+        source_chunk_id: str,
+        status: str,
+        questions_total: int = 0,
+        checked_questions: int = 0,
+        reliable_count: int = 0,
+        weak_count: int = 0,
+        confused_count: int = 0,
+        missing_count: int = 0,
+        improvement_count: int = 0,
+        review_payload: Mapping[str, object] | None = None,
+        error: str = "",
+    ) -> None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_streaming_retrieval_starts_before_all_entries_finish_generation() -> (
@@ -263,7 +284,7 @@ async def test_streaming_retrieval_starts_before_all_entries_finish_generation()
     assert len(store.saved_questions) == 2
     assert len(store.saved_results) == 2
     assert any(
-        payload.get("stage") == "streaming_retrieval_eval"
+        payload.get("stage") == "fragment_review_streaming"
         for payload in progress_payloads
     )
 
