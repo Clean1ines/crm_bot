@@ -328,7 +328,7 @@ class LlmRagEvalDatasetGenerator:
         json_parse_failures = 0
         provider_failures = 0
         retry_count = 0
-        last_error: ValueError | None = None
+        last_error: BaseException | None = None
 
         for attempt in range(1, self._max_batch_attempts + 1):
             if control_callback is not None:
@@ -366,6 +366,12 @@ class LlmRagEvalDatasetGenerator:
                     json_parse_failures += 1
                 else:
                     provider_failures += 1
+                if attempt < self._max_batch_attempts:
+                    retry_count += 1
+                    continue
+            except Exception as exc:
+                last_error = exc
+                provider_failures += 1
                 if attempt < self._max_batch_attempts:
                     retry_count += 1
                     continue
@@ -454,46 +460,11 @@ class LlmRagEvalDatasetGenerator:
             retry_count=retry_count,
         )
 
-    async def _complete_questions_json(
-        self,
-        *,
-        project_id: str,
-        document_id: str,
-        batch: list[RagEvalEvidenceEntry],
-        batch_index: int,
-        total_batches: int,
-    ) -> Mapping[str, object]:
-        try:
-            return await self._llm.complete_json(
-                system_prompt=RAG_EVAL_QUESTION_QUALITY_RULES
-                + "\n\n"
-                + self._system_prompt(),
-                user_prompt=self._user_prompt(
-                    project_id=project_id,
-                    document_id=document_id,
-                    chunks=batch,
-                    batch_index=batch_index,
-                    total_batches=total_batches,
-                ),
-                schema_name="rag_eval_questions_v2",
-            )
-        except ValueError as exc:
-            # Production LLMs can return truncated or malformed JSON.
-            # A single bad batch must not kill the whole full-document eval.
-            return {
-                "questions": [
-                    self._fallback_question_payload(chunk, error=exc)
-                    for chunk in batch
-                    if chunk.id
-                ],
-                "_fallback_reason": self._safe_error_text(exc),
-            }
-
     def _fallback_question_payload(
         self,
         chunk: RagEvalEvidenceEntry,
         *,
-        error: ValueError,
+        error: BaseException,
     ) -> dict[str, object]:
         expected_answer_summary = self._fallback_expected_answer_summary(chunk)
         source_chunk_ids = self._chunk_related_ids(chunk)
