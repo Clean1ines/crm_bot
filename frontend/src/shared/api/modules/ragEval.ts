@@ -240,6 +240,8 @@ export interface RagEvalReviewGroup {
   problem_count: number;
   improvement_count: number;
   status: string;
+  review_status?: 'queued' | 'generating_questions' | 'checking_retrieval' | 'ready_for_review' | 'failed';
+  error?: string;
   issue_summary: string;
   questions: RagEvalReviewQuestion[];
   proposed_improvements: string[];

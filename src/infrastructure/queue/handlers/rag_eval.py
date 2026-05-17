@@ -131,8 +131,26 @@ def _optional_int(value: object, *, minimum: int, maximum: int) -> int | None:
 RAG_EVAL_DATASET_CONCURRENCY = _coerce_int(
     os.getenv("RAG_EVAL_DATASET_CONCURRENCY"), default=2, minimum=1, maximum=8
 )
+RAG_EVAL_GENERATION_CONCURRENCY = _coerce_int(
+    os.getenv("RAG_EVAL_GENERATION_CONCURRENCY"),
+    default=RAG_EVAL_DATASET_CONCURRENCY,
+    minimum=1,
+    maximum=8,
+)
 RAG_EVAL_RETRIEVAL_CONCURRENCY = _coerce_int(
     os.getenv("RAG_EVAL_RETRIEVAL_CONCURRENCY"), default=4, minimum=1, maximum=16
+)
+RAG_EVAL_GLOBAL_RETRIEVAL_CONCURRENCY = _coerce_int(
+    os.getenv("RAG_EVAL_GLOBAL_RETRIEVAL_CONCURRENCY"),
+    default=RAG_EVAL_RETRIEVAL_CONCURRENCY,
+    minimum=1,
+    maximum=32,
+)
+RAG_EVAL_ENTRY_RETRIEVAL_CONCURRENCY = _coerce_int(
+    os.getenv("RAG_EVAL_ENTRY_RETRIEVAL_CONCURRENCY"),
+    default=8,
+    minimum=1,
+    maximum=32,
 )
 RAG_EVAL_DATASET_BATCH_ATTEMPTS = _coerce_int(
     os.getenv("RAG_EVAL_DATASET_BATCH_ATTEMPTS"), default=2, minimum=1, maximum=5
@@ -595,16 +613,23 @@ async def _run_full_document_rag_eval(
         max_tokens=question_max_tokens,
     )
     dataset_concurrency = _coerce_int(
-        payload.get("dataset_concurrency"),
-        default=RAG_EVAL_DATASET_CONCURRENCY,
+        payload.get("dataset_concurrency") or payload.get("generation_concurrency"),
+        default=RAG_EVAL_GENERATION_CONCURRENCY,
         minimum=1,
         maximum=8,
     )
     retrieval_concurrency = _coerce_int(
-        payload.get("retrieval_concurrency"),
-        default=RAG_EVAL_RETRIEVAL_CONCURRENCY,
+        payload.get("global_retrieval_concurrency")
+        or payload.get("retrieval_concurrency"),
+        default=RAG_EVAL_GLOBAL_RETRIEVAL_CONCURRENCY,
         minimum=1,
-        maximum=16,
+        maximum=32,
+    )
+    entry_retrieval_concurrency = _coerce_int(
+        payload.get("entry_retrieval_concurrency"),
+        default=RAG_EVAL_ENTRY_RETRIEVAL_CONCURRENCY,
+        minimum=1,
+        maximum=32,
     )
     dataset_batch_attempts = _coerce_int(
         payload.get("dataset_batch_attempts"),
@@ -659,6 +684,7 @@ async def _run_full_document_rag_eval(
         store=rag_eval_repo,
         report_sink=None,
         run_concurrency=retrieval_concurrency,
+        entry_retrieval_concurrency=entry_retrieval_concurrency,
     )
 
     source_entry_count = len(chunks)
@@ -689,6 +715,9 @@ async def _run_full_document_rag_eval(
         "total_batches": total_batches,
         "dataset_generation_concurrency": dataset_concurrency,
         "retrieval_concurrency": retrieval_concurrency,
+        "generation_concurrency": dataset_concurrency,
+        "entry_retrieval_concurrency": entry_retrieval_concurrency,
+        "global_retrieval_concurrency": retrieval_concurrency,
         "dataset_batch_attempts": dataset_batch_attempts,
         **_rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm),
         "updated_at": _utc_now_iso(),
@@ -738,9 +767,12 @@ async def _run_full_document_rag_eval(
         progress = {
             **base_progress,
             **dict(metrics),
-            "stage": "dataset_generation",
+            "stage": str(metrics.get("stage") or "dataset_generation"),
             "status": "running",
-            "message": "Generating RAG eval questions from document entries in parallel",
+            "message": str(
+                metrics.get("message")
+                or "Generating RAG eval questions from document entries in parallel"
+            ),
             "generated_questions": generated_questions,
             "target_questions": target_questions,
             "processed_batches": processed_batches,
@@ -771,7 +803,10 @@ async def _run_full_document_rag_eval(
         nonlocal current_control_progress
         processed_questions = _json_metric_int(metrics.get("processed_questions"))
         total_questions = _json_metric_int(metrics.get("total_questions"))
-        if str(metrics.get("stage") or "") == "streaming_retrieval_eval":
+        if str(metrics.get("stage") or "") in {
+            "streaming_retrieval_eval",
+            "fragment_review_streaming",
+        }:
             progress = {
                 **base_progress,
                 **dict(metrics),

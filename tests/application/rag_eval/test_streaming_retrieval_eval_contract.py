@@ -137,6 +137,30 @@ class StoreStub:
     async def save_dataset(self, *, dataset: RagEvalDataset) -> None:
         self.saved_datasets.append(dataset)
 
+    async def save_questions(self, *, questions: list[RagEvalQuestion]) -> None:
+        return None
+
+    async def upsert_review_group(
+        self,
+        *,
+        run_id: str,
+        dataset_id: str,
+        project_id: str,
+        document_id: str,
+        source_chunk_id: str,
+        status: str,
+        questions_total: int = 0,
+        checked_questions: int = 0,
+        reliable_count: int = 0,
+        weak_count: int = 0,
+        confused_count: int = 0,
+        missing_count: int = 0,
+        improvement_count: int = 0,
+        review_payload: Mapping[str, object] | None = None,
+        error: str = "",
+    ) -> None:
+        return None
+
     async def create_run(self, *, run: RagEvalRun) -> None:
         self.runs.append(run)
 

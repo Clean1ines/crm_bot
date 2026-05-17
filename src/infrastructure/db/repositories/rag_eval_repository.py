@@ -1321,6 +1321,156 @@ class RagEvalRepository:
             else str(updated_at),
         }
 
+    async def upsert_review_group(
+        self,
+        *,
+        run_id: str,
+        dataset_id: str,
+        project_id: str,
+        document_id: str,
+        source_chunk_id: str,
+        status: str,
+        questions_total: int = 0,
+        checked_questions: int = 0,
+        reliable_count: int = 0,
+        weak_count: int = 0,
+        confused_count: int = 0,
+        missing_count: int = 0,
+        improvement_count: int = 0,
+        review_payload: Mapping[str, object] | None = None,
+        error: str = "",
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO rag_eval_review_groups (
+                    id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    questions_total,
+                    checked_questions,
+                    reliable_count,
+                    weak_count,
+                    confused_count,
+                    missing_count,
+                    improvement_count,
+                    review_payload_json,
+                    error
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4::uuid,
+                    $5::uuid,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
+                    $14,
+                    $15::jsonb,
+                    $16
+                )
+                ON CONFLICT (run_id, source_chunk_id) DO UPDATE SET
+                    dataset_id = EXCLUDED.dataset_id,
+                    project_id = EXCLUDED.project_id,
+                    document_id = EXCLUDED.document_id,
+                    status = EXCLUDED.status,
+                    questions_total = EXCLUDED.questions_total,
+                    checked_questions = EXCLUDED.checked_questions,
+                    reliable_count = EXCLUDED.reliable_count,
+                    weak_count = EXCLUDED.weak_count,
+                    confused_count = EXCLUDED.confused_count,
+                    missing_count = EXCLUDED.missing_count,
+                    improvement_count = EXCLUDED.improvement_count,
+                    review_payload_json = EXCLUDED.review_payload_json,
+                    error = EXCLUDED.error,
+                    updated_at = now()
+                """,
+                f"rgrev_{run_id}_{source_chunk_id}"[:180],
+                run_id,
+                dataset_id,
+                project_id,
+                document_id,
+                source_chunk_id,
+                status,
+                questions_total,
+                checked_questions,
+                reliable_count,
+                weak_count,
+                confused_count,
+                missing_count,
+                improvement_count,
+                _jsonb(review_payload or {}),
+                error,
+            )
+
+    async def load_review_group_projections(self, *, run_id: str) -> list[JsonObject]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    questions_total,
+                    checked_questions,
+                    reliable_count,
+                    weak_count,
+                    confused_count,
+                    missing_count,
+                    improvement_count,
+                    review_payload_json,
+                    error,
+                    created_at,
+                    updated_at
+                FROM rag_eval_review_groups
+                WHERE run_id = $1
+                ORDER BY updated_at DESC, source_chunk_id ASC
+                """,
+                run_id,
+            )
+
+        projections: list[JsonObject] = []
+        for row in rows:
+            projections.append(
+                {
+                    "id": str(row["id"]),
+                    "run_id": str(row["run_id"]),
+                    "dataset_id": str(row["dataset_id"]),
+                    "project_id": str(row["project_id"]),
+                    "document_id": str(row["document_id"]),
+                    "source_chunk_id": str(row["source_chunk_id"]),
+                    "status": str(row["status"]),
+                    "questions_total": _row_int_value(row, "questions_total", 0),
+                    "checked_questions": _row_int_value(row, "checked_questions", 0),
+                    "reliable_count": _row_int_value(row, "reliable_count", 0),
+                    "weak_count": _row_int_value(row, "weak_count", 0),
+                    "confused_count": _row_int_value(row, "confused_count", 0),
+                    "missing_count": _row_int_value(row, "missing_count", 0),
+                    "improvement_count": _row_int_value(row, "improvement_count", 0),
+                    "review_payload": cast(
+                        JsonObject, _json_object(row.get("review_payload_json"))
+                    ),
+                    "error": str(row["error"] or ""),
+                    "created_at": str(row["created_at"]),
+                    "updated_at": str(row["updated_at"]),
+                }
+            )
+        return projections
+
     def _entry_from_row(self, row: Mapping[str, object]) -> RagEvalEvidenceEntry:
         source_refs = _source_ref_views_from_payload(row.get("source_refs"))
         source_excerpt = source_refs[0].quote if source_refs else ""
