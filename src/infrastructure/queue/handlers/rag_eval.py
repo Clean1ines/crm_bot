@@ -271,7 +271,7 @@ async def _read_rag_eval_job_state(
     )
 
 
-def _build_rag_eval_answer_progress(
+def _build_rag_eval_retrieval_progress(
     *,
     base_progress: Mapping[str, object],
     processed_questions: int,
@@ -283,11 +283,11 @@ def _build_rag_eval_answer_progress(
 
     return {
         **dict(base_progress),
-        "stage": "answer_generation",
+        "stage": "retrieval_checks",
         "status": "running",
         "message": "Running retrieval checks against project knowledge",
-        "generated_questions": base_progress.get("target_questions"),
-        "target_questions": base_progress.get("target_questions"),
+        "generated_questions": total_questions,
+        "target_questions": total_questions,
         "processed_questions": processed_questions,
         "total_questions": total_questions,
         "percent": percent,
@@ -411,6 +411,8 @@ async def _resume_existing_rag_eval_dataset(
     generator_model: str,
     control_callback,
     run_progress_callback,
+    run_metrics_callback=None,
+    retrieval_concurrency: int = 4,
 ) -> tuple[RagEvalRun, RagQualityReport] | None:
     dataset = await rag_eval_repo.get_latest_ready_dataset_with_questions(
         project_id=project_id,
@@ -446,40 +448,74 @@ async def _resume_existing_rag_eval_dataset(
     completed_question_ids = {result.question_id for result in run.results}
     total_questions = len(dataset.questions)
 
-    if run_progress_callback is not None:
-        await run_progress_callback(len(completed_question_ids), total_questions)
+    failed_retrieval_count = sum(1 for result in run.results if not result.is_passed)
+    semaphore = asyncio.Semaphore(max(1, min(16, retrieval_concurrency)))
 
-    try:
-        for index, question in enumerate(dataset.questions, start=1):
-            if question.id in completed_question_ids:
-                continue
+    async def emit_progress() -> None:
+        if run_progress_callback is not None:
+            await run_progress_callback(len(completed_question_ids), total_questions)
+        if run_metrics_callback is not None:
+            await run_metrics_callback(
+                {
+                    "processed_questions": len(completed_question_ids),
+                    "total_questions": total_questions,
+                    "failed_retrieval_count": failed_retrieval_count,
+                    "retrieval_concurrency": max(1, min(16, retrieval_concurrency)),
+                }
+            )
 
+    async def run_one(question_index: int):
+        question = dataset.questions[question_index]
+        if control_callback is not None:
+            await control_callback()
+
+        async with semaphore:
             if control_callback is not None:
                 await control_callback()
 
             try:
-                result = await runner.run_question(
+                return await runner.run_question(
                     run_id=run.id,
                     project_id=project_id,
                     question=question,
                 )
             except Exception as exc:
-                result = runner.failed_result(
+                return runner.failed_result(
                     run_id=run.id,
                     question=question,
                     error=exc,
                     stage="resumed_rag_eval_question",
                 )
 
-            run.results.append(result)
-            completed_question_ids.add(question.id)
+    await emit_progress()
+    pending_question_indexes = [
+        index
+        for index, question in enumerate(dataset.questions)
+        if question.id not in completed_question_ids
+    ]
 
-            await rag_eval_repo.save_result(result=result)
+    try:
+        tasks = [
+            asyncio.create_task(run_one(index)) for index in pending_question_indexes
+        ]
+        try:
+            for task in asyncio.as_completed(tasks):
+                if control_callback is not None:
+                    await control_callback()
 
-            if run_progress_callback is not None:
-                await run_progress_callback(
-                    len(completed_question_ids), total_questions
-                )
+                result = await task
+                run.results.append(result)
+                completed_question_ids.add(result.question_id)
+                if not result.is_passed:
+                    failed_retrieval_count += 1
+
+                await rag_eval_repo.save_result(result=result)
+                await emit_progress()
+        except Exception:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            raise
     except Exception:
         run.status = "failed"
         run.finished_at = datetime.now(UTC)
@@ -712,7 +748,7 @@ async def _run_full_document_rag_eval(
         nonlocal current_control_progress
         processed_questions = _json_metric_int(metrics.get("processed_questions"))
         total_questions = _json_metric_int(metrics.get("total_questions"))
-        progress = _build_rag_eval_answer_progress(
+        progress = _build_rag_eval_retrieval_progress(
             base_progress=base_progress,
             processed_questions=processed_questions,
             total_questions=total_questions,
@@ -761,7 +797,9 @@ async def _run_full_document_rag_eval(
             document_id=document_id,
             generator_model=RAG_EVAL_QUESTION_MODEL,
             control_callback=_control_callback,
-            run_progress_callback=_on_run_progress,
+            run_progress_callback=None,
+            run_metrics_callback=_on_run_metrics,
+            retrieval_concurrency=retrieval_concurrency,
         )
 
         if resumed is None:
@@ -770,7 +808,7 @@ async def _run_full_document_rag_eval(
                 document_id=document_id,
                 progress_callback=None,
                 control_callback=_control_callback,
-                run_progress_callback=_on_run_progress,
+                run_progress_callback=None,
                 dataset_metrics_callback=_on_dataset_metrics,
                 run_metrics_callback=_on_run_metrics,
             )
@@ -814,7 +852,7 @@ async def _run_full_document_rag_eval(
             "status": "completed",
             "message": "Full-document RAG eval completed",
             "generated_questions": len(run.results),
-            "target_questions": full_document_target,
+            "target_questions": len(run.results),
             "processed_questions": len(run.results),
             "total_questions": len(run.results),
             "processed_batches": total_batches,

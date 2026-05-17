@@ -103,7 +103,8 @@ const stageLabel = (stage: string): string => {
   if (stage === 'queued') return t('ragEval.stage.queued');
   if (stage === 'started') return t('ragEval.stage.started');
   if (stage === 'dataset_generation') return t('ragEval.stage.datasetGeneration');
-  if (stage === 'answer_generation' || stage === 'retrieval_checks') return t('ragEval.stage.answerGeneration');
+  if (stage === 'retrieval_checks') return t('ragEval.stage.retrievalChecks');
+  if (stage === 'answer_generation') return t('ragEval.stage.answerGeneration');
   if (stage === 'running') return t('ragEval.stage.running');
   if (stage === 'completed' || stage === 'done') return t('ragEval.stage.completed');
   if (stage === 'cancelled') return t('ragEval.stage.cancelled');
@@ -125,7 +126,8 @@ const statusLabel = (status: string): string => {
 const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
   const rawMessage = typeof progress.message === 'string' ? progress.message : '';
   if (stage === 'dataset_generation') return t('ragEval.stageDescription.datasetGeneration');
-  if (stage === 'answer_generation' || stage === 'retrieval_checks') return t('ragEval.stageDescription.answerGeneration');
+  if (stage === 'retrieval_checks') return t('ragEval.stageDescription.retrievalChecks');
+  if (stage === 'answer_generation') return t('ragEval.stageDescription.answerGeneration');
   if (stage === 'paused') return t('ragEval.stageDescription.paused');
   if (stage === 'cancelled') return t('ragEval.stageDescription.cancelled');
   if (stage === 'failed') return getErrorMessage(rawMessage, t('ragEval.stageDescription.failed'));
