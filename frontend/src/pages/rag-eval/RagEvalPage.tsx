@@ -661,17 +661,24 @@ const JobProgressCard: React.FC<{
   const percent = terminal ? 100 : clampPercent(percentSource);
   const progressStage = String(mergedProgress.stage || '');
   const stage = terminal ? effectiveStatus : progressStage || effectiveStatus;
+  const entriesTotal = asNumber(mergedProgress.entries_total || mergedProgress.source_entry_count || mergedProgress.source_chunk_count);
+  const entriesProcessed = asNumber(mergedProgress.entries_processed);
+  const activeGenerationWorkers = asNumber(mergedProgress.active_generation_workers);
+  const activeRetrievalWorkers = asNumber(mergedProgress.active_retrieval_workers);
   const generatedQuestions = asNumber(mergedProgress.generated_questions);
   const targetQuestions = asNumber(mergedProgress.target_questions);
   const processedQuestions = asNumber(mergedProgress.processed_questions);
-  const totalQuestions = asNumber(mergedProgress.total_questions || targetQuestions);
+  const queuedQuestions = asNumber(mergedProgress.queued_questions);
+  const totalQuestions = asNumber(mergedProgress.total_questions || targetQuestions || generatedQuestions);
+  const questionsPerMinute = asNumber(mergedProgress.questions_per_minute);
+  const entriesPerMinute = asNumber(mergedProgress.entries_per_minute);
+  const actionableImprovementsCount = asNumber(mergedProgress.actionable_improvements_count);
+  const fallbackUsedCount = asNumber(mergedProgress.fallback_used_count);
+  const questionModel = typeof mergedProgress.question_model === 'string' ? mergedProgress.question_model : '';
+  const lastUpdateSecondsAgo = asNumber(mergedProgress.last_update_seconds_ago);
   const processedBatches = asNumber(mergedProgress.processed_batches);
   const totalBatches = asNumber(mergedProgress.total_batches);
   const sourceChunkCount = asNumber(mergedProgress.source_chunk_count);
-  const tokenTotal = asNumber(mergedProgress.tokens_total);
-  const questionTokenTotal = asNumber(mergedProgress.question_tokens_total);
-  const judgeTokenTotal = asNumber(mergedProgress.judge_tokens_total);
-  const failedBatches = asNumber(mergedProgress.failed_batches);
   const skippedBatches = asNumber(mergedProgress.skipped_batches);
   const jsonParseFailures = asNumber(mergedProgress.json_parse_failures);
   const providerFailures = asNumber(mergedProgress.provider_failures);
@@ -753,19 +760,25 @@ const JobProgressCard: React.FC<{
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatPill label="Фрагменты: готово / всего" value={entriesTotal ? `${entriesProcessed}/${entriesTotal}` : entriesProcessed || '—'} />
+        <StatPill label="Сейчас обрабатывается фрагментов" value={activeGenerationWorkers} />
+        <StatPill label="Вопросы созданы" value={generatedQuestions} />
+        <StatPill label="Вопросы проверены" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
+        <StatPill label="Вопросы в очереди" value={queuedQuestions} />
+        <StatPill label="Активные проверки поиска" value={activeRetrievalWorkers} />
+        <StatPill label="Проблемы поиска" value={failedRetrievalCount} />
+        <StatPill label="Предложено улучшений" value={actionableImprovementsCount} />
+        <StatPill label="Скорость: вопросов/мин" value={questionsPerMinute || '—'} />
+        <StatPill label="Скорость: фрагментов/мин" value={entriesPerMinute || '—'} />
+        <StatPill label="Последнее обновление" value={`${lastUpdateSecondsAgo} сек назад`} />
+        <StatPill label="Модель вопросов" value={questionModel || '—'} />
+        <StatPill label="Fallback использован" value={`${fallbackUsedCount} раз`} />
         <StatPill label={t('ragEval.stats.elapsed')} value={startedAt === null ? '—' : formatDurationMs(elapsedMs)} />
-        <StatPill label={t('ragEval.stats.questionsReady')} value={targetQuestions ? `${generatedQuestions}/${targetQuestions}` : generatedQuestions} />
-        <StatPill label={t('ragEval.stats.retrievalChecks')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
-        <StatPill label={t('ragEval.stats.tokensSpent')} value={tokenTotal ? formatNumber(tokenTotal) : '—'} />
-        <StatPill label={t('ragEval.stats.questionTokens')} value={questionTokenTotal ? formatNumber(questionTokenTotal) : '—'} />
-        <StatPill label={t('ragEval.stats.judgeTokens')} value={judgeTokenTotal ? formatNumber(judgeTokenTotal) : '—'} />
-        <StatPill label={t('ragEval.stats.fragmentGroups')} value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
-        <StatPill label={t('ragEval.stats.failedBatches')} value={failedBatches} />
+        <StatPill label="Техн: группы" value={totalBatches ? `${processedBatches}/${totalBatches}` : processedBatches} />
         <StatPill label={t('ragEval.stats.jsonFailures')} value={jsonParseFailures} />
         <StatPill label={t('ragEval.stats.providerFailures')} value={providerFailures} />
         <StatPill label={t('ragEval.stats.retries')} value={retryCount} />
         <StatPill label={t('ragEval.stats.skippedBatches')} value={skippedBatches} />
-        <StatPill label={t('ragEval.stats.failedRetrieval')} value={failedRetrievalCount} />
         <StatPill label={t('ragEval.stats.fragments')} value={sourceChunkCount || '—'} />
         <StatPill label={t('ragEval.stats.attempts')} value={`${job.attempts}/${job.max_attempts}`} />
       </div>

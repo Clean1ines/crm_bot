@@ -30,7 +30,11 @@ router = APIRouter(prefix="/api/rag-eval", tags=["rag-eval"])
 
 
 PROJECT_RAG_EVAL_ROLES = ["owner", "admin"]
-RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "openai/gpt-oss-120b")
+RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "llama-3.1-8b-instant")
+RAG_EVAL_QUESTION_FALLBACK_MODEL = os.getenv(
+    "RAG_EVAL_QUESTION_FALLBACK_MODEL",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+)
 RAG_EVAL_JUDGE_MODEL = os.getenv("RAG_EVAL_JUDGE_MODEL", "llama-3.1-8b-instant")
 RAG_EVAL_QUESTION_MAX_TOKENS = 6144
 RAG_EVAL_JUDGE_MAX_TOKENS = 2048
@@ -448,6 +452,7 @@ async def run_rag_eval_for_document(
 
     question_llm = GroqRagEvalJsonLlmAdapter(
         model=RAG_EVAL_QUESTION_MODEL,
+        fallback_model=RAG_EVAL_QUESTION_FALLBACK_MODEL,
         max_tokens=RAG_EVAL_QUESTION_MAX_TOKENS,
     )
     dataset_generator = LlmRagEvalDatasetGenerator(

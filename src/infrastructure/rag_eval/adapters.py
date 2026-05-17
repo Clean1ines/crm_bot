@@ -76,22 +76,28 @@ class GroqRagEvalJsonLlmAdapter:
         *,
         client: AsyncGroq | None = None,
         model: str | None = None,
+        fallback_model: str | None = None,
         temperature: float = 0.1,
         max_tokens: int = 2048,
     ) -> None:
         self._client = client or RotatingAsyncGroq()
         self._model = model or settings.GROQ_MODEL
+        self._fallback_model = fallback_model.strip() if fallback_model else None
+        if self._fallback_model == self._model:
+            self._fallback_model = None
         self._temperature = temperature
         self._max_tokens = max(256, max_tokens)
         self._tokens_input = 0
         self._tokens_output = 0
         self._tokens_total = 0
+        self._fallback_used_count = 0
 
     def usage_snapshot(self) -> JsonObject:
         return {
             "tokens_input": self._tokens_input,
             "tokens_output": self._tokens_output,
             "tokens_total": self._tokens_total,
+            "fallback_used_count": self._fallback_used_count,
         }
 
     async def complete_json(
@@ -102,9 +108,58 @@ class GroqRagEvalJsonLlmAdapter:
         schema_name: str,
     ) -> Mapping[str, object]:
         try:
+            return await self._complete_json_with_model(
+                model=self._model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema_name=schema_name,
+                is_fallback=False,
+            )
+        except (
+            APIConnectionError,
+            APIError,
+            APITimeoutError,
+            RateLimitError,
+            AttributeError,
+            IndexError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as primary_exc:
+            if not self._fallback_model:
+                raise
+
+            logger.warning(
+                "RAG eval primary JSON LLM failed; trying fallback model",
+                extra={
+                    "schema_name": schema_name,
+                    "primary_model": self._model,
+                    "fallback_model": self._fallback_model,
+                    "error_type": type(primary_exc).__name__,
+                    "error": str(primary_exc)[:300],
+                },
+            )
+            return await self._complete_json_with_model(
+                model=self._fallback_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema_name=schema_name,
+                is_fallback=True,
+            )
+
+    async def _complete_json_with_model(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        schema_name: str,
+        is_fallback: bool,
+    ) -> Mapping[str, object]:
+        try:
             await _throttle_rag_eval_llm_call()
             response = await self._client.chat.completions.create(
-                model=self._model,
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -122,6 +177,8 @@ class GroqRagEvalJsonLlmAdapter:
             payload = _extract_json_object(content)
             if not isinstance(payload, Mapping):
                 raise ValueError(f"{schema_name} response is not a JSON object")
+            if is_fallback:
+                self._fallback_used_count += 1
             return payload
         except (
             APIConnectionError,
@@ -138,7 +195,8 @@ class GroqRagEvalJsonLlmAdapter:
                 "RAG eval JSON LLM call failed",
                 extra={
                     "schema_name": schema_name,
-                    "model": self._model,
+                    "model": model,
+                    "is_fallback": is_fallback,
                     "error_type": type(exc).__name__,
                     "error": str(exc)[:300],
                 },
@@ -168,6 +226,117 @@ class GroqRagEvalJsonLlmAdapter:
         self._tokens_input += prompt_tokens
         self._tokens_output += completion_tokens
         self._tokens_total += total_tokens
+
+
+class FallbackRagEvalJsonLlmAdapter:
+    """JSON LLM adapter that uses fallback only after primary failure.
+
+    The primary model is tried first. A small primary retry protects against
+    transient provider/JSON failures. The fallback model is used only when the
+    primary still cannot return a valid compact JSON object.
+    """
+
+    def __init__(
+        self,
+        *,
+        primary_model: str,
+        fallback_model: str | None,
+        temperature: float = 0.1,
+        max_tokens: int = 2048,
+        primary_attempts: int = 2,
+    ) -> None:
+        self._primary = GroqRagEvalJsonLlmAdapter(
+            model=primary_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        self._fallback = (
+            GroqRagEvalJsonLlmAdapter(
+                model=fallback_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            if fallback_model
+            else None
+        )
+        self._primary_attempts = max(1, min(3, primary_attempts))
+        self._fallback_used_count = 0
+        self._primary_retry_count = 0
+
+    def usage_snapshot(self) -> JsonObject:
+        primary = self._primary.usage_snapshot()
+        fallback = self._fallback.usage_snapshot() if self._fallback is not None else {}
+        primary_input = _usage_int(primary.get("tokens_input")) or 0
+        primary_output = _usage_int(primary.get("tokens_output")) or 0
+        primary_total = _usage_int(primary.get("tokens_total")) or 0
+        fallback_input = _usage_int(fallback.get("tokens_input")) or 0
+        fallback_output = _usage_int(fallback.get("tokens_output")) or 0
+        fallback_total = _usage_int(fallback.get("tokens_total")) or 0
+        return {
+            "tokens_input": primary_input + fallback_input,
+            "tokens_output": primary_output + fallback_output,
+            "tokens_total": primary_total + fallback_total,
+            "fallback_used_count": self._fallback_used_count,
+            "adapter_retry_count": self._primary_retry_count,
+        }
+
+    async def complete_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        schema_name: str,
+    ) -> Mapping[str, object]:
+        primary_error: BaseException | None = None
+        for attempt in range(1, self._primary_attempts + 1):
+            try:
+                return await self._primary.complete_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    schema_name=schema_name,
+                )
+            except (
+                APIConnectionError,
+                APIError,
+                APITimeoutError,
+                RateLimitError,
+                AttributeError,
+                IndexError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                primary_error = exc
+                if attempt < self._primary_attempts:
+                    self._primary_retry_count += 1
+                    continue
+
+        if self._fallback is None:
+            if primary_error is not None:
+                raise primary_error
+            raise ValueError(f"{schema_name} primary model failed without an exception")
+
+        self._fallback_used_count += 1
+        logger.warning(
+            "RAG eval question model fallback used",
+            extra={
+                "schema_name": schema_name,
+                "primary_error_type": type(primary_error).__name__
+                if primary_error
+                else "unknown",
+                "primary_error": str(primary_error)[:300] if primary_error else "",
+            },
+        )
+        try:
+            return await self._fallback.complete_json(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema_name=schema_name,
+            )
+        except Exception as fallback_error:
+            if primary_error is not None:
+                raise fallback_error from primary_error
+            raise
 
 
 class RagServiceRagEvalRetriever:

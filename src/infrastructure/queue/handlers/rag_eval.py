@@ -27,6 +27,7 @@ from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.llm.groq_keyring import has_configured_groq_api_key
 from src.infrastructure.rag_eval.adapters import (
+    FallbackRagEvalJsonLlmAdapter,
     GroqRagEvalJsonLlmAdapter,
     RagServiceRagEvalRetriever,
 )
@@ -34,7 +35,11 @@ from src.infrastructure.queue.job_exceptions import PermanentJobError, Transient
 
 logger = get_logger(__name__)
 
-RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "openai/gpt-oss-120b")
+RAG_EVAL_QUESTION_MODEL = os.getenv("RAG_EVAL_QUESTION_MODEL", "llama-3.1-8b-instant")
+RAG_EVAL_QUESTION_FALLBACK_MODEL = os.getenv(
+    "RAG_EVAL_QUESTION_FALLBACK_MODEL",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+)
 RAG_EVAL_JUDGE_MODEL = os.getenv("RAG_EVAL_JUDGE_MODEL", "llama-3.1-8b-instant")
 RAG_EVAL_QUESTION_MAX_TOKENS = 6144
 RAG_EVAL_JUDGE_MAX_TOKENS = 2048
@@ -63,7 +68,7 @@ def _json_metric_int(value: object) -> int:
 
 def _rag_eval_usage_progress(
     *,
-    question_llm: GroqRagEvalJsonLlmAdapter,
+    question_llm: GroqRagEvalJsonLlmAdapter | FallbackRagEvalJsonLlmAdapter,
     judge_llm: GroqRagEvalJsonLlmAdapter | None = None,
 ) -> dict[str, object]:
     question_usage = question_llm.usage_snapshot()
@@ -72,9 +77,15 @@ def _rag_eval_usage_progress(
         "question_tokens_input": _json_metric_int(question_usage.get("tokens_input")),
         "question_tokens_output": _json_metric_int(question_usage.get("tokens_output")),
         "question_tokens_total": _json_metric_int(question_usage.get("tokens_total")),
+        "fallback_used_count": _json_metric_int(
+            question_usage.get("fallback_used_count")
+        ),
         "judge_tokens_input": _json_metric_int(judge_usage.get("tokens_input")),
         "judge_tokens_output": _json_metric_int(judge_usage.get("tokens_output")),
         "judge_tokens_total": _json_metric_int(judge_usage.get("tokens_total")),
+        "adapter_retry_count": _json_metric_int(
+            question_usage.get("adapter_retry_count")
+        ),
         "tokens_input": _json_metric_int(question_usage.get("tokens_input"))
         + _json_metric_int(judge_usage.get("tokens_input")),
         "tokens_output": _json_metric_int(question_usage.get("tokens_output"))
@@ -580,6 +591,7 @@ async def _run_full_document_rag_eval(
 
     question_llm = GroqRagEvalJsonLlmAdapter(
         model=RAG_EVAL_QUESTION_MODEL,
+        fallback_model=RAG_EVAL_QUESTION_FALLBACK_MODEL,
         max_tokens=question_max_tokens,
     )
     dataset_concurrency = _coerce_int(
@@ -663,6 +675,17 @@ async def _run_full_document_rag_eval(
         "target_questions": full_document_target,
         "retrieval_limit": retrieval_limit,
         "eval_mode": eval_mode,
+        "question_model": RAG_EVAL_QUESTION_MODEL,
+        "question_fallback_model": RAG_EVAL_QUESTION_FALLBACK_MODEL,
+        "entries_total": source_entry_count,
+        "entries_processed": 0,
+        "active_generation_workers": 0,
+        "active_retrieval_workers": 0,
+        "queued_questions": 0,
+        "actionable_improvements_count": 0,
+        "questions_per_minute": 0,
+        "entries_per_minute": 0,
+        "last_update_seconds_ago": 0,
         "total_batches": total_batches,
         "dataset_generation_concurrency": dataset_concurrency,
         "retrieval_concurrency": retrieval_concurrency,
@@ -748,12 +771,20 @@ async def _run_full_document_rag_eval(
         nonlocal current_control_progress
         processed_questions = _json_metric_int(metrics.get("processed_questions"))
         total_questions = _json_metric_int(metrics.get("total_questions"))
-        progress = _build_rag_eval_retrieval_progress(
-            base_progress=base_progress,
-            processed_questions=processed_questions,
-            total_questions=total_questions,
-        )
-        progress.update(dict(metrics))
+        if str(metrics.get("stage") or "") == "streaming_retrieval_eval":
+            progress = {
+                **base_progress,
+                **dict(metrics),
+                "status": str(metrics.get("status") or "running"),
+                "updated_at": _utc_now_iso(),
+            }
+        else:
+            progress = _build_rag_eval_retrieval_progress(
+                base_progress=base_progress,
+                processed_questions=processed_questions,
+                total_questions=total_questions,
+            )
+            progress.update(dict(metrics))
         progress.update(
             _rag_eval_usage_progress(question_llm=question_llm, judge_llm=judge_llm)
         )
@@ -789,21 +820,8 @@ async def _run_full_document_rag_eval(
     )
 
     try:
-        resumed = await _resume_existing_rag_eval_dataset(
-            rag_eval_repo=rag_eval_repo,
-            runner=runner,
-            reporter=service._reporter,
-            project_id=project_id,
-            document_id=document_id,
-            generator_model=RAG_EVAL_QUESTION_MODEL,
-            control_callback=_control_callback,
-            run_progress_callback=None,
-            run_metrics_callback=_on_run_metrics,
-            retrieval_concurrency=retrieval_concurrency,
-        )
-
-        if resumed is None:
-            run, report = await service.generate_dataset_and_run(
+        if eval_mode == "retrieval_eval":
+            run, report = await service.generate_dataset_and_run_streaming_retrieval(
                 project_id=project_id,
                 document_id=document_id,
                 progress_callback=None,
@@ -813,7 +831,30 @@ async def _run_full_document_rag_eval(
                 run_metrics_callback=_on_run_metrics,
             )
         else:
-            run, report = resumed
+            resumed = await _resume_existing_rag_eval_dataset(
+                rag_eval_repo=rag_eval_repo,
+                runner=runner,
+                reporter=service._reporter,
+                project_id=project_id,
+                document_id=document_id,
+                generator_model=RAG_EVAL_QUESTION_MODEL,
+                control_callback=_control_callback,
+                run_progress_callback=None,
+                run_metrics_callback=_on_run_metrics,
+                retrieval_concurrency=retrieval_concurrency,
+            )
+            if resumed is None:
+                run, report = await service.generate_dataset_and_run(
+                    project_id=project_id,
+                    document_id=document_id,
+                    progress_callback=None,
+                    control_callback=_control_callback,
+                    run_progress_callback=None,
+                    dataset_metrics_callback=_on_dataset_metrics,
+                    run_metrics_callback=_on_run_metrics,
+                )
+            else:
+                run, report = resumed
     except RagEvalTechnicalAnswerError as exc:
         await _write_rag_eval_progress(
             db_pool=db_pool,
@@ -864,6 +905,25 @@ async def _run_full_document_rag_eval(
             "provider_failures": current_control_progress.get("provider_failures", 0),
             "retry_count": current_control_progress.get("retry_count", 0),
             "skipped_batches": current_control_progress.get("skipped_batches", 0),
+            "entries_total": current_control_progress.get(
+                "entries_total", source_entry_count
+            ),
+            "entries_processed": current_control_progress.get(
+                "entries_processed",
+                source_entry_count,
+            ),
+            "active_generation_workers": 0,
+            "active_retrieval_workers": 0,
+            "queued_questions": 0,
+            "actionable_improvements_count": current_control_progress.get(
+                "actionable_improvements_count",
+                0,
+            ),
+            "questions_per_minute": current_control_progress.get(
+                "questions_per_minute", 0
+            ),
+            "entries_per_minute": current_control_progress.get("entries_per_minute", 0),
+            "last_update_seconds_ago": 0,
             "failed_retrieval_count": current_control_progress.get(
                 "failed_retrieval_count", 0
             ),
