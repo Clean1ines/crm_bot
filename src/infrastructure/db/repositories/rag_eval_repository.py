@@ -988,6 +988,489 @@ class RagEvalRepository:
             ],
         }
 
+    async def get_run_summary(self, *, run_id: str) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    r.id,
+                    r.dataset_id,
+                    r.project_id,
+                    r.document_id,
+                    r.status,
+                    r.started_at,
+                    r.finished_at,
+                    r.retriever_version,
+                    r.reranker_version,
+                    r.generator_model,
+                    COUNT(rr.id)::int AS result_count
+                FROM rag_eval_runs AS r
+                LEFT JOIN rag_eval_results AS rr ON rr.run_id = r.id
+                WHERE r.id = $1
+                GROUP BY
+                    r.id,
+                    r.dataset_id,
+                    r.project_id,
+                    r.document_id,
+                    r.status,
+                    r.started_at,
+                    r.finished_at,
+                    r.retriever_version,
+                    r.reranker_version,
+                    r.generator_model
+                """,
+                run_id,
+            )
+
+        if row is None:
+            return None
+        return self._run_summary_from_row(row)
+
+    async def load_question_reviews(self, *, run_id: str) -> dict[str, JsonObject]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                FROM rag_eval_question_reviews
+                WHERE run_id = $1
+                """,
+                run_id,
+            )
+        return {
+            str(row["question_id"]): self._question_review_from_row(row) for row in rows
+        }
+
+    async def upsert_question_review(
+        self,
+        *,
+        question_id: str,
+        status: str,
+        reason: str,
+        reviewed_by: str,
+    ) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                WITH source AS (
+                    SELECT
+                        q.id AS question_id,
+                        rr.run_id,
+                        q.dataset_id,
+                        q.project_id,
+                        q.document_id,
+                        COALESCE(q.metadata->>'source_chunk_id', q.expected_entry_ids->>0) AS source_chunk_id,
+                        q.question AS original_question
+                    FROM rag_eval_questions AS q
+                    JOIN rag_eval_results AS rr ON rr.question_id = q.id
+                    WHERE q.id = $1
+                    ORDER BY rr.created_at DESC
+                    LIMIT 1
+                )
+                INSERT INTO rag_eval_question_reviews (
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at
+                )
+                SELECT
+                    'rqrev_' || replace(source.question_id, '-', '_'),
+                    source.question_id,
+                    source.run_id,
+                    source.dataset_id,
+                    source.project_id,
+                    source.document_id,
+                    source.source_chunk_id,
+                    $2,
+                    source.original_question,
+                    $3,
+                    $4,
+                    now()
+                FROM source
+                ON CONFLICT (question_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    review_reason = EXCLUDED.review_reason,
+                    reviewed_by = EXCLUDED.reviewed_by,
+                    reviewed_at = EXCLUDED.reviewed_at,
+                    updated_at = now()
+                RETURNING
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                """,
+                question_id,
+                status,
+                reason,
+                reviewed_by,
+            )
+        return self._question_review_from_row(row) if row is not None else None
+
+    async def edit_question_review(
+        self,
+        *,
+        question_id: str,
+        question: str,
+        reviewed_by: str,
+    ) -> JsonObject | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                WITH source AS (
+                    SELECT
+                        q.id AS question_id,
+                        rr.run_id,
+                        q.dataset_id,
+                        q.project_id,
+                        q.document_id,
+                        COALESCE(q.metadata->>'source_chunk_id', q.expected_entry_ids->>0) AS source_chunk_id,
+                        q.question AS original_question
+                    FROM rag_eval_questions AS q
+                    JOIN rag_eval_results AS rr ON rr.question_id = q.id
+                    WHERE q.id = $1
+                    ORDER BY rr.created_at DESC
+                    LIMIT 1
+                )
+                INSERT INTO rag_eval_question_reviews (
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    reviewed_by,
+                    reviewed_at
+                )
+                SELECT
+                    'rqrev_' || replace(source.question_id, '-', '_'),
+                    source.question_id,
+                    source.run_id,
+                    source.dataset_id,
+                    source.project_id,
+                    source.document_id,
+                    source.source_chunk_id,
+                    'edited',
+                    source.original_question,
+                    $2,
+                    $3,
+                    now()
+                FROM source
+                ON CONFLICT (question_id) DO UPDATE SET
+                    status = 'edited',
+                    edited_question = EXCLUDED.edited_question,
+                    reviewed_by = EXCLUDED.reviewed_by,
+                    reviewed_at = EXCLUDED.reviewed_at,
+                    updated_at = now()
+                RETURNING
+                    id,
+                    question_id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    original_question,
+                    edited_question,
+                    review_reason,
+                    reviewed_by,
+                    reviewed_at,
+                    created_at,
+                    updated_at
+                """,
+                question_id,
+                question,
+                reviewed_by,
+            )
+        return self._question_review_from_row(row) if row is not None else None
+
+    async def load_accepted_question_reviews(self, *, run_id: str) -> list[JsonObject]:
+        reviews = await self.load_question_reviews(run_id=run_id)
+        results = await self.load_run_results(run_id=run_id)
+        accepted: list[JsonObject] = []
+        for result in results:
+            review = reviews.get(result.question_id)
+            if review is None or review.get("status") not in {"accepted", "edited"}:
+                continue
+            target_entry_id = (
+                result.question.expected_entry_ids[0]
+                if result.question.expected_entry_ids
+                else ""
+            )
+            if not target_entry_id:
+                continue
+            edited = str(review.get("edited_question") or "").strip()
+            accepted.append(
+                {
+                    "review_id": str(review["id"]),
+                    "question_id": result.question_id,
+                    "result_id": result.id,
+                    "run_id": result.run_id,
+                    "dataset_id": result.question.dataset_id,
+                    "project_id": result.question.project_id,
+                    "document_id": result.question.document_id,
+                    "target_entry_id": target_entry_id,
+                    "question": edited or result.question.question,
+                    "status": str(review["status"]),
+                }
+            )
+        return accepted
+
+    async def mark_question_reviews_applied(
+        self, *, review_ids: list[str], reviewed_by: str
+    ) -> None:
+        if not review_ids:
+            return
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE rag_eval_question_reviews
+                SET status = 'applied',
+                    reviewed_by = $2,
+                    reviewed_at = now(),
+                    updated_at = now()
+                WHERE id = ANY($1::text[])
+                """,
+                review_ids,
+                reviewed_by,
+            )
+
+    def _run_summary_from_row(self, row: Mapping[str, object]) -> JsonObject:
+        started_at = row["started_at"]
+        finished_at = row["finished_at"]
+        return {
+            "id": str(row["id"]),
+            "dataset_id": str(row["dataset_id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]),
+            "status": str(row["status"]),
+            "started_at": started_at.isoformat()
+            if hasattr(started_at, "isoformat")
+            else str(started_at),
+            "finished_at": finished_at.isoformat()
+            if hasattr(finished_at, "isoformat")
+            else (str(finished_at) if finished_at is not None else None),
+            "retriever_version": str(row["retriever_version"]),
+            "reranker_version": str(row["reranker_version"]),
+            "generator_model": str(row["generator_model"] or ""),
+            "result_count": _row_int_value(row, "result_count", 0),
+        }
+
+    def _question_review_from_row(self, row: Mapping[str, object]) -> JsonObject:
+        reviewed_at = row.get("reviewed_at")
+        created_at = row.get("created_at")
+        updated_at = row.get("updated_at")
+        return {
+            "id": str(row["id"]),
+            "question_id": str(row["question_id"]),
+            "run_id": str(row["run_id"]),
+            "dataset_id": str(row["dataset_id"]),
+            "project_id": str(row["project_id"]),
+            "document_id": str(row["document_id"]),
+            "source_chunk_id": str(row.get("source_chunk_id") or ""),
+            "status": str(row["status"]),
+            "original_question": str(row["original_question"] or ""),
+            "edited_question": str(row.get("edited_question") or ""),
+            "review_reason": str(row.get("review_reason") or ""),
+            "reviewed_by": str(row.get("reviewed_by") or ""),
+            "reviewed_at": reviewed_at.isoformat()
+            if hasattr(reviewed_at, "isoformat")
+            else None,
+            "created_at": created_at.isoformat()
+            if hasattr(created_at, "isoformat")
+            else str(created_at),
+            "updated_at": updated_at.isoformat()
+            if hasattr(updated_at, "isoformat")
+            else str(updated_at),
+        }
+
+    async def upsert_review_group(
+        self,
+        *,
+        run_id: str,
+        dataset_id: str,
+        project_id: str,
+        document_id: str,
+        source_chunk_id: str,
+        status: str,
+        questions_total: int = 0,
+        checked_questions: int = 0,
+        reliable_count: int = 0,
+        weak_count: int = 0,
+        confused_count: int = 0,
+        missing_count: int = 0,
+        improvement_count: int = 0,
+        review_payload: Mapping[str, object] | None = None,
+        error: str = "",
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO rag_eval_review_groups (
+                    id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    questions_total,
+                    checked_questions,
+                    reliable_count,
+                    weak_count,
+                    confused_count,
+                    missing_count,
+                    improvement_count,
+                    review_payload_json,
+                    error
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4::uuid,
+                    $5::uuid,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
+                    $14,
+                    $15::jsonb,
+                    $16
+                )
+                ON CONFLICT (run_id, source_chunk_id) DO UPDATE SET
+                    dataset_id = EXCLUDED.dataset_id,
+                    project_id = EXCLUDED.project_id,
+                    document_id = EXCLUDED.document_id,
+                    status = EXCLUDED.status,
+                    questions_total = EXCLUDED.questions_total,
+                    checked_questions = EXCLUDED.checked_questions,
+                    reliable_count = EXCLUDED.reliable_count,
+                    weak_count = EXCLUDED.weak_count,
+                    confused_count = EXCLUDED.confused_count,
+                    missing_count = EXCLUDED.missing_count,
+                    improvement_count = EXCLUDED.improvement_count,
+                    review_payload_json = EXCLUDED.review_payload_json,
+                    error = EXCLUDED.error,
+                    updated_at = now()
+                """,
+                f"rgrev_{run_id}_{source_chunk_id}"[:180],
+                run_id,
+                dataset_id,
+                project_id,
+                document_id,
+                source_chunk_id,
+                status,
+                questions_total,
+                checked_questions,
+                reliable_count,
+                weak_count,
+                confused_count,
+                missing_count,
+                improvement_count,
+                _jsonb(review_payload or {}),
+                error,
+            )
+
+    async def load_review_group_projections(self, *, run_id: str) -> list[JsonObject]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    run_id,
+                    dataset_id,
+                    project_id,
+                    document_id,
+                    source_chunk_id,
+                    status,
+                    questions_total,
+                    checked_questions,
+                    reliable_count,
+                    weak_count,
+                    confused_count,
+                    missing_count,
+                    improvement_count,
+                    review_payload_json,
+                    error,
+                    created_at,
+                    updated_at
+                FROM rag_eval_review_groups
+                WHERE run_id = $1
+                ORDER BY updated_at DESC, source_chunk_id ASC
+                """,
+                run_id,
+            )
+
+        projections: list[JsonObject] = []
+        for row in rows:
+            projections.append(
+                {
+                    "id": str(row["id"]),
+                    "run_id": str(row["run_id"]),
+                    "dataset_id": str(row["dataset_id"]),
+                    "project_id": str(row["project_id"]),
+                    "document_id": str(row["document_id"]),
+                    "source_chunk_id": str(row["source_chunk_id"]),
+                    "status": str(row["status"]),
+                    "questions_total": _row_int_value(row, "questions_total", 0),
+                    "checked_questions": _row_int_value(row, "checked_questions", 0),
+                    "reliable_count": _row_int_value(row, "reliable_count", 0),
+                    "weak_count": _row_int_value(row, "weak_count", 0),
+                    "confused_count": _row_int_value(row, "confused_count", 0),
+                    "missing_count": _row_int_value(row, "missing_count", 0),
+                    "improvement_count": _row_int_value(row, "improvement_count", 0),
+                    "review_payload": cast(
+                        JsonObject, _json_object(row.get("review_payload_json"))
+                    ),
+                    "error": str(row["error"] or ""),
+                    "created_at": str(row["created_at"]),
+                    "updated_at": str(row["updated_at"]),
+                }
+            )
+        return projections
+
     def _entry_from_row(self, row: Mapping[str, object]) -> RagEvalEvidenceEntry:
         source_refs = _source_ref_views_from_payload(row.get("source_refs"))
         source_excerpt = source_refs[0].quote if source_refs else ""
