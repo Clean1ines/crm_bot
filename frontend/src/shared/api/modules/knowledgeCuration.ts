@@ -90,6 +90,12 @@ export interface KnowledgeEntryPatchRequest {
   idempotency_key?: string;
 }
 
+export interface RebuildEmbeddingRequest {
+  reason?: string;
+  expected_version?: number | null;
+  idempotency_key: string;
+}
+
 export interface KnowledgeEntryMergeIncludeOptions {
   answers: boolean;
   questions: boolean;
@@ -200,8 +206,8 @@ export const knowledgeCurationApi = {
   patchEntry: (projectId: string, documentId: string, entryId: string, payload: KnowledgeEntryPatchRequest) =>
     authedJsonRequest<{ ok: boolean; entry: KnowledgeCurationEntry }, KnowledgeEntryPatchRequest>(`${basePath(projectId, documentId)}/entries/${entryId}`, { method: 'PATCH', body: payload }),
 
-  rebuildEntryEmbedding: (projectId: string, documentId: string, entryId: string) =>
-    authedJsonRequest<{ ok: boolean; entry_id: string }>(`${basePath(projectId, documentId)}/entries/${entryId}/embedding/rebuild`, { method: 'POST' }),
+  rebuildEntryEmbedding: (projectId: string, documentId: string, entryId: string, payload: RebuildEmbeddingRequest) =>
+    authedJsonRequest<{ ok: boolean; entry_id: string; action_id: string }, RebuildEmbeddingRequest>(`${basePath(projectId, documentId)}/entries/${entryId}/embedding/rebuild`, { method: 'POST', body: payload }),
 
   previewMerge: (projectId: string, documentId: string, payload: KnowledgeEntryMergePreviewRequest) =>
     authedJsonRequest<KnowledgeEntryMergePreviewResponse, KnowledgeEntryMergePreviewRequest>(`${basePath(projectId, documentId)}/merge/preview`, { method: 'POST', body: payload }),
