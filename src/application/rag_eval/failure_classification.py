@@ -41,6 +41,15 @@ class KnowledgeEditActionType(StrEnum):
     CREATE_ENTRY_FROM_FAILURE = "create_entry_from_failure"
     REBUILD_EMBEDDING = "rebuild_embedding"
     RERUN_EVAL = "rerun_eval"
+    MERGE_ENTRIES = "merge_entries"
+    HIDE_ENTRY = "hide_entry"
+    REJECT_ENTRY = "reject_entry"
+    RESTORE_ENTRY = "restore_entry"
+    PUBLISH_ENTRY = "publish_entry"
+    UNPUBLISH_ENTRY = "unpublish_entry"
+    EDIT_ENTRY_TITLE = "edit_entry_title"
+    EDIT_ENTRY_ANSWER = "edit_entry_answer"
+    EDIT_ENTRY_ENRICHMENT = "edit_entry_enrichment"
 
 
 @dataclass(frozen=True)

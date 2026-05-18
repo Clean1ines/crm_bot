@@ -38,6 +38,7 @@ class KnowledgeEntryStatus(StrEnum):
     HIDDEN = "hidden"
     ARCHIVED = "archived"
     REJECTED = "rejected"
+    MERGED = "merged"
 
 
 class KnowledgeEntryVisibility(StrEnum):
