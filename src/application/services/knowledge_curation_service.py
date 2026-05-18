@@ -53,6 +53,7 @@ class KnowledgeCurationRepositoryPort(Protocol):
         visibility: str,
         reason: str,
         idempotency_key: str,
+        rebuild_embedding: bool,
     ) -> KnowledgeCurationEntryView: ...
 
     async def update_entry_content(
@@ -64,6 +65,18 @@ class KnowledgeCurationRepositoryPort(Protocol):
         actor_user_id: str,
         patch: KnowledgeEntryPatch,
     ) -> KnowledgeCurationEntryView: ...
+
+    async def create_manual_rebuild_embedding_action(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        entry_id: str,
+        actor_user_id: str,
+        expected_version: int | None,
+        reason: str,
+        idempotency_key: str,
+    ) -> str: ...
 
     async def rebuild_entry_embedding(
         self, *, action_id: str, project_id: str, document_id: str, target_entry_id: str
@@ -496,7 +509,7 @@ class KnowledgeCurationService:
         transition: KnowledgeEntryStatusTransition,
     ) -> KnowledgeCurationEntryView:
         status, visibility = self._status_visibility_for_transition(transition)
-        return await self.repository.update_entry_status_visibility(
+        entry = await self.repository.update_entry_status_visibility(
             project_id=project_id,
             document_id=document_id,
             entry_id=entry_id,
@@ -507,7 +520,15 @@ class KnowledgeCurationService:
             visibility=visibility.value,
             reason=transition.reason,
             idempotency_key=transition.idempotency_key,
+            rebuild_embedding=transition.rebuild_embedding,
         )
+        await self.enqueue_rerun_eval_if_requested(
+            project_id=project_id,
+            document_id=document_id,
+            actor_user_id=actor_user_id,
+            enabled=transition.rerun_eval,
+        )
+        return entry
 
     def _status_visibility_for_transition(
         self, transition: KnowledgeEntryStatusTransition
@@ -543,24 +564,50 @@ class KnowledgeCurationService:
             raise ValidationError("title must not be blank")
         if patch.answer is not None and not patch.answer.strip():
             raise ValidationError("answer must not be blank")
-        return await self.repository.update_entry_content(
+        entry = await self.repository.update_entry_content(
             project_id=project_id,
             document_id=document_id,
             entry_id=entry_id,
             actor_user_id=actor_user_id,
             patch=patch,
         )
+        await self.enqueue_rerun_eval_if_requested(
+            project_id=project_id,
+            document_id=document_id,
+            actor_user_id=actor_user_id,
+            enabled=patch.rerun_eval,
+        )
+        return entry
 
     async def rebuild_embedding(
-        self, *, project_id: str, document_id: str, entry_id: str, action_id: str
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        entry_id: str,
+        actor_user_id: str,
+        expected_version: int | None,
+        reason: str,
+        idempotency_key: str,
     ) -> Mapping[str, object]:
+        if not idempotency_key.strip():
+            raise ValidationError("idempotency_key is required")
+        action_id = await self.repository.create_manual_rebuild_embedding_action(
+            project_id=project_id,
+            document_id=document_id,
+            entry_id=entry_id,
+            actor_user_id=actor_user_id,
+            expected_version=expected_version,
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
         await self.repository.rebuild_entry_embedding(
             action_id=action_id,
             project_id=project_id,
             document_id=document_id,
             target_entry_id=entry_id,
         )
-        return {"ok": True, "entry_id": entry_id}
+        return {"ok": True, "entry_id": entry_id, "action_id": action_id}
 
     async def build_merge_preview(
         self, *, project_id: str, document_id: str, request: KnowledgeEntryMergeRequest
@@ -788,6 +835,16 @@ class KnowledgeCurationService:
             project_id=project_id, document_id=document_id, request=request
         )
         if preview.blocking_errors:
+            if request.idempotency_key.strip():
+                replay_result = await self.repository.apply_manual_entry_merge(
+                    project_id=project_id,
+                    document_id=document_id,
+                    actor_user_id=actor_user_id,
+                    request=request,
+                    preview=preview,
+                )
+                if replay_result.replayed:
+                    return replay_result
             raise ConflictError(
                 "Merge preview has blocking errors: "
                 + ", ".join(preview.blocking_errors)

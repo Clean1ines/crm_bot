@@ -139,3 +139,38 @@ def test_merge_shape_rejects_parent_in_absorbed_ids() -> None:
             ),
             by_id={"a": entry("a")},
         )
+
+
+def test_merge_preview_blocks_invalid_parent_status() -> None:
+    service = KnowledgeCurationService(repository=object())
+    preview = service._build_merge_preview_from_entries(
+        request=KnowledgeEntryMergeRequest(
+            parent_entry_id="parent",
+            absorbed_entry_ids=("child",),
+            idempotency_key="k",
+        ),
+        by_id={
+            "parent": entry("parent", status=KnowledgeEntryStatus.REJECTED),
+            "child": entry("child"),
+        },
+    )
+
+    assert "parent_not_mergeable" in preview.blocking_errors
+
+
+def test_merge_preview_blocks_absorbed_version_conflict() -> None:
+    service = KnowledgeCurationService(repository=object())
+    preview = service._build_merge_preview_from_entries(
+        request=KnowledgeEntryMergeRequest(
+            parent_entry_id="parent",
+            absorbed_entry_ids=("child",),
+            absorbed_expected_versions={"child": 99},
+            idempotency_key="k",
+        ),
+        by_id={
+            "parent": entry("parent"),
+            "child": entry("child", version=2),
+        },
+    )
+
+    assert "absorbed_version_conflict:child" in preview.blocking_errors

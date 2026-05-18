@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.application.errors import ConflictError
+from src.application.errors import ApplicationError, ConflictError, ValidationError
 from src.application.services.knowledge_curation_service import KnowledgeCurationService
 from src.application.services.project_service import ProjectAccessService
 from src.domain.project_plane.json_types import json_object_from_unknown
@@ -84,23 +84,22 @@ async def _require_mutation_access(
     await project_service.require_project_role(project_id, user_id, ["owner", "admin"])
 
 
-def _handle_value_error(exc: ValueError) -> None:
-    message = str(exc)
-    if (
-        "version_conflict" in message
-        or "source refs" in message
-        or "already applied" in message
-        or "cross-document" in message
-    ):
-        raise HTTPException(
-            status_code=409, detail={"code": message, "message": message}
-        ) from exc
-    if "not found" in message:
-        raise HTTPException(
-            status_code=404, detail={"code": "not_found", "message": message}
-        ) from exc
+def _error_code(detail: str) -> str:
+    normalized = detail.strip().lower().replace(" ", "_")
+    return normalized or "application_error"
+
+
+def _raise_application_http_error(exc: ApplicationError) -> None:
+    # Curation idempotency conflicts intentionally surface as 409 with
+    # stable machine-readable codes such as idempotency_conflict,
+    # idempotency_replay:<action_id>, and action_in_progress:<action_id>.
     raise HTTPException(
-        status_code=400, detail={"code": "invalid_request", "message": message}
+        status_code=exc.status_code,
+        detail={
+            "code": _error_code(exc.detail),
+            "message": exc.detail,
+            "details": {},
+        },
     ) from exc
 
 
@@ -112,7 +111,7 @@ class KnowledgeCurationStatusRequest(BaseModel):
     reason: str = Field(default="", max_length=1000)
     rebuild_embedding: bool = False
     rerun_eval: bool = False
-    idempotency_key: str = Field(default="", max_length=200)
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 class KnowledgeEntryPatchRequest(BaseModel):
@@ -124,7 +123,13 @@ class KnowledgeEntryPatchRequest(BaseModel):
     reason: str = Field(default="", max_length=1000)
     rebuild_embedding: bool = False
     rerun_eval: bool = False
-    idempotency_key: str = Field(default="", max_length=200)
+    idempotency_key: str = Field(default="", min_length=1, max_length=200)
+
+
+class RebuildEmbeddingRequest(BaseModel):
+    reason: str = Field(default="Manual embedding rebuild", max_length=1000)
+    expected_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 class KnowledgeEntryMergeIncludeRequest(BaseModel):
@@ -228,8 +233,8 @@ async def set_entry_status(
             actor_user_id=current_user_id,
             transition=KnowledgeEntryStatusTransition(**request.model_dump()),
         )
-    except ValueError as exc:
-        _handle_value_error(exc)
+    except ApplicationError as exc:
+        _raise_application_http_error(exc)
     return {"ok": True, "entry": _serialize(entry)}
 
 
@@ -244,6 +249,10 @@ async def patch_entry(
     project_service: Annotated[ProjectAccessService, Depends(get_project_service)],
 ):
     await _require_mutation_access(project_id, current_user_id, project_service)
+    if request.source_refs is not None:
+        _raise_application_http_error(
+            ValidationError("source_refs editing is not implemented yet")
+        )
     patch = KnowledgeEntryPatch(
         title=request.title,
         answer=request.answer,
@@ -265,8 +274,8 @@ async def patch_entry(
             actor_user_id=current_user_id,
             patch=patch,
         )
-    except ValueError as exc:
-        _handle_value_error(exc)
+    except ApplicationError as exc:
+        _raise_application_http_error(exc)
     return {"ok": True, "entry": _serialize(entry)}
 
 
@@ -275,6 +284,7 @@ async def rebuild_entry_embedding(
     project_id: str,
     document_id: str,
     entry_id: str,
+    request: RebuildEmbeddingRequest,
     current_user_id: Annotated[str, Depends(get_current_user_id)],
     pool: Annotated[object, Depends(get_pool)],
     project_service: Annotated[ProjectAccessService, Depends(get_project_service)],
@@ -285,10 +295,13 @@ async def rebuild_entry_embedding(
             project_id=project_id,
             document_id=document_id,
             entry_id=entry_id,
-            action_id=f"manual_embedding_rebuild:{entry_id}",
+            actor_user_id=current_user_id,
+            expected_version=request.expected_version,
+            reason=request.reason,
+            idempotency_key=request.idempotency_key,
         )
-    except ValueError as exc:
-        _handle_value_error(exc)
+    except ApplicationError as exc:
+        _raise_application_http_error(exc)
     return result
 
 
@@ -333,8 +346,8 @@ async def apply_merge(
             actor_user_id=current_user_id,
             enabled=request.rerun_eval,
         )
-    except ValueError as exc:
-        _handle_value_error(exc)
+    except ApplicationError as exc:
+        _raise_application_http_error(exc)
     except ConflictError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "merge_conflict", "message": exc.detail}
@@ -402,6 +415,6 @@ async def restore_version(
             actor_user_id=current_user_id,
             reason=request.reason,
         )
-    except ValueError as exc:
-        _handle_value_error(exc)
+    except ApplicationError as exc:
+        _raise_application_http_error(exc)
     return {"ok": True, "entry": _serialize(entry)}

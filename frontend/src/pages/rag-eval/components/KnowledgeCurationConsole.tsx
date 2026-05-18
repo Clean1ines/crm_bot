@@ -120,7 +120,11 @@ export const KnowledgeCurationConsole: React.FC<{
   });
 
   const rebuildMutation = useMutation({
-    mutationFn: async (entry: KnowledgeCurationEntry) => knowledgeCurationApi.rebuildEntryEmbedding(projectId, documentId, entry.id),
+    mutationFn: async (entry: KnowledgeCurationEntry) => knowledgeCurationApi.rebuildEntryEmbedding(projectId, documentId, entry.id, {
+      expected_version: entry.version,
+      reason: 'Manual embedding rebuild',
+      idempotency_key: crypto.randomUUID(),
+    }),
     onSuccess: async () => { toast.success('Embedding rebuild выполнен'); await invalidate(); },
     onError: (error) => { toast.error(getErrorMessage(error, 'Не удалось rebuild embedding')); },
   });

@@ -8,11 +8,13 @@ Clean Architecture contract:
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Protocol
 
 import asyncpg
+
+from src.application.errors import ConflictError, NotFoundError, ValidationError
 
 from src.domain.project_plane.knowledge_views import (
     KnowledgeAnswerCandidateSummaryView,
@@ -3436,7 +3438,7 @@ class KnowledgeRepository:
                     ensure_uuid(document_id),
                 )
                 if before is None:
-                    raise ValueError("target knowledge entry not found")
+                    raise NotFoundError("target knowledge entry not found")
 
                 previous_snapshot = self._stage_h_entry_snapshot(before)
                 previous_version = int(before["version"])
@@ -3595,7 +3597,7 @@ class KnowledgeRepository:
             )
 
         if row is None:
-            raise ValueError("target knowledge entry not found")
+            raise NotFoundError("target knowledge entry not found")
 
         embedding_text = self._stage_h_embedding_text(row)
         if not embedding_text.strip():
@@ -3654,7 +3656,7 @@ class KnowledgeRepository:
                     ensure_uuid(document_id),
                 )
                 if before is None:
-                    raise ValueError("target knowledge entry not found")
+                    raise NotFoundError("target knowledge entry not found")
 
                 previous_snapshot = self._stage_h_entry_snapshot(before)
                 entry_version = int(before["version"])
@@ -3846,24 +3848,63 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, project_id, file_name, status, processing_stage, preprocessing_status,
-                       chunk_count, created_at, updated_at
-                FROM knowledge_documents
-                WHERE project_id = $1 AND id = $2
+                SELECT
+                    kd.id,
+                    kd.project_id,
+                    kd.file_name,
+                    kd.status,
+                    kd.preprocessing_status,
+                    kd.preprocessing_metrics,
+                    kd.created_at,
+                    kd.updated_at,
+                    COALESCE((
+                        SELECT count(*)
+                        FROM knowledge_entries AS ke
+                        WHERE ke.project_id = kd.project_id
+                          AND ke.document_id = kd.id
+                    ), 0) AS canonical_entry_count,
+                    COALESCE((
+                        SELECT count(*)
+                        FROM knowledge_retrieval_surface AS rs
+                        WHERE rs.project_id = kd.project_id
+                          AND rs.document_id = kd.id
+                    ), 0) AS retrieval_surface_count,
+                    0 AS legacy_chunk_count
+                FROM knowledge_documents AS kd
+                WHERE kd.project_id = $1 AND kd.id = $2
                 """,
                 ensure_uuid(project_id),
                 ensure_uuid(document_id),
             )
         if row is None:
             return None
+
+        metrics = _json_object_from_db(row["preprocessing_metrics"])
+        metrics_stage = metrics.get("stage")
+        preprocessing_status = str(row["preprocessing_status"] or "")
+        document_status = str(row["status"] or "")
+        processing_stage = (
+            str(metrics_stage)
+            if metrics_stage
+            else preprocessing_status or document_status
+        )
+
+        canonical_entry_count = int(row["canonical_entry_count"] or 0)
+        legacy_chunk_count = int(row["legacy_chunk_count"] or 0)
+
         return {
             "id": str(row["id"]),
             "project_id": str(row["project_id"]),
             "file_name": str(row["file_name"] or ""),
-            "status": str(row["status"] or ""),
-            "processing_stage": str(row["processing_stage"] or ""),
-            "preprocessing_status": str(row["preprocessing_status"] or ""),
-            "chunk_count": int(row["chunk_count"] or 0),
+            "status": document_status,
+            "processing_stage": processing_stage,
+            "preprocessing_status": preprocessing_status,
+            "preprocessing_metrics": metrics,
+            "canonical_entry_count": canonical_entry_count,
+            "retrieval_surface_count": int(row["retrieval_surface_count"] or 0),
+            "legacy_chunk_count": legacy_chunk_count,
+            # Backward-compatible UI field. It is derived, not a physical column.
+            "chunk_count": canonical_entry_count or legacy_chunk_count,
             "created_at": _normalize_timestamp(row["created_at"]),
             "updated_at": _normalize_timestamp(row["updated_at"]),
         }
@@ -3995,7 +4036,7 @@ class KnowledgeRepository:
         if idempotency_key:
             existing = await conn.fetchrow(
                 """
-                SELECT id, payload
+                SELECT id, payload, status, result_payload, error
                 FROM knowledge_edit_actions
                 WHERE project_id = $1
                   AND document_id = $2
@@ -4008,13 +4049,29 @@ class KnowledgeRepository:
                 idempotency_key,
             )
             if existing is not None:
-                if json.dumps(
+                existing_payload_fingerprint = json.dumps(
                     _json_object_from_db(existing["payload"]),
                     sort_keys=True,
                     default=str,
-                ) != json.dumps(action_payload, sort_keys=True, default=str):
-                    raise ValueError("action already applied with different payload")
-                return str(existing["id"])
+                )
+                requested_payload_fingerprint = json.dumps(
+                    action_payload,
+                    sort_keys=True,
+                    default=str,
+                )
+                if existing_payload_fingerprint != requested_payload_fingerprint:
+                    raise ConflictError("idempotency_conflict")
+
+                existing_status = str(existing["status"] or "")
+                existing_id = str(existing["id"])
+                if existing_status in {
+                    "applied",
+                    "applied_with_warning",
+                    "failed",
+                    "rejected",
+                }:
+                    raise ConflictError(f"idempotency_replay:{existing_id}")
+                raise ConflictError(f"action_in_progress:{existing_id}")
         action_id = f"curation:{action_type}:{project_id}:{document_id}:{idempotency_key or len(json.dumps(action_payload, default=str))}"
         await conn.execute(
             """
@@ -4049,6 +4106,107 @@ class KnowledgeRepository:
             json.dumps(action_payload, ensure_ascii=False, default=str),
         )
         return action_id
+
+    def _manual_merge_action_payload(
+        self, *, request: KnowledgeEntryMergeRequest
+    ) -> Mapping[str, object]:
+        return {
+            "request": json_object_from_unknown(asdict(request)),
+        }
+
+    async def _load_existing_manual_curation_action(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        project_id: str,
+        document_id: str,
+        source_kind: str,
+        idempotency_key: str,
+        payload: Mapping[str, object],
+    ) -> Mapping[str, object] | None:
+        if not idempotency_key.strip():
+            return None
+
+        existing = await conn.fetchrow(
+            """
+            SELECT id, payload, status, result_payload, error
+            FROM knowledge_edit_actions
+            WHERE project_id = $1
+              AND document_id = $2
+              AND source_kind = $3
+              AND idempotency_key = $4
+            """,
+            ensure_uuid(project_id),
+            ensure_uuid(document_id),
+            source_kind,
+            idempotency_key,
+        )
+        if existing is None:
+            return None
+
+        existing_payload_fingerprint = json.dumps(
+            _json_object_from_db(existing["payload"]),
+            sort_keys=True,
+            default=str,
+        )
+        requested_payload_fingerprint = json.dumps(
+            dict(payload),
+            sort_keys=True,
+            default=str,
+        )
+        if existing_payload_fingerprint != requested_payload_fingerprint:
+            raise ConflictError("idempotency_conflict")
+
+        status = str(existing["status"] or "")
+        action_id = str(existing["id"])
+        if status in {"proposed", "in_progress"}:
+            raise ConflictError(f"action_in_progress:{action_id}")
+
+        return {
+            "action_id": action_id,
+            "status": status,
+            "result_payload": _json_object_from_db(existing["result_payload"]),
+            "error": str(existing["error"] or ""),
+        }
+
+    def _merge_apply_result_from_payload(
+        self,
+        *,
+        action_id: str,
+        payload: Mapping[str, object],
+        preview: KnowledgeEntryMergePreview,
+    ) -> KnowledgeEntryMergeApplyResult:
+        absorbed_raw = payload.get("absorbed_entry_ids")
+        absorbed_entry_ids = (
+            tuple(str(item) for item in absorbed_raw)
+            if isinstance(absorbed_raw, Sequence)
+            and not isinstance(absorbed_raw, str | bytes | bytearray)
+            else ()
+        )
+        parent_version_raw = payload.get("parent_version")
+        if isinstance(parent_version_raw, int):
+            parent_version = parent_version_raw
+        elif isinstance(parent_version_raw, str):
+            try:
+                parent_version = int(parent_version_raw)
+            except ValueError:
+                parent_version = 0
+        else:
+            parent_version = 0
+
+        return KnowledgeEntryMergeApplyResult(
+            ok=bool(payload.get("ok")),
+            partial=bool(payload.get("partial")),
+            action_id=str(payload.get("action_id") or action_id),
+            parent_entry_id=str(payload.get("parent_entry_id") or ""),
+            absorbed_entry_ids=absorbed_entry_ids,
+            parent_version=parent_version,
+            embedding_rebuilt=bool(payload.get("embedding_rebuilt")),
+            rerun_eval_enqueued=bool(payload.get("rerun_eval_enqueued")),
+            error=str(payload.get("error") or ""),
+            preview=preview,
+            replayed=True,
+        )
 
     async def _fetch_entry_row_for_update(
         self,
@@ -4115,6 +4273,7 @@ class KnowledgeRepository:
         visibility: str,
         reason: str,
         idempotency_key: str,
+        rebuild_embedding: bool = False,
     ) -> KnowledgeCurationEntryView:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
@@ -4125,19 +4284,19 @@ class KnowledgeRepository:
                     entry_id=entry_id,
                 )
                 if before is None:
-                    raise ValueError("knowledge entry not found")
+                    raise NotFoundError("knowledge entry not found")
                 if (
                     expected_version is not None
                     and int(before["version"]) != expected_version
                 ):
-                    raise ValueError("version_conflict")
+                    raise ConflictError("version_conflict")
                 if status == KnowledgeEntryStatus.PUBLISHED.value:
                     source_ref_count = await conn.fetchval(
                         "SELECT count(*) FROM knowledge_entry_source_refs WHERE entry_id = $1",
                         ensure_uuid(entry_id),
                     )
                     if int(source_ref_count or 0) == 0:
-                        raise ValueError("source refs are required to publish")
+                        raise ConflictError("source_refs_required_to_publish")
                 action_id = await self._create_manual_curation_action(
                     conn,
                     project_id=project_id,
@@ -4213,7 +4372,7 @@ class KnowledgeRepository:
             and visibility == KnowledgeEntryVisibility.RUNTIME.value
         ):
             await self.rebuild_entry_embedding(
-                action_id=f"curation:rebuild:{entry_id}:{idempotency_key}",
+                action_id=action_id,
                 project_id=project_id,
                 document_id=document_id,
                 target_entry_id=entry_id,
@@ -4222,7 +4381,7 @@ class KnowledgeRepository:
             project_id=project_id, document_id=document_id, entry_id=entry_id
         )
         if loaded is None:
-            raise ValueError("knowledge entry not found")
+            raise NotFoundError("knowledge entry not found")
         return loaded
 
     async def update_entry_content(
@@ -4243,12 +4402,12 @@ class KnowledgeRepository:
                     entry_id=entry_id,
                 )
                 if before is None:
-                    raise ValueError("knowledge entry not found")
+                    raise NotFoundError("knowledge entry not found")
                 if (
                     patch.expected_version is not None
                     and int(before["version"]) != patch.expected_version
                 ):
-                    raise ValueError("version_conflict")
+                    raise ConflictError("version_conflict")
                 title = " ".join(
                     (patch.title if patch.title is not None else str(before["title"]))
                     .strip()
@@ -4355,7 +4514,7 @@ class KnowledgeRepository:
                 )
         if patch.rebuild_embedding:
             await self.rebuild_entry_embedding(
-                action_id=f"curation:rebuild:{entry_id}:{patch.idempotency_key}",
+                action_id=action_id,
                 project_id=project_id,
                 document_id=document_id,
                 target_entry_id=entry_id,
@@ -4364,7 +4523,7 @@ class KnowledgeRepository:
             project_id=project_id, document_id=document_id, entry_id=entry_id
         )
         if loaded is None:
-            raise ValueError("knowledge entry not found")
+            raise NotFoundError("knowledge entry not found")
         return loaded
 
     async def apply_manual_entry_merge(
@@ -4385,6 +4544,39 @@ class KnowledgeRepository:
                         request.parent_entry_id,
                         *request.absorbed_entry_ids,
                     )
+                    if len(selected_ids) < 2 or len(selected_ids) > 12:
+                        raise ValidationError(
+                            "merge selection must contain 2..12 entries"
+                        )
+                    if len(set(selected_ids)) != len(selected_ids):
+                        raise ValidationError("duplicate_merge_entry_ids")
+                    if request.parent_entry_id in request.absorbed_entry_ids:
+                        raise ValidationError("parent_entry_id cannot be absorbed")
+
+                    merge_action_payload = self._manual_merge_action_payload(
+                        request=request
+                    )
+                    existing_action = await self._load_existing_manual_curation_action(
+                        conn,
+                        project_id=project_id,
+                        document_id=document_id,
+                        source_kind="manual_merge",
+                        idempotency_key=request.idempotency_key,
+                        payload=merge_action_payload,
+                    )
+                    if existing_action is not None:
+                        result_payload = existing_action["result_payload"]
+                        if (
+                            not isinstance(result_payload, Mapping)
+                            or not result_payload
+                        ):
+                            raise ConflictError("idempotency_replay_missing_result")
+                        return self._merge_apply_result_from_payload(
+                            action_id=str(existing_action["action_id"]),
+                            payload=result_payload,
+                            preview=preview,
+                        )
+
                     rows = await conn.fetch(
                         """
                         SELECT id, project_id, document_id, compiler_run_id, stable_key, entry_kind,
@@ -4399,15 +4591,55 @@ class KnowledgeRepository:
                         [ensure_uuid(item) for item in selected_ids],
                     )
                     if len(rows) != len(selected_ids):
-                        raise ValueError("cross-document or missing merge entry")
+                        raise NotFoundError("merge entries not found in document")
                     by_id = {str(row["id"]): row for row in rows}
                     parent_row = by_id[request.parent_entry_id]
+
+                    parent_status = str(parent_row["status"])
+                    if parent_status in {
+                        KnowledgeEntryStatus.REJECTED.value,
+                        KnowledgeEntryStatus.ARCHIVED.value,
+                        KnowledgeEntryStatus.MERGED.value,
+                    }:
+                        raise ConflictError(f"invalid_parent_status:{parent_status}")
+
                     if (
                         request.parent_expected_version is not None
                         and int(parent_row["version"])
                         != request.parent_expected_version
                     ):
-                        raise ValueError("version_conflict")
+                        raise ConflictError("parent_version_conflict")
+
+                    for absorbed_id in request.absorbed_entry_ids:
+                        absorbed_row = by_id.get(absorbed_id)
+                        if absorbed_row is None:
+                            raise NotFoundError("absorbed entry not found")
+                        expected_absorbed_version = (
+                            request.absorbed_expected_versions.get(absorbed_id)
+                        )
+                        if (
+                            expected_absorbed_version is not None
+                            and int(absorbed_row["version"])
+                            != expected_absorbed_version
+                        ):
+                            raise ConflictError(
+                                f"absorbed_version_conflict:{absorbed_id}"
+                            )
+
+                        absorbed_metadata = _json_object_from_db(
+                            absorbed_row["metadata"]
+                        )
+                        absorbed_curation = absorbed_metadata.get("curation")
+                        absorbed_curation_payload = (
+                            dict(absorbed_curation)
+                            if isinstance(absorbed_curation, Mapping)
+                            else {}
+                        )
+                        if absorbed_curation_payload.get("merged_into"):
+                            raise ConflictError(
+                                f"absorbed_already_merged:{absorbed_id}"
+                            )
+
                     action_id = await self._create_manual_curation_action(
                         conn,
                         project_id=project_id,
@@ -4417,10 +4649,7 @@ class KnowledgeRepository:
                         target_entry_id=request.parent_entry_id,
                         target_entry_ids=selected_ids,
                         reason=request.merge_instruction,
-                        payload={
-                            "request": request,
-                            "preview": preview.proposed_entry_after,
-                        },
+                        payload=merge_action_payload,
                         idempotency_key=request.idempotency_key,
                         source_kind="manual_merge",
                     )
@@ -4440,6 +4669,14 @@ class KnowledgeRepository:
                         and not isinstance(raw_source_refs, str | bytes | bytearray)
                         else ()
                     )
+                    if (
+                        str(parent_row["status"])
+                        == KnowledgeEntryStatus.PUBLISHED.value
+                        and str(parent_row["visibility"])
+                        == KnowledgeEntryVisibility.RUNTIME.value
+                        and not source_refs
+                    ):
+                        raise ConflictError("source_refs_required_for_published_parent")
                     previous_version = int(parent_row["version"])
                     parent_version = previous_version + 1
                     await conn.execute(
@@ -4553,7 +4790,7 @@ class KnowledgeRepository:
                         ensure_uuid(request.parent_entry_id),
                     )
                     await conn.execute(
-                        "UPDATE knowledge_edit_actions SET status = 'applied', applied_at = COALESCE(applied_at, now()), updated_at = now() WHERE id = $1",
+                        "UPDATE knowledge_edit_actions SET status = 'in_progress', updated_at = now() WHERE id = $1",
                         action_id,
                     )
             embedding_rebuilt = False
@@ -4570,14 +4807,9 @@ class KnowledgeRepository:
                     embedding_rebuilt = True
                 except Exception as exc:
                     partial = True
-                    error = "embedding_rebuild_failed"
-                    async with self.pool.acquire() as conn:
-                        await conn.execute(
-                            "UPDATE knowledge_edit_actions SET status = 'failed', error = $2, updated_at = now() WHERE id = $1",
-                            action_id,
-                            type(exc).__name__,
-                        )
-            return KnowledgeEntryMergeApplyResult(
+                    error = f"embedding_rebuild_failed:{type(exc).__name__}"
+
+            result = KnowledgeEntryMergeApplyResult(
                 ok=not partial,
                 partial=partial,
                 action_id=action_id,
@@ -4588,9 +4820,87 @@ class KnowledgeRepository:
                 rerun_eval_enqueued=False,
                 error=error,
                 preview=preview,
+                replayed=False,
             )
+            merge_result_payload: dict[str, object] = {
+                "ok": result.ok,
+                "partial": result.partial,
+                "action_id": result.action_id,
+                "parent_entry_id": result.parent_entry_id,
+                "absorbed_entry_ids": list(result.absorbed_entry_ids),
+                "parent_version": result.parent_version,
+                "embedding_rebuilt": result.embedding_rebuilt,
+                "rerun_eval_enqueued": result.rerun_eval_enqueued,
+                "error": result.error,
+                "replayed": False,
+            }
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE knowledge_edit_actions
+                    SET status = $2,
+                        error = $3,
+                        result_payload = $4::jsonb,
+                        applied_at = COALESCE(applied_at, now()),
+                        updated_at = now()
+                    WHERE id = $1
+                    """,
+                    action_id,
+                    "applied_with_warning" if partial else "applied",
+                    error,
+                    json.dumps(merge_result_payload, ensure_ascii=False, default=str),
+                )
+            return result
         except Exception:
             raise
+
+    async def create_manual_rebuild_embedding_action(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        entry_id: str,
+        actor_user_id: str,
+        expected_version: int | None,
+        reason: str,
+        idempotency_key: str,
+    ) -> str:
+        if not idempotency_key.strip():
+            raise ValidationError("idempotency_key is required")
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                before = await self._fetch_entry_row_for_update(
+                    conn,
+                    project_id=project_id,
+                    document_id=document_id,
+                    entry_id=entry_id,
+                )
+                if before is None:
+                    raise NotFoundError("knowledge entry not found")
+                if (
+                    expected_version is not None
+                    and int(before["version"]) != expected_version
+                ):
+                    raise ConflictError("version_conflict")
+
+                return await self._create_manual_curation_action(
+                    conn,
+                    project_id=project_id,
+                    document_id=document_id,
+                    action_type="rebuild_embedding",
+                    actor_user_id=actor_user_id,
+                    target_entry_id=entry_id,
+                    target_entry_ids=(entry_id,),
+                    reason=reason,
+                    payload={
+                        "entry_id": entry_id,
+                        "expected_version": expected_version,
+                        "reason": reason,
+                    },
+                    idempotency_key=idempotency_key,
+                    source_kind="manual_embedding_rebuild",
+                )
 
     async def list_knowledge_curation_actions(
         self,
@@ -4701,7 +5011,7 @@ class KnowledgeRepository:
                     ensure_uuid(entry_id),
                 )
                 if before is None or version is None:
-                    raise ValueError("entry version not found")
+                    raise NotFoundError("entry version not found")
                 snapshot = _json_object_from_db(version["new_snapshot"])
                 action_id = await self._create_manual_curation_action(
                     conn,
@@ -4776,7 +5086,7 @@ class KnowledgeRepository:
             project_id=project_id, document_id=document_id, entry_id=entry_id
         )
         if loaded is None:
-            raise ValueError("knowledge entry not found")
+            raise NotFoundError("knowledge entry not found")
         return loaded
 
     async def clear_project_knowledge(self, project_id: str) -> None:

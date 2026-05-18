@@ -208,6 +208,7 @@ class KnowledgeEntryMergeApplyResult:
     rerun_eval_enqueued: bool
     error: str = ""
     preview: KnowledgeEntryMergePreview | None = None
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
