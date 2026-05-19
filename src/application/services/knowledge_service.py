@@ -41,6 +41,10 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeCompilerBatchView,
     KnowledgeSearchResultView,
 )
+from src.domain.project_plane.knowledge_document_pipeline import (
+    allowed_actions_for_state,
+    resolve_pipeline_state,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     PREPROCESSING_STATUS_NOT_REQUESTED,
@@ -195,48 +199,21 @@ def _knowledge_processing_message(
     return "Документ ожидает обработки или пока не дал пригодных ответов."
 
 
-def _knowledge_processing_actions(
-    *,
-    batch_failed: int,
-    raw_answer_count: int,
-    published_answer_count: int,
-    is_processing: bool,
-) -> tuple[KnowledgeProcessingActionDto, ...]:
-    actions: list[KnowledgeProcessingActionDto] = []
-    if is_processing:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="cancel",
-                label="Остановить обработку",
-                kind="destructive",
-            )
+
+
+
+
+def _pipeline_actions_to_dto(state: object) -> tuple[KnowledgeProcessingActionDto, ...]:
+    actions = allowed_actions_for_state(state)
+    return tuple(
+        KnowledgeProcessingActionDto(
+            id=action.id,
+            label=action.label,
+            kind=str(action.kind),
+            enabled=action.enabled,
         )
-    if batch_failed > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="retry_failed_batches",
-                label="Повторить проблемные части",
-                kind="primary",
-            )
-        )
-    if raw_answer_count > published_answer_count:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="publish_ready",
-                label="Опубликовать готовые ответы",
-                kind="primary",
-                enabled=not is_processing,
-            )
-        )
-    if published_answer_count > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="review_published",
-                label="Проверить опубликованные ответы",
-                kind="secondary",
-            )
-        )
-    return tuple(actions)
+        for action in actions
+    )
 
 
 @dataclass(frozen=True)
@@ -602,6 +579,17 @@ class KnowledgeService:
             or _json_int_metric(document_metrics, "published_entry_count")
         )
 
+        state = resolve_pipeline_state(
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status or "",
+            pipeline_stage=current_stage,
+            batch_total=batch_total,
+            batch_failed=batch_failed,
+            has_raw_drafts=candidate_summary.raw_count > 0,
+            has_canonical_entries=published_answer_count > 0,
+            has_retrieval_surface=published_answer_count > 0 and document.status == "processed",
+        )
+
         steps = (
             KnowledgeProcessingStepDto(
                 id="prepare",
@@ -729,12 +717,7 @@ class KnowledgeService:
             recoverable=batch_failed > 0
             or candidate_summary.raw_count > published_answer_count,
             steps=steps,
-            actions=_knowledge_processing_actions(
-                batch_failed=batch_failed,
-                raw_answer_count=candidate_summary.raw_count,
-                published_answer_count=published_answer_count,
-                is_processing=is_processing,
-            ),
+            actions=_pipeline_actions_to_dto(state),
             metrics=metrics,
         )
 
