@@ -396,41 +396,6 @@ async def publish_knowledge_ready_answers(
 
 
 
-@router.post("/{document_id}/resume-processing")
-async def resume_knowledge_processing(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Queues explicit pipeline continuation after extraction/retry stage."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    return await service.resume_document_processing(
-        project_id,
-        document_id,
-        authorization,
-        queue_repo=queue_repo,
-        resume_processing_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
-        logger=logger,
-    )
-
-
 @router.post("/{document_id}/retry-failed-batches")
 async def retry_knowledge_failed_batches(
     project_id: str,

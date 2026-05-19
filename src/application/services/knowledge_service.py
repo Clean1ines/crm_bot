@@ -202,6 +202,7 @@ def _knowledge_processing_actions(
     published_answer_count: int,
     is_processing: bool,
     answer_resolution_ready: bool,
+    current_stage: str,
 ) -> tuple[KnowledgeProcessingActionDto, ...]:
     actions: list[KnowledgeProcessingActionDto] = []
     if is_processing:
@@ -221,20 +222,15 @@ def _knowledge_processing_actions(
                 enabled=not is_processing,
             )
         )
-    if answer_resolution_ready and batch_failed == 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="resume_processing",
-                label="Продолжить обработку",
-                kind="primary",
-                enabled=not is_processing,
-            )
-        )
     if raw_answer_count > published_answer_count:
         actions.append(
             KnowledgeProcessingActionDto(
                 id="publish_ready",
-                label="Опубликовать готовые ответы",
+                label=(
+                    "Опубликовать черновики без уплотнения"
+                    if current_stage == "answer_resolution_pending"
+                    else "Опубликовать готовые ответы"
+                ),
                 kind="primary",
                 enabled=not is_processing,
             )
@@ -578,7 +574,7 @@ class KnowledgeService:
         batch_failed = _batch_status_count(batches, "failed")
         batch_processing = _batch_status_count(batches, "processing")
         batch_pending = _batch_status_count(batches, "pending")
-        is_processing = document.status in {"processing", "pending"} or (
+        is_processing = document.status in {"processing"} or (
             document.preprocessing_status == "processing"
         )
         published_answer_count = int(document.structured_entries or 0)
@@ -716,6 +712,9 @@ class KnowledgeService:
                 "Черновики уже сохранены. Сейчас система проверяет смысловые дубли "
                 "и выбирает итоговые ответы перед публикацией."
             )
+        elif current_stage == "answer_resolution_pending":
+            title = "Проблемные части повторены"
+            message = "Черновики готовы. Продолжите уплотнение и публикацию."
         else:
             title = (
                 "Опубликовано частично: есть проблемные части"
@@ -751,74 +750,10 @@ class KnowledgeService:
                     and batch_completed >= batch_total
                     and published_answer_count == 0
                 ),
+                current_stage=current_stage,
             ),
             metrics=metrics,
         )
-
-    async def cancel_document_processing(
-        self,
-        project_id: str,
-        document_id: str,
-        authorization: str | None,
-        *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
-        logger: LoggerPort,
-    ) -> None:
-        await self.require_access(project_id, authorization)
-        await self._ensure_project_exists(project_id, logger)
-
-        repo = knowledge_repo_factory(self.pool)
-        cancelled = await repo.cancel_document_processing(
-            project_id=project_id,
-            document_id=document_id,
-            reason=KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE,
-        )
-        if not cancelled:
-            raise NotFoundError("Knowledge document not found")
-
-        logger.info(
-            "Knowledge document processing cancelled",
-            extra={"project_id": project_id, "document_id": document_id},
-        )
-
-
-    async def resume_document_processing(
-        self,
-        project_id: str,
-        document_id: str,
-        authorization: str | None,
-        *,
-        queue_repo: KnowledgeQueuePort,
-        resume_processing_task_type: str,
-        logger: LoggerPort,
-    ) -> JsonObject:
-        user_id = await self.require_access(project_id, authorization)
-        await self._ensure_project_exists(project_id, logger)
-
-        job_id = await queue_repo.enqueue(
-            resume_processing_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_resume_processing",
-            },
-            max_attempts=3,
-        )
-
-        logger.info(
-            "Knowledge resume processing queued",
-            extra={
-                "project_id": project_id,
-                "document_id": document_id,
-                "job_id": job_id,
-            },
-        )
-        return {
-            "status": "queued",
-            "job_id": job_id,
-            "document_id": document_id,
-        }
 
     async def publish_document_ready_answers(
         self,

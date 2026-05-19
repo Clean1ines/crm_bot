@@ -1500,24 +1500,6 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
-  const resumeProcessingMutation = useMutation({
-    mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error('Project ID is missing');
-      await knowledgeApi.resumeProcessing(projectId, documentId);
-    },
-    onSuccess: async () => {
-      toast.success(t('knowledge.feedback.publishReadyQueued'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-answer-drafts', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-source-units', projectId] });
-    },
-    onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
-    },
-  });
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1896,25 +1878,16 @@ export const KnowledgePage: React.FC = () => {
                           {processingReport.actions.map((action) => {
                             const canRetry = action.id === 'retry_failed_batches' && action.enabled;
                             const canPublishReady = action.id === 'publish_ready' && action.enabled;
-                            const canResumeProcessing = action.id === 'resume_processing' && action.enabled;
-                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
+                                                        const isRetryingThisDoc = retryFailedBatchesMutation.isPending
                               && retryFailedBatchesMutation.variables === doc.id;
                             const isPublishingThisDoc = publishReadyMutation.isPending
                               && publishReadyMutation.variables === doc.id;
-                            const isResumingThisDoc = resumeProcessingMutation.isPending
-                              && resumeProcessingMutation.variables === doc.id;
 
-                            if (canRetry || canPublishReady || canResumeProcessing) {
-                              const isPending = canRetry
-                                ? isRetryingThisDoc
-                                : canResumeProcessing
-                                  ? isResumingThisDoc
-                                  : isPublishingThisDoc;
+                            if (canRetry || canPublishReady) {
+                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
                               const mutationPending = canRetry
                                 ? retryFailedBatchesMutation.isPending
-                                : canResumeProcessing
-                                  ? resumeProcessingMutation.isPending
-                                  : publishReadyMutation.isPending;
+                                : publishReadyMutation.isPending;
                               return (
                                 <button
                                   key={action.id}
@@ -1922,8 +1895,6 @@ export const KnowledgePage: React.FC = () => {
                                   onClick={() => {
                                     if (canRetry) {
                                       retryFailedBatchesMutation.mutate(doc.id);
-                                    } else if (canResumeProcessing) {
-                                      resumeProcessingMutation.mutate(doc.id);
                                     } else {
                                       publishReadyMutation.mutate(doc.id);
                                     }

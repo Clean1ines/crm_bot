@@ -4234,7 +4234,7 @@ class KnowledgeIngestionService:
                 prompt_version=prompt_version_for_mode(mode),
                 metrics=metrics,
             )
-            await repo.update_document_status(document_id, "pending")
+            await repo.update_document_status(document_id, "error", None)
         else:
             metrics["status_message"] = (
                 "Часть проблемных частей всё ещё требует повтора"
