@@ -7,6 +7,7 @@ from typing import cast
 import jwt
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     Form,
@@ -65,6 +66,11 @@ UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 class KnowledgePreviewRequestModel(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     limit: int = Field(default=5, ge=1, le=10)
+
+
+class KnowledgePipelineCommandRequestModel(BaseModel):
+    expected_state: str = Field(min_length=1, max_length=100)
+    expected_state_version: int = Field(ge=1)
 
 
 class PyJwtDecoder:
@@ -332,6 +338,7 @@ async def retighten_knowledge_document(
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     queue_repo=Depends(get_queue_repo),
+    payload: KnowledgePipelineCommandRequestModel = Body(...),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """Queues answer resolution tightening for an already processed document."""
@@ -354,7 +361,10 @@ async def retighten_knowledge_document(
         document_id,
         authorization,
         queue_repo=queue_repo,
+        knowledge_repo_factory=make_knowledge_repo,
         retighten_task_type=TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+        expected_state=payload.expected_state,
+        expected_state_version=payload.expected_state_version,
         logger=logger,
     )
 
@@ -367,6 +377,7 @@ async def publish_knowledge_ready_answers(
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     queue_repo=Depends(get_queue_repo),
+    payload: KnowledgePipelineCommandRequestModel = Body(...),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """Queues publishing of already extracted answer drafts for a document."""
@@ -389,7 +400,10 @@ async def publish_knowledge_ready_answers(
         document_id,
         authorization,
         queue_repo=queue_repo,
+        knowledge_repo_factory=make_knowledge_repo,
         publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+        expected_state=payload.expected_state,
+        expected_state_version=payload.expected_state_version,
         logger=logger,
     )
 
@@ -402,6 +416,7 @@ async def retry_knowledge_failed_batches(
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     queue_repo=Depends(get_queue_repo),
+    payload: KnowledgePipelineCommandRequestModel = Body(...),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """Queues retry for failed durable compiler batches of a document."""
@@ -424,7 +439,10 @@ async def retry_knowledge_failed_batches(
         document_id,
         authorization,
         queue_repo=queue_repo,
+        knowledge_repo_factory=make_knowledge_repo,
         retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+        expected_state=payload.expected_state,
+        expected_state_version=payload.expected_state_version,
         logger=logger,
     )
 

@@ -18,6 +18,7 @@ from src.application.dto.knowledge_dto import (
 )
 from src.application.dto.model_usage_dto import ModelUsageSummaryDto
 from src.application.errors import (
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     UnauthorizedError,
@@ -767,11 +768,21 @@ class KnowledgeService:
         authorization: str | None,
         *,
         queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         publish_ready_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
 
         job_id = await queue_repo.enqueue(
             publish_ready_task_type,
@@ -780,6 +791,8 @@ class KnowledgeService:
                 "document_id": document_id,
                 "requested_by": user_id,
                 "source": "knowledge_ready_answer_publish",
+                "expected_state": expected_state,
+                "expected_state_version": expected_state_version,
             },
             max_attempts=3,
         )
@@ -805,11 +818,21 @@ class KnowledgeService:
         authorization: str | None,
         *,
         queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         retry_failed_batches_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
 
         job_id = await queue_repo.enqueue(
             retry_failed_batches_task_type,
@@ -818,6 +841,8 @@ class KnowledgeService:
                 "document_id": document_id,
                 "requested_by": user_id,
                 "source": "knowledge_failed_batch_retry",
+                "expected_state": expected_state,
+                "expected_state_version": expected_state_version,
             },
             max_attempts=3,
         )
@@ -843,11 +868,21 @@ class KnowledgeService:
         authorization: str | None,
         *,
         queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         retighten_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
 
         job_id = await queue_repo.enqueue(
             retighten_task_type,
@@ -856,6 +891,8 @@ class KnowledgeService:
                 "document_id": document_id,
                 "requested_by": user_id,
                 "source": "knowledge_document_retighten",
+                "expected_state": expected_state,
+                "expected_state_version": expected_state_version,
             },
             max_attempts=3,
         )
@@ -873,6 +910,53 @@ class KnowledgeService:
             "job_id": job_id,
             "document_id": document_id,
         }
+
+    async def _current_pipeline_state_and_version(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+    ) -> tuple[str, int]:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        batch_total = max((batch.batch_count for batch in batches), default=0)
+        batch_completed = _batch_status_count(batches, "completed")
+        batch_failed = _batch_status_count(batches, "failed")
+        published_answer_count = int(document.structured_entries or 0)
+        document_metrics = (
+            dict(document.preprocessing_metrics)
+            if isinstance(document.preprocessing_metrics, Mapping)
+            else {}
+        )
+        current_stage = str(document_metrics.get("stage") or "")
+        state = resolve_pipeline_state(
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status or "",
+            pipeline_stage=current_stage,
+            batch_total=batch_total,
+            batch_failed=batch_failed,
+            has_raw_drafts=candidate_summary.raw_count > 0,
+            has_canonical_entries=published_answer_count > 0,
+            has_retrieval_surface=(
+                published_answer_count > 0 and document.status == "processed"
+            ),
+        )
+        state_version = max(
+            1,
+            batch_total + batch_completed + batch_failed + published_answer_count,
+        )
+        return state.value, state_version
 
     async def preview_query(
         self,

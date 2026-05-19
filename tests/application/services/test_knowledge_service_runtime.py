@@ -177,6 +177,29 @@ async def test_retry_document_failed_batches_queues_retry_task():
 
     queue_repo = Mock()
     queue_repo.enqueue = AsyncMock(return_value="job-retry-1")
+    repo = Mock()
+    repo.get_document = AsyncMock(
+        return_value=type(
+            "Document",
+            (),
+            {
+                "project_id": "project-1",
+                "structured_entries": 0,
+                "status": "processing",
+                "preprocessing_status": "processing",
+                "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+            },
+        )()
+    )
+    repo.list_document_compiler_batches = AsyncMock(return_value=[])
+    repo.get_document_answer_candidate_summary = AsyncMock(
+        return_value=type(
+            "CandidateSummary",
+            (),
+            {"raw_count": 0, "total_count": 0, "grounded_count": 0, "rejected_count": 0},
+        )()
+    )
+    knowledge_repo_factory = Mock(return_value=repo)
     logger = Mock()
 
     service = KnowledgeService(project_repo, user_repo, object(), "secret", FakeJwt)
@@ -186,7 +209,10 @@ async def test_retry_document_failed_batches_queues_retry_task():
         "doc-1",
         "Bearer valid-token",
         queue_repo=queue_repo,
+        knowledge_repo_factory=knowledge_repo_factory,
         retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+        expected_state="compiler_running",
+        expected_state_version=1,
         logger=logger,
     )
 
@@ -202,6 +228,8 @@ async def test_retry_document_failed_batches_queues_retry_task():
             "document_id": "doc-1",
             "requested_by": "user-1",
             "source": "knowledge_failed_batch_retry",
+            "expected_state": "compiler_running",
+            "expected_state_version": 1,
         },
         max_attempts=3,
     )
@@ -220,6 +248,29 @@ async def test_publish_document_ready_answers_queues_publish_task():
 
     queue_repo = Mock()
     queue_repo.enqueue = AsyncMock(return_value="job-publish-1")
+    repo = Mock()
+    repo.get_document = AsyncMock(
+        return_value=type(
+            "Document",
+            (),
+            {
+                "project_id": "project-1",
+                "structured_entries": 0,
+                "status": "processing",
+                "preprocessing_status": "processing",
+                "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+            },
+        )()
+    )
+    repo.list_document_compiler_batches = AsyncMock(return_value=[])
+    repo.get_document_answer_candidate_summary = AsyncMock(
+        return_value=type(
+            "CandidateSummary",
+            (),
+            {"raw_count": 0, "total_count": 0, "grounded_count": 0, "rejected_count": 0},
+        )()
+    )
+    knowledge_repo_factory = Mock(return_value=repo)
     logger = Mock()
 
     service = KnowledgeService(project_repo, user_repo, object(), "secret", FakeJwt)
@@ -229,7 +280,10 @@ async def test_publish_document_ready_answers_queues_publish_task():
         "doc-1",
         "Bearer valid-token",
         queue_repo=queue_repo,
+        knowledge_repo_factory=knowledge_repo_factory,
         publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+        expected_state="compiler_running",
+        expected_state_version=1,
         logger=logger,
     )
 
@@ -245,6 +299,8 @@ async def test_publish_document_ready_answers_queues_publish_task():
             "document_id": "doc-1",
             "requested_by": "user-1",
             "source": "knowledge_ready_answer_publish",
+            "expected_state": "compiler_running",
+            "expected_state_version": 1,
         },
         max_attempts=3,
     )
