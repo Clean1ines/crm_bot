@@ -4040,6 +4040,52 @@ class KnowledgeIngestionService:
             "remaining_failed_batch_count": batch_failed,
         }
 
+
+    async def resume_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+
+        mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        failed_count = sum(1 for batch in batches if batch.status == "failed")
+        if failed_count > 0:
+            raise ValidationError("Cannot resume while failed compiler batches remain")
+
+        document_metrics = (
+            dict(document.preprocessing_metrics)
+            if isinstance(document.preprocessing_metrics, Mapping)
+            else {}
+        )
+        stage = str(document_metrics.get("stage") or "")
+        if stage not in {"answer_resolution_pending", "answer_resolution"}:
+            return {
+                "status": "skipped",
+                "reason": "stage_not_resumable",
+                "document_id": document_id,
+                "stage": stage,
+            }
+
+        result = await self.publish_ready_answers(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        result["resumed"] = True
+        return result
+
     async def retry_failed_batches(
         self,
         *,

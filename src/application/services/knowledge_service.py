@@ -221,6 +221,15 @@ def _knowledge_processing_actions(
                 enabled=not is_processing,
             )
         )
+    if current_stage == "answer_resolution_pending":
+        actions.append(
+            KnowledgeProcessingActionDto(
+                id="resume_processing",
+                label="Продолжить обработку",
+                kind="primary",
+                enabled=not is_processing,
+            )
+        )
     if raw_answer_count > published_answer_count:
         actions.append(
             KnowledgeProcessingActionDto(
@@ -774,6 +783,32 @@ class KnowledgeService:
             "Knowledge document processing cancelled",
             extra={"project_id": project_id, "document_id": document_id},
         )
+
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        resume_task_type: str,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        job_id = await queue_repo.enqueue(
+            resume_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_resume_processing",
+            },
+            max_attempts=3,
+        )
+        return {"status": "queued", "job_id": job_id, "document_id": document_id}
 
     async def publish_document_ready_answers(
         self,

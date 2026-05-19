@@ -24,6 +24,9 @@ from src.infrastructure.queue.handlers.knowledge_failed_batches import (
 from src.infrastructure.queue.handlers.knowledge_publish_ready import (
     handle_publish_knowledge_ready_answers,
 )
+from src.infrastructure.queue.handlers.knowledge_resume_processing import (
+    handle_resume_knowledge_processing,
+)
 from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
 from src.infrastructure.queue.handlers.notify_manager import (
     RedisGetter,
