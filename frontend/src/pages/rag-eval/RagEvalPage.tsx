@@ -13,7 +13,6 @@ import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 import { getErrorMessage } from '@shared/api/core/errors';
 
-import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
   type RagEvalReviewGroup,
   type RagEvalReviewQuestion,
@@ -31,6 +30,8 @@ import { ApplyAcceptedQuestionsPanel, TechnicalDiagnosticsDisclosure } from './c
 import { RagEvalResultsPanel, ReportSummaryCard } from './components/RagEvalSummaryPanels';
 import { DocumentEvalOverviewCard, EvalProblemMap } from './components/RagEvalReviewOverview';
 import { EvalFiltersBar, FragmentReviewCard, JobProgressCard, QuestionReviewDrawer } from './components/RagEvalReviewRuntimeSections';
+import { useRagEvalDocuments } from './hooks/useRagEvalDocuments';
+import { useRagEvalJobs, useRagEvalReview } from './hooks/useRagEvalReview';
 import { getActionableResults, getEvalResults } from './lib/ragEvalResults';
 import {
   questionIsProblem,
@@ -41,17 +42,8 @@ import {
 } from './lib/ragEvalReviewFilters';
 import { formatNumber, statusLabel } from './lib/ragEvalProgress';
 import { getRecord } from './lib/ragEvalRuntimeUtils';
-import { getJobStatus, isJobActive, isJobPaused, isJobTerminal } from './lib/ragEvalStatus';
+import { getJobStatus, isJobTerminal } from './lib/ragEvalStatus';
 import { ReportJsonBlock } from './components/RagEvalReportComponents';
-
-interface Document {
-  id: string;
-  file_name: string;
-  file_size: number;
-  status: 'pending' | 'processing' | 'processed' | 'error';
-  chunk_count: number;
-  created_at: string;
-}
 
 const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
 
@@ -77,36 +69,7 @@ export const RagEvalPage: React.FC = () => {
   const [selectedReviewGroup, setSelectedReviewGroup] = useState<RagEvalReviewGroup | null>(null);
   const [activeReviewTab, setActiveReviewTab] = useState<'curation' | 'retrieval'>('curation');
 
-  const documentsQuery = useQuery({
-    queryKey: ['knowledge-documents', projectId],
-    queryFn: async () => {
-      if (!projectId) return [];
-      const { data } = await knowledgeApi.list(projectId);
-
-      const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
-      const list = Array.isArray(payload.documents)
-        ? payload.documents
-        : Array.isArray(payload.items)
-          ? payload.items
-          : [];
-
-      return list as Document[];
-    },
-    enabled: !!projectId,
-  });
-
-  const documents = useMemo(
-    () => (Array.isArray(documentsQuery.data) ? documentsQuery.data : []),
-    [documentsQuery.data],
-  );
-
-  const processedDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === 'processed' && doc.chunk_count > 0),
-    [documents],
-  );
-
-  const activeDocumentId = selectedDocumentId || processedDocuments[0]?.id || '';
-  const activeDocument = processedDocuments.find((doc) => doc.id === activeDocumentId) || null;
+  const { documentsQuery, processedDocuments, activeDocumentId, activeDocument } = useRagEvalDocuments(projectId, selectedDocumentId);
 
   const statusQuery = useQuery({
     queryKey: ['rag-eval-status', activeDocumentId],
@@ -120,57 +83,8 @@ export const RagEvalPage: React.FC = () => {
     },
   });
 
-  const reviewQuery = useQuery({
-    queryKey: ['rag-eval-latest-review', activeDocumentId],
-    queryFn: async () => ragEvalApi.getLatestReview(activeDocumentId),
-    enabled: !!activeDocumentId,
-    retry: false,
-    refetchInterval: (query) => {
-      const statusRun = statusQuery.data?.run as Record<string, unknown> | undefined;
-      const latestReview = query.state.data?.review;
-      const reviewRun = latestReview?.run as Record<string, unknown> | undefined;
-      const status = String(reviewRun?.status || statusRun?.status || '');
-      return ACTIVE_RUN_STATUSES.has(status) ? 3000 : false;
-    },
-  });
-
-  const jobsQuery = useQuery({
-    queryKey: ['rag-eval-jobs', activeDocumentId],
-    queryFn: async () => ragEvalApi.listJobs(activeDocumentId),
-    enabled: !!activeDocumentId,
-    retry: false,
-    refetchInterval: (query) => {
-      const jobs = query.state.data?.jobs ?? [];
-      return jobs.some((job) => isJobActive(job) || isJobPaused(job)) ? 3000 : false;
-    },
-  });
-
-  const visibleJob = useMemo(() => {
-    const jobs = jobsQuery.data?.jobs ?? [];
-    const active = jobs.find((job) => isJobActive(job));
-    if (active) return active;
-
-    const paused = jobs.find((job) => isJobPaused(job));
-    if (paused) return paused;
-
-    if (lastQueued) {
-      const queued = jobs.find((job) => job.id === lastQueued.job_id);
-      if (queued) return queued;
-    }
-
-    return jobs[0] ?? null;
-  }, [jobsQuery.data?.jobs, lastQueued]);
-
-  const progressQuery = useQuery({
-    queryKey: ['rag-eval-job-progress', visibleJob?.id],
-    queryFn: async () => ragEvalApi.getJobProgress(String(visibleJob?.id)),
-    enabled: !!visibleJob?.id,
-    retry: false,
-    refetchInterval: (query) => {
-      const job = query.state.data?.job;
-      return isJobActive(job) || isJobPaused(job) ? 3000 : false;
-    },
-  });
+  const { reviewQuery } = useRagEvalReview(activeDocumentId, statusQuery.data?.run as Record<string, unknown> | undefined);
+  const { visibleJob, progressQuery } = useRagEvalJobs(activeDocumentId, lastQueued?.job_id);
 
   const invalidateEvalQueries = async () => {
     await queryClient.invalidateQueries({ queryKey: ['rag-eval-status', activeDocumentId] });
