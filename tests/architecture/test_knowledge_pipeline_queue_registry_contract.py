@@ -33,3 +33,4 @@ def test_no_endpoint_enqueues_wrong_task_type_for_knowledge_pipeline_commands() 
     assert "publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS" in http_source
     assert "retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES" in http_source
     assert "retighten_task_type=TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT" in http_source
+    assert "resume_task_type=TASK_RESUME_KNOWLEDGE_PROCESSING" in http_source

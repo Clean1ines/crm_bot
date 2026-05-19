@@ -18,6 +18,13 @@ def test_no_endpoint_enqueues_wrong_task_type() -> None:
     assert "TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS" in source
     assert "TASK_RETRY_KNOWLEDGE_FAILED_BATCHES" in source
     assert "TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT" in source
+    assert "TASK_RESUME_KNOWLEDGE_PROCESSING" in source
+
+
+def test_resume_task_is_dispatched_to_resume_handler() -> None:
+    dispatcher = _read("src/infrastructure/queue/job_dispatcher.py")
+    assert "TASK_RESUME_KNOWLEDGE_PROCESSING" in dispatcher
+    assert "handle_resume_knowledge_processing" in dispatcher
 
 
 def test_processed_requires_retrieval_surface_rows_guard() -> None:
