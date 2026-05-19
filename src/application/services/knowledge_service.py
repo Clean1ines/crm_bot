@@ -43,7 +43,9 @@ from src.domain.project_plane.knowledge_views import (
 )
 from src.domain.project_plane.knowledge_document_pipeline import (
     allowed_actions_for_state,
+    recommended_action_for_state,
     resolve_pipeline_state,
+    state_hash,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
@@ -709,6 +711,9 @@ class KnowledgeService:
                 raw_answer_count=candidate_summary.raw_count,
                 published_answer_count=published_answer_count,
             )
+        state_version = max(1, batch_total + batch_completed + batch_failed + published_answer_count)
+        next_action = recommended_action_for_state(state)
+
         return KnowledgeProcessingReportDto(
             document_id=document_id,
             status=document.preprocessing_status or document.status,
@@ -719,6 +724,14 @@ class KnowledgeService:
             steps=steps,
             actions=_pipeline_actions_to_dto(state),
             metrics=metrics,
+            state=state.value,
+            state_version=state_version,
+            state_hash=state_hash(state, state_version),
+            recommended_next_action=(
+                {"id": next_action[0], "reason": next_action[1]}
+                if next_action is not None
+                else None
+            ),
         )
 
     async def cancel_document_processing(

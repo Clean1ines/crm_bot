@@ -608,6 +608,10 @@ class KnowledgeProcessingReportDto:
     steps: tuple[KnowledgeProcessingStepDto, ...]
     actions: tuple[KnowledgeProcessingActionDto, ...]
     metrics: JsonObject
+    state: str = "uploaded"
+    state_version: int = 1
+    state_hash: str = ""
+    recommended_next_action: JsonObject | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -616,6 +620,10 @@ class KnowledgeProcessingReportDto:
             "title": self.title,
             "message": self.message,
             "recoverable": self.recoverable,
+            "state": self.state,
+            "state_version": self.state_version,
+            "state_hash": self.state_hash,
+            "recommended_next_action": self.recommended_next_action,
             "steps": [step.to_dict() for step in self.steps],
             "actions": [action.to_dict() for action in self.actions],
             "metrics": self.metrics,

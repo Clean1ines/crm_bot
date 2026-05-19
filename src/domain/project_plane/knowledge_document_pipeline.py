@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from hashlib import sha256
 
 
 class KnowledgeDocumentPipelineState(StrEnum):
@@ -66,60 +67,31 @@ ALLOWED_TRANSITIONS: dict[
     tuple[KnowledgeDocumentPipelineState, KnowledgeDocumentPipelineCommand],
     KnowledgeDocumentPipelineState,
 ] = {
-    (
-        KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED,
-        KnowledgeDocumentPipelineCommand.RETRY_FAILED_COMPILER_BATCHES,
-    ): KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING,
-    (
-        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING,
-        KnowledgeDocumentPipelineCommand.RESUME_KNOWLEDGE_COMPILATION,
-    ): KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING,
-    (
-        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING,
-        KnowledgeDocumentPipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION,
-    ): KnowledgeDocumentPipelineState.PARTIAL_PUBLISHED,
-    (
-        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING,
-        KnowledgeDocumentPipelineCommand.COMPLETE_ANSWER_RESOLUTION,
-    ): KnowledgeDocumentPipelineState.PUBLICATION_RUNNING,
-    (
-        KnowledgeDocumentPipelineState.PUBLICATION_RUNNING,
-        KnowledgeDocumentPipelineCommand.COMPLETE_PUBLICATION,
-    ): KnowledgeDocumentPipelineState.EMBEDDING_RUNNING,
-    (
-        KnowledgeDocumentPipelineState.EMBEDDING_RUNNING,
-        KnowledgeDocumentPipelineCommand.COMPLETE_EMBEDDINGS,
-    ): KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING,
-    (
-        KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING,
-        KnowledgeDocumentPipelineCommand.COMPLETE_RETRIEVAL_SURFACE,
-    ): KnowledgeDocumentPipelineState.PROCESSED,
+    (KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED, KnowledgeDocumentPipelineCommand.RETRY_FAILED_COMPILER_BATCHES): KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING,
+    (KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING, KnowledgeDocumentPipelineCommand.RESUME_KNOWLEDGE_COMPILATION): KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING,
+    (KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING, KnowledgeDocumentPipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION): KnowledgeDocumentPipelineState.PARTIAL_PUBLISHED,
+    (KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING, KnowledgeDocumentPipelineCommand.COMPLETE_ANSWER_RESOLUTION): KnowledgeDocumentPipelineState.PUBLICATION_RUNNING,
+    (KnowledgeDocumentPipelineState.PUBLICATION_RUNNING, KnowledgeDocumentPipelineCommand.COMPLETE_PUBLICATION): KnowledgeDocumentPipelineState.EMBEDDING_RUNNING,
+    (KnowledgeDocumentPipelineState.EMBEDDING_RUNNING, KnowledgeDocumentPipelineCommand.COMPLETE_EMBEDDINGS): KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING,
+    (KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING, KnowledgeDocumentPipelineCommand.COMPLETE_RETRIEVAL_SURFACE): KnowledgeDocumentPipelineState.PROCESSED,
+    (KnowledgeDocumentPipelineState.COMPILER_RUNNING, KnowledgeDocumentPipelineCommand.CANCEL_KNOWLEDGE_PROCESSING): KnowledgeDocumentPipelineState.CANCELLED,
+    (KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING, KnowledgeDocumentPipelineCommand.CANCEL_KNOWLEDGE_PROCESSING): KnowledgeDocumentPipelineState.CANCELLED,
+    (KnowledgeDocumentPipelineState.PUBLICATION_RUNNING, KnowledgeDocumentPipelineCommand.CANCEL_KNOWLEDGE_PROCESSING): KnowledgeDocumentPipelineState.CANCELLED,
+    (KnowledgeDocumentPipelineState.EMBEDDING_RUNNING, KnowledgeDocumentPipelineCommand.CANCEL_KNOWLEDGE_PROCESSING): KnowledgeDocumentPipelineState.CANCELLED,
+    (KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING, KnowledgeDocumentPipelineCommand.CANCEL_KNOWLEDGE_PROCESSING): KnowledgeDocumentPipelineState.CANCELLED,
+    (KnowledgeDocumentPipelineState.PROCESSED, KnowledgeDocumentPipelineCommand.RETIGHTEN_PUBLISHED_ENTRIES): KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING,
+    (KnowledgeDocumentPipelineState.PUBLICATION_COMPLETED, KnowledgeDocumentPipelineCommand.RETIGHTEN_PUBLISHED_ENTRIES): KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING,
 }
 
 
-def validate_transition(
-    state: KnowledgeDocumentPipelineState,
-    command: KnowledgeDocumentPipelineCommand,
-) -> KnowledgeDocumentPipelineState:
+def validate_transition(state: KnowledgeDocumentPipelineState, command: KnowledgeDocumentPipelineCommand) -> KnowledgeDocumentPipelineState:
     next_state = ALLOWED_TRANSITIONS.get((state, command))
     if next_state is None:
-        raise KnowledgeDocumentPipelineError(
-            f"invalid knowledge pipeline transition: {state} -> {command}"
-        )
+        raise KnowledgeDocumentPipelineError(f"invalid knowledge pipeline transition: {state} -> {command}")
     return next_state
 
 
-def resolve_pipeline_state(
-    *,
-    document_status: str,
-    preprocessing_status: str,
-    pipeline_stage: str,
-    batch_total: int,
-    batch_failed: int,
-    has_raw_drafts: bool,
-    has_canonical_entries: bool,
-    has_retrieval_surface: bool,
-) -> KnowledgeDocumentPipelineState:
+def resolve_pipeline_state(*, document_status: str, preprocessing_status: str, pipeline_stage: str, batch_total: int, batch_failed: int, has_raw_drafts: bool, has_canonical_entries: bool, has_retrieval_surface: bool) -> KnowledgeDocumentPipelineState:
     if has_retrieval_surface and document_status == "processed":
         return KnowledgeDocumentPipelineState.PROCESSED
     if pipeline_stage == "answer_resolution" and preprocessing_status == "processing":
@@ -139,55 +111,28 @@ def resolve_pipeline_state(
     return KnowledgeDocumentPipelineState.UPLOADED
 
 
-def allowed_actions_for_state(
-    state: KnowledgeDocumentPipelineState,
-) -> tuple[KnowledgeDocumentPipelineAction, ...]:
+def recommended_action_for_state(state: KnowledgeDocumentPipelineState) -> tuple[str, str] | None:
     if state == KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED:
-        return (
-            KnowledgeDocumentPipelineAction(
-                id="retry_failed_batches",
-                label="Повторить проблемные части",
-                kind=KnowledgeDocumentPipelineActionKind.PRIMARY,
-            ),
-        )
+        return ("retry_failed_batches", "Есть проблемные части документа — повторите их обработку")
+    if state == KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING:
+        return ("resume_processing", "Все черновики готовы, можно продолжить уплотнение")
+    return None
+
+
+def state_hash(state: KnowledgeDocumentPipelineState, version: int) -> str:
+    return sha256(f"{state.value}:{version}".encode("utf-8")).hexdigest()[:16]
+
+
+def allowed_actions_for_state(state: KnowledgeDocumentPipelineState) -> tuple[KnowledgeDocumentPipelineAction, ...]:
+    if state == KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED:
+        return (KnowledgeDocumentPipelineAction(id="retry_failed_batches", label="Повторить проблемные части", kind=KnowledgeDocumentPipelineActionKind.PRIMARY),)
     if state == KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING:
         return (
-            KnowledgeDocumentPipelineAction(
-                id="resume_processing",
-                label="Продолжить обработку",
-                kind=KnowledgeDocumentPipelineActionKind.PRIMARY,
-            ),
-            KnowledgeDocumentPipelineAction(
-                id="publish_raw_drafts_without_resolution",
-                label="Опубликовать черновики без уплотнения",
-                kind=KnowledgeDocumentPipelineActionKind.SECONDARY_WARNING,
-            ),
+            KnowledgeDocumentPipelineAction(id="resume_processing", label="Продолжить обработку", kind=KnowledgeDocumentPipelineActionKind.PRIMARY),
+            KnowledgeDocumentPipelineAction(id="publish_raw_drafts_without_resolution", label="Опубликовать черновики без уплотнения", kind=KnowledgeDocumentPipelineActionKind.SECONDARY_WARNING),
         )
-    if state in {
-        KnowledgeDocumentPipelineState.COMPILER_RUNNING,
-        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING,
-        KnowledgeDocumentPipelineState.PUBLICATION_RUNNING,
-        KnowledgeDocumentPipelineState.EMBEDDING_RUNNING,
-        KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING,
-    }:
-        return (
-            KnowledgeDocumentPipelineAction(
-                id="cancel",
-                label="Остановить обработку",
-                kind=KnowledgeDocumentPipelineActionKind.DESTRUCTIVE,
-            ),
-        )
-    if state in {
-        KnowledgeDocumentPipelineState.PUBLICATION_COMPLETED,
-        KnowledgeDocumentPipelineState.PARTIAL_PUBLISHED,
-        KnowledgeDocumentPipelineState.PROCESSED,
-        KnowledgeDocumentPipelineState.PROCESSED_WITH_WARNINGS,
-    }:
-        return (
-            KnowledgeDocumentPipelineAction(
-                id="review_published",
-                label="Проверить опубликованные ответы",
-                kind=KnowledgeDocumentPipelineActionKind.SECONDARY,
-            ),
-        )
+    if state in {KnowledgeDocumentPipelineState.COMPILER_RUNNING, KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_RUNNING, KnowledgeDocumentPipelineState.PUBLICATION_RUNNING, KnowledgeDocumentPipelineState.EMBEDDING_RUNNING, KnowledgeDocumentPipelineState.RETRIEVAL_SURFACE_RUNNING}:
+        return (KnowledgeDocumentPipelineAction(id="cancel", label="Остановить обработку", kind=KnowledgeDocumentPipelineActionKind.DESTRUCTIVE),)
+    if state in {KnowledgeDocumentPipelineState.PUBLICATION_COMPLETED, KnowledgeDocumentPipelineState.PARTIAL_PUBLISHED, KnowledgeDocumentPipelineState.PROCESSED, KnowledgeDocumentPipelineState.PROCESSED_WITH_WARNINGS}:
+        return (KnowledgeDocumentPipelineAction(id="review_published", label="Проверить опубликованные ответы", kind=KnowledgeDocumentPipelineActionKind.SECONDARY),)
     return ()
