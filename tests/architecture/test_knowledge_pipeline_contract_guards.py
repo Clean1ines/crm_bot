@@ -27,6 +27,16 @@ def test_resume_task_is_dispatched_to_resume_handler() -> None:
     assert "handle_resume_knowledge_processing" in dispatcher
 
 
+def test_mutation_endpoints_require_expected_state_payload_contract() -> None:
+    http_source = _read("src/interfaces/http/knowledge.py")
+    assert "@router.post(\"/{document_id}/publish-ready\")" in http_source
+    assert "@router.post(\"/{document_id}/retry-failed-batches\")" in http_source
+    assert "@router.post(\"/{document_id}/retighten\")" in http_source
+    assert "@router.post(\"/{document_id}/resume-processing\")" in http_source
+    assert "@router.post(\"/{document_id}/cancel\")" in http_source
+    assert http_source.count("KnowledgePipelineCommandRequestModel = Body(...)") >= 5
+
+
 def test_processed_requires_retrieval_surface_rows_guard() -> None:
     source = _read("src/domain/project_plane/knowledge_document_pipeline.py")
     assert "has_retrieval_surface and document_status == \"processed\"" in source
