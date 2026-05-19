@@ -1047,6 +1047,64 @@ class KnowledgeService:
         )
         return KnowledgePreviewResponseDto.from_results(query=query, results=results)
 
+    async def document_health(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        canonical_entries = int(document.chunk_count or 0)
+        retrieval_entries = int(document.structured_entries or 0)
+        failed_batches = _batch_status_count(
+            await repo.list_document_compiler_batches(
+                project_id=project_id,
+                document_id=document_id,
+            ),
+            "failed",
+        )
+        processing_report = await self.processing_report(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        state_consistency = not (
+            processing_report.state == "processed" and retrieval_entries <= 0
+        )
+        return {
+            "document_id": document_id,
+            "state": processing_report.state,
+            "state_version": processing_report.state_version,
+            "state_hash": processing_report.state_hash,
+            "state_consistency": state_consistency,
+            "failed_batches": failed_batches,
+            "raw_drafts_count": candidate_summary.raw_count,
+            "canonical_entries_count": canonical_entries,
+            "retrieval_entries_count": retrieval_entries,
+            "retrieval_surface_mismatch": canonical_entries != retrieval_entries,
+            "missing_embeddings": max(0, canonical_entries - retrieval_entries),
+            "lineage_completeness": retrieval_entries >= 0 and canonical_entries >= 0,
+            "source_refs_completeness": candidate_summary.grounded_count
+            >= retrieval_entries,
+            "stale_error": bool(document.error)
+            and processing_report.state in {"processed", "processed_with_warnings"},
+        }
+
     async def clear_project_knowledge(
         self,
         project_id: str,

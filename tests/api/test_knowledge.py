@@ -693,3 +693,41 @@ class TestKnowledgeUpload:
 
         assert response.status_code == 409
         assert response.json()["detail"] == "state_conflict"
+
+    def test_knowledge_health_returns_payload(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        expected_payload = {
+            "document_id": document_id,
+            "state": "compiler_partial_failed",
+            "state_version": 17,
+            "state_hash": "abc123",
+            "state_consistency": True,
+            "failed_batches": 1,
+            "raw_drafts_count": 151,
+            "canonical_entries_count": 46,
+            "retrieval_entries_count": 40,
+            "retrieval_surface_mismatch": True,
+            "missing_embeddings": 6,
+            "lineage_completeness": True,
+            "source_refs_completeness": True,
+            "stale_error": False,
+        }
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.document_health",
+                new=AsyncMock(return_value=expected_payload),
+            ):
+                response = client.get(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/health",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+
+        assert response.status_code == 200
+        assert response.json() == expected_payload
