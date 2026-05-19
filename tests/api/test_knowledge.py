@@ -18,6 +18,7 @@ from src.interfaces.http.dependencies import (
 )
 from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
 from src.interfaces.http.knowledge import UPLOAD_TOO_LARGE_DETAIL
+from src.application.errors import ConflictError
 
 
 TEST_USER_ID = "knowledge-user-id"
@@ -638,3 +639,57 @@ class TestKnowledgeUpload:
         assert payload["tokens_month_total"] == 1200
         assert payload["tokens_today_total"] == 300
         assert payload["remaining_tokens"] == 199998800
+
+    def test_retry_failed_batches_returns_409_on_state_conflict(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.retry_document_failed_batches",
+                new=AsyncMock(side_effect=ConflictError("state_conflict")),
+            ):
+                response = client.post(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/retry-failed-batches",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={
+                        "expected_state": "compiler_partial_failed",
+                        "expected_state_version": 17,
+                    },
+                )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "state_conflict"
+
+    def test_publish_ready_returns_409_on_state_conflict(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.publish_document_ready_answers",
+                new=AsyncMock(side_effect=ConflictError("state_conflict")),
+            ):
+                response = client.post(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/publish-ready",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={
+                        "expected_state": "answer_resolution_pending",
+                        "expected_state_version": 18,
+                    },
+                )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "state_conflict"

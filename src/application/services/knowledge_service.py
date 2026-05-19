@@ -1,6 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
@@ -54,11 +55,21 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
+from src.infrastructure.queue.job_types import (
+    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+    TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+)
 
 
 BEARER_PREFIX = "Bearer "
 UPLOAD_FALLBACK_NAME = "upload"
 KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE = "Остановлено пользователем"
+KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES = (
+    TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+)
 
 
 def _exact_answer_fingerprint(value: str) -> str:
@@ -784,17 +795,17 @@ class KnowledgeService:
         if expected_state != current_state or expected_state_version != current_state_version:
             raise ConflictError("state_conflict")
 
-        job_id = await queue_repo.enqueue(
-            publish_ready_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_ready_answer_publish",
-                "expected_state": expected_state,
-                "expected_state_version": expected_state_version,
-            },
-            max_attempts=3,
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=publish_ready_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_ready_answer_publish",
+            command="publish_raw_drafts_without_resolution",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
         )
 
         logger.info(
@@ -834,17 +845,17 @@ class KnowledgeService:
         if expected_state != current_state or expected_state_version != current_state_version:
             raise ConflictError("state_conflict")
 
-        job_id = await queue_repo.enqueue(
-            retry_failed_batches_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_failed_batch_retry",
-                "expected_state": expected_state,
-                "expected_state_version": expected_state_version,
-            },
-            max_attempts=3,
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=retry_failed_batches_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_failed_batch_retry",
+            command="retry_failed_compiler_batches",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
         )
 
         logger.info(
@@ -884,17 +895,17 @@ class KnowledgeService:
         if expected_state != current_state or expected_state_version != current_state_version:
             raise ConflictError("state_conflict")
 
-        job_id = await queue_repo.enqueue(
-            retighten_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_document_retighten",
-                "expected_state": expected_state,
-                "expected_state_version": expected_state_version,
-            },
-            max_attempts=3,
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=retighten_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_document_retighten",
+            command="retighten_published_entries",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
         )
 
         logger.info(
@@ -957,6 +968,53 @@ class KnowledgeService:
             batch_total + batch_completed + batch_failed + published_answer_count,
         )
         return state.value, state_version
+
+    async def _enqueue_pipeline_command_with_lock_and_idempotency(
+        self,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        queue_repo: KnowledgeQueuePort,
+        task_type: str,
+        project_id: str,
+        document_id: str,
+        requested_by: str,
+        source: str,
+        command: str,
+        expected_state: str,
+        expected_state_version: int,
+    ) -> str:
+        repo = knowledge_repo_factory(self.pool)
+        expected_state_hash = sha256(
+            f"{expected_state}:{expected_state_version}".encode("utf-8")
+        ).hexdigest()[:16]
+        idempotency_key = f"{document_id}:{command}:{expected_state_hash}"
+        existing_job = await repo.find_knowledge_pipeline_job_by_idempotency_key(
+            document_id=document_id,
+            task_type=task_type,
+            idempotency_key=idempotency_key,
+        )
+        if existing_job is not None:
+            return existing_job
+        active_job = await repo.find_active_knowledge_pipeline_job(
+            document_id=document_id,
+            task_types=KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES,
+        )
+        if active_job is not None:
+            raise ConflictError(f"knowledge_pipeline_job_locked:{active_job}")
+        return await queue_repo.enqueue(
+            task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": requested_by,
+                "source": source,
+                "expected_state": expected_state,
+                "expected_state_version": expected_state_version,
+                "expected_state_hash": expected_state_hash,
+                "idempotency_key": idempotency_key,
+            },
+            max_attempts=3,
+        )
 
     async def preview_query(
         self,
