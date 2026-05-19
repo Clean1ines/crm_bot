@@ -893,3 +893,39 @@ class TestKnowledgeUpload:
                 )
         assert response.status_code == 409
         assert response.json()["detail"] == "state_conflict"
+
+    def test_cancel_processing_requires_expected_state_payload(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            response = client.post(
+                f"/api/projects/{project_id}/knowledge/{document_id}/cancel",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+
+        assert response.status_code == 422
+
+    def test_resume_processing_requires_expected_state_payload(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            response = client.post(
+                f"/api/projects/{project_id}/knowledge/{document_id}/resume-processing",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+
+        assert response.status_code == 422
