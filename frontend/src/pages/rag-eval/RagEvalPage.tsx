@@ -18,7 +18,6 @@ import { getErrorMessage } from '@shared/api/core/errors';
 
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
-  isRagEvalProposedActionType,
   ragEvalApi,
   type KnowledgeEditActionExecutionSummary,
   type RagEvalActionableResult,
@@ -28,13 +27,33 @@ import {
   type RagEvalJobProgressResponse,
   type RagEvalJobsResponse,
   type RagEvalProgressPayload,
-  type RagEvalProposedActionType,
   type RagEvalResultSummary,
   type RagEvalReviewGroup,
   type RagEvalReviewPayload,
   type RagEvalReviewQuestion,
 } from '@shared/api/modules/ragEval';
 import { KnowledgeCurationConsole } from './components/KnowledgeCurationConsole';
+import {
+  actionTypeDescription,
+  actionTypeLabel,
+  asStringList,
+  formatResultScore,
+  getActionableResults,
+  getEvalResults,
+  parseJsonValue,
+  readinessLabel,
+  resultProblemLabel,
+  riskLabel,
+} from './lib/ragEvalResults';
+import {
+  REVIEW_FILTERS,
+  REVIEW_SORTS,
+  groupMatchesFilter,
+  questionIsProblem,
+  sortReviewGroups,
+  type EvalReviewFilter,
+  type EvalReviewSort,
+} from './lib/ragEvalReviewFilters';
 import {
   formatDurationMs,
   formatNumber,
@@ -89,161 +108,6 @@ const ReportJsonBlock: React.FC<{ value: unknown }> = ({ value }) => (
   </pre>
 );
 
-const parseJsonValue = (value: unknown): unknown => {
-  if (typeof value !== 'string') return value;
-  const trimmed = value.trim();
-  if (!trimmed) return value;
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    return value;
-  }
-};
-
-const asStringList = (value: unknown): string[] => {
-  const parsed = parseJsonValue(value);
-  if (Array.isArray(parsed)) {
-    return parsed.map((item) => String(item).trim()).filter(Boolean);
-  }
-  if (typeof parsed === 'string' && parsed.trim()) return [parsed.trim()];
-  return [];
-};
-
-const asBoolean = (value: unknown, fallback = false): boolean => (
-  typeof value === 'boolean' ? value : fallback
-);
-
-const getEvalResults = (value: unknown): RagEvalResultSummary[] => (
-  Array.isArray(value) ? value as RagEvalResultSummary[] : []
-);
-
-const getActionableResults = (report: Record<string, unknown>): RagEvalActionableResult[] => {
-  const parsed = parseJsonValue(report.actionable_results);
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed
-    .map((raw): RagEvalActionableResult | null => {
-      const item = getRecord(raw);
-      const resultId = String(item.result_id || '').trim();
-      if (!resultId) return null;
-
-      const rawActions = parseJsonValue(item.proposed_actions);
-      const proposedActions = Array.isArray(rawActions)
-        ? rawActions.map((rawAction) => {
-          const action = getRecord(rawAction);
-          const actionType = String(action.action_type || '').trim();
-          if (!isRagEvalProposedActionType(actionType)) return null;
-
-          const targetEntryId = String(action.target_entry_id || '').trim();
-
-          return {
-            action_type: actionType,
-            target_entry_id: targetEntryId || null,
-            reason: String(action.reason || '').trim(),
-            payload: getRecord(action.payload),
-          };
-        }).filter((action): action is NonNullable<typeof action> => action !== null)
-        : [];
-
-      const classification = getRecord(item.classification);
-
-      return {
-        result_id: resultId,
-        run_id: String(item.run_id || '').trim(),
-        question_id: String(item.question_id || '').trim(),
-        question: String(item.question || '').trim(),
-        question_type: String(item.question_type || '').trim(),
-        expected_entry_ids: asStringList(item.expected_entry_ids),
-        retrieved_entry_ids: asStringList(item.retrieved_entry_ids),
-        score: asNumber(item.score),
-        answer_supported: asBoolean(item.answer_supported),
-        wrong_entry_top1: asBoolean(item.wrong_entry_top1),
-        hallucination_risk: String(item.hallucination_risk || '').trim(),
-        should_answer_passed: asBoolean(item.should_answer_passed),
-        classification: Object.keys(classification).length ? classification : null,
-        proposed_actions: proposedActions,
-      };
-    })
-    .filter((item): item is RagEvalActionableResult => item !== null);
-};
-
-const assertNeverActionType = (value: never): never => {
-  throw new Error(`Unhandled RAG eval proposed action type: ${value}`);
-};
-
-const actionTypeLabel = (value: RagEvalProposedActionType): string => {
-  switch (value) {
-    case 'attach_question_to_entry':
-      return t('ragEval.actionType.attachQuestionToEntry');
-    case 'rebuild_embedding':
-      return t('ragEval.actionType.rebuildEntryEmbedding');
-    case 'rerun_eval':
-      return t('ragEval.actionType.rerunEval');
-    case 'create_entry_from_failure':
-      return t('ragEval.actionType.createEntryFromFailure');
-  }
-
-  return assertNeverActionType(value);
-};
-
-const actionTypeDescription = (value: RagEvalProposedActionType): string => {
-  switch (value) {
-    case 'attach_question_to_entry':
-      return t('ragEval.actionDescription.attachQuestionToEntry');
-    case 'rebuild_embedding':
-      return t('ragEval.actionDescription.rebuildEntryEmbedding');
-    case 'rerun_eval':
-      return t('ragEval.actionDescription.rerunEval');
-    case 'create_entry_from_failure':
-      return t('ragEval.actionDescription.createEntryFromFailure');
-  }
-
-  return assertNeverActionType(value);
-};
-
-const formatResultScore = (score: number): string => {
-  const normalized = score > 1 ? score : score * 100;
-  return `${Math.round(normalized)}%`;
-};
-
-const riskLabel = (value: string): string => {
-  if (value === 'high') return t('ragEval.risk.high');
-  if (value === 'medium') return t('ragEval.risk.medium');
-  if (value === 'low') return t('ragEval.risk.low');
-  return t('ragEval.risk.unknown');
-};
-
-const resultProblemLabel = (result: RagEvalActionableResult): string => {
-  if (result.wrong_entry_top1 && !result.answer_supported) {
-    return t('ragEval.problem.wrongEntryAndUnsupported');
-  }
-
-  if (result.wrong_entry_top1) {
-    return t('ragEval.problem.wrongEntryTop1');
-  }
-
-  if (!result.answer_supported) {
-    return t('ragEval.problem.unsupportedAnswer');
-  }
-
-  if (result.hallucination_risk === 'high') {
-    return t('ragEval.problem.highHallucinationRisk');
-  }
-
-  if (!result.should_answer_passed) {
-    return t('ragEval.problem.shouldAnswerFailed');
-  }
-
-  return t('ragEval.problem.fallback');
-};
-
-const readinessLabel = (value: unknown): string => {
-  const readiness = String(value || '').trim();
-  if (readiness === 'ready') return t('ragEval.readiness.ready');
-  if (readiness === 'needs_review') return t('ragEval.readiness.needsReview');
-  if (readiness === 'not_ready') return t('ragEval.readiness.notReady');
-  return readiness || t('ragEval.readiness.noStatus');
-};
 
 const MetricPill: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
   <div className="rounded-xl bg-[var(--surface-elevated)] px-3 py-2 shadow-[var(--shadow-card)]">
@@ -576,53 +440,6 @@ const RagEvalResultsPanel: React.FC<{
   </section>
 );
 
-type EvalReviewFilter = 'all' | 'problematic' | 'wrong_top1' | 'missing' | 'good_candidates' | 'fallback' | 'typo_short_vague';
-type EvalReviewSort = 'most_problematic' | 'most_questions' | 'worst_confusion' | 'best_candidates';
-
-const REVIEW_FILTERS: Array<{ id: EvalReviewFilter; label: string }> = [
-  { id: 'all', label: 'Все фрагменты' },
-  { id: 'problematic', label: 'Только проблемные' },
-  { id: 'wrong_top1', label: 'Только wrong top-1' },
-  { id: 'missing', label: 'Только не найденные' },
-  { id: 'good_candidates', label: 'Хорошие кандидаты' },
-  { id: 'fallback', label: 'Fallback-generated' },
-  { id: 'typo_short_vague', label: 'Typo / short / vague' },
-];
-
-const REVIEW_SORTS: Array<{ id: EvalReviewSort; label: string }> = [
-  { id: 'most_problematic', label: 'Сначала самые проблемные' },
-  { id: 'most_questions', label: 'Сначала больше вопросов' },
-  { id: 'worst_confusion', label: 'Сначала worst top-1 confusion' },
-  { id: 'best_candidates', label: 'Сначала хорошие кандидаты' },
-];
-
-const questionIsProblem = (question: RagEvalReviewQuestion): boolean => question.retrieval_status !== 'reliable';
-
-const groupMatchesFilter = (group: RagEvalReviewGroup, filter: EvalReviewFilter): boolean => {
-  if (filter === 'all') return true;
-  if (filter === 'problematic') return group.problem_count > 0;
-  if (filter === 'wrong_top1') return group.questions.some((question) => question.wrong_entry_top1);
-  if (filter === 'missing') return group.questions.some((question) => question.retrieval_status === 'missing');
-  if (filter === 'good_candidates') return group.questions.some((question) => questionIsProblem(question) && question.review.status !== 'rejected');
-  if (filter === 'fallback') return group.questions.some((question) => question.fallback_generated);
-  if (filter === 'typo_short_vague') return group.questions.some((question) => question.question_type === 'short_vague');
-  return true;
-};
-
-const sortReviewGroups = (groups: RagEvalReviewGroup[], sort: EvalReviewSort): RagEvalReviewGroup[] => {
-  const copy = [...groups];
-  copy.sort((left, right) => {
-    if (sort === 'most_questions') return right.question_count - left.question_count;
-    if (sort === 'worst_confusion') {
-      const rightConfused = right.questions.filter((question) => question.wrong_entry_top1).length;
-      const leftConfused = left.questions.filter((question) => question.wrong_entry_top1).length;
-      return rightConfused - leftConfused || right.problem_count - left.problem_count;
-    }
-    if (sort === 'best_candidates') return right.improvement_count - left.improvement_count || right.problem_count - left.problem_count;
-    return right.problem_count - left.problem_count || right.improvement_count - left.improvement_count;
-  });
-  return copy;
-};
 
 const questionStatusClass = (statusValue: RagEvalReviewQuestion['retrieval_status']): string => {
   if (statusValue === 'reliable') return 'bg-emerald-500/10 text-emerald-600';
