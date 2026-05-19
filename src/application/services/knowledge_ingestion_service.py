@@ -4207,41 +4207,24 @@ class KnowledgeIngestionService:
             project_id=project_id,
             document_id=document_id,
         )
-        canonical_entries: tuple[CanonicalKnowledgeEntry, ...] = ()
-
-        if all_batches_completed:
-            canonical_entries = _canonical_entries_from_raw_answer_candidates(
-                project_id=project_id,
-                document_id=document_id,
-                compiler_run_id=updated_batches[0].compiler_run_id,
-                mode=mode,
-                candidates=raw_candidates,
-            )
-            if not canonical_entries:
-                raise ValidationError(
-                    "Knowledge retry produced no grounded answer entries"
-                )
-            await _persist_stage_e_compiler_outputs(
-                repo=repo,
-                project_id=project_id,
-                document_id=document_id,
-                compiler_run_id=updated_batches[0].compiler_run_id,
-                source_chunks=source_chunks,
-                entries=canonical_entries,
-            )
 
         metrics: JsonObject = {
-            "stage": "retry_failed_batches",
+            "stage": (
+                "answer_resolution_pending"
+                if all_batches_completed
+                else "extraction_partial_failed"
+            ),
             "retried_batch_count": retried_batch_count,
             "failed_batch_count_before": len(failed_batches),
             "remaining_failed_batch_count": remaining_failed_count,
             "usage_event_count": usage_event_count,
             "raw_answer_count": len(raw_candidates),
-            "canonical_entry_count": len(canonical_entries),
+            "canonical_entry_count": 0,
+            "failed_part_count": remaining_failed_count,
         }
         if all_batches_completed:
             metrics["status_message"] = (
-                "Проблемные части повторены, ответы опубликованы"
+                "Проблемные части повторены. Можно продолжить уплотнение и публикацию."
             )
             await repo.update_document_preprocessing_status(
                 document_id,
@@ -4251,7 +4234,7 @@ class KnowledgeIngestionService:
                 prompt_version=prompt_version_for_mode(mode),
                 metrics=metrics,
             )
-            await repo.update_document_status(document_id, "processed")
+            await repo.update_document_status(document_id, "pending")
         else:
             metrics["status_message"] = (
                 "Часть проблемных частей всё ещё требует повтора"
@@ -4284,6 +4267,11 @@ class KnowledgeIngestionService:
             "retried_batch_count": retried_batch_count,
             "remaining_failed_batch_count": remaining_failed_count,
             "usage_event_count": usage_event_count,
+            "raw_answer_count": len(raw_candidates),
+            "canonical_entry_count": 0,
+            "next_action": (
+                "resume_pipeline" if all_batches_completed else "retry_failed_batches"
+            ),
         }
 
     async def process_document(

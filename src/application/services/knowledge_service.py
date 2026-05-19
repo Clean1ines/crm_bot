@@ -201,6 +201,7 @@ def _knowledge_processing_actions(
     raw_answer_count: int,
     published_answer_count: int,
     is_processing: bool,
+    answer_resolution_ready: bool,
 ) -> tuple[KnowledgeProcessingActionDto, ...]:
     actions: list[KnowledgeProcessingActionDto] = []
     if is_processing:
@@ -217,6 +218,16 @@ def _knowledge_processing_actions(
                 id="retry_failed_batches",
                 label="Повторить проблемные части",
                 kind="primary",
+                enabled=not is_processing,
+            )
+        )
+    if answer_resolution_ready and batch_failed == 0:
+        actions.append(
+            KnowledgeProcessingActionDto(
+                id="resume_processing",
+                label="Продолжить обработку",
+                kind="primary",
+                enabled=not is_processing,
             )
         )
     if raw_answer_count > published_answer_count:
@@ -734,6 +745,12 @@ class KnowledgeService:
                 raw_answer_count=candidate_summary.raw_count,
                 published_answer_count=published_answer_count,
                 is_processing=is_processing,
+                answer_resolution_ready=(
+                    batch_total > 0
+                    and batch_failed == 0
+                    and batch_completed >= batch_total
+                    and published_answer_count == 0
+                ),
             ),
             metrics=metrics,
         )

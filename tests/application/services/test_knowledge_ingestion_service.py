@@ -1105,3 +1105,39 @@ def test_publication_guard_collapses_exact_duplicate_answers():
         "Что делает ассистент без данных?",
         "Как отвечает ассистент без данных?",
     )
+
+
+@pytest.mark.asyncio
+async def test_retry_failed_batches_success_does_not_publish_or_mark_processed():
+    repo = Mock()
+    repo.get_document = AsyncMock(return_value=Mock(project_id="project-1", preprocessing_mode="faq", file_name="faq.md"))
+    repo.list_document_source_chunks = AsyncMock(return_value=[Mock(id="s1", source_index=0, content="c")])
+    failed_batch = Mock(id="b1", status="failed", batch_index=1, attempt_count=0, compiler_run_id="run-1")
+    repo.list_document_compiler_batches = AsyncMock(side_effect=[[failed_batch], [Mock(status="completed")]])
+    repo.update_document_preprocessing_status = AsyncMock()
+    repo.update_document_status = AsyncMock()
+    repo.mark_compiler_batch_processing = AsyncMock()
+    repo.delete_raw_answer_candidates_for_batch = AsyncMock()
+    repo.add_answer_candidates = AsyncMock()
+    repo.complete_compiler_batch = AsyncMock()
+    repo.fail_compiler_batch = AsyncMock()
+    repo.list_document_raw_answer_candidates = AsyncMock(return_value=[])
+
+    preprocessor = Mock(model_name="llama")
+    preprocessor.preprocess = AsyncMock(return_value=KnowledgePreprocessingExecutionResult(result=KnowledgePreprocessingResult(mode="faq", prompt_version="p", model="m", entries=(), metrics={}), usage=None))
+
+    service = KnowledgeIngestionService(object())
+    result = await service.retry_failed_batches(
+        project_id="project-1",
+        document_id="doc-1",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=_usage_repo()),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+
+    assert result["status"] == "completed"
+    assert result["canonical_entry_count"] == 0
+    assert result["next_action"] == "resume_pipeline"
+    status_calls = [call.args[:2] for call in repo.update_document_status.await_args_list]
+    assert ("doc-1", "processed") not in status_calls
