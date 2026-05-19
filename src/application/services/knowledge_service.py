@@ -201,6 +201,7 @@ def _knowledge_processing_actions(
     raw_answer_count: int,
     published_answer_count: int,
     is_processing: bool,
+    current_stage: str,
 ) -> tuple[KnowledgeProcessingActionDto, ...]:
     actions: list[KnowledgeProcessingActionDto] = []
     if is_processing:
@@ -217,13 +218,27 @@ def _knowledge_processing_actions(
                 id="retry_failed_batches",
                 label="Повторить проблемные части",
                 kind="primary",
+                enabled=not is_processing,
+            )
+        )
+    if current_stage == "answer_resolution_pending":
+        actions.append(
+            KnowledgeProcessingActionDto(
+                id="resume_processing",
+                label="Продолжить обработку",
+                kind="primary",
+                enabled=not is_processing,
             )
         )
     if raw_answer_count > published_answer_count:
         actions.append(
             KnowledgeProcessingActionDto(
                 id="publish_ready",
-                label="Опубликовать готовые ответы",
+                label=(
+                    "Опубликовать черновики без уплотнения"
+                    if current_stage == "answer_resolution_pending"
+                    else "Опубликовать готовые ответы"
+                ),
                 kind="primary",
                 enabled=not is_processing,
             )
@@ -567,7 +582,7 @@ class KnowledgeService:
         batch_failed = _batch_status_count(batches, "failed")
         batch_processing = _batch_status_count(batches, "processing")
         batch_pending = _batch_status_count(batches, "pending")
-        is_processing = document.status in {"processing", "pending"} or (
+        is_processing = document.status in {"processing"} or (
             document.preprocessing_status == "processing"
         )
         published_answer_count = int(document.structured_entries or 0)
@@ -705,6 +720,9 @@ class KnowledgeService:
                 "Черновики уже сохранены. Сейчас система проверяет смысловые дубли "
                 "и выбирает итоговые ответы перед публикацией."
             )
+        elif current_stage == "answer_resolution_pending":
+            title = "Проблемные части повторены"
+            message = "Черновики готовы. Продолжите уплотнение и публикацию."
         else:
             title = (
                 "Опубликовано частично: есть проблемные части"
@@ -734,6 +752,7 @@ class KnowledgeService:
                 raw_answer_count=candidate_summary.raw_count,
                 published_answer_count=published_answer_count,
                 is_processing=is_processing,
+                current_stage=current_stage,
             ),
             metrics=metrics,
         )
@@ -763,6 +782,31 @@ class KnowledgeService:
             "Knowledge document processing cancelled",
             extra={"project_id": project_id, "document_id": document_id},
         )
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        resume_task_type: str,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        job_id = await queue_repo.enqueue(
+            resume_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_resume_processing",
+            },
+            max_attempts=3,
+        )
+        return {"status": "queued", "job_id": job_id, "document_id": document_id}
 
     async def publish_document_ready_answers(
         self,
