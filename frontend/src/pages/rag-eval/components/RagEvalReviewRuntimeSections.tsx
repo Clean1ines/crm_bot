@@ -1,13 +1,16 @@
 import { t } from '@shared/i18n';
-import { BarChart3, FileText, Loader2, Pause, Play, ShieldCheck, Square, XCircle } from 'lucide-react';
-import React from 'react';
+import { BarChart3, Loader2, Pause, RotateCcw, Square } from 'lucide-react';
+import React, { useState } from 'react';
 import type { RagEvalJob, RagEvalProgressPayload, RagEvalReviewGroup, RagEvalReviewQuestion } from '@shared/api/modules/ragEval';
 import { ReportJsonBlock, StatPill } from './RagEvalReportComponents';
-import { REVIEW_FILTERS, REVIEW_SORTS, questionIsProblem, type EvalReviewFilter, type EvalReviewSort } from '../lib/ragEvalReviewFilters';
+import { asStringList } from '../lib/ragEvalResults';
+import { REVIEW_FILTERS, REVIEW_SORTS, type EvalReviewFilter, type EvalReviewSort } from '../lib/ragEvalReviewFilters';
 import { questionStatusClass, questionStatusIcon } from '../lib/ragEvalReviewPresentation';
 import { formatDurationMs, formatNumber, progressMessage, stageLabel, statusLabel } from '../lib/ragEvalProgress';
 import { getJobStatus, isJobActive, isJobPaused, isJobTerminal } from '../lib/ragEvalStatus';
 import { asNumber, clampPercent, timestampMs } from '../lib/ragEvalRuntimeUtils';
+
+const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
 
 export const EvalFiltersBar: React.FC<{
   filter: EvalReviewFilter;
@@ -95,14 +98,14 @@ export const FragmentReviewCard: React.FC<{
       <div>
         <div className="text-sm font-semibold text-[var(--text-primary)]">Уже есть вопросы</div>
         <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-          {existingQuestions.slice(0, 4).map((item) => <li key={item}>— {item}</li>)}
+          {existingQuestions.slice(0, 4).map((item: string) => <li key={item}>— {item}</li>)}
           {!existingQuestions.length && <li className="text-[var(--text-muted)]">Нет сохранённых вопросов.</li>}
         </ul>
       </div>
       <div>
         <div className="text-sm font-semibold text-[var(--text-primary)]">Предложение системы</div>
         <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-          {proposedImprovements.map((item) => <li key={item}>— {item}</li>)}
+          {proposedImprovements.map((item: string) => <li key={item}>— {item}</li>)}
         </ul>
       </div>
     </div>
@@ -178,7 +181,7 @@ export const QuestionReviewDrawer: React.FC<{
           <section>
             <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что можно сделать</h4>
             <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
-              {proposedImprovements.map((item) => <li key={item}>☑ {item}</li>)}
+              {proposedImprovements.map((item: string) => <li key={item}>☑ {item}</li>)}
               <li>☐ Отклонить как плохой вопрос</li>
             </ul>
           </section>

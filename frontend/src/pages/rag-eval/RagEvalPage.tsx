@@ -1,7 +1,12 @@
 import { t } from '@shared/i18n';
 import React, { useMemo, useState } from 'react';
 import {
-  RotateCcw,
+  FileText,
+  Loader2,
+  Play,
+  ShieldCheck,
+  XCircle,
+  BarChart3,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -10,6 +15,8 @@ import { getErrorMessage } from '@shared/api/core/errors';
 
 import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
+  type RagEvalReviewGroup,
+  type RagEvalReviewQuestion,
   ragEvalApi,
   type KnowledgeEditActionExecutionSummary,
   type RagEvalDocumentStatusResponse,
@@ -24,19 +31,18 @@ import { ApplyAcceptedQuestionsPanel, TechnicalDiagnosticsDisclosure } from './c
 import { RagEvalResultsPanel, ReportSummaryCard } from './components/RagEvalSummaryPanels';
 import { DocumentEvalOverviewCard, EvalProblemMap } from './components/RagEvalReviewOverview';
 import { EvalFiltersBar, FragmentReviewCard, JobProgressCard, QuestionReviewDrawer } from './components/RagEvalReviewRuntimeSections';
+import { getActionableResults, getEvalResults } from './lib/ragEvalResults';
 import {
-  asStringList,
-  getActionableResults,
-  getEvalResults,
-} from './lib/ragEvalResults';
-import {
+  questionIsProblem,
   groupMatchesFilter,
   sortReviewGroups,
   type EvalReviewFilter,
   type EvalReviewSort,
 } from './lib/ragEvalReviewFilters';
-import { formatNumber } from './lib/ragEvalProgress';
+import { formatNumber, statusLabel } from './lib/ragEvalProgress';
 import { getRecord } from './lib/ragEvalRuntimeUtils';
+import { getJobStatus, isJobActive, isJobPaused, isJobTerminal } from './lib/ragEvalStatus';
+import { ReportJsonBlock } from './components/RagEvalReportComponents';
 
 interface Document {
   id: string;
@@ -48,8 +54,6 @@ interface Document {
 }
 
 const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
-const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
-
 
 
 
