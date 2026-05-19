@@ -203,6 +203,11 @@ export const knowledgeApi = {
       method: 'POST',
     }),
 
+  resumeProcessing: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
+      method: 'POST',
+    }),
+
   retryFailedBatches: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
       method: 'POST',

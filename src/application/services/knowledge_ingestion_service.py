@@ -4692,7 +4692,15 @@ class KnowledgeIngestionService:
                 result for result in batch_task_results if isinstance(result, Exception)
             ]
             if batch_errors:
-                raise batch_errors[0]
+                first_error = batch_errors[0]
+                if len(batch_errors) == 1:
+                    raise first_error
+                combined_error = "; ".join(
+                    f"{type(err).__name__}: {str(err)}" for err in batch_errors
+                )[:2000]
+                raise ValidationError(
+                    f"Multiple compiler batches failed ({len(batch_errors)}): {combined_error}"
+                ) from first_error
 
             compiled_entries = [
                 entry
