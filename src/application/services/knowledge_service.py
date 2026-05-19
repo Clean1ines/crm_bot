@@ -48,6 +48,10 @@ from src.domain.project_plane.knowledge_document_pipeline import (
     recommended_action_for_state,
     resolve_pipeline_state,
     state_hash,
+    validate_publish_raw_drafts_without_resolution,
+    validate_resume_processing,
+    validate_retighten_published_entries,
+    validate_retry_failed_batches,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
@@ -228,6 +232,17 @@ def _pipeline_actions_to_dto(state: object) -> tuple[KnowledgeProcessingActionDt
         )
         for action in actions
     )
+
+
+def _state_enum_from_value(state_value: str) -> object:
+    try:
+        from src.domain.project_plane.knowledge_document_pipeline import (
+            KnowledgeDocumentPipelineState,
+        )
+
+        return KnowledgeDocumentPipelineState(state_value)
+    except Exception:
+        return state_value
 
 
 @dataclass(frozen=True)
@@ -816,6 +831,12 @@ class KnowledgeService:
         )
         if expected_state != current_state or expected_state_version != current_state_version:
             raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_publish_raw_drafts_without_resolution(state_enum)
+        if not valid:
+            raise ValidationError(
+                f"publish_raw_drafts_without_resolution_blocked:{','.join(blockers)}"
+            )
 
         job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
             knowledge_repo_factory=knowledge_repo_factory,
@@ -866,6 +887,12 @@ class KnowledgeService:
         )
         if expected_state != current_state or expected_state_version != current_state_version:
             raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_retry_failed_batches(state_enum)
+        if not valid:
+            raise ValidationError(
+                f"retry_failed_batches_blocked:{','.join(blockers)}"
+            )
 
         job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
             knowledge_repo_factory=knowledge_repo_factory,
@@ -916,6 +943,12 @@ class KnowledgeService:
         )
         if expected_state != current_state or expected_state_version != current_state_version:
             raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_retighten_published_entries(state_enum)
+        if not valid:
+            raise ValidationError(
+                f"retighten_published_entries_blocked:{','.join(blockers)}"
+            )
 
         job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
             knowledge_repo_factory=knowledge_repo_factory,
@@ -1285,14 +1318,18 @@ class KnowledgeService:
             logger=logger,
         )
         blockers: list[JsonObject] = []
-        if failed_batches > 0:
+        can_resume, blocker_codes = validate_resume_processing(
+            _state_enum_from_value(processing_report.state),
+            failed_batches=failed_batches,
+        )
+        if "failed_batches_remain" in blocker_codes:
             blockers.append(
                 {
                     "code": "failed_batches_remain",
                     "message": f"Сначала повторите {failed_batches} проблемную часть(и)",
                 }
             )
-        if processing_report.state != "answer_resolution_pending":
+        if "resume_allowed_only_for_answer_resolution_pending" in blocker_codes:
             blockers.append(
                 {
                     "code": "invalid_state_for_resume",
@@ -1303,7 +1340,7 @@ class KnowledgeService:
             "document_id": document_id,
             "state": processing_report.state,
             "state_version": processing_report.state_version,
-            "can_resume": len(blockers) == 0,
+            "can_resume": can_resume,
             "blockers": blockers,
         }
 

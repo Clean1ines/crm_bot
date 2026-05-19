@@ -172,3 +172,43 @@ def allowed_actions_for_state(state: KnowledgeDocumentPipelineState) -> tuple[Kn
     if state in {KnowledgeDocumentPipelineState.PUBLICATION_COMPLETED, KnowledgeDocumentPipelineState.PARTIAL_PUBLISHED, KnowledgeDocumentPipelineState.PROCESSED, KnowledgeDocumentPipelineState.PROCESSED_WITH_WARNINGS}:
         return (KnowledgeDocumentPipelineAction(id="review_published", label="Проверить опубликованные ответы", kind=KnowledgeDocumentPipelineActionKind.SECONDARY),)
     return ()
+
+
+def validate_retry_failed_batches(
+    state: KnowledgeDocumentPipelineState,
+) -> tuple[bool, tuple[str, ...]]:
+    if state == KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED:
+        return True, ()
+    return False, ("retry_allowed_only_for_compiler_partial_failed",)
+
+
+def validate_resume_processing(
+    state: KnowledgeDocumentPipelineState,
+    *,
+    failed_batches: int,
+) -> tuple[bool, tuple[str, ...]]:
+    blockers: list[str] = []
+    if state != KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING:
+        blockers.append("resume_allowed_only_for_answer_resolution_pending")
+    if failed_batches > 0:
+        blockers.append("failed_batches_remain")
+    return len(blockers) == 0, tuple(blockers)
+
+
+def validate_publish_raw_drafts_without_resolution(
+    state: KnowledgeDocumentPipelineState,
+) -> tuple[bool, tuple[str, ...]]:
+    if state == KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING:
+        return True, ()
+    return False, ("publish_raw_drafts_allowed_only_for_answer_resolution_pending",)
+
+
+def validate_retighten_published_entries(
+    state: KnowledgeDocumentPipelineState,
+) -> tuple[bool, tuple[str, ...]]:
+    if state in {
+        KnowledgeDocumentPipelineState.PROCESSED,
+        KnowledgeDocumentPipelineState.PUBLICATION_COMPLETED,
+    }:
+        return True, ()
+    return False, ("retighten_allowed_only_for_published_states",)

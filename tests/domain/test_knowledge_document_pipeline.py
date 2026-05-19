@@ -11,6 +11,9 @@ from src.domain.project_plane.knowledge_document_pipeline import (
     recommended_action_for_state,
     resolve_pipeline_state,
     state_hash,
+    validate_publish_raw_drafts_without_resolution,
+    validate_resume_processing,
+    validate_retry_failed_batches,
     validate_transition,
 )
 
@@ -76,3 +79,30 @@ def test_pipeline_error_taxonomy_contains_provider_capacity() -> None:
         KnowledgeDocumentPipelineErrorSeverity.RECOVERABLE_ERROR.value
         == "recoverable_error"
     )
+
+
+def test_resume_validator_blocks_when_failed_batches_remain() -> None:
+    valid, blockers = validate_resume_processing(
+        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING,
+        failed_batches=1,
+    )
+    assert not valid
+    assert "failed_batches_remain" in blockers
+
+
+def test_retry_validator_allows_only_partial_failed_state() -> None:
+    valid, _ = validate_retry_failed_batches(
+        KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED
+    )
+    assert valid
+    valid_other, _ = validate_retry_failed_batches(
+        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING
+    )
+    assert not valid_other
+
+
+def test_publish_raw_drafts_validator_requires_pending_state() -> None:
+    valid, _ = validate_publish_raw_drafts_without_resolution(
+        KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING
+    )
+    assert valid
