@@ -325,4 +325,36 @@ async def test_processing_report_publish_ready_label_is_fallback_when_answer_res
     )
 
     labels = {action.id: action.label for action in report.actions}
+    assert "resume_processing" not in labels
     assert labels.get("publish_ready") == "Опубликовать черновики без уплотнения"
+
+
+
+@pytest.mark.asyncio
+async def test_cancel_document_processing_uses_repo_and_reason():
+    project_repo = Mock()
+    project_repo.user_has_project_role = AsyncMock(return_value=True)
+    project_repo.project_exists = AsyncMock(return_value=True)
+
+    user_repo = Mock()
+    user_repo.is_platform_admin = AsyncMock(return_value=False)
+
+    repo = Mock()
+    repo.cancel_document_processing = AsyncMock(return_value=True)
+
+    service = KnowledgeService(project_repo, user_repo, object(), "secret", FakeJwt)
+
+    await service.cancel_document_processing(
+        "project-1",
+        "doc-1",
+        "Bearer valid-token",
+        knowledge_repo_factory=Mock(return_value=repo),
+        logger=Mock(),
+    )
+
+    repo.cancel_document_processing.assert_awaited_once_with(
+        project_id="project-1",
+        document_id="doc-1",
+        reason="Остановлено пользователем",
+    )
+

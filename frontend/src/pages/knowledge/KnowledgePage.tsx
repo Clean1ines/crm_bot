@@ -1878,7 +1878,7 @@ export const KnowledgePage: React.FC = () => {
                           {processingReport.actions.map((action) => {
                             const canRetry = action.id === 'retry_failed_batches' && action.enabled;
                             const canPublishReady = action.id === 'publish_ready' && action.enabled;
-                                                        const isRetryingThisDoc = retryFailedBatchesMutation.isPending
+                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
                               && retryFailedBatchesMutation.variables === doc.id;
                             const isPublishingThisDoc = publishReadyMutation.isPending
                               && publishReadyMutation.variables === doc.id;
