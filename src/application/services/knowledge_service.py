@@ -1234,6 +1234,57 @@ class KnowledgeService:
             "safe_auto_fix_applied": False,
         }
 
+    async def resume_preflight(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        failed_batches = _batch_status_count(batches, "failed")
+        processing_report = await self.processing_report(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        blockers: list[JsonObject] = []
+        if failed_batches > 0:
+            blockers.append(
+                {
+                    "code": "failed_batches_remain",
+                    "message": f"Сначала повторите {failed_batches} проблемную часть(и)",
+                }
+            )
+        if processing_report.state != "answer_resolution_pending":
+            blockers.append(
+                {
+                    "code": "invalid_state_for_resume",
+                    "message": "Продолжение доступно только из состояния готовности к уплотнению.",
+                }
+            )
+        return {
+            "document_id": document_id,
+            "state": processing_report.state,
+            "state_version": processing_report.state_version,
+            "can_resume": len(blockers) == 0,
+            "blockers": blockers,
+        }
+
     async def clear_project_knowledge(
         self,
         project_id: str,

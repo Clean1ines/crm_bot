@@ -810,3 +810,34 @@ class TestKnowledgeUpload:
                 )
         assert response.status_code == 200
         assert response.json() == expected_payload
+
+    def test_resume_preflight_returns_payload(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+        expected_payload = {
+            "document_id": document_id,
+            "state": "answer_resolution_pending",
+            "state_version": 17,
+            "can_resume": False,
+            "blockers": [
+                {
+                    "code": "failed_batches_remain",
+                    "message": "Сначала повторите 1 проблемную часть(и)",
+                }
+            ],
+        }
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.resume_preflight",
+                new=AsyncMock(return_value=expected_payload),
+            ):
+                response = client.get(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/resume-preflight",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+        assert response.status_code == 200
+        assert response.json() == expected_payload
