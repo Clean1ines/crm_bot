@@ -31,11 +31,16 @@ def test_stage_h4_rag_eval_page_uses_user_facing_main_copy() -> None:
 
 
 def test_stage_h4_rag_eval_page_avoids_raw_json_primary_copy() -> None:
-    source = RAG_EVAL_PAGE.read_text(encoding="utf-8")
+    page_source = RAG_EVAL_PAGE.read_text(encoding="utf-8")
+    report_component_source = (
+        ROOT / "frontend/src/pages/rag-eval/components/RagEvalReportComponents.tsx"
+    ).read_text(encoding="utf-8")
     ru_locale = RU_LOCALE.read_text(encoding="utf-8")
 
-    assert "JSON.stringify(value ?? null, null, 2)" in source
-    assert "ragEval.launch.description" in source
+    assert "JSON.stringify(value ?? null, null, 2)" not in page_source
+    assert "ReportJsonBlock" in page_source
+    assert "JSON.stringify(value ?? null, null, 2)" in report_component_source
+    assert "ragEval.launch.description" in page_source
     assert (
         "'ragEval.launch.description': 'Здесь показано состояние последней проверки без служебного JSON.'"
         in ru_locale
