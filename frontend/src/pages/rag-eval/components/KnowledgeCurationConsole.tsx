@@ -18,41 +18,10 @@ import { KnowledgeEntryCurationCard } from './KnowledgeEntryCurationCard';
 import { KnowledgeEntryEditDrawer } from './KnowledgeEntryEditDrawer';
 import { KnowledgeEntryMergeDrawer } from './KnowledgeEntryMergeDrawer';
 import { KnowledgeEntryVersionDrawer } from './KnowledgeEntryVersionDrawer';
+import { matchesKnowledgeCurationFilter } from '../lib/knowledgeCurationFilters';
+import { sortKnowledgeCurationEntries } from '../lib/knowledgeCurationSort';
+import { useKnowledgeCurationSelection } from '../hooks/useKnowledgeCurationSelection';
 
-const listCount = (value: unknown): number => Array.isArray(value) ? value.length : 0;
-const issueTypes = (entry: KnowledgeCurationEntry): Set<string> => new Set(entry.issues.map((issue) => issue.type));
-
-const matchesFilter = (entry: KnowledgeCurationEntry, filter: CurationFilter, duplicateIds: Set<string>): boolean => {
-  const issues = issueTypes(entry);
-  if (filter === 'all') return true;
-  if (filter === 'published') return entry.status === 'published';
-  if (filter === 'needs_review') return entry.status === 'needs_review';
-  if (filter === 'hidden') return entry.status === 'hidden';
-  if (filter === 'rejected') return entry.status === 'rejected';
-  if (filter === 'merged') return entry.status === 'merged' || Boolean((entry.metadata.curation as Record<string, unknown> | undefined)?.merged_into);
-  if (filter === 'possible_duplicates') return duplicateIds.has(entry.id);
-  if (filter === 'missing_source_refs') return issues.has('missing_source_refs');
-  if (filter === 'missing_embedding') return !entry.has_embedding;
-  if (filter === 'no_retrieval_surface') return issues.has('published_without_retrieval_row');
-  if (filter === 'fallback_chunk') return entry.entry_kind === 'fallback_chunk';
-  if (filter === 'suspicious_short') return issues.has('empty_or_too_short_answer');
-  if (filter === 'changed_recently') return Boolean(entry.updated_at);
-  return true;
-};
-
-const sortEntries = (entries: KnowledgeCurationEntry[], sort: CurationSort, duplicateSize: Map<string, number>): KnowledgeCurationEntry[] => {
-  const copy = [...entries];
-  copy.sort((left, right) => {
-    if (sort === 'title') return left.title.localeCompare(right.title);
-    if (sort === 'status') return left.status.localeCompare(right.status);
-    if (sort === 'updated_at') return String(right.updated_at || '').localeCompare(String(left.updated_at || ''));
-    if (sort === 'source_refs_count') return right.source_refs.length - left.source_refs.length;
-    if (sort === 'questions_count') return listCount(right.enrichment.questions) - listCount(left.enrichment.questions);
-    if (sort === 'duplicate_group_size') return (duplicateSize.get(right.id) ?? 0) - (duplicateSize.get(left.id) ?? 0);
-    return right.issues.length - left.issues.length;
-  });
-  return copy;
-};
 
 export const KnowledgeCurationConsole: React.FC<{
   projectId: string;
@@ -63,7 +32,6 @@ export const KnowledgeCurationConsole: React.FC<{
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<CurationFilter>('all');
   const [sort, setSort] = useState<CurationSort>('most_suspicious');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [editingEntry, setEditingEntry] = useState<KnowledgeCurationEntry | null>(null);
   const [diagnosticsEntry, setDiagnosticsEntry] = useState<KnowledgeCurationEntry | null>(null);
   const [versionEntry, setVersionEntry] = useState<KnowledgeCurationEntry | null>(null);
@@ -139,7 +107,7 @@ export const KnowledgeCurationConsole: React.FC<{
     mutationFn: async (payload: KnowledgeEntryMergePreviewRequest) => knowledgeCurationApi.applyMerge(projectId, documentId, payload),
     onSuccess: async ({ data }) => {
       if (data.partial) toast.error(data.error || 'Merge применён частично'); else toast.success('Merge применён');
-      setMergeOpen(false); setMergePreview(null); setSelectedIds(new Set()); await invalidate();
+      setMergeOpen(false); setMergePreview(null); clearSelection(); await invalidate();
     },
     onError: (error) => { setMutationError(getErrorMessage(error, 'Apply merge failed')); },
   });
@@ -157,8 +125,9 @@ export const KnowledgeCurationConsole: React.FC<{
     for (const group of payload?.duplicate_groups ?? []) for (const id of group.entry_ids) map.set(id, Math.max(map.get(id) ?? 0, group.entry_ids.length));
     return map;
   }, [payload?.duplicate_groups]);
-  const visibleEntries = useMemo(() => sortEntries((payload?.entries ?? []).filter((entry) => matchesFilter(entry, filter, duplicateIds)), sort, duplicateSize), [payload?.entries, filter, duplicateIds, sort, duplicateSize]);
-  const selectedEntries = useMemo(() => (payload?.entries ?? []).filter((entry) => selectedIds.has(entry.id)), [payload?.entries, selectedIds]);
+  const allEntries = useMemo(() => payload?.entries ?? [], [payload?.entries]);
+  const { selectedIds, selectedEntries, toggleEntry, clearSelection } = useKnowledgeCurationSelection(allEntries);
+  const visibleEntries = useMemo(() => sortKnowledgeCurationEntries(allEntries.filter((entry) => matchesKnowledgeCurationFilter(entry, filter, duplicateIds)), sort, duplicateSize), [allEntries, filter, duplicateIds, sort, duplicateSize]);
 
   if (!documentId) return <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">Выберите processed документ для курации знаний.</section>;
   if (curationQuery.isLoading) return <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Загружаем curation console...</section>;
@@ -173,7 +142,7 @@ export const KnowledgeCurationConsole: React.FC<{
         <button type="button" disabled={selectedEntries.length < 2 || selectedEntries.length > 12} onClick={() => { setMergeOpen(true); setMergePreview(null); setMutationError(''); }} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Merge selected</button>
       </div>
       <div className="space-y-4">
-        {visibleEntries.map((entry) => <KnowledgeEntryCurationCard key={entry.id} entry={entry} selected={selectedIds.has(entry.id)} onToggle={() => setSelectedIds((current) => { const next = new Set(current); if (next.has(entry.id)) next.delete(entry.id); else if (next.size < 12) next.add(entry.id); return next; })} onEdit={() => { setEditingEntry(entry); setMutationError(''); }} onVersions={() => setVersionEntry(entry)} onDiagnostics={() => setDiagnosticsEntry(entry)} onStatus={(action) => statusMutation.mutate({ entry, action })} onRebuild={() => rebuildMutation.mutate(entry)} />)}
+        {visibleEntries.map((entry) => <KnowledgeEntryCurationCard key={entry.id} entry={entry} selected={selectedIds.has(entry.id)} onToggle={() => toggleEntry(entry.id)} onEdit={() => { setEditingEntry(entry); setMutationError(''); }} onVersions={() => setVersionEntry(entry)} onDiagnostics={() => setDiagnosticsEntry(entry)} onStatus={(action) => statusMutation.mutate({ entry, action })} onRebuild={() => rebuildMutation.mutate(entry)} />)}
         {!visibleEntries.length && <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">По выбранному фильтру canonical entries нет.</section>}
       </div>
       <KnowledgeCurationActionsPanel actions={actionsQuery.data ?? []} />
