@@ -66,6 +66,7 @@ import {
   isJobPaused,
   isJobTerminal,
 } from './lib/ragEvalStatus';
+import { asNumber, clampPercent, getRecord, timestampMs } from './lib/ragEvalRuntimeUtils';
 
 interface Document {
   id: string;
@@ -78,27 +79,6 @@ interface Document {
 
 const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
 const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
-
-const timestampMs = (value: unknown): number | null => {
-  if (typeof value !== 'string' || !value.trim()) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const getRecord = (value: unknown): Record<string, unknown> => (
-  value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
-);
-
-const asNumber = (value: unknown, fallback = 0): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : fallback
-);
-
-const clampPercent = (value: unknown): number => {
-  const numeric = asNumber(value, 0);
-  return Math.max(0, Math.min(100, Math.round(numeric)));
-};
 
 
 
