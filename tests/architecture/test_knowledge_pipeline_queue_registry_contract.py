@@ -34,3 +34,13 @@ def test_no_endpoint_enqueues_wrong_task_type_for_knowledge_pipeline_commands() 
     assert "retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES" in http_source
     assert "retighten_task_type=TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT" in http_source
     assert "resume_task_type=TASK_RESUME_KNOWLEDGE_PROCESSING" in http_source
+
+
+def test_endpoint_command_matrix_exposes_resume_and_cancel_contract() -> None:
+    http_source = _read("src/interfaces/http/knowledge.py")
+    service_source = _read("src/application/services/knowledge_service.py")
+
+    assert '@router.post("/{document_id}/resume-processing")' in http_source
+    assert "resume_document_processing(" in service_source
+    assert '@router.post("/{document_id}/cancel")' in http_source
+    assert "cancel_document_processing(" in service_source
