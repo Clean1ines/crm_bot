@@ -35,6 +35,12 @@ import {
   type RagEvalReviewQuestion,
 } from '@shared/api/modules/ragEval';
 import { KnowledgeCurationConsole } from './components/KnowledgeCurationConsole';
+import {
+  getJobStatus,
+  isJobActive,
+  isJobPaused,
+  isJobTerminal,
+} from './lib/ragEvalStatus';
 
 interface Document {
   id: string;
@@ -45,11 +51,8 @@ interface Document {
   created_at: string;
 }
 
-const ACTIVE_JOB_STATUSES = new Set(['pending', 'processing', 'running', 'retrying', 'running_or_locked']);
 const ACTIVE_RUN_STATUSES = new Set(['created', 'pending', 'processing', 'generating', 'ready', 'running', 'paused']);
 const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
-const PAUSED_STATUSES = new Set(['paused', 'manual_pause', 'manual-pause']);
-const TERMINAL_JOB_STATUSES = new Set(['completed', 'done', 'succeeded', 'success', 'failed', 'cancelled']);
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
 
@@ -83,25 +86,6 @@ const clampPercent = (value: unknown): number => {
   const numeric = asNumber(value, 0);
   return Math.max(0, Math.min(100, Math.round(numeric)));
 };
-
-type RagEvalJobWithEffectiveStatus = RagEvalJob & { effective_status?: string };
-
-const getJobStatus = (job: RagEvalJob | null | undefined): string => {
-  const jobWithEffectiveStatus = job as RagEvalJobWithEffectiveStatus | null | undefined;
-  return String(jobWithEffectiveStatus?.effective_status || jobWithEffectiveStatus?.status || '');
-};
-
-const isJobTerminal = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && TERMINAL_JOB_STATUSES.has(getJobStatus(job)))
-);
-
-const isJobActive = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && !isJobTerminal(job) && ACTIVE_JOB_STATUSES.has(getJobStatus(job)))
-);
-
-const isJobPaused = (job: RagEvalJob | null | undefined): boolean => (
-  Boolean(job && !isJobTerminal(job) && PAUSED_STATUSES.has(getJobStatus(job)))
-);
 
 const stageLabel = (stage: string): string => {
   if (stage === 'queued') return t('ragEval.stage.queued');
