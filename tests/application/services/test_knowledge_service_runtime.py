@@ -414,3 +414,52 @@ async def test_publish_document_ready_answers_raises_state_conflict_when_expecte
             expected_state_version=99,
             logger=Mock(),
         )
+
+
+@pytest.mark.asyncio
+async def test_cancel_document_processing_raises_state_conflict_when_expected_mismatch():
+    project_repo = Mock()
+    project_repo.user_has_project_role = AsyncMock(return_value=True)
+    project_repo.project_exists = AsyncMock(return_value=True)
+    user_repo = Mock()
+    user_repo.is_platform_admin = AsyncMock(return_value=False)
+    repo = Mock()
+    repo.get_document = AsyncMock(
+        return_value=type(
+            "Document",
+            (),
+            {
+                "project_id": "project-1",
+                "structured_entries": 0,
+                "status": "processing",
+                "preprocessing_status": "processing",
+                "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+            },
+        )()
+    )
+    repo.list_document_compiler_batches = AsyncMock(return_value=[])
+    repo.get_document_answer_candidate_summary = AsyncMock(
+        return_value=type(
+            "CandidateSummary",
+            (),
+            {
+                "raw_count": 0,
+                "total_count": 0,
+                "grounded_count": 0,
+                "rejected_count": 0,
+            },
+        )()
+    )
+    knowledge_repo_factory = Mock(return_value=repo)
+    service = KnowledgeService(project_repo, user_repo, object(), "secret", FakeJwt)
+
+    with pytest.raises(ConflictError, match="state_conflict"):
+        await service.cancel_document_processing(
+            "project-1",
+            "doc-1",
+            "Bearer valid-token",
+            knowledge_repo_factory=knowledge_repo_factory,
+            expected_state="answer_resolution_pending",
+            expected_state_version=99,
+            logger=Mock(),
+        )
