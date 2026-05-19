@@ -625,6 +625,7 @@ async def cancel_knowledge_processing(
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
+    payload: KnowledgePipelineCommandRequestModel = Body(...),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     """Stops queued/running knowledge document processing cooperatively."""
@@ -647,6 +648,8 @@ async def cancel_knowledge_processing(
         document_id,
         authorization,
         knowledge_repo_factory=make_knowledge_repo,
+        expected_state=payload.expected_state,
+        expected_state_version=payload.expected_state_version,
         logger=logger,
     )
     return {"status": "cancelled", "document_id": document_id}

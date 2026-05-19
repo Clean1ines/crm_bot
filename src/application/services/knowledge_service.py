@@ -792,10 +792,19 @@ class KnowledgeService:
         authorization: str | None,
         *,
         knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> None:
         await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
 
         repo = knowledge_repo_factory(self.pool)
         cancelled = await repo.cancel_document_processing(
