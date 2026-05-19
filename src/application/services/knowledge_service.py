@@ -1105,6 +1105,74 @@ class KnowledgeService:
             and processing_report.state in {"processed", "processed_with_warnings"},
         }
 
+    async def inspect_document_pipeline(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        report = await self.processing_report(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        active_job = await repo.find_active_knowledge_pipeline_job(
+            document_id=document_id,
+            task_types=KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES,
+        )
+        batch_statuses: dict[str, int] = {
+            "pending": _batch_status_count(batches, "pending"),
+            "processing": _batch_status_count(batches, "processing"),
+            "completed": _batch_status_count(batches, "completed"),
+            "failed": _batch_status_count(batches, "failed"),
+        }
+
+        return {
+            "document_id": document_id,
+            "document_status": document.status,
+            "preprocessing_status": document.preprocessing_status,
+            "preprocessing_metrics": (
+                dict(document.preprocessing_metrics)
+                if isinstance(document.preprocessing_metrics, Mapping)
+                else {}
+            ),
+            "pipeline_state": report.state,
+            "pipeline_state_version": report.state_version,
+            "pipeline_state_hash": report.state_hash,
+            "active_job_id": active_job,
+            "compiler_batches_by_status": batch_statuses,
+            "raw_candidates_count": candidate_summary.raw_count,
+            "canonical_entries_count": int(document.chunk_count or 0),
+            "retrieval_surface_count": int(document.structured_entries or 0),
+            "allowed_actions": [action.to_dict() for action in report.actions],
+            "recommended_next_action": report.recommended_next_action,
+            "state_consistency": not (
+                report.state == "processed"
+                and int(document.structured_entries or 0) <= 0
+            ),
+            "last_error": str(document.error or ""),
+        }
+
     async def clear_project_knowledge(
         self,
         project_id: str,

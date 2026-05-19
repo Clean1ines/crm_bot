@@ -731,3 +731,45 @@ class TestKnowledgeUpload:
 
         assert response.status_code == 200
         assert response.json() == expected_payload
+
+    def test_knowledge_inspect_returns_payload(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+        expected_payload = {
+            "document_id": document_id,
+            "document_status": "processing",
+            "preprocessing_status": "processing",
+            "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+            "pipeline_state": "compiler_running",
+            "pipeline_state_version": 17,
+            "pipeline_state_hash": "hash",
+            "active_job_id": "job-1",
+            "compiler_batches_by_status": {
+                "pending": 1,
+                "processing": 2,
+                "completed": 70,
+                "failed": 1,
+            },
+            "raw_candidates_count": 151,
+            "canonical_entries_count": 46,
+            "retrieval_surface_count": 40,
+            "allowed_actions": [],
+            "recommended_next_action": {"id": "retry_failed_batches", "reason": "x"},
+            "state_consistency": True,
+            "last_error": "",
+        }
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.inspect_document_pipeline",
+                new=AsyncMock(return_value=expected_payload),
+            ):
+                response = client.get(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/inspect",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+        assert response.status_code == 200
+        assert response.json() == expected_payload

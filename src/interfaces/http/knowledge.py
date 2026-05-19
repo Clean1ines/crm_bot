@@ -363,6 +363,39 @@ async def knowledge_document_health(
     )
 
 
+@router.get("/{document_id}/inspect")
+async def inspect_knowledge_document_pipeline(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns an operator-focused pipeline inspection payload."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    return await service.inspect_document_pipeline(
+        project_id=project_id,
+        document_id=document_id,
+        authorization=authorization,
+        knowledge_repo_factory=make_knowledge_repo,
+        logger=logger,
+    )
+
+
 @router.post("/{document_id}/retighten")
 async def retighten_knowledge_document(
     project_id: str,
