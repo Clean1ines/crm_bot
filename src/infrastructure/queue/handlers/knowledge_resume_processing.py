@@ -5,7 +5,7 @@ import asyncpg
 from src.application.services.knowledge_ingestion_service import KnowledgeIngestionService
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.logging.logger import get_logger
-from src.infrastructure.queue.types import PermanentJobError
+from src.infrastructure.queue.job_exceptions import PermanentJobError
 
 logger = get_logger(__name__)
 

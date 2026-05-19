@@ -1141,3 +1141,34 @@ async def test_retry_failed_batches_success_does_not_publish_or_mark_processed()
     assert result["next_action"] == "resume_pipeline"
     status_calls = [call.args[:2] for call in repo.update_document_status.await_args_list]
     assert ("doc-1", "processed") not in status_calls
+
+
+@pytest.mark.asyncio
+async def test_resume_processing_from_answer_resolution_pending_fails_without_publish_ready_call():
+    from src.application.errors import ValidationError
+
+    repo = Mock()
+    repo.get_document = AsyncMock(
+        return_value=Mock(
+            project_id="project-1",
+            preprocessing_mode="faq",
+            preprocessing_metrics={"stage": "answer_resolution_pending"},
+        )
+    )
+    repo.list_document_compiler_batches = AsyncMock(return_value=[Mock(status="completed")])
+
+    service = KnowledgeIngestionService(object())
+    service.publish_ready_answers = AsyncMock()
+
+    with pytest.raises(
+        ValidationError,
+        match="Resume pipeline is not implemented yet for answer_resolution_pending stage",
+    ):
+        await service.resume_processing(
+            project_id="project-1",
+            document_id="doc-1",
+            knowledge_repo_factory=Mock(return_value=repo),
+            logger=Mock(),
+        )
+
+    service.publish_ready_answers.assert_not_awaited()

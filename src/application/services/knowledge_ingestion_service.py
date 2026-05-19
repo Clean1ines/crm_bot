@@ -4077,14 +4077,9 @@ class KnowledgeIngestionService:
                 "stage": stage,
             }
 
-        result = await self.publish_ready_answers(
-            project_id=project_id,
-            document_id=document_id,
-            knowledge_repo_factory=knowledge_repo_factory,
-            logger=logger,
+        raise ValidationError(
+            "Resume pipeline is not implemented yet for answer_resolution_pending stage"
         )
-        result["resumed"] = True
-        return result
 
     async def retry_failed_batches(
         self,
