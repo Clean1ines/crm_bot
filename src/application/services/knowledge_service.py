@@ -781,6 +781,45 @@ class KnowledgeService:
             extra={"project_id": project_id, "document_id": document_id},
         )
 
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        resume_processing_task_type: str,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        job_id = await queue_repo.enqueue(
+            resume_processing_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_resume_processing",
+            },
+            max_attempts=3,
+        )
+
+        logger.info(
+            "Knowledge resume processing queued",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "job_id": job_id,
+            },
+        )
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "document_id": document_id,
+        }
+
     async def publish_document_ready_answers(
         self,
         project_id: str,

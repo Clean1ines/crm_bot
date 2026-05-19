@@ -204,7 +204,7 @@ export const knowledgeApi = {
     }),
 
   resumeProcessing: (projectId: string, documentId: string) =>
-    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/resume-processing`, {
       method: 'POST',
     }),
 
