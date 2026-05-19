@@ -929,3 +929,55 @@ class TestKnowledgeUpload:
             )
 
         assert response.status_code == 422
+
+    def test_publish_ready_requires_expected_state_payload(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            response = client.post(
+                f"/api/projects/{project_id}/knowledge/{document_id}/publish-ready",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+
+        assert response.status_code == 422
+
+    def test_retry_failed_batches_requires_expected_state_payload(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            response = client.post(
+                f"/api/projects/{project_id}/knowledge/{document_id}/retry-failed-batches",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+
+        assert response.status_code == 422
+
+    def test_retighten_requires_expected_state_payload(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            response = client.post(
+                f"/api/projects/{project_id}/knowledge/{document_id}/retighten",
+                headers={"Authorization": "Bearer valid-token"},
+            )
+
+        assert response.status_code == 422
