@@ -773,3 +773,40 @@ class TestKnowledgeUpload:
                 )
         assert response.status_code == 200
         assert response.json() == expected_payload
+
+    def test_knowledge_reconcile_returns_payload(self, client, mock_project_repo):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+        expected_payload = {
+            "document_id": document_id,
+            "reconciled": False,
+            "state": "compiler_partial_failed",
+            "state_version": 17,
+            "state_hash": "hash17",
+            "diagnostics": [
+                {
+                    "code": "failed_batches_remain",
+                    "message": "Есть проблемные части документа: сначала повторите их.",
+                }
+            ],
+            "recommended_next_action": {
+                "id": "retry_failed_batches",
+                "reason": "x",
+            },
+            "safe_auto_fix_applied": False,
+        }
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.reconcile_document_pipeline_state",
+                new=AsyncMock(return_value=expected_payload),
+            ):
+                response = client.post(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/reconcile",
+                    headers={"Authorization": "Bearer valid-token"},
+                )
+        assert response.status_code == 200
+        assert response.json() == expected_payload

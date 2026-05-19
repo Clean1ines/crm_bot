@@ -1173,6 +1173,67 @@ class KnowledgeService:
             "last_error": str(document.error or ""),
         }
 
+    async def reconcile_document_pipeline_state(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        health = await self.document_health(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        inspect = await self.inspect_document_pipeline(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+
+        diagnostics: list[JsonObject] = []
+        if not bool(health.get("state_consistency")):
+            diagnostics.append(
+                {
+                    "code": "state_inconsistent",
+                    "message": "Состояние документа не согласовано с индексом поиска.",
+                }
+            )
+        if bool(health.get("retrieval_surface_mismatch")):
+            diagnostics.append(
+                {
+                    "code": "retrieval_surface_mismatch",
+                    "message": "Количество runtime карточек и retrieval surface не совпадает.",
+                }
+            )
+        if int(health.get("failed_batches") or 0) > 0:
+            diagnostics.append(
+                {
+                    "code": "failed_batches_remain",
+                    "message": "Есть проблемные части документа: сначала повторите их.",
+                }
+            )
+        recommended = inspect.get("recommended_next_action")
+        return {
+            "document_id": document_id,
+            "reconciled": len(diagnostics) == 0,
+            "state": inspect.get("pipeline_state"),
+            "state_version": inspect.get("pipeline_state_version"),
+            "state_hash": inspect.get("pipeline_state_hash"),
+            "diagnostics": diagnostics,
+            "recommended_next_action": recommended,
+            "safe_auto_fix_applied": False,
+        }
+
     async def clear_project_knowledge(
         self,
         project_id: str,
