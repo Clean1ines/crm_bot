@@ -62,6 +62,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
 from src.infrastructure.queue.job_types import (
     TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
     TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+    TASK_RESUME_KNOWLEDGE_PROCESSING,
     TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
 )
 
@@ -71,6 +72,7 @@ UPLOAD_FALLBACK_NAME = "upload"
 KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE = "Остановлено пользователем"
 KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES = (
     TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+    TASK_RESUME_KNOWLEDGE_PROCESSING,
     TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
     TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
 )
@@ -976,6 +978,46 @@ class KnowledgeService:
             "job_id": job_id,
             "document_id": document_id,
         }
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        resume_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_resume_processing(state_enum, failed_batches=0)
+        if not valid:
+            raise ValidationError(f"resume_processing_blocked:{','.join(blockers)}")
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=resume_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_resume_processing",
+            command="resume_knowledge_compilation",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
+        )
+        return {"status": "queued", "job_id": job_id, "document_id": document_id}
 
     async def _current_pipeline_state_and_version(
         self,

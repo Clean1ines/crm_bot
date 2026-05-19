@@ -841,3 +841,29 @@ class TestKnowledgeUpload:
                 )
         assert response.status_code == 200
         assert response.json() == expected_payload
+
+    def test_resume_processing_returns_409_on_state_conflict(
+        self, client, mock_project_repo
+    ):
+        project_id = str(uuid4())
+        document_id = str(uuid4())
+        mock_project_repo.project_exists.return_value = True
+
+        with patch(
+            "src.interfaces.http.knowledge.jwt.decode",
+            return_value={"sub": TEST_USER_ID},
+        ):
+            with patch(
+                "src.application.services.knowledge_service.KnowledgeService.resume_document_processing",
+                new=AsyncMock(side_effect=ConflictError("state_conflict")),
+            ):
+                response = client.post(
+                    f"/api/projects/{project_id}/knowledge/{document_id}/resume-processing",
+                    headers={"Authorization": "Bearer valid-token"},
+                    json={
+                        "expected_state": "answer_resolution_pending",
+                        "expected_state_version": 17,
+                    },
+                )
+        assert response.status_code == 409
+        assert response.json()["detail"] == "state_conflict"
