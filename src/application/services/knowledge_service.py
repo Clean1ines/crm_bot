@@ -757,7 +757,6 @@ class KnowledgeService:
             metrics=metrics,
         )
 
-
     async def cancel_document_processing(
         self,
         project_id: str,
@@ -783,7 +782,6 @@ class KnowledgeService:
             "Knowledge document processing cancelled",
             extra={"project_id": project_id, "document_id": document_id},
         )
-
 
     async def resume_document_processing(
         self,

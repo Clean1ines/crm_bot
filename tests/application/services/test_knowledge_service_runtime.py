@@ -267,7 +267,13 @@ async def test_processing_report_retry_success_stage_not_processing_and_not_read
         chunk_count=10,
         preprocessing_metrics={"stage": "answer_resolution_pending"},
     )
-    batch = Mock(status="completed", batch_count=1, tokens_input=0, tokens_output=0, tokens_total=0)
+    batch = Mock(
+        status="completed",
+        batch_count=1,
+        tokens_input=0,
+        tokens_output=0,
+        tokens_total=0,
+    )
     summary = Mock(raw_count=5, total_count=5, grounded_count=5, rejected_count=0)
 
     repo = Mock()
@@ -307,7 +313,13 @@ async def test_processing_report_publish_ready_label_is_fallback_when_answer_res
         chunk_count=10,
         preprocessing_metrics={"stage": "answer_resolution_pending"},
     )
-    batch = Mock(status="completed", batch_count=1, tokens_input=0, tokens_output=0, tokens_total=0)
+    batch = Mock(
+        status="completed",
+        batch_count=1,
+        tokens_input=0,
+        tokens_output=0,
+        tokens_total=0,
+    )
     summary = Mock(raw_count=2, total_count=2, grounded_count=2, rejected_count=0)
 
     repo = Mock()
@@ -327,7 +339,6 @@ async def test_processing_report_publish_ready_label_is_fallback_when_answer_res
     labels = {action.id: action.label for action in report.actions}
     assert labels.get("resume_processing") == "Продолжить обработку"
     assert labels.get("publish_ready") == "Опубликовать черновики без уплотнения"
-
 
 
 @pytest.mark.asyncio
@@ -359,7 +370,6 @@ async def test_cancel_document_processing_uses_repo_and_reason():
     )
 
 
-
 @pytest.mark.asyncio
 async def test_resume_document_processing_queues_resume_task():
     from src.infrastructure.queue.job_types import TASK_RESUME_KNOWLEDGE_PROCESSING
@@ -383,7 +393,11 @@ async def test_resume_document_processing_queues_resume_task():
         logger=Mock(),
     )
 
-    assert result == {"status": "queued", "job_id": "job-resume-1", "document_id": "doc-1"}
+    assert result == {
+        "status": "queued",
+        "job_id": "job-resume-1",
+        "document_id": "doc-1",
+    }
     queue_repo.enqueue.assert_awaited_once_with(
         TASK_RESUME_KNOWLEDGE_PROCESSING,
         payload={
@@ -413,7 +427,13 @@ async def test_processing_report_answer_resolution_pending_shows_resume_and_fall
         chunk_count=10,
         preprocessing_metrics={"stage": "answer_resolution_pending"},
     )
-    batch = Mock(status="completed", batch_count=1, tokens_input=0, tokens_output=0, tokens_total=0)
+    batch = Mock(
+        status="completed",
+        batch_count=1,
+        tokens_input=0,
+        tokens_output=0,
+        tokens_total=0,
+    )
     summary = Mock(raw_count=3, total_count=3, grounded_count=3, rejected_count=0)
 
     repo = Mock()

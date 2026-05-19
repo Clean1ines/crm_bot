@@ -395,10 +395,6 @@ async def publish_knowledge_ready_answers(
     )
 
 
-
-
-
-
 @router.post("/{document_id}/resume-processing")
 async def resume_knowledge_processing(
     project_id: str,
@@ -416,7 +412,9 @@ async def resume_knowledge_processing(
         settings.JWT_SECRET_KEY,
         jwt_decoder,
         service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET),
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
             voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
             model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
         ),
@@ -429,6 +427,7 @@ async def resume_knowledge_processing(
         resume_task_type=TASK_RESUME_KNOWLEDGE_PROCESSING,
         logger=logger,
     )
+
 
 @router.post("/{document_id}/retry-failed-batches")
 async def retry_knowledge_failed_batches(

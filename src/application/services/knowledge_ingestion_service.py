@@ -3931,7 +3931,6 @@ class KnowledgeIngestionService:
         )
         return result
 
-
     def _preprocessing_entries_from_raw_candidates(
         self,
         *,
@@ -3959,7 +3958,9 @@ class KnowledgeIngestionService:
                     embedding_text="",
                     canonical_question=canonical_question,
                     source_chunk_indexes=tuple(
-                        ref.source_index for ref in candidate.source_refs
+                        ref.source_index
+                        for ref in candidate.source_refs
+                        if ref.source_index is not None
                     ),
                 )
             )
@@ -3981,7 +3982,7 @@ class KnowledgeIngestionService:
         prompt_version: str,
         answer_compiler_metrics: Mapping[str, JsonValue],
         on_progress: Callable[[JsonObject], Awaitable[None]] | None,
-    ) -> tuple[CanonicalKnowledgeEntry, JsonObject]:
+    ) -> tuple[tuple[CanonicalKnowledgeEntry, ...], JsonObject]:
         compiled_entries = self._preprocessing_entries_from_raw_candidates(
             candidates=raw_candidates,
         )
@@ -4190,7 +4191,6 @@ class KnowledgeIngestionService:
             "remaining_failed_batch_count": batch_failed,
         }
 
-
     async def resume_processing(
         self,
         *,
@@ -4214,11 +4214,15 @@ class KnowledgeIngestionService:
             document_id=document_id,
         )
         if not batches:
-            raise ValidationError("Cannot resume while compiler batches are not completed")
+            raise ValidationError(
+                "Cannot resume while compiler batches are not completed"
+            )
         if any(batch.status == "failed" for batch in batches):
             raise ValidationError("Cannot resume while failed compiler batches remain")
         if any(batch.status in {"pending", "processing"} for batch in batches):
-            raise ValidationError("Cannot resume while compiler batches are not completed")
+            raise ValidationError(
+                "Cannot resume while compiler batches are not completed"
+            )
 
         document_metrics = (
             dict(document.preprocessing_metrics)
@@ -4263,7 +4267,10 @@ class KnowledgeIngestionService:
             },
         )
 
-        canonical_entries, _metrics = await self._run_answer_resolution_publication_pipeline(
+        (
+            canonical_entries,
+            _metrics,
+        ) = await self._run_answer_resolution_publication_pipeline(
             project_id=project_id,
             document_id=document_id,
             file_name=document.file_name,
@@ -4641,7 +4648,6 @@ class KnowledgeIngestionService:
                 batches=compiler_batches,
             )
             preprocessing_results: list[KnowledgePreprocessingResult] = []
-            compiled_entries: list[KnowledgePreprocessingEntry] = []
             usage_event_count = 0
             llm_answer_resolution_call_count = 0
             answer_resolution_keep_separate_count = 0
@@ -4957,11 +4963,6 @@ class KnowledgeIngestionService:
                     f"Multiple compiler batches failed ({len(batch_errors)}): {combined_error}"
                 ) from first_error
 
-            compiled_entries = [
-                entry
-                for batch_index in sorted(entries_by_batch_index)
-                for entry in entries_by_batch_index[batch_index]
-            ]
             latest_result = (
                 results_by_batch_index[max(results_by_batch_index)]
                 if results_by_batch_index
@@ -4978,6 +4979,7 @@ class KnowledgeIngestionService:
                 project_id=project_id,
                 document_id=document_id,
             )
+
             async def persist_answer_resolution_progress(metrics: JsonObject) -> None:
                 await repo.update_document_preprocessing_status(
                     document_id,
@@ -4996,7 +4998,10 @@ class KnowledgeIngestionService:
                     },
                 )
 
-            canonical_entries, _preprocessing_metrics = await self._run_answer_resolution_publication_pipeline(
+            (
+                canonical_entries,
+                _preprocessing_metrics,
+            ) = await self._run_answer_resolution_publication_pipeline(
                 project_id=project_id,
                 document_id=document_id,
                 file_name=file_name,
