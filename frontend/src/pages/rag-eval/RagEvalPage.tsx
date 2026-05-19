@@ -8,10 +8,8 @@ import {
   XCircle,
   BarChart3,
 } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
-import { getErrorMessage } from '@shared/api/core/errors';
 
 import {
   type RagEvalReviewGroup,
@@ -20,9 +18,6 @@ import {
   type KnowledgeEditActionExecutionSummary,
   type RagEvalDocumentStatusResponse,
   type RagEvalFullRunAcceptedResponse,
-  type RagEvalJob,
-  type RagEvalJobProgressResponse,
-  type RagEvalJobsResponse,
 } from '@shared/api/modules/ragEval';
 import { KnowledgeCurationConsole } from './components/KnowledgeCurationConsole';
 import { ActionableResultsPanel } from './components/RagEvalMainPanels';
@@ -33,6 +28,7 @@ import { EvalFiltersBar, FragmentReviewCard, JobProgressCard, QuestionReviewDraw
 import { useRagEvalDocuments } from './hooks/useRagEvalDocuments';
 import { useRagEvalReview } from './hooks/useRagEvalReview';
 import { useRagEvalJobs } from './hooks/useRagEvalJobs';
+import { useRagEvalMutations } from './hooks/useRagEvalMutations';
 import { getActionableResults, getEvalResults } from './lib/ragEvalResults';
 import {
   questionIsProblem,
@@ -94,130 +90,21 @@ export const RagEvalPage: React.FC = () => {
     await queryClient.invalidateQueries({ queryKey: ['rag-eval-latest-review', activeDocumentId] });
   };
 
-  const applyJobMutationResult = (job: RagEvalJob) => {
-    queryClient.setQueryData<RagEvalJobsResponse>(['rag-eval-jobs', activeDocumentId], (current) => {
-      if (!current) return current;
-      const exists = current.jobs.some((item) => item.id === job.id);
-      const jobs = exists
-        ? current.jobs.map((item) => (item.id === job.id ? job : item))
-        : [job, ...current.jobs];
-      return { ...current, jobs };
-    });
-
-    queryClient.setQueryData<RagEvalJobProgressResponse>(['rag-eval-job-progress', job.id], {
-      ok: true,
-      job,
-    });
-  };
-
-  const runMutation = useMutation({
-    mutationFn: async () => {
-      if (!activeDocumentId) throw new Error(t('ragEval.error.noProcessedDocument'));
-
-        return await ragEvalApi.runFullDocumentEval(activeDocumentId);
-    },
-    onSuccess: async (result) => {
-      setLastQueued(result);
-      setLastActionExecutionSummary(null);
-      toast.success(t('ragEval.feedback.started'));
-      await invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, t('ragEval.error.enqueueFailed')));
-    },
-  });
-
-  const pauseMutation = useMutation({
-    mutationFn: async (jobId: string) => ragEvalApi.pauseJob(jobId),
-    onSuccess: (result) => {
-      applyJobMutationResult(result.job);
-      toast.success(t('ragEval.feedback.paused'));
-      void invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, t('ragEval.error.pauseFailed')));
-    },
-  });
-
-  const resumeMutation = useMutation({
-    mutationFn: async (jobId: string) => ragEvalApi.resumeJob(jobId),
-    onSuccess: (result) => {
-      applyJobMutationResult(result.job);
-      toast.success(t('ragEval.feedback.resumed'));
-      void invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, t('ragEval.error.resumeFailed')));
-    },
-  });
-
-  const cancelMutation = useMutation({
-    mutationFn: async (jobId: string) => ragEvalApi.cancelJob(jobId),
-    onSuccess: (result) => {
-      setLastQueued(null);
-      applyJobMutationResult(result.job);
-      toast.success(t('ragEval.feedback.cancelled'));
-      void invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, t('ragEval.error.cancelFailed')));
-    },
-  });
-
-  const executeActionsMutation = useMutation<KnowledgeEditActionExecutionSummary, unknown, string>({
-    mutationFn: async (resultId: string) => ragEvalApi.executeResultActions(resultId),
-    onSuccess: async (summary) => {
-      setLastActionExecutionSummary(summary);
-
-      const rerunMessage = summary.queued_rerun_job_ids.length
-        ? t('ragEval.feedback.rerunQueuedSuffix')
-        : '';
-
-      toast.success(
-        t('ragEval.feedback.actionsApplied', { applied: summary.applied_actions, rejected: summary.rejected_actions, failed: summary.failed_actions, suffix: rerunMessage }),
-      );
-      await invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, t('ragEval.error.executeActionsFailed')));
-    },
-  });
-
-  const reviewQuestionMutation = useMutation({
-    mutationFn: async ({ questionId, status: nextStatus }: { questionId: string; status: 'accepted' | 'rejected' }) => ragEvalApi.reviewQuestion(questionId, nextStatus),
-    onSuccess: async () => {
-      toast.success('Решение по вопросу сохранено');
-      setSelectedReviewQuestion(null);
-      setSelectedReviewGroup(null);
-      await invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось сохранить решение по вопросу'));
-    },
-  });
-
-  const editQuestionMutation = useMutation({
-    mutationFn: async ({ questionId, question }: { questionId: string; question: string }) => ragEvalApi.editQuestion(questionId, question),
-    onSuccess: async () => {
-      toast.success('Формулировка сохранена');
-      setSelectedReviewQuestion(null);
-      setSelectedReviewGroup(null);
-      await invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось отредактировать вопрос'));
-    },
-  });
-
-  const applyAcceptedMutation = useMutation({
-    mutationFn: async (runId: string) => ragEvalApi.applyAcceptedQuestions(runId),
-    onSuccess: async (result) => {
-      toast.success(`Применено вопросов: ${formatNumber(result.applied_questions)}`);
-      await invalidateEvalQueries();
-    },
-    onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось применить принятые вопросы'));
-    },
+  const {
+    runMutation,
+    pauseMutation,
+    resumeMutation,
+    cancelMutation,
+    executeActionsMutation,
+    reviewQuestionMutation,
+    editQuestionMutation,
+    applyAcceptedMutation,
+  } = useRagEvalMutations({
+    activeDocumentId,
+    queryClient,
+    setLastQueued,
+    setLastActionExecutionSummary,
+    invalidateEvalQueries,
   });
 
   const latestReportPayload = statusQuery.data?.report ?? null;
