@@ -1,6 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
@@ -18,6 +19,7 @@ from src.application.dto.knowledge_dto import (
 )
 from src.application.dto.model_usage_dto import ModelUsageSummaryDto
 from src.application.errors import (
+    ConflictError,
     ForbiddenError,
     NotFoundError,
     UnauthorizedError,
@@ -41,17 +43,39 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeCompilerBatchView,
     KnowledgeSearchResultView,
 )
+from src.domain.project_plane.knowledge_document_pipeline import (
+    allowed_actions_for_state,
+    recommended_action_for_state,
+    resolve_pipeline_state,
+    state_hash,
+    validate_publish_raw_drafts_without_resolution,
+    validate_resume_processing,
+    validate_retighten_published_entries,
+    validate_retry_failed_batches,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     PREPROCESSING_STATUS_NOT_REQUESTED,
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
+from src.infrastructure.queue.job_types import (
+    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+    TASK_RESUME_KNOWLEDGE_PROCESSING,
+    TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+)
 
 
 BEARER_PREFIX = "Bearer "
 UPLOAD_FALLBACK_NAME = "upload"
 KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE = "Остановлено пользователем"
+KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES = (
+    TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+    TASK_RESUME_KNOWLEDGE_PROCESSING,
+    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
+    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
+)
 
 
 def _exact_answer_fingerprint(value: str) -> str:
@@ -195,48 +219,32 @@ def _knowledge_processing_message(
     return "Документ ожидает обработки или пока не дал пригодных ответов."
 
 
-def _knowledge_processing_actions(
-    *,
-    batch_failed: int,
-    raw_answer_count: int,
-    published_answer_count: int,
-    is_processing: bool,
-) -> tuple[KnowledgeProcessingActionDto, ...]:
-    actions: list[KnowledgeProcessingActionDto] = []
-    if is_processing:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="cancel",
-                label="Остановить обработку",
-                kind="destructive",
-            )
+
+
+
+
+def _pipeline_actions_to_dto(state: object) -> tuple[KnowledgeProcessingActionDto, ...]:
+    actions = allowed_actions_for_state(state)
+    return tuple(
+        KnowledgeProcessingActionDto(
+            id=action.id,
+            label=action.label,
+            kind=str(action.kind),
+            enabled=action.enabled,
         )
-    if batch_failed > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="retry_failed_batches",
-                label="Повторить проблемные части",
-                kind="primary",
-            )
+        for action in actions
+    )
+
+
+def _state_enum_from_value(state_value: str) -> object:
+    try:
+        from src.domain.project_plane.knowledge_document_pipeline import (
+            KnowledgeDocumentPipelineState,
         )
-    if raw_answer_count > published_answer_count:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="publish_ready",
-                label="Опубликовать готовые ответы",
-                kind="primary",
-                enabled=not is_processing,
-            )
-        )
-    if published_answer_count > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="review_published",
-                label="Проверить опубликованные ответы",
-                kind="secondary",
-            )
-        )
-    return tuple(actions)
+
+        return KnowledgeDocumentPipelineState(state_value)
+    except Exception:
+        return state_value
 
 
 @dataclass(frozen=True)
@@ -602,6 +610,17 @@ class KnowledgeService:
             or _json_int_metric(document_metrics, "published_entry_count")
         )
 
+        state = resolve_pipeline_state(
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status or "",
+            pipeline_stage=current_stage,
+            batch_total=batch_total,
+            batch_failed=batch_failed,
+            has_raw_drafts=candidate_summary.raw_count > 0,
+            has_canonical_entries=published_answer_count > 0,
+            has_retrieval_surface=published_answer_count > 0 and document.status == "processed",
+        )
+
         steps = (
             KnowledgeProcessingStepDto(
                 id="prepare",
@@ -721,6 +740,9 @@ class KnowledgeService:
                 raw_answer_count=candidate_summary.raw_count,
                 published_answer_count=published_answer_count,
             )
+        state_version = max(1, batch_total + batch_completed + batch_failed + published_answer_count)
+        next_action = recommended_action_for_state(state)
+
         return KnowledgeProcessingReportDto(
             document_id=document_id,
             status=document.preprocessing_status or document.status,
@@ -729,13 +751,38 @@ class KnowledgeService:
             recoverable=batch_failed > 0
             or candidate_summary.raw_count > published_answer_count,
             steps=steps,
-            actions=_knowledge_processing_actions(
-                batch_failed=batch_failed,
-                raw_answer_count=candidate_summary.raw_count,
-                published_answer_count=published_answer_count,
-                is_processing=is_processing,
-            ),
+            actions=_pipeline_actions_to_dto(state),
             metrics=metrics,
+            state=state.value,
+            state_version=state_version,
+            state_hash=state_hash(state, state_version),
+            recommended_next_action=(
+                {"id": next_action[0], "reason": next_action[1]}
+                if next_action is not None
+                else None
+            ),
+            active_error=(
+                {
+                    "code": "unknown_llm_error",
+                    "severity": "recoverable_error",
+                    "retryable": True,
+                    "user_message": "Во время обработки возникла ошибка. Прогресс сохранён.",
+                }
+                if str(document.error or "").strip()
+                and state.value
+                in {"failed_retryable", "compiler_partial_failed", "embedding_failed_retryable"}
+                else None
+            ),
+            last_error=(
+                {
+                    "code": "unknown_llm_error",
+                    "severity": "technical_diagnostic",
+                    "retryable": True,
+                    "technical_message": str(document.error or ""),
+                }
+                if str(document.error or "").strip()
+                else None
+            ),
         )
 
     async def cancel_document_processing(
@@ -745,10 +792,19 @@ class KnowledgeService:
         authorization: str | None,
         *,
         knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> None:
         await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
 
         repo = knowledge_repo_factory(self.pool)
         cancelled = await repo.cancel_document_processing(
@@ -771,21 +827,39 @@ class KnowledgeService:
         authorization: str | None,
         *,
         queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         publish_ready_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_publish_raw_drafts_without_resolution(state_enum)
+        if not valid:
+            raise ValidationError(
+                f"publish_raw_drafts_without_resolution_blocked:{','.join(blockers)}"
+            )
 
-        job_id = await queue_repo.enqueue(
-            publish_ready_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_ready_answer_publish",
-            },
-            max_attempts=3,
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=publish_ready_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_ready_answer_publish",
+            command="publish_raw_drafts_without_resolution",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
         )
 
         logger.info(
@@ -809,21 +883,39 @@ class KnowledgeService:
         authorization: str | None,
         *,
         queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         retry_failed_batches_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_retry_failed_batches(state_enum)
+        if not valid:
+            raise ValidationError(
+                f"retry_failed_batches_blocked:{','.join(blockers)}"
+            )
 
-        job_id = await queue_repo.enqueue(
-            retry_failed_batches_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_failed_batch_retry",
-            },
-            max_attempts=3,
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=retry_failed_batches_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_failed_batch_retry",
+            command="retry_failed_compiler_batches",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
         )
 
         logger.info(
@@ -847,21 +939,39 @@ class KnowledgeService:
         authorization: str | None,
         *,
         queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
         retighten_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_retighten_published_entries(state_enum)
+        if not valid:
+            raise ValidationError(
+                f"retighten_published_entries_blocked:{','.join(blockers)}"
+            )
 
-        job_id = await queue_repo.enqueue(
-            retighten_task_type,
-            payload={
-                "project_id": project_id,
-                "document_id": document_id,
-                "requested_by": user_id,
-                "source": "knowledge_document_retighten",
-            },
-            max_attempts=3,
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=retighten_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_document_retighten",
+            command="retighten_published_entries",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
         )
 
         logger.info(
@@ -877,6 +987,140 @@ class KnowledgeService:
             "job_id": job_id,
             "document_id": document_id,
         }
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        resume_task_type: str,
+        expected_state: str,
+        expected_state_version: int,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+        current_state, current_state_version = await self._current_pipeline_state_and_version(
+            project_id=project_id,
+            document_id=document_id,
+            knowledge_repo_factory=knowledge_repo_factory,
+        )
+        if expected_state != current_state or expected_state_version != current_state_version:
+            raise ConflictError("state_conflict")
+        state_enum = _state_enum_from_value(current_state)
+        valid, blockers = validate_resume_processing(state_enum, failed_batches=0)
+        if not valid:
+            raise ValidationError(f"resume_processing_blocked:{','.join(blockers)}")
+        job_id = await self._enqueue_pipeline_command_with_lock_and_idempotency(
+            knowledge_repo_factory=knowledge_repo_factory,
+            queue_repo=queue_repo,
+            task_type=resume_task_type,
+            project_id=project_id,
+            document_id=document_id,
+            requested_by=user_id,
+            source="knowledge_resume_processing",
+            command="resume_knowledge_compilation",
+            expected_state=expected_state,
+            expected_state_version=expected_state_version,
+        )
+        return {"status": "queued", "job_id": job_id, "document_id": document_id}
+
+    async def _current_pipeline_state_and_version(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+    ) -> tuple[str, int]:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        batch_total = max((batch.batch_count for batch in batches), default=0)
+        batch_completed = _batch_status_count(batches, "completed")
+        batch_failed = _batch_status_count(batches, "failed")
+        published_answer_count = int(document.structured_entries or 0)
+        document_metrics = (
+            dict(document.preprocessing_metrics)
+            if isinstance(document.preprocessing_metrics, Mapping)
+            else {}
+        )
+        current_stage = str(document_metrics.get("stage") or "")
+        state = resolve_pipeline_state(
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status or "",
+            pipeline_stage=current_stage,
+            batch_total=batch_total,
+            batch_failed=batch_failed,
+            has_raw_drafts=candidate_summary.raw_count > 0,
+            has_canonical_entries=published_answer_count > 0,
+            has_retrieval_surface=(
+                published_answer_count > 0 and document.status == "processed"
+            ),
+        )
+        state_version = max(
+            1,
+            batch_total + batch_completed + batch_failed + published_answer_count,
+        )
+        return state.value, state_version
+
+    async def _enqueue_pipeline_command_with_lock_and_idempotency(
+        self,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        queue_repo: KnowledgeQueuePort,
+        task_type: str,
+        project_id: str,
+        document_id: str,
+        requested_by: str,
+        source: str,
+        command: str,
+        expected_state: str,
+        expected_state_version: int,
+    ) -> str:
+        repo = knowledge_repo_factory(self.pool)
+        expected_state_hash = sha256(
+            f"{expected_state}:{expected_state_version}".encode("utf-8")
+        ).hexdigest()[:16]
+        idempotency_key = f"{document_id}:{command}:{expected_state_hash}"
+        existing_job = await repo.find_knowledge_pipeline_job_by_idempotency_key(
+            document_id=document_id,
+            task_type=task_type,
+            idempotency_key=idempotency_key,
+        )
+        if existing_job is not None:
+            return existing_job
+        active_job = await repo.find_active_knowledge_pipeline_job(
+            document_id=document_id,
+            task_types=KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES,
+        )
+        if active_job is not None:
+            raise ConflictError(f"knowledge_pipeline_job_locked:{active_job}")
+        return await queue_repo.enqueue(
+            task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": requested_by,
+                "source": source,
+                "expected_state": expected_state,
+                "expected_state_version": expected_state_version,
+                "expected_state_hash": expected_state_hash,
+                "idempotency_key": idempotency_key,
+            },
+            max_attempts=3,
+        )
 
     async def preview_query(
         self,
@@ -908,6 +1152,248 @@ class KnowledgeService:
             extra={"project_id": project_id, "result_count": len(results)},
         )
         return KnowledgePreviewResponseDto.from_results(query=query, results=results)
+
+    async def document_health(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        canonical_entries = int(document.chunk_count or 0)
+        retrieval_entries = int(document.structured_entries or 0)
+        failed_batches = _batch_status_count(
+            await repo.list_document_compiler_batches(
+                project_id=project_id,
+                document_id=document_id,
+            ),
+            "failed",
+        )
+        processing_report = await self.processing_report(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        state_consistency = not (
+            processing_report.state == "processed" and retrieval_entries <= 0
+        )
+        return {
+            "document_id": document_id,
+            "state": processing_report.state,
+            "state_version": processing_report.state_version,
+            "state_hash": processing_report.state_hash,
+            "state_consistency": state_consistency,
+            "failed_batches": failed_batches,
+            "raw_drafts_count": candidate_summary.raw_count,
+            "canonical_entries_count": canonical_entries,
+            "retrieval_entries_count": retrieval_entries,
+            "retrieval_surface_mismatch": canonical_entries != retrieval_entries,
+            "missing_embeddings": max(0, canonical_entries - retrieval_entries),
+            "lineage_completeness": retrieval_entries >= 0 and canonical_entries >= 0,
+            "source_refs_completeness": candidate_summary.grounded_count
+            >= retrieval_entries,
+            "stale_error": bool(document.error)
+            and processing_report.state in {"processed", "processed_with_warnings"},
+        }
+
+    async def inspect_document_pipeline(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        report = await self.processing_report(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        active_job = await repo.find_active_knowledge_pipeline_job(
+            document_id=document_id,
+            task_types=KNOWLEDGE_PIPELINE_MUTATION_TASK_TYPES,
+        )
+        batch_statuses: dict[str, int] = {
+            "pending": _batch_status_count(batches, "pending"),
+            "processing": _batch_status_count(batches, "processing"),
+            "completed": _batch_status_count(batches, "completed"),
+            "failed": _batch_status_count(batches, "failed"),
+        }
+
+        return {
+            "document_id": document_id,
+            "document_status": document.status,
+            "preprocessing_status": document.preprocessing_status,
+            "preprocessing_metrics": (
+                dict(document.preprocessing_metrics)
+                if isinstance(document.preprocessing_metrics, Mapping)
+                else {}
+            ),
+            "pipeline_state": report.state,
+            "pipeline_state_version": report.state_version,
+            "pipeline_state_hash": report.state_hash,
+            "active_job_id": active_job,
+            "compiler_batches_by_status": batch_statuses,
+            "raw_candidates_count": candidate_summary.raw_count,
+            "canonical_entries_count": int(document.chunk_count or 0),
+            "retrieval_surface_count": int(document.structured_entries or 0),
+            "allowed_actions": [action.to_dict() for action in report.actions],
+            "recommended_next_action": report.recommended_next_action,
+            "state_consistency": not (
+                report.state == "processed"
+                and int(document.structured_entries or 0) <= 0
+            ),
+            "last_error": str(document.error or ""),
+        }
+
+    async def reconcile_document_pipeline_state(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        health = await self.document_health(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        inspect = await self.inspect_document_pipeline(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+
+        diagnostics: list[JsonObject] = []
+        if not bool(health.get("state_consistency")):
+            diagnostics.append(
+                {
+                    "code": "state_inconsistent",
+                    "message": "Состояние документа не согласовано с индексом поиска.",
+                }
+            )
+        if bool(health.get("retrieval_surface_mismatch")):
+            diagnostics.append(
+                {
+                    "code": "retrieval_surface_mismatch",
+                    "message": "Количество runtime карточек и retrieval surface не совпадает.",
+                }
+            )
+        if int(health.get("failed_batches") or 0) > 0:
+            diagnostics.append(
+                {
+                    "code": "failed_batches_remain",
+                    "message": "Есть проблемные части документа: сначала повторите их.",
+                }
+            )
+        recommended = inspect.get("recommended_next_action")
+        return {
+            "document_id": document_id,
+            "reconciled": len(diagnostics) == 0,
+            "state": inspect.get("pipeline_state"),
+            "state_version": inspect.get("pipeline_state_version"),
+            "state_hash": inspect.get("pipeline_state_hash"),
+            "diagnostics": diagnostics,
+            "recommended_next_action": recommended,
+            "safe_auto_fix_applied": False,
+        }
+
+    async def resume_preflight(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        failed_batches = _batch_status_count(batches, "failed")
+        processing_report = await self.processing_report(
+            project_id=project_id,
+            document_id=document_id,
+            authorization=authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        blockers: list[JsonObject] = []
+        can_resume, blocker_codes = validate_resume_processing(
+            _state_enum_from_value(processing_report.state),
+            failed_batches=failed_batches,
+        )
+        if "failed_batches_remain" in blocker_codes:
+            blockers.append(
+                {
+                    "code": "failed_batches_remain",
+                    "message": f"Сначала повторите {failed_batches} проблемную часть(и)",
+                }
+            )
+        if "resume_allowed_only_for_answer_resolution_pending" in blocker_codes:
+            blockers.append(
+                {
+                    "code": "invalid_state_for_resume",
+                    "message": "Продолжение доступно только из состояния готовности к уплотнению.",
+                }
+            )
+        return {
+            "document_id": document_id,
+            "state": processing_report.state,
+            "state_version": processing_report.state_version,
+            "can_resume": can_resume,
+            "blockers": blockers,
+        }
 
     async def clear_project_knowledge(
         self,

@@ -842,6 +842,62 @@ class KnowledgeRepository:
         preprocessing_status = str(row["preprocessing_status"] or "")
         return status == "error" or preprocessing_status in {"failed", "cancelled"}
 
+    async def find_active_knowledge_pipeline_job(
+        self,
+        *,
+        document_id: str,
+        task_types: Sequence[str],
+    ) -> str | None:
+        if not task_types:
+            return None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id
+                FROM execution_queue
+                WHERE task_type = ANY($1::text[])
+                  AND COALESCE(status, '') <> ALL($2::text[])
+                  AND payload::jsonb ->> 'document_id' = $3
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                list(task_types),
+                list(TERMINAL_QUEUE_STATUSES),
+                document_id,
+            )
+        if row is None:
+            return None
+        return str(row["id"])
+
+    async def find_knowledge_pipeline_job_by_idempotency_key(
+        self,
+        *,
+        document_id: str,
+        task_type: str,
+        idempotency_key: str,
+    ) -> str | None:
+        key = idempotency_key.strip()
+        if not key:
+            return None
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id
+                FROM execution_queue
+                WHERE task_type = $1
+                  AND payload::jsonb ->> 'document_id' = $2
+                  AND payload::jsonb ->> 'idempotency_key' = $3
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                task_type,
+                document_id,
+                key,
+            )
+        if row is None:
+            return None
+        return str(row["id"])
+
     async def list_runtime_entry_titles(
         self,
         *,
