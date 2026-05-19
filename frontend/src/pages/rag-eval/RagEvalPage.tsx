@@ -31,7 +31,8 @@ import { RagEvalResultsPanel, ReportSummaryCard } from './components/RagEvalSumm
 import { DocumentEvalOverviewCard, EvalProblemMap } from './components/RagEvalReviewOverview';
 import { EvalFiltersBar, FragmentReviewCard, JobProgressCard, QuestionReviewDrawer } from './components/RagEvalReviewRuntimeSections';
 import { useRagEvalDocuments } from './hooks/useRagEvalDocuments';
-import { useRagEvalJobs, useRagEvalReview } from './hooks/useRagEvalReview';
+import { useRagEvalReview } from './hooks/useRagEvalReview';
+import { useRagEvalJobs } from './hooks/useRagEvalJobs';
 import { getActionableResults, getEvalResults } from './lib/ragEvalResults';
 import {
   questionIsProblem,
