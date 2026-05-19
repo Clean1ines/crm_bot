@@ -744,6 +744,28 @@ class KnowledgeService:
                 if next_action is not None
                 else None
             ),
+            active_error=(
+                {
+                    "code": "unknown_llm_error",
+                    "severity": "recoverable_error",
+                    "retryable": True,
+                    "user_message": "Во время обработки возникла ошибка. Прогресс сохранён.",
+                }
+                if str(document.error or "").strip()
+                and state.value
+                in {"failed_retryable", "compiler_partial_failed", "embedding_failed_retryable"}
+                else None
+            ),
+            last_error=(
+                {
+                    "code": "unknown_llm_error",
+                    "severity": "technical_diagnostic",
+                    "retryable": True,
+                    "technical_message": str(document.error or ""),
+                }
+                if str(document.error or "").strip()
+                else None
+            ),
         )
 
     async def cancel_document_processing(

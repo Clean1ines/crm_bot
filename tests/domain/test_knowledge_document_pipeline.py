@@ -5,6 +5,8 @@ from src.domain.project_plane.knowledge_document_pipeline import (
     KnowledgeDocumentPipelineCommand,
     KnowledgeDocumentPipelineError,
     KnowledgeDocumentPipelineState,
+    KnowledgeDocumentPipelineErrorCode,
+    KnowledgeDocumentPipelineErrorSeverity,
     allowed_actions_for_state,
     recommended_action_for_state,
     resolve_pipeline_state,
@@ -63,3 +65,14 @@ def test_state_hash_is_deterministic() -> None:
     one = state_hash(KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING, 17)
     two = state_hash(KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING, 17)
     assert one == two
+
+
+def test_pipeline_error_taxonomy_contains_provider_capacity() -> None:
+    assert (
+        KnowledgeDocumentPipelineErrorCode.LLM_PROVIDER_OVER_CAPACITY.value
+        == "llm_provider_over_capacity"
+    )
+    assert (
+        KnowledgeDocumentPipelineErrorSeverity.RECOVERABLE_ERROR.value
+        == "recoverable_error"
+    )

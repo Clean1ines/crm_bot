@@ -51,12 +51,48 @@ class KnowledgeDocumentPipelineActionKind(StrEnum):
     DESTRUCTIVE = "destructive"
 
 
+class KnowledgeDocumentPipelineErrorCode(StrEnum):
+    LLM_PROVIDER_OVER_CAPACITY = "llm_provider_over_capacity"
+    LLM_RATE_LIMITED = "llm_rate_limited"
+    LLM_TIMEOUT = "llm_timeout"
+    LLM_CONNECTION_ERROR = "llm_connection_error"
+    LLM_INVALID_JSON = "llm_invalid_json"
+    LLM_SCHEMA_VALIDATION_ERROR = "llm_schema_validation_error"
+    EMBEDDING_PROVIDER_UNAVAILABLE = "embedding_provider_unavailable"
+    EMBEDDING_VECTOR_COUNT_MISMATCH = "embedding_vector_count_mismatch"
+    UNKNOWN_LLM_ERROR = "unknown_llm_error"
+    UNKNOWN_EMBEDDING_ERROR = "unknown_embedding_error"
+
+
+class KnowledgeDocumentPipelineErrorSeverity(StrEnum):
+    INFO = "info"
+    WARNING = "warning"
+    RECOVERABLE_ERROR = "recoverable_error"
+    FATAL_ERROR = "fatal_error"
+    TECHNICAL_DIAGNOSTIC = "technical_diagnostic"
+
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeDocumentPipelineAction:
     id: str
     label: str
     kind: KnowledgeDocumentPipelineActionKind
     enabled: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeDocumentPipelineErrorInfo:
+    code: KnowledgeDocumentPipelineErrorCode
+    severity: KnowledgeDocumentPipelineErrorSeverity
+    retryable: bool
+    user_message: str
+    technical_message: str = ""
+    provider: str | None = None
+    model: str | None = None
+    status_code: int | None = None
+    job_id: str | None = None
+    batch_index: int | None = None
+    timestamp: str | None = None
 
 
 class KnowledgeDocumentPipelineError(ValueError):

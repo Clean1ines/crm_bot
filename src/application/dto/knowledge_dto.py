@@ -612,6 +612,8 @@ class KnowledgeProcessingReportDto:
     state_version: int = 1
     state_hash: str = ""
     recommended_next_action: JsonObject | None = None
+    active_error: JsonObject | None = None
+    last_error: JsonObject | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -624,6 +626,8 @@ class KnowledgeProcessingReportDto:
             "state_version": self.state_version,
             "state_hash": self.state_hash,
             "recommended_next_action": self.recommended_next_action,
+            "active_error": self.active_error,
+            "last_error": self.last_error,
             "steps": [step.to_dict() for step in self.steps],
             "actions": [action.to_dict() for action in self.actions],
             "metrics": self.metrics,
