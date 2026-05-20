@@ -3020,6 +3020,99 @@ class KnowledgeRepository:
             grounded_count=int(row["grounded_count"] or 0),
         )
 
+    async def count_document_runtime_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM knowledge_entries
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND visibility = 'runtime'
+                  AND status = 'published'
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        return int(count or 0)
+
+    async def count_document_retrieval_surface_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM knowledge_retrieval_surface
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND visibility = 'runtime'
+                  AND status = 'published'
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        return int(count or 0)
+
+    async def count_document_missing_embedding_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM knowledge_entries
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND visibility = 'runtime'
+                  AND status = 'published'
+                  AND (embedding IS NULL OR embedding_text = '')
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        return int(count or 0)
+
+    async def list_active_document_pipeline_jobs(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[dict[str, str], ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT task_type, status
+                FROM execution_queue
+                WHERE payload::jsonb ->> 'project_id' = $1
+                  AND payload::jsonb ->> 'document_id' = $2
+                  AND COALESCE(status, '') <> ALL($3::text[])
+                ORDER BY created_at DESC
+                LIMIT 10
+                """,
+                project_id,
+                document_id,
+                list(TERMINAL_QUEUE_STATUSES),
+            )
+        return tuple(
+            {
+                "task_type": str(row["task_type"] or ""),
+                "status": str(row["status"] or ""),
+            }
+            for row in rows
+        )
+
     async def update_document_status(
         self,
         document_id: str,

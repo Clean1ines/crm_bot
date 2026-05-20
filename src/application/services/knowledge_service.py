@@ -47,6 +47,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
+from src.domain.project_plane.knowledge_pipeline import (
+    KnowledgePipelineCommand,
+    KnowledgePipelineSnapshot,
+    allowed_actions_for_state,
+    resolve_pipeline_state,
+)
 
 
 BEARER_PREFIX = "Bearer "
@@ -237,6 +243,66 @@ def _knowledge_processing_actions(
             )
         )
     return tuple(actions)
+
+
+def _action_from_pipeline_command(
+    command: KnowledgePipelineCommand,
+    *,
+    is_processing: bool,
+) -> KnowledgeProcessingActionDto:
+    mapping: dict[KnowledgePipelineCommand, tuple[str, str, str]] = {
+        KnowledgePipelineCommand.RETRY_FAILED_COMPILER_BATCHES: (
+            "retry_failed_compiler_batches",
+            "Повторить проблемные части",
+            "primary",
+        ),
+        KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION: (
+            "resume_knowledge_compilation",
+            "Продолжить обработку",
+            "primary",
+        ),
+        KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION: (
+            "publish_raw_drafts_without_resolution",
+            "Опубликовать черновики без уплотнения",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.CANCEL_PROCESSING: (
+            "cancel_processing",
+            "Остановить обработку",
+            "destructive",
+        ),
+        KnowledgePipelineCommand.RETIGHTEN_PUBLISHED_ENTRIES: (
+            "retighten_published_entries",
+            "Повторно уплотнить ответы",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.OPEN_DRAFT_REVIEW: (
+            "open_draft_review",
+            "Открыть черновики",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.OPEN_CURATION_CONSOLE: (
+            "open_curation_console",
+            "Открыть консоль курации",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.RUN_RETRIEVAL_REVIEW: (
+            "run_retrieval_review",
+            "Проверить retrieval-покрытие",
+            "secondary",
+        ),
+    }
+    action_id, label, kind = mapping[command]
+    enabled = not (
+        command == KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION
+        and is_processing
+    )
+    return KnowledgeProcessingActionDto(
+        id=action_id,
+        label=label,
+        kind=kind,
+        enabled=enabled,
+    )
 
 
 @dataclass(frozen=True)
@@ -561,6 +627,22 @@ class KnowledgeService:
             project_id=project_id,
             document_id=document_id,
         )
+        runtime_entry_count = await repo.count_document_runtime_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        retrieval_surface_count = await repo.count_document_retrieval_surface_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        missing_embedding_count = await repo.count_document_missing_embedding_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        active_jobs = await repo.list_active_document_pipeline_jobs(
+            project_id=project_id,
+            document_id=document_id,
+        )
 
         batch_total = max((batch.batch_count for batch in batches), default=0)
         batch_completed = _batch_status_count(batches, "completed")
@@ -600,6 +682,65 @@ class KnowledgeService:
             or _json_int_metric(answer_resolution_metrics, "entry_count_after")
             or _json_int_metric(document_metrics, "canonical_entry_count")
             or _json_int_metric(document_metrics, "published_entry_count")
+        )
+        canonical_entry_count = _json_int_metric(
+            document_metrics, "canonical_entry_count"
+        )
+        active_error_payload = (
+            document_metrics.get("active_error")
+            if isinstance(document_metrics.get("active_error"), Mapping)
+            else None
+        )
+        last_error_payload = (
+            document_metrics.get("last_error")
+            if isinstance(document_metrics.get("last_error"), Mapping)
+            else None
+        )
+        active_error_code = (
+            str(active_error_payload.get("code"))
+            if isinstance(active_error_payload, Mapping)
+            and active_error_payload.get("code")
+            else None
+        )
+        active_error_retryable = bool(
+            isinstance(active_error_payload, Mapping)
+            and active_error_payload.get("retryable") is True
+        )
+        snapshot = KnowledgePipelineSnapshot(
+            document_id=document_id,
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status,
+            preprocessing_stage=current_stage or None,
+            source_unit_count=_json_int_metric(document_metrics, "source_chunk_count")
+            or document.chunk_count,
+            compiler_batch_total_count=batch_total,
+            compiler_batch_completed_count=batch_completed,
+            compiler_batch_failed_count=batch_failed,
+            compiler_batch_processing_count=batch_processing,
+            compiler_batch_pending_count=batch_pending,
+            raw_candidate_count=candidate_summary.raw_count,
+            canonical_entry_count=canonical_entry_count,
+            runtime_entry_count=runtime_entry_count,
+            retrieval_surface_count=retrieval_surface_count,
+            missing_embedding_count=missing_embedding_count,
+            active_job_count=len(active_jobs),
+            active_job_type=active_jobs[0]["task_type"] if active_jobs else None,
+            active_job_status=active_jobs[0]["status"] if active_jobs else None,
+            active_error_code=active_error_code,
+            active_error_retryable=active_error_retryable,
+            last_error_code=(
+                str(last_error_payload.get("code"))
+                if isinstance(last_error_payload, Mapping)
+                and last_error_payload.get("code")
+                else None
+            ),
+            metrics=document_metrics,
+        )
+        pipeline_state = resolve_pipeline_state(snapshot)
+        pipeline_commands = allowed_actions_for_state(pipeline_state, snapshot)
+        backend_actions = tuple(
+            _action_from_pipeline_command(command, is_processing=is_processing)
+            for command in pipeline_commands
         )
 
         steps = (
@@ -683,6 +824,9 @@ class KnowledgeService:
                 or document.chunk_count
             ),
             "retrieval_surface_entry_count": document.structured_entries,
+            "runtime_entry_count": runtime_entry_count,
+            "retrieval_surface_count": retrieval_surface_count,
+            "missing_embedding_count": missing_embedding_count,
             "batch_total": batch_total,
             "batch_completed": batch_completed,
             "batch_failed": batch_failed,
@@ -726,15 +870,28 @@ class KnowledgeService:
             status=document.preprocessing_status or document.status,
             title=title,
             message=message,
+            state=pipeline_state.value,
+            state_hash=f"{pipeline_state.value}:{document_id}",
             recoverable=batch_failed > 0
             or candidate_summary.raw_count > published_answer_count,
             steps=steps,
-            actions=_knowledge_processing_actions(
-                batch_failed=batch_failed,
-                raw_answer_count=candidate_summary.raw_count,
-                published_answer_count=published_answer_count,
-                is_processing=is_processing,
+            allowed_actions=backend_actions,
+            actions=backend_actions,
+            active_error=dict(active_error_payload)
+            if isinstance(active_error_payload, Mapping)
+            else None,
+            last_error=dict(last_error_payload)
+            if isinstance(last_error_payload, Mapping)
+            else None,
+            recommended_next_action=(
+                {"id": backend_actions[0].id, "label": backend_actions[0].label}
+                if backend_actions
+                else None
             ),
+            diagnostics={
+                "active_job_count": len(active_jobs),
+                "active_job_type": active_jobs[0]["task_type"] if active_jobs else None,
+            },
             metrics=metrics,
         )
 

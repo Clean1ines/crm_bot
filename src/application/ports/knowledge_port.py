@@ -269,6 +269,34 @@ class KnowledgeRepositoryPort(Protocol):
         document_id: str,
     ) -> KnowledgeAnswerCandidateSummaryView: ...
 
+    async def count_document_runtime_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int: ...
+
+    async def count_document_retrieval_surface_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int: ...
+
+    async def count_document_missing_embedding_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int: ...
+
+    async def list_active_document_pipeline_jobs(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[dict[str, str], ...]: ...
+
     async def search(
         self,
         project_id: str,
