@@ -1,6 +1,8 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
+import json
 
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
@@ -46,6 +48,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_NOT_REQUESTED,
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
+)
+from src.domain.project_plane.knowledge_pipeline import (
+    KnowledgePipelineCommand,
+    KnowledgePipelineSnapshot,
+    allowed_actions_for_state,
+    resolve_pipeline_state,
 )
 
 
@@ -237,6 +245,154 @@ def _knowledge_processing_actions(
             )
         )
     return tuple(actions)
+
+
+def _action_from_pipeline_command(
+    command: KnowledgePipelineCommand,
+    *,
+    is_processing: bool,
+) -> KnowledgeProcessingActionDto:
+    mapping: dict[KnowledgePipelineCommand, tuple[str, str, str]] = {
+        KnowledgePipelineCommand.RETRY_FAILED_COMPILER_BATCHES: (
+            "retry_failed_compiler_batches",
+            "Повторить проблемные части",
+            "primary",
+        ),
+        KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION: (
+            "resume_knowledge_compilation",
+            "Продолжить обработку",
+            "primary",
+        ),
+        KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION: (
+            "publish_raw_drafts_without_resolution",
+            "Опубликовать черновики без уплотнения",
+            "secondary_warning",
+        ),
+        KnowledgePipelineCommand.CANCEL_PROCESSING: (
+            "cancel_processing",
+            "Остановить обработку",
+            "destructive",
+        ),
+        KnowledgePipelineCommand.RETIGHTEN_PUBLISHED_ENTRIES: (
+            "retighten_published_entries",
+            "Повторно уплотнить ответы",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.OPEN_DRAFT_REVIEW: (
+            "open_draft_review",
+            "Открыть черновики",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.OPEN_CURATION_CONSOLE: (
+            "open_curation_console",
+            "Открыть консоль курации",
+            "secondary",
+        ),
+        KnowledgePipelineCommand.RUN_RETRIEVAL_REVIEW: (
+            "run_retrieval_review",
+            "Проверить retrieval-покрытие",
+            "secondary",
+        ),
+    }
+    action_id, label, kind = mapping[command]
+    enabled = True
+    reason = ""
+    blocker_code = ""
+    if command == KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION:
+        enabled = not is_processing
+        if is_processing:
+            blocker_code = "pipeline_already_running"
+            reason = "Обработка уже выполняется."
+    elif command == KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION:
+        enabled = not is_processing
+        reason = (
+            "Аварийная публикация: часть ответов может быть не объединена "
+            "и не очищена от дублей."
+        )
+    return KnowledgeProcessingActionDto(
+        id=action_id,
+        label=label,
+        kind=kind,
+        enabled=enabled,
+        reason=reason,
+        blocker_code=blocker_code,
+    )
+
+
+def _build_pipeline_state_hash(
+    snapshot: KnowledgePipelineSnapshot,
+    state_value: str,
+) -> str:
+    payload = {
+        "state": state_value,
+        "document_id": snapshot.document_id,
+        "document_status": snapshot.document_status,
+        "preprocessing_status": snapshot.preprocessing_status,
+        "preprocessing_stage": snapshot.preprocessing_stage,
+        "compiler_batch_total_count": snapshot.compiler_batch_total_count,
+        "compiler_batch_completed_count": snapshot.compiler_batch_completed_count,
+        "compiler_batch_failed_count": snapshot.compiler_batch_failed_count,
+        "compiler_batch_processing_count": snapshot.compiler_batch_processing_count,
+        "compiler_batch_pending_count": snapshot.compiler_batch_pending_count,
+        "raw_candidate_count": snapshot.raw_candidate_count,
+        "canonical_entry_count": snapshot.canonical_entry_count,
+        "runtime_entry_count": snapshot.runtime_entry_count,
+        "retrieval_surface_count": snapshot.retrieval_surface_count,
+        "missing_embedding_count": snapshot.missing_embedding_count,
+        "active_job_count": snapshot.active_job_count,
+        "active_error_code": snapshot.active_error_code,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _recommended_next_action_payload(
+    actions: tuple[KnowledgeProcessingActionDto, ...],
+) -> JsonObject | None:
+    def _payload(action: KnowledgeProcessingActionDto) -> JsonObject:
+        return {
+            str(key): json_value_from_unknown(value)
+            for key, value in action.to_dict().items()
+        }
+
+    enabled_resume = next(
+        (
+            action
+            for action in actions
+            if action.id == "resume_knowledge_compilation" and action.enabled
+        ),
+        None,
+    )
+    if enabled_resume is not None:
+        return _payload(enabled_resume)
+
+    disabled_resume = next(
+        (
+            action
+            for action in actions
+            if action.id == "resume_knowledge_compilation" and not action.enabled
+        ),
+        None,
+    )
+    if disabled_resume is not None:
+        return _payload(disabled_resume)
+
+    retry_action = next(
+        (action for action in actions if action.id == "retry_failed_compiler_batches"),
+        None,
+    )
+    if retry_action is not None:
+        return _payload(retry_action)
+
+    curation_action = next(
+        (action for action in actions if action.id == "open_curation_console"),
+        None,
+    )
+    if curation_action is not None:
+        return _payload(curation_action)
+
+    return None
 
 
 @dataclass(frozen=True)
@@ -561,6 +717,26 @@ class KnowledgeService:
             project_id=project_id,
             document_id=document_id,
         )
+        runtime_entry_count = await repo.count_document_runtime_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        retrieval_surface_count = await repo.count_document_retrieval_surface_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        missing_embedding_count = await repo.count_document_missing_embedding_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        canonical_entry_count = await repo.count_document_canonical_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        active_jobs = await repo.list_active_document_pipeline_jobs(
+            project_id=project_id,
+            document_id=document_id,
+        )
 
         batch_total = max((batch.batch_count for batch in batches), default=0)
         batch_completed = _batch_status_count(batches, "completed")
@@ -601,6 +777,63 @@ class KnowledgeService:
             or _json_int_metric(document_metrics, "canonical_entry_count")
             or _json_int_metric(document_metrics, "published_entry_count")
         )
+        active_error_payload = (
+            document_metrics.get("active_error")
+            if isinstance(document_metrics.get("active_error"), Mapping)
+            else None
+        )
+        last_error_payload = (
+            document_metrics.get("last_error")
+            if isinstance(document_metrics.get("last_error"), Mapping)
+            else None
+        )
+        active_error_code = (
+            str(active_error_payload.get("code"))
+            if isinstance(active_error_payload, Mapping)
+            and active_error_payload.get("code")
+            else None
+        )
+        active_error_retryable = bool(
+            isinstance(active_error_payload, Mapping)
+            and active_error_payload.get("retryable") is True
+        )
+        snapshot = KnowledgePipelineSnapshot(
+            document_id=document_id,
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status,
+            preprocessing_stage=current_stage or None,
+            source_unit_count=_json_int_metric(document_metrics, "source_chunk_count")
+            or document.chunk_count,
+            compiler_batch_total_count=batch_total,
+            compiler_batch_completed_count=batch_completed,
+            compiler_batch_failed_count=batch_failed,
+            compiler_batch_processing_count=batch_processing,
+            compiler_batch_pending_count=batch_pending,
+            raw_candidate_count=candidate_summary.raw_count,
+            canonical_entry_count=canonical_entry_count,
+            runtime_entry_count=runtime_entry_count,
+            retrieval_surface_count=retrieval_surface_count,
+            missing_embedding_count=missing_embedding_count,
+            active_job_count=len(active_jobs),
+            active_job_type=active_jobs[0]["task_type"] if active_jobs else None,
+            active_job_status=active_jobs[0]["status"] if active_jobs else None,
+            active_error_code=active_error_code,
+            active_error_retryable=active_error_retryable,
+            last_error_code=(
+                str(last_error_payload.get("code"))
+                if isinstance(last_error_payload, Mapping)
+                and last_error_payload.get("code")
+                else None
+            ),
+            metrics=document_metrics,
+        )
+        pipeline_state = resolve_pipeline_state(snapshot)
+        pipeline_commands = allowed_actions_for_state(pipeline_state, snapshot)
+        backend_actions = tuple(
+            _action_from_pipeline_command(command, is_processing=is_processing)
+            for command in pipeline_commands
+        )
+        state_hash = _build_pipeline_state_hash(snapshot, pipeline_state.value)
 
         steps = (
             KnowledgeProcessingStepDto(
@@ -683,6 +916,9 @@ class KnowledgeService:
                 or document.chunk_count
             ),
             "retrieval_surface_entry_count": document.structured_entries,
+            "runtime_entry_count": runtime_entry_count,
+            "retrieval_surface_count": retrieval_surface_count,
+            "missing_embedding_count": missing_embedding_count,
             "batch_total": batch_total,
             "batch_completed": batch_completed,
             "batch_failed": batch_failed,
@@ -726,15 +962,34 @@ class KnowledgeService:
             status=document.preprocessing_status or document.status,
             title=title,
             message=message,
+            state=pipeline_state.value,
+            # TODO: replace constant with persisted monotonic pipeline state version
+            # when pipeline_events are introduced.
+            state_version=1,
+            state_hash=state_hash,
             recoverable=batch_failed > 0
             or candidate_summary.raw_count > published_answer_count,
             steps=steps,
-            actions=_knowledge_processing_actions(
-                batch_failed=batch_failed,
-                raw_answer_count=candidate_summary.raw_count,
-                published_answer_count=published_answer_count,
-                is_processing=is_processing,
-            ),
+            allowed_actions=backend_actions,
+            actions=backend_actions,
+            active_error=dict(active_error_payload)
+            if isinstance(active_error_payload, Mapping)
+            else None,
+            last_error=dict(last_error_payload)
+            if isinstance(last_error_payload, Mapping)
+            else None,
+            recommended_next_action=_recommended_next_action_payload(backend_actions),
+            diagnostics={
+                "active_job_count": len(active_jobs),
+                "active_job_type": active_jobs[0]["task_type"] if active_jobs else None,
+                "state": pipeline_state.value,
+                "state_hash": state_hash,
+                "raw_candidate_count": candidate_summary.raw_count,
+                "canonical_entry_count": canonical_entry_count,
+                "runtime_entry_count": runtime_entry_count,
+                "retrieval_surface_count": retrieval_surface_count,
+                "missing_embedding_count": missing_embedding_count,
+            },
             metrics=metrics,
         )
 
@@ -877,6 +1132,53 @@ class KnowledgeService:
             "job_id": job_id,
             "document_id": document_id,
         }
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        resume_processing_task_type: str,
+        logger: LoggerPort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+        report = await self.processing_report(
+            project_id,
+            document_id,
+            authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        resume_action = next(
+            (
+                action
+                for action in report.allowed_actions
+                if action.id == "resume_knowledge_compilation"
+            ),
+            None,
+        )
+        if resume_action is None:
+            raise ValidationError("Resume command is not allowed for current state")
+        if not resume_action.enabled:
+            raise ValidationError(
+                resume_action.reason or "Resume command is temporarily unavailable"
+            )
+
+        job_id = await queue_repo.enqueue(
+            resume_processing_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_resume_processing",
+            },
+            max_attempts=3,
+        )
+        return {"status": "queued", "job_id": job_id, "document_id": document_id}
 
     async def preview_query(
         self,

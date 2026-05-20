@@ -85,7 +85,19 @@ export type KnowledgeProcessingAction = {
   label: string;
   kind: string;
   enabled: boolean;
+  reason?: string;
+  blocker_code?: string;
 };
+
+export type KnowledgePipelineActionId =
+  | 'retry_failed_compiler_batches'
+  | 'resume_knowledge_compilation'
+  | 'publish_raw_drafts_without_resolution'
+  | 'cancel_processing'
+  | 'retighten_published_entries'
+  | 'open_draft_review'
+  | 'open_curation_console'
+  | 'run_retrieval_review';
 
 export type KnowledgeProcessingReport = {
   document_id: string;
@@ -93,8 +105,16 @@ export type KnowledgeProcessingReport = {
   title: string;
   message: string;
   recoverable: boolean;
+  state: string;
+  state_version: number;
+  state_hash: string;
   steps: KnowledgeProcessingStep[];
+  allowed_actions: KnowledgeProcessingAction[];
   actions: KnowledgeProcessingAction[];
+  active_error: Record<string, unknown> | null;
+  last_error: Record<string, unknown> | null;
+  recommended_next_action: Record<string, unknown> | null;
+  diagnostics: Record<string, unknown>;
   metrics: Record<string, unknown>;
 };
 
@@ -205,6 +225,15 @@ export const knowledgeApi = {
 
   retryFailedBatches: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
+      method: 'POST',
+    }),
+  resumeProcessing: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/resume-processing`, {
+      method: 'POST',
+    }),
+
+  publishRawDraftsWithoutResolution: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
       method: 'POST',
     }),
 

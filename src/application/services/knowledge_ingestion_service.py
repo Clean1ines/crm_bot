@@ -3975,7 +3975,7 @@ class KnowledgeIngestionService:
         batch_failed = sum(1 for batch in batches if batch.status == "failed")
         batch_completed = sum(1 for batch in batches if batch.status == "completed")
         all_batches_completed = bool(batches) and all(
-            batch.status == "completed" for batch in batches
+            getattr(batch, "status", "") == "completed" for batch in batches
         )
         compiler_run_id = raw_candidates[0].compiler_run_id
 
@@ -5061,3 +5061,130 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", error_message)
             raise ValidationError(error_message) from exc
+
+    async def resume_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        requested_by: str | None = None,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if any(batch.status == "failed" for batch in batches):
+            raise ValidationError(
+                "Cannot resume knowledge compilation while failed compiler batches exist; retry failed batches first."
+            )
+
+        raw_candidates = await repo.list_document_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not raw_candidates:
+            raise ValidationError(
+                "Cannot resume knowledge compilation without raw answer candidates."
+            )
+
+        canonical_count = await repo.count_document_canonical_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if canonical_count > 0:
+            raise ValidationError(
+                "Cannot resume: canonical entries already exist for this document."
+            )
+
+        return await self._run_post_extraction_publication_pipeline(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+            document=document,
+            raw_candidates=raw_candidates,
+            batches=batches,
+            logger=logger,
+        )
+
+    async def _run_post_extraction_publication_pipeline(
+        self,
+        *,
+        repo: KnowledgeRepositoryPort,
+        project_id: str,
+        document_id: str,
+        document: object,
+        raw_candidates: Sequence[AnswerCandidate],
+        batches: Sequence[object],
+        logger: LoggerPort,
+    ) -> JsonObject:
+        mode = normalize_preprocessing_mode(
+            getattr(document, "preprocessing_mode", None)
+        )
+        source_chunks = await repo.list_document_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if not source_chunks:
+            raise ValidationError("Knowledge document has no saved source chunks")
+
+        all_batches_completed = bool(batches) and all(
+            getattr(batch, "status", "") == "completed" for batch in batches
+        )
+        compiler_run_id = raw_candidates[0].compiler_run_id
+        canonical_entries = _canonical_entries_from_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            mode=mode,
+            candidates=raw_candidates,
+        )
+        if not canonical_entries:
+            raise ValidationError("Knowledge document has no publishable answer drafts")
+
+        await _persist_stage_e_compiler_outputs(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            source_chunks=source_chunks,
+            entries=canonical_entries,
+            complete_run=all_batches_completed,
+        )
+
+        metrics: JsonObject = {
+            "stage": "resume_processing",
+            "status_message": "Продолжение обработки завершено; база знаний обновлена",
+            "raw_answer_count": len(raw_candidates),
+            "canonical_entry_count": len(canonical_entries),
+            "published_answer_count": len(canonical_entries),
+        }
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_COMPLETED,
+            model=getattr(document, "preprocessing_model", None),
+            prompt_version=getattr(document, "preprocessing_prompt_version", None),
+            metrics=metrics,
+        )
+        await repo.update_document_status(document_id, "processed")
+        logger.info(
+            "Knowledge resume processing completed",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "canonical_entry_count": len(canonical_entries),
+            },
+        )
+        return {
+            "status": "completed",
+            "document_id": document_id,
+            "canonical_entry_count": len(canonical_entries),
+            "runtime_entry_count": len(canonical_entries),
+        }

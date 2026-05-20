@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_compilation import (
@@ -588,14 +588,21 @@ class KnowledgeProcessingActionDto:
     label: str
     kind: str
     enabled: bool = True
+    reason: str = ""
+    blocker_code: str = ""
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "label": self.label,
             "kind": self.kind,
             "enabled": self.enabled,
         }
+        if self.reason:
+            payload["reason"] = self.reason
+        if self.blocker_code:
+            payload["blocker_code"] = self.blocker_code
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -608,15 +615,32 @@ class KnowledgeProcessingReportDto:
     steps: tuple[KnowledgeProcessingStepDto, ...]
     actions: tuple[KnowledgeProcessingActionDto, ...]
     metrics: JsonObject
+    state: str = ""
+    state_version: int = 1
+    state_hash: str = ""
+    allowed_actions: tuple[KnowledgeProcessingActionDto, ...] = ()
+    active_error: JsonObject | None = None
+    last_error: JsonObject | None = None
+    recommended_next_action: JsonObject | None = None
+    diagnostics: JsonObject = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
+        diagnostics = self.diagnostics if isinstance(self.diagnostics, dict) else {}
         return {
             "document_id": self.document_id,
             "status": self.status,
             "title": self.title,
             "message": self.message,
             "recoverable": self.recoverable,
+            "state": self.state,
+            "state_version": self.state_version,
+            "state_hash": self.state_hash,
             "steps": [step.to_dict() for step in self.steps],
+            "allowed_actions": [action.to_dict() for action in self.allowed_actions],
             "actions": [action.to_dict() for action in self.actions],
+            "active_error": self.active_error,
+            "last_error": self.last_error,
+            "recommended_next_action": self.recommended_next_action,
+            "diagnostics": diagnostics,
             "metrics": self.metrics,
         }

@@ -32,6 +32,7 @@ import {
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
+import { KnowledgeCurationConsole } from '../rag-eval/components/KnowledgeCurationConsole';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -1174,6 +1175,7 @@ export const KnowledgePage: React.FC = () => {
   const [previewQuestion, setPreviewQuestion] = useState('');
   const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [curationDocumentId, setCurationDocumentId] = useState<string | null>(null);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
@@ -1487,7 +1489,7 @@ export const KnowledgePage: React.FC = () => {
   const publishReadyMutation = useMutation({
     mutationFn: async (documentId: string) => {
       if (!projectId) throw new Error('Project ID is missing');
-      await knowledgeApi.publishReady(projectId, documentId);
+      await knowledgeApi.publishRawDraftsWithoutResolution(projectId, documentId);
     },
     onSuccess: async () => {
       toast.success(t('knowledge.feedback.publishReadyQueued'));
@@ -1499,6 +1501,162 @@ export const KnowledgePage: React.FC = () => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
     },
   });
+  const resumeProcessingMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.resumeProcessing(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success('Продолжение обработки поставлено в очередь');
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, 'Не удалось поставить продолжение обработки в очередь'));
+    },
+  });
+
+  const renderPipelineAction = (
+    doc: Document,
+    action: { id: string; label: string; enabled: boolean; reason?: string },
+  ) => {
+    const actionId = action.id;
+    const isRetryAction = actionId === 'retry_failed_compiler_batches' || actionId === 'retry_failed_batches';
+    const isPublishAction = actionId === 'publish_raw_drafts_without_resolution' || actionId === 'publish_ready';
+    const isOpenCurationAction = actionId === 'open_curation_console' || actionId === 'review_published';
+    const isRetightenAction = actionId === 'retighten_published_entries' || actionId === 'retighten';
+    const isCancelAction = actionId === 'cancel_processing' || actionId === 'cancel';
+    const isOpenDraftsAction = actionId === 'open_draft_review';
+    const isResumeAction = actionId === 'resume_knowledge_compilation';
+
+    if (isResumeAction) {
+      if (action.enabled) {
+        const isPending = resumeProcessingMutation.isPending && resumeProcessingMutation.variables === doc.id;
+        return (
+          <button
+            key={action.id}
+            type="button"
+            onClick={() => resumeProcessingMutation.mutate(doc.id)}
+            disabled={resumeProcessingMutation.isPending}
+            title={action.reason || action.label}
+            className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isPending ? t('common.states.loading') : action.label}
+          </button>
+        );
+      }
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled
+          title={action.reason || action.label}
+          className="rounded-full bg-[var(--control-bg)] px-2 py-1 text-[var(--text-muted)] disabled:cursor-not-allowed"
+        >
+          {action.label}
+        </button>
+      );
+    }
+
+    if (isRetryAction) {
+      const isPending = retryFailedBatchesMutation.isPending && retryFailedBatchesMutation.variables === doc.id;
+      return (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => retryFailedBatchesMutation.mutate(doc.id)}
+          disabled={retryFailedBatchesMutation.isPending || !action.enabled}
+          className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isPending ? t('common.states.loading') : action.label}
+        </button>
+      );
+    }
+
+    if (isPublishAction) {
+      const isPending = publishReadyMutation.isPending && publishReadyMutation.variables === doc.id;
+      return (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => publishReadyMutation.mutate(doc.id)}
+          disabled={publishReadyMutation.isPending || !action.enabled}
+          title={action.reason || action.label}
+          className="rounded-full bg-[var(--accent-warning-bg)] px-2 py-1 text-[var(--accent-warning)] transition-colors hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isPending ? t('common.states.loading') : action.label}
+        </button>
+      );
+    }
+
+    if (isOpenCurationAction) {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => setCurationDocumentId(doc.id)}
+          disabled={!action.enabled}
+          className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:opacity-60"
+        >
+          {action.label}
+        </button>
+      );
+    }
+
+    if (isRetightenAction) {
+      const isPending = retightenMutation.isPending && retightenMutation.variables === doc.id;
+      return (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => retightenMutation.mutate(doc.id)}
+          disabled={retightenMutation.isPending || !action.enabled}
+          className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+        >
+          {isPending ? t('common.states.loading') : action.label}
+        </button>
+      );
+    }
+
+    if (isCancelAction) {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => cancelProcessingMutation.mutate(doc.id)}
+          disabled={cancelProcessingMutation.isPending || !action.enabled}
+          className="rounded-full bg-[var(--accent-danger-bg)] px-2 py-1 text-[var(--accent-danger-text)] transition-colors hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+        >
+          {action.label}
+        </button>
+      );
+    }
+
+    if (isOpenDraftsAction) {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => openDraftsModal(doc.id)}
+          disabled={!action.enabled}
+          className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:opacity-60"
+        >
+          {action.label}
+        </button>
+      );
+    }
+
+    return (
+      <span
+        key={action.id}
+        title={action.reason || action.label}
+        className="rounded-full bg-[var(--control-bg)] px-2 py-1 text-[var(--text-muted)]"
+      >
+        {action.label}
+      </span>
+    );
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1875,47 +2033,10 @@ export const KnowledgePage: React.FC = () => {
                           {t('knowledge.processReport.nextActions')}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {processingReport.actions.map((action) => {
-                            const canRetry = action.id === 'retry_failed_batches' && action.enabled;
-                            const canPublishReady = action.id === 'publish_ready' && action.enabled;
-                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
-                              && retryFailedBatchesMutation.variables === doc.id;
-                            const isPublishingThisDoc = publishReadyMutation.isPending
-                              && publishReadyMutation.variables === doc.id;
-
-                            if (canRetry || canPublishReady) {
-                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
-                              const mutationPending = canRetry
-                                ? retryFailedBatchesMutation.isPending
-                                : publishReadyMutation.isPending;
-                              return (
-                                <button
-                                  key={action.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (canRetry) {
-                                      retryFailedBatchesMutation.mutate(doc.id);
-                                    } else {
-                                      publishReadyMutation.mutate(doc.id);
-                                    }
-                                  }}
-                                  disabled={mutationPending}
-                                  className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
-                                >
-                                  {isPending ? t('common.states.loading') : action.label}
-                                </button>
-                              );
-                            }
-
-                            return (
-                              <span
-                                key={action.id}
-                                className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-                              >
-                                {action.label}
-                              </span>
-                            );
-                          })}
+                          {(processingReport.allowed_actions.length > 0
+                            ? processingReport.allowed_actions
+                            : processingReport.actions
+                          ).map((action) => renderPipelineAction(doc, action))}
                         </div>
                       </div>
                     )}
@@ -2032,6 +2153,22 @@ export const KnowledgePage: React.FC = () => {
           onToggleSourceUnit={(sourceUnitId) => toggleSourceUnitExpanded(sourceUnitsDocumentId, sourceUnitId)}
           onClose={() => setSourceUnitsDocumentId(null)}
         />
+      )}
+
+      {curationDocumentId && projectId && (
+        <BaseModal
+          isOpen
+          onClose={() => setCurationDocumentId(null)}
+          title="Knowledge Curation Console"
+          cancelLabel={t('common.actions.close')}
+          maxWidthClassName="max-w-7xl"
+        >
+          <KnowledgeCurationConsole
+            projectId={projectId}
+            documentId={curationDocumentId}
+            documentName={documents.find((document) => document.id === curationDocumentId)?.file_name}
+          />
+        </BaseModal>
       )}
 
       <BaseModal
