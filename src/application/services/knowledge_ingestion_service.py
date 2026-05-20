@@ -4040,6 +4040,76 @@ class KnowledgeIngestionService:
             "remaining_failed_batch_count": batch_failed,
         }
 
+    async def resume_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+        mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_PLAIN:
+            raise ValidationError("Plain knowledge documents do not have answer drafts")
+
+        metrics = document.preprocessing_metrics if isinstance(document.preprocessing_metrics, Mapping) else {}
+        stage = str(metrics.get("stage") or "")
+        if stage not in {"answer_resolution_pending", "extraction_completed"}:
+            raise ValidationError("Knowledge document is not in resume-compatible stage")
+
+        source_chunks = await repo.list_document_source_chunks(project_id=project_id, document_id=document_id)
+        if not source_chunks:
+            raise ValidationError("Knowledge document has no saved source chunks")
+        batches = await repo.list_document_compiler_batches(project_id=project_id, document_id=document_id)
+        if not batches:
+            raise ValidationError("Knowledge document has no compiler batches")
+        if any(batch.status in {"pending", "processing"} for batch in batches):
+            raise ValidationError("Knowledge document still has pending compiler batches")
+        if any(batch.status == "failed" for batch in batches):
+            raise ValidationError("Knowledge document still has failed compiler batches")
+
+        raw_candidates = await repo.list_document_raw_answer_candidates(project_id=project_id, document_id=document_id)
+        if not raw_candidates:
+            raise ValidationError("Knowledge document has no ready answer drafts")
+        compiler_run_ids = {candidate.compiler_run_id for candidate in raw_candidates}
+        if len(compiler_run_ids) != 1:
+            raise ValidationError("Knowledge document has ambiguous compiler run for resume")
+        compiler_run_id = next(iter(compiler_run_ids))
+
+        canonical_entries = _canonical_entries_from_raw_answer_candidates(
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            mode=mode,
+            candidates=raw_candidates,
+        )
+        if not canonical_entries:
+            raise ValidationError("Knowledge document has no publishable answer drafts")
+        await _persist_stage_e_compiler_outputs(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            source_chunks=source_chunks,
+            entries=canonical_entries,
+            complete_run=True,
+        )
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_COMPLETED,
+            model=document.preprocessing_model,
+            prompt_version=document.preprocessing_prompt_version,
+            metrics={"stage": "resume_processing", "canonical_entry_count": len(canonical_entries), "raw_answer_count": len(raw_candidates)},
+        )
+        await repo.update_document_status(document_id, "processed")
+        logger.info("Knowledge resume processing completed", extra={"project_id": project_id, "document_id": document_id})
+        return {"status": "completed", "document_id": document_id, "published_answer_count": len(canonical_entries)}
+
     async def retry_failed_batches(
         self,
         *,

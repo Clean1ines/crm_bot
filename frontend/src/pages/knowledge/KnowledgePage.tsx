@@ -1469,9 +1469,9 @@ export const KnowledgePage: React.FC = () => {
   });
 
   const retryFailedBatchesMutation = useMutation({
-    mutationFn: async (documentId: string) => {
+    mutationFn: async ({ documentId, expectedState, expectedStateVersion }: { documentId: string; expectedState: string; expectedStateVersion: number }) => {
       if (!projectId) throw new Error('Project ID is missing');
-      await knowledgeApi.retryFailedBatches(projectId, documentId);
+      await knowledgeApi.retryFailedBatches(projectId, documentId, { expected_state: expectedState, expected_state_version: expectedStateVersion });
     },
     onSuccess: async () => {
       toast.success(t('knowledge.feedback.retryFailedBatchesQueued'));
@@ -1485,9 +1485,9 @@ export const KnowledgePage: React.FC = () => {
   });
 
   const publishReadyMutation = useMutation({
-    mutationFn: async (documentId: string) => {
+    mutationFn: async ({ documentId, expectedState, expectedStateVersion }: { documentId: string; expectedState: string; expectedStateVersion: number }) => {
       if (!projectId) throw new Error('Project ID is missing');
-      await knowledgeApi.publishReady(projectId, documentId);
+      await knowledgeApi.publishReady(projectId, documentId, { expected_state: expectedState, expected_state_version: expectedStateVersion });
     },
     onSuccess: async () => {
       toast.success(t('knowledge.feedback.publishReadyQueued'));
@@ -1497,6 +1497,12 @@ export const KnowledgePage: React.FC = () => {
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
+    },
+  });
+  const resumeProcessingMutation = useMutation({
+    mutationFn: async ({ documentId, expectedState, expectedStateVersion }: { documentId: string; expectedState: string; expectedStateVersion: number }) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.resumeProcessing(projectId, documentId, { expected_state: expectedState, expected_state_version: expectedStateVersion });
     },
   });
 
@@ -1877,26 +1883,29 @@ export const KnowledgePage: React.FC = () => {
                         <div className="flex flex-wrap gap-1.5">
                           {processingReport.actions.map((action) => {
                             const canRetry = action.id === 'retry_failed_batches' && action.enabled;
-                            const canPublishReady = action.id === 'publish_ready' && action.enabled;
+                            const canPublishReady = (action.id === 'publish_ready' || action.id === 'publish_raw_drafts_without_resolution') && action.enabled;
+                            const canResume = action.id === 'resume_processing' && action.enabled;
                             const isRetryingThisDoc = retryFailedBatchesMutation.isPending
                               && retryFailedBatchesMutation.variables === doc.id;
                             const isPublishingThisDoc = publishReadyMutation.isPending
                               && publishReadyMutation.variables === doc.id;
 
-                            if (canRetry || canPublishReady) {
-                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
+                            if (canRetry || canPublishReady || canResume) {
+                              const isPending = canRetry ? isRetryingThisDoc : canPublishReady ? isPublishingThisDoc : (resumeProcessingMutation.isPending && resumeProcessingMutation.variables?.documentId === doc.id);
                               const mutationPending = canRetry
                                 ? retryFailedBatchesMutation.isPending
-                                : publishReadyMutation.isPending;
+                                : canPublishReady ? publishReadyMutation.isPending : resumeProcessingMutation.isPending;
                               return (
                                 <button
                                   key={action.id}
                                   type="button"
                                   onClick={() => {
                                     if (canRetry) {
-                                      retryFailedBatchesMutation.mutate(doc.id);
+                                      retryFailedBatchesMutation.mutate({ documentId: doc.id, expectedState: processingReport.state, expectedStateVersion: processingReport.state_version });
+                                    } else if (canResume) {
+                                      resumeProcessingMutation.mutate({ documentId: doc.id, expectedState: processingReport.state, expectedStateVersion: processingReport.state_version });
                                     } else {
-                                      publishReadyMutation.mutate(doc.id);
+                                      publishReadyMutation.mutate({ documentId: doc.id, expectedState: processingReport.state, expectedStateVersion: processingReport.state_version });
                                     }
                                   }}
                                   disabled={mutationPending}

@@ -11,7 +11,9 @@ from src.application.services.knowledge_ingestion_service import KnowledgeIngest
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingValidationError
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.logging.logger import get_logger
-from src.infrastructure.queue.job_exceptions import PermanentJobError
+from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
+from src.infrastructure.providers.embeddings_provider import EmbeddingProviderError
+from src.infrastructure.providers.llm_provider import LlmProviderError
 
 logger = get_logger(__name__)
 
@@ -45,11 +47,15 @@ async def handle_resume_knowledge_processing(
 
     service = KnowledgeIngestionService(db_pool)
     try:
-        await service.publish_ready_answers(
+        await service.resume_processing(
             project_id=project_id,
             document_id=document_id,
             knowledge_repo_factory=make_knowledge_repository,
             logger=logger,
         )
     except (KnowledgePreprocessingValidationError, ValidationError) as exc:
+        raise PermanentJobError(str(exc)) from exc
+    except (EmbeddingProviderError, LlmProviderError) as exc:
+        if getattr(exc, "retryable", False):
+            raise TransientJobError(str(exc)) from exc
         raise PermanentJobError(str(exc)) from exc
