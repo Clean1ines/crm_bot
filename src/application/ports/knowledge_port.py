@@ -211,6 +211,21 @@ class KnowledgeRepositoryPort(Protocol):
 
     async def is_document_processing_cancelled(self, document_id: str) -> bool: ...
 
+    async def find_active_knowledge_pipeline_job(
+        self,
+        *,
+        document_id: str,
+        task_types: Sequence[str],
+    ) -> str | None: ...
+
+    async def find_knowledge_pipeline_job_by_idempotency_key(
+        self,
+        *,
+        document_id: str,
+        task_type: str,
+        idempotency_key: str,
+    ) -> str | None: ...
+
     async def list_runtime_entry_titles(
         self,
         *,
