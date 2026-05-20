@@ -85,6 +85,8 @@ export type KnowledgeProcessingAction = {
   label: string;
   kind: string;
   enabled: boolean;
+  reason?: string;
+  blocker_code?: string;
 };
 
 export type KnowledgePipelineActionId =

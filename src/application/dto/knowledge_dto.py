@@ -588,14 +588,21 @@ class KnowledgeProcessingActionDto:
     label: str
     kind: str
     enabled: bool = True
+    reason: str = ""
+    blocker_code: str = ""
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "label": self.label,
             "kind": self.kind,
             "enabled": self.enabled,
         }
+        if self.reason:
+            payload["reason"] = self.reason
+        if self.blocker_code:
+            payload["blocker_code"] = self.blocker_code
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

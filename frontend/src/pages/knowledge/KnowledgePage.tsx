@@ -1504,7 +1504,7 @@ export const KnowledgePage: React.FC = () => {
 
   const renderPipelineAction = (
     doc: Document,
-    action: { id: string; label: string; enabled: boolean },
+    action: { id: string; label: string; enabled: boolean; reason?: string },
   ) => {
     const actionId = action.id;
     const isRetryAction = actionId === 'retry_failed_compiler_batches' || actionId === 'retry_failed_batches';
@@ -1513,6 +1513,21 @@ export const KnowledgePage: React.FC = () => {
     const isRetightenAction = actionId === 'retighten_published_entries' || actionId === 'retighten';
     const isCancelAction = actionId === 'cancel_processing' || actionId === 'cancel';
     const isOpenDraftsAction = actionId === 'open_draft_review';
+    const isResumeAction = actionId === 'resume_knowledge_compilation';
+
+    if (isResumeAction) {
+      return (
+        <button
+          key={action.id}
+          type="button"
+          disabled
+          title={action.reason || action.label}
+          className="rounded-full bg-[var(--control-bg)] px-2 py-1 text-[var(--text-muted)] disabled:cursor-not-allowed"
+        >
+          {action.label}
+        </button>
+      );
+    }
 
     if (isRetryAction) {
       const isPending = retryFailedBatchesMutation.isPending && retryFailedBatchesMutation.variables === doc.id;
@@ -1537,6 +1552,7 @@ export const KnowledgePage: React.FC = () => {
           type="button"
           onClick={() => publishReadyMutation.mutate(doc.id)}
           disabled={publishReadyMutation.isPending || !action.enabled}
+          title={action.reason || action.label}
           className="rounded-full bg-[var(--accent-warning-bg)] px-2 py-1 text-[var(--accent-warning)] transition-colors hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
         >
           {isPending ? t('common.states.loading') : action.label}
@@ -1604,6 +1620,7 @@ export const KnowledgePage: React.FC = () => {
     return (
       <span
         key={action.id}
+        title={action.reason || action.label}
         className="rounded-full bg-[var(--control-bg)] px-2 py-1 text-[var(--text-muted)]"
       >
         {action.label}
@@ -1986,7 +2003,10 @@ export const KnowledgePage: React.FC = () => {
                           {t('knowledge.processReport.nextActions')}
                         </div>
                         <div className="flex flex-wrap gap-1.5">
-                          {processingReport.actions.map((action) => renderPipelineAction(doc, action))}
+                          {(processingReport.allowed_actions.length > 0
+                            ? processingReport.allowed_actions
+                            : processingReport.actions
+                          ).map((action) => renderPipelineAction(doc, action))}
                         </div>
                       </div>
                     )}

@@ -1,6 +1,8 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import hashlib
+import json
 
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
@@ -264,7 +266,7 @@ def _action_from_pipeline_command(
         KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION: (
             "publish_raw_drafts_without_resolution",
             "Опубликовать черновики без уплотнения",
-            "secondary",
+            "secondary_warning",
         ),
         KnowledgePipelineCommand.CANCEL_PROCESSING: (
             "cancel_processing",
@@ -293,16 +295,105 @@ def _action_from_pipeline_command(
         ),
     }
     action_id, label, kind = mapping[command]
-    enabled = not (
-        command == KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION
-        and is_processing
-    )
+    enabled = True
+    reason = ""
+    blocker_code = ""
+    if command == KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION:
+        enabled = False
+        blocker_code = "resume_endpoint_not_implemented"
+        reason = (
+            "Продолжение обработки будет доступно после подключения resume endpoint."
+        )
+    elif command == KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION:
+        enabled = not is_processing
+        reason = (
+            "Аварийная публикация: часть ответов может быть не объединена "
+            "и не очищена от дублей."
+        )
     return KnowledgeProcessingActionDto(
         id=action_id,
         label=label,
         kind=kind,
         enabled=enabled,
+        reason=reason,
+        blocker_code=blocker_code,
     )
+
+
+def _build_pipeline_state_hash(
+    snapshot: KnowledgePipelineSnapshot,
+    state_value: str,
+) -> str:
+    payload = {
+        "state": state_value,
+        "document_id": snapshot.document_id,
+        "document_status": snapshot.document_status,
+        "preprocessing_status": snapshot.preprocessing_status,
+        "preprocessing_stage": snapshot.preprocessing_stage,
+        "compiler_batch_total_count": snapshot.compiler_batch_total_count,
+        "compiler_batch_completed_count": snapshot.compiler_batch_completed_count,
+        "compiler_batch_failed_count": snapshot.compiler_batch_failed_count,
+        "compiler_batch_processing_count": snapshot.compiler_batch_processing_count,
+        "compiler_batch_pending_count": snapshot.compiler_batch_pending_count,
+        "raw_candidate_count": snapshot.raw_candidate_count,
+        "canonical_entry_count": snapshot.canonical_entry_count,
+        "runtime_entry_count": snapshot.runtime_entry_count,
+        "retrieval_surface_count": snapshot.retrieval_surface_count,
+        "missing_embedding_count": snapshot.missing_embedding_count,
+        "active_job_count": snapshot.active_job_count,
+        "active_error_code": snapshot.active_error_code,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _recommended_next_action_payload(
+    actions: tuple[KnowledgeProcessingActionDto, ...],
+) -> JsonObject | None:
+    def _payload(action: KnowledgeProcessingActionDto) -> JsonObject:
+        return {
+            str(key): json_value_from_unknown(value)
+            for key, value in action.to_dict().items()
+        }
+
+    enabled_resume = next(
+        (
+            action
+            for action in actions
+            if action.id == "resume_knowledge_compilation" and action.enabled
+        ),
+        None,
+    )
+    if enabled_resume is not None:
+        return _payload(enabled_resume)
+
+    disabled_resume = next(
+        (
+            action
+            for action in actions
+            if action.id == "resume_knowledge_compilation" and not action.enabled
+        ),
+        None,
+    )
+    if disabled_resume is not None:
+        return _payload(disabled_resume)
+
+    retry_action = next(
+        (action for action in actions if action.id == "retry_failed_compiler_batches"),
+        None,
+    )
+    if retry_action is not None:
+        return _payload(retry_action)
+
+    curation_action = next(
+        (action for action in actions if action.id == "open_curation_console"),
+        None,
+    )
+    if curation_action is not None:
+        return _payload(curation_action)
+
+    return None
 
 
 @dataclass(frozen=True)
@@ -738,15 +829,12 @@ class KnowledgeService:
             metrics=document_metrics,
         )
         pipeline_state = resolve_pipeline_state(snapshot)
-        pipeline_commands = tuple(
-            command
-            for command in allowed_actions_for_state(pipeline_state, snapshot)
-            if command != KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION
-        )
+        pipeline_commands = allowed_actions_for_state(pipeline_state, snapshot)
         backend_actions = tuple(
             _action_from_pipeline_command(command, is_processing=is_processing)
             for command in pipeline_commands
         )
+        state_hash = _build_pipeline_state_hash(snapshot, pipeline_state.value)
 
         steps = (
             KnowledgeProcessingStepDto(
@@ -876,7 +964,10 @@ class KnowledgeService:
             title=title,
             message=message,
             state=pipeline_state.value,
-            state_hash=f"{pipeline_state.value}:{document_id}",
+            # TODO: replace constant with persisted monotonic pipeline state version
+            # when pipeline_events are introduced.
+            state_version=1,
+            state_hash=state_hash,
             recoverable=batch_failed > 0
             or candidate_summary.raw_count > published_answer_count,
             steps=steps,
@@ -888,14 +979,17 @@ class KnowledgeService:
             last_error=dict(last_error_payload)
             if isinstance(last_error_payload, Mapping)
             else None,
-            recommended_next_action=(
-                {"id": backend_actions[0].id, "label": backend_actions[0].label}
-                if backend_actions
-                else None
-            ),
+            recommended_next_action=_recommended_next_action_payload(backend_actions),
             diagnostics={
                 "active_job_count": len(active_jobs),
                 "active_job_type": active_jobs[0]["task_type"] if active_jobs else None,
+                "state": pipeline_state.value,
+                "state_hash": state_hash,
+                "raw_candidate_count": candidate_summary.raw_count,
+                "canonical_entry_count": canonical_entry_count,
+                "runtime_entry_count": runtime_entry_count,
+                "retrieval_surface_count": retrieval_surface_count,
+                "missing_embedding_count": missing_embedding_count,
             },
             metrics=metrics,
         )

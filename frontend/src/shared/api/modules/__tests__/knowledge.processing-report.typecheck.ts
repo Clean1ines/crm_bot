@@ -10,7 +10,16 @@ const reportShape: KnowledgeProcessingReport = {
   state_version: 1,
   state_hash: 'state:doc-1',
   steps: [],
-  allowed_actions: [],
+  allowed_actions: [
+    {
+      id: 'resume_knowledge_compilation',
+      label: 'Продолжить обработку',
+      kind: 'primary',
+      enabled: false,
+      reason: 'Продолжение обработки будет доступно после подключения resume endpoint.',
+      blocker_code: 'resume_endpoint_not_implemented',
+    },
+  ],
   actions: [],
   active_error: null,
   last_error: null,
