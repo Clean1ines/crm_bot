@@ -87,6 +87,16 @@ export type KnowledgeProcessingAction = {
   enabled: boolean;
 };
 
+export type KnowledgePipelineActionId =
+  | 'retry_failed_compiler_batches'
+  | 'resume_knowledge_compilation'
+  | 'publish_raw_drafts_without_resolution'
+  | 'cancel_processing'
+  | 'retighten_published_entries'
+  | 'open_draft_review'
+  | 'open_curation_console'
+  | 'run_retrieval_review';
+
 export type KnowledgeProcessingReport = {
   document_id: string;
   status: string;
@@ -205,6 +215,11 @@ export const knowledgeApi = {
 
   retryFailedBatches: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
+      method: 'POST',
+    }),
+
+  publishRawDraftsWithoutResolution: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
       method: 'POST',
     }),
 
