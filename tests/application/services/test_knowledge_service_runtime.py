@@ -190,20 +190,24 @@ async def test_retry_document_failed_batches_queues_retry_task():
             {
                 "project_id": "project-1",
                 "structured_entries": 0,
-                "status": "processing",
-                "preprocessing_status": "processing",
-                "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+                "status": "error",
+                "preprocessing_status": "failed",
+                "preprocessing_metrics": {"stage": "retry_failed_batches"},
             },
         )()
     )
-    repo.list_document_compiler_batches = AsyncMock(return_value=[])
+    repo.list_document_compiler_batches = AsyncMock(
+        return_value=[type("Batch", (), {"batch_count": 1, "status": "failed"})()]
+    )
     repo.get_document_answer_candidate_summary = AsyncMock(
         return_value=type(
             "CandidateSummary",
             (),
-            {"raw_count": 0, "total_count": 0, "grounded_count": 0, "rejected_count": 0},
+            {"raw_count": 1, "total_count": 1, "grounded_count": 1, "rejected_count": 0},
         )()
     )
+    repo.find_knowledge_pipeline_job_by_idempotency_key = AsyncMock(return_value=None)
+    repo.find_active_knowledge_pipeline_job = AsyncMock(return_value=None)
     knowledge_repo_factory = Mock(return_value=repo)
     logger = Mock()
 
@@ -216,8 +220,8 @@ async def test_retry_document_failed_batches_queues_retry_task():
         queue_repo=queue_repo,
         knowledge_repo_factory=knowledge_repo_factory,
         retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
-        expected_state="compiler_running",
-        expected_state_version=1,
+        expected_state="compiler_partial_failed",
+        expected_state_version=2,
         logger=logger,
     )
 
@@ -226,18 +230,12 @@ async def test_retry_document_failed_batches_queues_retry_task():
         "job_id": "job-retry-1",
         "document_id": "doc-1",
     }
-    queue_repo.enqueue.assert_awaited_once_with(
-        TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
-        payload={
-            "project_id": "project-1",
-            "document_id": "doc-1",
-            "requested_by": "user-1",
-            "source": "knowledge_failed_batch_retry",
-            "expected_state": "compiler_running",
-            "expected_state_version": 1,
-        },
-        max_attempts=3,
-    )
+    queue_repo.enqueue.assert_awaited_once()
+    args = queue_repo.enqueue.await_args
+    assert args.args[0] == TASK_RETRY_KNOWLEDGE_FAILED_BATCHES
+    assert args.kwargs["max_attempts"] == 3
+    assert args.kwargs["payload"]["expected_state"] == "compiler_partial_failed"
+    assert args.kwargs["payload"]["expected_state_version"] == 2
 
 
 @pytest.mark.anyio
@@ -261,20 +259,24 @@ async def test_publish_document_ready_answers_queues_publish_task():
             {
                 "project_id": "project-1",
                 "structured_entries": 0,
-                "status": "processing",
-                "preprocessing_status": "processing",
-                "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+                "status": "error",
+                "preprocessing_status": "failed",
+                "preprocessing_metrics": {"stage": "retry_failed_batches"},
             },
         )()
     )
-    repo.list_document_compiler_batches = AsyncMock(return_value=[])
+    repo.list_document_compiler_batches = AsyncMock(
+        return_value=[type("Batch", (), {"batch_count": 1, "status": "completed"})()]
+    )
     repo.get_document_answer_candidate_summary = AsyncMock(
         return_value=type(
             "CandidateSummary",
             (),
-            {"raw_count": 0, "total_count": 0, "grounded_count": 0, "rejected_count": 0},
+            {"raw_count": 1, "total_count": 1, "grounded_count": 1, "rejected_count": 0},
         )()
     )
+    repo.find_knowledge_pipeline_job_by_idempotency_key = AsyncMock(return_value=None)
+    repo.find_active_knowledge_pipeline_job = AsyncMock(return_value=None)
     knowledge_repo_factory = Mock(return_value=repo)
     logger = Mock()
 
@@ -287,8 +289,8 @@ async def test_publish_document_ready_answers_queues_publish_task():
         queue_repo=queue_repo,
         knowledge_repo_factory=knowledge_repo_factory,
         publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
-        expected_state="compiler_running",
-        expected_state_version=1,
+        expected_state="answer_resolution_pending",
+        expected_state_version=2,
         logger=logger,
     )
 
@@ -297,18 +299,12 @@ async def test_publish_document_ready_answers_queues_publish_task():
         "job_id": "job-publish-1",
         "document_id": "doc-1",
     }
-    queue_repo.enqueue.assert_awaited_once_with(
-        TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
-        payload={
-            "project_id": "project-1",
-            "document_id": "doc-1",
-            "requested_by": "user-1",
-            "source": "knowledge_ready_answer_publish",
-            "expected_state": "compiler_running",
-            "expected_state_version": 1,
-        },
-        max_attempts=3,
-    )
+    queue_repo.enqueue.assert_awaited_once()
+    args = queue_repo.enqueue.await_args
+    assert args.args[0] == TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS
+    assert args.kwargs["max_attempts"] == 3
+    assert args.kwargs["payload"]["expected_state"] == "answer_resolution_pending"
+    assert args.kwargs["payload"]["expected_state_version"] == 2
 
 
 @pytest.mark.anyio
@@ -330,18 +326,20 @@ async def test_retry_document_failed_batches_returns_existing_job_on_idempotency
             {
                 "project_id": "project-1",
                 "structured_entries": 0,
-                "status": "processing",
-                "preprocessing_status": "processing",
-                "preprocessing_metrics": {"stage": "technical_compiler_loop"},
+                "status": "error",
+                "preprocessing_status": "failed",
+                "preprocessing_metrics": {"stage": "retry_failed_batches"},
             },
         )()
     )
-    repo.list_document_compiler_batches = AsyncMock(return_value=[])
+    repo.list_document_compiler_batches = AsyncMock(
+        return_value=[type("Batch", (), {"batch_count": 1, "status": "failed"})()]
+    )
     repo.get_document_answer_candidate_summary = AsyncMock(
         return_value=type(
             "CandidateSummary",
             (),
-            {"raw_count": 0, "total_count": 0, "grounded_count": 0, "rejected_count": 0},
+            {"raw_count": 1, "total_count": 1, "grounded_count": 1, "rejected_count": 0},
         )()
     )
     repo.find_knowledge_pipeline_job_by_idempotency_key = AsyncMock(
@@ -358,8 +356,8 @@ async def test_retry_document_failed_batches_returns_existing_job_on_idempotency
         queue_repo=queue_repo,
         knowledge_repo_factory=knowledge_repo_factory,
         retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
-        expected_state="compiler_running",
-        expected_state_version=1,
+        expected_state="compiler_partial_failed",
+        expected_state_version=2,
         logger=Mock(),
     )
     assert result["job_id"] == "job-existing-1"

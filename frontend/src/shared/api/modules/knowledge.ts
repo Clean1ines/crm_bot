@@ -195,14 +195,16 @@ export const knowledgeApi = {
       method: 'DELETE',
     }),
 
-  cancel: (projectId: string, documentId: string) =>
+  cancel: (projectId: string, documentId: string, payload: KnowledgeCommandPayload) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/cancel`, {
       method: 'POST',
+      body: payload,
     }),
 
-  retighten: (projectId: string, documentId: string) =>
+  retighten: (projectId: string, documentId: string, payload: KnowledgeCommandPayload) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retighten`, {
       method: 'POST',
+      body: payload,
     }),
 
   publishReady: (projectId: string, documentId: string, payload: KnowledgeCommandPayload) =>

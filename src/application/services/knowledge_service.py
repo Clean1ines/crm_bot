@@ -44,6 +44,7 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
 )
 from src.domain.project_plane.knowledge_document_pipeline import (
+    KnowledgeDocumentPipelineState,
     allowed_actions_for_state,
     recommended_action_for_state,
     resolve_pipeline_state,
@@ -770,7 +771,11 @@ class KnowledgeService:
                 }
                 if str(document.error or "").strip()
                 and state.value
-                in {"failed_retryable", "compiler_partial_failed", "embedding_failed_retryable"}
+                in {
+                    KnowledgeDocumentPipelineState.FAILED_RETRYABLE.value,
+                    KnowledgeDocumentPipelineState.COMPILER_PARTIAL_FAILED.value,
+                    KnowledgeDocumentPipelineState.EMBEDDING_FAILED_RETRYABLE.value,
+                }
                 else None
             ),
             last_error=(
@@ -1208,7 +1213,11 @@ class KnowledgeService:
             "source_refs_completeness": candidate_summary.grounded_count
             >= retrieval_entries,
             "stale_error": bool(document.error)
-            and processing_report.state in {"processed", "processed_with_warnings"},
+            and processing_report.state
+            in {
+                KnowledgeDocumentPipelineState.PROCESSED.value,
+                KnowledgeDocumentPipelineState.PROCESSED_WITH_WARNINGS.value,
+            },
         }
 
     async def inspect_document_pipeline(

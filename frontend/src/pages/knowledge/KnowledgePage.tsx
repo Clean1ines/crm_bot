@@ -1437,9 +1437,9 @@ export const KnowledgePage: React.FC = () => {
 
 
   const cancelProcessingMutation = useMutation({
-    mutationFn: async (documentId: string) => {
+    mutationFn: async ({ documentId, expectedState, expectedStateVersion }: { documentId: string; expectedState: string; expectedStateVersion: number }) => {
       if (!projectId) throw new Error('Project ID is missing');
-      await knowledgeApi.cancel(projectId, documentId);
+      await knowledgeApi.cancel(projectId, documentId, { expected_state: expectedState, expected_state_version: expectedStateVersion });
     },
     onSuccess: async () => {
       toast.success(t('knowledge.feedback.processingStopped'));
@@ -1453,9 +1453,9 @@ export const KnowledgePage: React.FC = () => {
   });
 
   const retightenMutation = useMutation({
-    mutationFn: async (documentId: string) => {
+    mutationFn: async ({ documentId, expectedState, expectedStateVersion }: { documentId: string; expectedState: string; expectedStateVersion: number }) => {
       if (!projectId) throw new Error('Project ID is missing');
-      await knowledgeApi.retighten(projectId, documentId);
+      await knowledgeApi.retighten(projectId, documentId, { expected_state: expectedState, expected_state_version: expectedStateVersion });
     },
     onSuccess: async () => {
       toast.success(t('knowledge.feedback.retightenQueued'));
@@ -1781,7 +1781,7 @@ export const KnowledgePage: React.FC = () => {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
-            const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
+            const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables?.documentId === doc.id;
             const processingReport = processingReports[doc.id];
 
             return (
@@ -1798,7 +1798,7 @@ export const KnowledgePage: React.FC = () => {
                       {isDocumentRetightenable(doc) && (
                         <button
                           type="button"
-                          onClick={() => retightenMutation.mutate(doc.id)}
+                          onClick={() => processingReport && retightenMutation.mutate({ documentId: doc.id, expectedState: processingReport.state, expectedStateVersion: processingReport.state_version })}
                           disabled={retightenMutation.isPending}
                           title={isRetighteningThisDoc ? t('knowledge.actions.retightening') : t('knowledge.actions.retightenDuplicates')}
                           className="rounded-lg p-2 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/10 disabled:cursor-wait disabled:opacity-50"
@@ -1809,7 +1809,7 @@ export const KnowledgePage: React.FC = () => {
                       {isDocumentProcessing(doc) && (
                         <button
                           type="button"
-                          onClick={() => cancelProcessingMutation.mutate(doc.id)}
+                          onClick={() => processingReport && cancelProcessingMutation.mutate({ documentId: doc.id, expectedState: processingReport.state, expectedStateVersion: processingReport.state_version })}
                           disabled={cancelProcessingMutation.isPending}
                           title={t('knowledge.actions.stopProcessing')}
                           className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
@@ -1886,9 +1886,9 @@ export const KnowledgePage: React.FC = () => {
                             const canPublishReady = (action.id === 'publish_ready' || action.id === 'publish_raw_drafts_without_resolution') && action.enabled;
                             const canResume = action.id === 'resume_processing' && action.enabled;
                             const isRetryingThisDoc = retryFailedBatchesMutation.isPending
-                              && retryFailedBatchesMutation.variables === doc.id;
+                              && retryFailedBatchesMutation.variables?.documentId === doc.id;
                             const isPublishingThisDoc = publishReadyMutation.isPending
-                              && publishReadyMutation.variables === doc.id;
+                              && publishReadyMutation.variables?.documentId === doc.id;
 
                             if (canRetry || canPublishReady || canResume) {
                               const isPending = canRetry ? isRetryingThisDoc : canPublishReady ? isPublishingThisDoc : (resumeProcessingMutation.isPending && resumeProcessingMutation.variables?.documentId === doc.id);

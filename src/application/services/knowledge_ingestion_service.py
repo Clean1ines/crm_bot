@@ -63,6 +63,9 @@ from src.domain.project_plane.knowledge_preprocessing import (
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+from src.domain.project_plane.knowledge_document_pipeline import (
+    KnowledgeDocumentPipelineState,
+)
 from src.domain.project_plane.knowledge_compilation import (
     CompilerRunStatus,
     CompilerRun,
@@ -4058,7 +4061,10 @@ class KnowledgeIngestionService:
 
         metrics = document.preprocessing_metrics if isinstance(document.preprocessing_metrics, Mapping) else {}
         stage = str(metrics.get("stage") or "")
-        if stage not in {"answer_resolution_pending", "extraction_completed"}:
+        if stage not in {
+            KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING.value,
+            "extraction_completed",
+        }:
             raise ValidationError("Knowledge document is not in resume-compatible stage")
 
         source_chunks = await repo.list_document_source_chunks(project_id=project_id, document_id=document_id)
