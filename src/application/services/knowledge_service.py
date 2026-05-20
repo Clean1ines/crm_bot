@@ -299,11 +299,10 @@ def _action_from_pipeline_command(
     reason = ""
     blocker_code = ""
     if command == KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION:
-        enabled = False
-        blocker_code = "resume_endpoint_not_implemented"
-        reason = (
-            "Продолжение обработки будет доступно после подключения resume endpoint."
-        )
+        enabled = not is_processing
+        if is_processing:
+            blocker_code = "pipeline_already_running"
+            reason = "Обработка уже выполняется."
     elif command == KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION:
         enabled = not is_processing
         reason = (
@@ -1133,6 +1132,53 @@ class KnowledgeService:
             "job_id": job_id,
             "document_id": document_id,
         }
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        queue_repo: KnowledgeQueuePort,
+        resume_processing_task_type: str,
+        logger: LoggerPort,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+        report = await self.processing_report(
+            project_id,
+            document_id,
+            authorization,
+            knowledge_repo_factory=knowledge_repo_factory,
+            logger=logger,
+        )
+        resume_action = next(
+            (
+                action
+                for action in report.allowed_actions
+                if action.id == "resume_knowledge_compilation"
+            ),
+            None,
+        )
+        if resume_action is None:
+            raise ValidationError("Resume command is not allowed for current state")
+        if not resume_action.enabled:
+            raise ValidationError(
+                resume_action.reason or "Resume command is temporarily unavailable"
+            )
+
+        job_id = await queue_repo.enqueue(
+            resume_processing_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "requested_by": user_id,
+                "source": "knowledge_resume_processing",
+            },
+            max_attempts=3,
+        )
+        return {"status": "queued", "job_id": job_id, "document_id": document_id}
 
     async def preview_query(
         self,

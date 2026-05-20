@@ -1501,6 +1501,21 @@ export const KnowledgePage: React.FC = () => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
     },
   });
+  const resumeProcessingMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error('Project ID is missing');
+      await knowledgeApi.resumeProcessing(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success('Продолжение обработки поставлено в очередь');
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, 'Не удалось поставить продолжение обработки в очередь'));
+    },
+  });
 
   const renderPipelineAction = (
     doc: Document,
@@ -1516,6 +1531,21 @@ export const KnowledgePage: React.FC = () => {
     const isResumeAction = actionId === 'resume_knowledge_compilation';
 
     if (isResumeAction) {
+      if (action.enabled) {
+        const isPending = resumeProcessingMutation.isPending && resumeProcessingMutation.variables === doc.id;
+        return (
+          <button
+            key={action.id}
+            type="button"
+            onClick={() => resumeProcessingMutation.mutate(doc.id)}
+            disabled={resumeProcessingMutation.isPending}
+            title={action.reason || action.label}
+            className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isPending ? t('common.states.loading') : action.label}
+          </button>
+        );
+      }
       return (
         <button
           key={action.id}

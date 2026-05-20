@@ -87,7 +87,7 @@ async def _build_report(service: KnowledgeService, *, repo: Mock):
 
 
 @pytest.mark.asyncio
-async def test_processing_report_returns_disabled_resume_action_when_endpoint_not_implemented(
+async def test_processing_report_resume_enabled_when_not_running(
     service: KnowledgeService,
 ) -> None:
     report = await _build_report(service, repo=_repo_for_answer_resolution_pending())
@@ -98,8 +98,9 @@ async def test_processing_report_returns_disabled_resume_action_when_endpoint_no
         for action in report.allowed_actions
         if action.id == "resume_knowledge_compilation"
     )
-    assert resume_action.enabled is False
-    assert resume_action.blocker_code == "resume_endpoint_not_implemented"
+    assert resume_action.enabled is True
+    assert resume_action.blocker_code == ""
+    assert resume_action.reason == ""
 
     action_ids = {item.id for item in report.allowed_actions}
     assert "publish_raw_drafts_without_resolution" in action_ids
@@ -148,18 +149,14 @@ async def test_processing_report_does_not_silently_drop_domain_actions(
 
 
 @pytest.mark.asyncio
-async def test_processing_report_recommended_next_action_prefers_resume_even_when_disabled(
+async def test_recommended_next_action_prefers_enabled_resume(
     service: KnowledgeService,
 ) -> None:
     report = await _build_report(service, repo=_repo_for_answer_resolution_pending())
 
     assert report.recommended_next_action is not None
     assert report.recommended_next_action["id"] == "resume_knowledge_compilation"
-    assert report.recommended_next_action["enabled"] is False
-    assert (
-        report.recommended_next_action["blocker_code"]
-        == "resume_endpoint_not_implemented"
-    )
+    assert report.recommended_next_action["enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -175,3 +172,72 @@ async def test_fallback_publish_action_is_secondary_warning_with_reason(
     )
     assert publish_action.kind == "secondary_warning"
     assert publish_action.reason
+
+
+@pytest.mark.asyncio
+async def test_processing_report_resume_disabled_when_pipeline_running(
+    service: KnowledgeService,
+) -> None:
+    repo = _repo_for_answer_resolution_pending()
+    repo.get_document = AsyncMock(
+        return_value=_document(status="processing", preprocessing_status="processing")
+    )
+    report = await _build_report(service, repo=repo)
+    resume_action = next(
+        action
+        for action in report.allowed_actions
+        if action.id == "resume_knowledge_compilation"
+    )
+    assert resume_action.enabled is False
+    assert resume_action.blocker_code == "pipeline_already_running"
+
+
+@pytest.mark.asyncio
+async def test_resume_document_processing_enqueues_resume_task(
+    service: KnowledgeService,
+) -> None:
+    repo = _repo_for_answer_resolution_pending()
+    queue_repo = Mock()
+    queue_repo.enqueue = AsyncMock(return_value="job-1")
+
+    result = await service.resume_document_processing(
+        "project-1",
+        "doc-1",
+        "Bearer token",
+        queue_repo=queue_repo,
+        resume_processing_task_type="resume_knowledge_processing",
+        logger=Mock(),
+        knowledge_repo_factory=Mock(return_value=repo),
+    )
+
+    assert result["status"] == "queued"
+    payload = queue_repo.enqueue.await_args.kwargs["payload"]
+    assert payload["project_id"] == "project-1"
+    assert payload["document_id"] == "doc-1"
+    assert payload["requested_by"] == "user-1"
+    assert payload["source"] == "knowledge_resume_processing"
+
+
+@pytest.mark.asyncio
+async def test_resume_document_processing_rejects_state_without_resume_action(
+    service: KnowledgeService,
+) -> None:
+    repo = _repo_for_answer_resolution_pending()
+    repo.get_document = AsyncMock(
+        return_value=_document(
+            status="processed", preprocessing_status="completed", structured_entries=1
+        )
+    )
+    queue_repo = Mock()
+    queue_repo.enqueue = AsyncMock(return_value="job-1")
+
+    with pytest.raises(Exception):
+        await service.resume_document_processing(
+            "project-1",
+            "doc-1",
+            "Bearer token",
+            queue_repo=queue_repo,
+            resume_processing_task_type="resume_knowledge_processing",
+            logger=Mock(),
+            knowledge_repo_factory=Mock(return_value=repo),
+        )

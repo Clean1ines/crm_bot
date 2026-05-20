@@ -227,6 +227,10 @@ export const knowledgeApi = {
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
       method: 'POST',
     }),
+  resumeProcessing: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/resume-processing`, {
+      method: 'POST',
+    }),
 
   publishRawDraftsWithoutResolution: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
