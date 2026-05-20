@@ -9,6 +9,7 @@ from src.application.errors import (
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
 )
+from src.application.errors import ValidationError
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
@@ -918,6 +919,81 @@ def test_online_pipeline_publishes_tightened_entries_after_raw_candidates_are_sa
     assert raw_save_index < merge_index < publish_index
     assert "entries=tightened_entries" in source[merge_index:publish_index]
     assert "entries=compiled_entries" not in source[merge_index:publish_index]
+
+
+def test_resume_processing_uses_shared_post_extraction_pipeline():
+    from pathlib import Path
+    import src.application.services.knowledge_ingestion_service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    resume_idx = source.index("async def resume_processing")
+    assert "_run_answer_resolution_publication_pipeline(" in source[resume_idx:]
+
+
+def test_resume_processing_does_not_call_canonical_entries_from_raw_answer_candidates_directly():
+    from pathlib import Path
+    import src.application.services.knowledge_ingestion_service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    resume_block = source[source.index("async def resume_processing") : source.index("async def retry_failed_batches")]
+    assert "_canonical_entries_from_raw_answer_candidates(" not in resume_block
+
+
+def test_process_document_uses_shared_post_extraction_pipeline():
+    from pathlib import Path
+    import src.application.services.knowledge_ingestion_service as service_module
+
+    source = Path(service_module.__file__).read_text()
+    process_block = source[source.index("async def process_document") :]
+    assert "_run_answer_resolution_publication_pipeline(" in process_block
+
+
+@pytest.mark.anyio
+async def test_resume_processing_rejects_failed_batches():
+    service = KnowledgeIngestionService(object())
+    repo = Mock()
+    repo.get_document = AsyncMock(return_value=type("D", (), {"project_id": "p1", "preprocessing_mode": "faq", "preprocessing_metrics": {"stage": "answer_resolution_pending"}, "file_name": "a.md", "preprocessing_prompt_version": "v1", "preprocessing_model": "m"})())
+    repo.list_document_source_chunks = AsyncMock(return_value=[Mock()])
+    repo.list_document_compiler_batches = AsyncMock(return_value=[type("B", (), {"status": "failed"})()])
+    with pytest.raises(ValidationError):
+        await service.resume_processing(project_id="p1", document_id="d1", knowledge_repo_factory=Mock(return_value=repo), logger=Mock())
+
+
+@pytest.mark.anyio
+async def test_resume_processing_rejects_pending_or_processing_batches():
+    service = KnowledgeIngestionService(object())
+    repo = Mock()
+    repo.get_document = AsyncMock(return_value=type("D", (), {"project_id": "p1", "preprocessing_mode": "faq", "preprocessing_metrics": {"stage": "answer_resolution_pending"}, "file_name": "a.md", "preprocessing_prompt_version": "v1", "preprocessing_model": "m"})())
+    repo.list_document_source_chunks = AsyncMock(return_value=[Mock()])
+    repo.list_document_compiler_batches = AsyncMock(return_value=[type("B", (), {"status": "processing"})()])
+    with pytest.raises(ValidationError):
+        await service.resume_processing(project_id="p1", document_id="d1", knowledge_repo_factory=Mock(return_value=repo), logger=Mock())
+
+
+@pytest.mark.anyio
+async def test_resume_processing_rejects_no_raw_candidates():
+    service = KnowledgeIngestionService(object())
+    repo = Mock()
+    repo.get_document = AsyncMock(return_value=type("D", (), {"project_id": "p1", "preprocessing_mode": "faq", "preprocessing_metrics": {"stage": "answer_resolution_pending"}, "file_name": "a.md", "preprocessing_prompt_version": "v1", "preprocessing_model": "m"})())
+    repo.list_document_source_chunks = AsyncMock(return_value=[Mock()])
+    repo.list_document_compiler_batches = AsyncMock(return_value=[type("B", (), {"status": "completed"})()])
+    repo.list_document_raw_answer_candidates = AsyncMock(return_value=[])
+    with pytest.raises(ValidationError):
+        await service.resume_processing(project_id="p1", document_id="d1", knowledge_repo_factory=Mock(return_value=repo), logger=Mock())
+
+
+@pytest.mark.anyio
+async def test_resume_processing_rejects_ambiguous_compiler_run():
+    service = KnowledgeIngestionService(object())
+    repo = Mock()
+    repo.get_document = AsyncMock(return_value=type("D", (), {"project_id": "p1", "preprocessing_mode": "faq", "preprocessing_metrics": {"stage": "answer_resolution_pending"}, "file_name": "a.md", "preprocessing_prompt_version": "v1", "preprocessing_model": "m"})())
+    repo.list_document_source_chunks = AsyncMock(return_value=[Mock()])
+    repo.list_document_compiler_batches = AsyncMock(return_value=[type("B", (), {"status": "completed"})()])
+    c1 = type("C", (), {"compiler_run_id": "r1", "title": "t", "candidate_answer": "a", "source_refs": ()})()
+    c2 = type("C", (), {"compiler_run_id": "r2", "title": "t", "candidate_answer": "a", "source_refs": ()})()
+    repo.list_document_raw_answer_candidates = AsyncMock(return_value=[c1, c2])
+    with pytest.raises(ValidationError):
+        await service.resume_processing(project_id="p1", document_id="d1", knowledge_repo_factory=Mock(return_value=repo), logger=Mock())
 
 
 def test_mechanical_cleanup_dedupes_exact_question_variants_without_semantic_dictionary():

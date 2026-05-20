@@ -24,6 +24,9 @@ from src.infrastructure.queue.handlers.knowledge_failed_batches import (
 from src.infrastructure.queue.handlers.knowledge_publish_ready import (
     handle_publish_knowledge_ready_answers,
 )
+from src.infrastructure.queue.handlers.knowledge_resume_processing import (
+    handle_resume_knowledge_processing,
+)
 from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
 from src.infrastructure.queue.handlers.notify_manager import (
     RedisGetter,
@@ -37,6 +40,7 @@ from src.infrastructure.queue.job_types import (
     TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
     TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
     TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+    TASK_RESUME_KNOWLEDGE_PROCESSING,
     TASK_RUN_FULL_RAG_EVAL,
     TASK_UPDATE_METRICS,
 )
@@ -105,6 +109,13 @@ class JobDispatcher:
 
         if task_type == TASK_RETRY_KNOWLEDGE_FAILED_BATCHES:
             await handle_retry_knowledge_failed_batches(
+                job,
+                db_pool=self.db_pool,
+            )
+            return
+
+        if task_type == TASK_RESUME_KNOWLEDGE_PROCESSING:
+            await handle_resume_knowledge_processing(
                 job,
                 db_pool=self.db_pool,
             )

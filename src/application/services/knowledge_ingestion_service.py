@@ -63,6 +63,9 @@ from src.domain.project_plane.knowledge_preprocessing import (
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+from src.domain.project_plane.knowledge_document_pipeline import (
+    KnowledgeDocumentPipelineState,
+)
 from src.domain.project_plane.knowledge_compilation import (
     CompilerRunStatus,
     CompilerRun,
@@ -4040,6 +4043,103 @@ class KnowledgeIngestionService:
             "remaining_failed_batch_count": batch_failed,
         }
 
+    async def resume_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise ValidationError("Knowledge document not found")
+        mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_PLAIN:
+            raise ValidationError("Plain knowledge documents do not have answer drafts")
+
+        metrics = document.preprocessing_metrics if isinstance(document.preprocessing_metrics, Mapping) else {}
+        stage = str(metrics.get("stage") or "")
+        if stage not in {
+            KnowledgeDocumentPipelineState.ANSWER_RESOLUTION_PENDING.value,
+            "extraction_completed",
+        }:
+            raise ValidationError("Knowledge document is not in resume-compatible stage")
+
+        source_chunks = await repo.list_document_source_chunks(project_id=project_id, document_id=document_id)
+        if not source_chunks:
+            raise ValidationError("Knowledge document has no saved source chunks")
+        batches = await repo.list_document_compiler_batches(project_id=project_id, document_id=document_id)
+        if not batches:
+            raise ValidationError("Knowledge document has no compiler batches")
+        if any(batch.status in {"pending", "processing"} for batch in batches):
+            raise ValidationError("Knowledge document still has pending compiler batches")
+        if any(batch.status == "failed" for batch in batches):
+            raise ValidationError("Knowledge document still has failed compiler batches")
+
+        raw_candidates = await repo.list_document_raw_answer_candidates(project_id=project_id, document_id=document_id)
+        if not raw_candidates:
+            raise ValidationError("Knowledge document has no ready answer drafts")
+        compiler_run_ids = {candidate.compiler_run_id for candidate in raw_candidates}
+        if len(compiler_run_ids) != 1:
+            raise ValidationError("Knowledge document has ambiguous compiler run for resume")
+        compiler_run_id = next(iter(compiler_run_ids))
+
+        compiled_entries = tuple(
+            KnowledgePreprocessingEntry(
+                title=_clean_optional_text(candidate.title) or "Answer entry",
+                answer=_clean_optional_text(candidate.candidate_answer),
+                source_excerpt=next((ref.quote for ref in candidate.source_refs if ref.quote), ""),
+                questions=(),
+                synonyms=(),
+                tags=(),
+                embedding_text=_clean_optional_text(candidate.candidate_answer),
+                canonical_question="",
+                source_chunk_indexes=(),
+            )
+            for candidate in raw_candidates
+            if _clean_optional_text(candidate.candidate_answer)
+        )
+        if not compiled_entries:
+            raise ValidationError("Knowledge document has no publishable answer drafts")
+        template = KnowledgePreprocessingResult(
+            mode=mode,
+            prompt_version=str(document.preprocessing_prompt_version or prompt_version_for_mode(mode)),
+            model=str(document.preprocessing_model or ""),
+            entries=compiled_entries,
+            metrics={},
+        )
+        _, canonical_entries, _ = await self._run_answer_resolution_publication_pipeline(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+            mode=mode,
+            file_name=document.file_name,
+            source_chunks=source_chunks,
+            compiler_run_id=compiler_run_id,
+            compiled_entries=compiled_entries,
+            latest_result=template,
+            preprocessor=load_knowledge_preprocessor(),
+            active_model=str(document.preprocessing_model or ""),
+            active_prompt_version=str(document.preprocessing_prompt_version or ""),
+            raw_candidate_count=len(raw_candidates),
+            technical_batches_count=len(batches),
+            extraction_concurrency=1,
+            processing_started_monotonic=time.monotonic(),
+        )
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_COMPLETED,
+            model=document.preprocessing_model,
+            prompt_version=document.preprocessing_prompt_version,
+            metrics={"stage": "resume_processing", "canonical_entry_count": len(canonical_entries), "raw_answer_count": len(raw_candidates)},
+        )
+        await repo.update_document_status(document_id, "processed")
+        logger.info("Knowledge resume processing completed", extra={"project_id": project_id, "document_id": document_id})
+        return {"status": "completed", "document_id": document_id, "published_answer_count": len(canonical_entries)}
+
     async def retry_failed_batches(
         self,
         *,
@@ -4723,147 +4823,23 @@ class KnowledgeIngestionService:
             if latest_result is None:
                 raise ValidationError("Knowledge preprocessing produced no results")
 
-            source_excerpts_before_cleanup = tuple(
-                _source_excerpts_from_preprocessing_entry(entry)
-                for entry in compiled_entries
-            )
-            cleanup_result = _mechanically_cleanup_compiled_entries(
-                entries=compiled_entries,
-                source_excerpts_by_entry=source_excerpts_before_cleanup,
-            )
-            existing_project_titles = (
-                await _existing_project_titles_for_answer_resolution(
-                    repo=repo,
-                    project_id=project_id,
-                    document_id=document_id,
-                )
-            )
-            await repo.update_document_preprocessing_status(
-                document_id,
-                mode=mode,
-                status=PREPROCESSING_STATUS_PROCESSING,
-                model=active_model,
-                prompt_version=active_prompt_version,
-                metrics={
-                    "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
-                    "stage": "answer_resolution",
-                    "status_message": (
-                        "Извлечение завершено, идёт уплотнение повторяющихся смыслов."
-                    ),
-                    "technical_chunk_processed_count": len(technical_batches),
-                    "technical_chunk_total_count": len(technical_batches),
-                    "failed_part_count": 0,
-                    "raw_draft_count": raw_candidate_count,
-                    "compiled_entry_count": len(cleanup_result.entries),
-                    "answer_resolution_enabled": True,
-                    "extraction_concurrency": extraction_concurrency,
-                    **cleanup_result.metrics,
-                    "elapsed_seconds": round(
-                        time.monotonic() - processing_started_monotonic,
-                        1,
-                    ),
-                },
-            )
-
-            async def persist_answer_resolution_progress(metrics: JsonObject) -> None:
-                await repo.update_document_preprocessing_status(
-                    document_id,
-                    mode=mode,
-                    status=PREPROCESSING_STATUS_PROCESSING,
-                    model=active_model,
-                    prompt_version=active_prompt_version,
-                    metrics={
-                        "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
-                        "stage": "answer_resolution",
-                        "status_message": (
-                            "Черновики сохранены, идёт разрешение похожих ответов."
-                        ),
-                        "technical_chunk_processed_count": len(technical_batches),
-                        "technical_chunk_total_count": len(technical_batches),
-                        "failed_part_count": 0,
-                        "raw_draft_count": raw_candidate_count,
-                        "compiled_entry_count": len(cleanup_result.entries),
-                        "deterministic_cleanup": cleanup_result.metrics,
-                        "answer_resolution": {
-                            **metrics,
-                            "raw_draft_count": raw_candidate_count,
-                        },
-                        "answer_resolution_fallback_published": (
-                            metrics.get("fallback_published") is True
-                        ),
-                        "answer_resolution_enabled": True,
-                        "extraction_concurrency": extraction_concurrency,
-                        "elapsed_seconds": round(
-                            time.monotonic() - processing_started_monotonic,
-                            1,
-                        ),
-                    },
-                )
-
-            (
-                tightened_entries,
-                tightened_source_excerpts,
-                answer_resolution_metrics,
-            ) = await _resolve_compiled_answer_cases(
-                preprocessor=preprocessor,
-                mode=mode,
-                file_name=file_name,
-                entries=cleanup_result.entries,
-                source_excerpts_by_entry=cleanup_result.source_excerpts_by_entry,
-                existing_project_titles=existing_project_titles,
-                on_progress=persist_answer_resolution_progress,
-            )
-            answer_resolution_fallback_published = (
-                answer_resolution_metrics.get("fallback_published") is True
-            )
-            if answer_resolution_fallback_published:
-                answer_resolution_metrics["status"] = "failed_fallback_published"
-                answer_resolution_metrics["published_fallback_entry_count"] = len(
-                    tightened_entries
-                )
-                answer_resolution_metrics["raw_draft_count"] = raw_candidate_count
-            llm_answer_resolution_call_count = _json_metric_int(
-                answer_resolution_metrics, "llm_call_count"
-            )
-            answer_resolution_keep_separate_count = _json_metric_int(
-                answer_resolution_metrics, "kept_separate_count"
-            )
-
-            result = _preprocessing_result_from_entries(
-                mode=mode,
-                template=latest_result,
-                entries=tightened_entries,
-                metrics={
-                    "technical_compiler_call_count": len(preprocessing_results),
-                    "technical_chunk_batch_size": (
-                        KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL
-                    ),
-                    "technical_source_char_budget": (
-                        KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
-                    ),
-                    "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
-                    "answer_resolution_keep_separate_count": (
-                        answer_resolution_keep_separate_count
-                    ),
-                    "compiled_entry_key_count": len(tightened_entries),
-                    "raw_draft_count": raw_candidate_count,
-                    "deterministic_cleanup": cleanup_result.metrics,
-                    "merged_preprocessing_entry_counts": cleanup_result.metrics.get(
-                        "merged_preprocessing_entry_counts", []
-                    ),
-                    "source_refs_preserved_per_semantic_entry": True,
-                    "answer_resolution": answer_resolution_metrics,
-                    "answer_resolution_fallback_published": answer_resolution_fallback_published,
-                    "answer_resolution_enabled": True,
-                    "extraction_concurrency": extraction_concurrency,
-                },
-            )
-            canonical_entries = _canonical_entries_from_preprocessing_result(
+            result, canonical_entries, _shared_metrics = await self._run_answer_resolution_publication_pipeline(
+                repo=repo,
                 project_id=project_id,
                 document_id=document_id,
-                compiler_run_id=compiler_run_id,
-                result=result,
+                mode=mode,
+                file_name=file_name,
                 source_chunks=source_chunks,
+                compiler_run_id=compiler_run_id,
+                compiled_entries=compiled_entries,
+                latest_result=latest_result,
+                preprocessor=preprocessor,
+                active_model=active_model,
+                active_prompt_version=active_prompt_version,
+                raw_candidate_count=raw_candidate_count,
+                technical_batches_count=len(technical_batches),
+                extraction_concurrency=extraction_concurrency,
+                processing_started_monotonic=processing_started_monotonic,
             )
             if not canonical_entries:
                 raise ValidationError(
@@ -4885,15 +4861,6 @@ class KnowledgeIngestionService:
                     "metadata_preserved": True,
                     "source_refs_preserved_per_semantic_entry": True,
                 },
-            )
-
-            await _persist_stage_e_compiler_outputs(
-                repo=repo,
-                project_id=project_id,
-                document_id=document_id,
-                compiler_run_id=compiler_run_id,
-                source_chunks=source_chunks,
-                entries=canonical_entries,
             )
 
             preprocessing_metrics: JsonObject = dict(result.metrics)
@@ -4939,18 +4906,10 @@ class KnowledgeIngestionService:
                 "База знаний обновлена. Сырые черновики сохранены для проверки."
             )
             preprocessing_metrics["usage_event_count"] = usage_event_count
-            preprocessing_metrics["llm_answer_resolution_call_count"] = (
-                llm_answer_resolution_call_count
-            )
-            preprocessing_metrics["semantic_answer_resolution_count"] = (
-                llm_answer_resolution_call_count
-            )
-            preprocessing_metrics["answer_resolution_call_count"] = (
-                llm_answer_resolution_call_count
-            )
-            preprocessing_metrics["answer_resolution_keep_separate_count"] = (
-                answer_resolution_keep_separate_count
-            )
+            preprocessing_metrics["llm_answer_resolution_call_count"] = _json_metric_int(result.metrics.get("answer_resolution", {}), "llm_call_count")
+            preprocessing_metrics["semantic_answer_resolution_count"] = preprocessing_metrics["llm_answer_resolution_call_count"]
+            preprocessing_metrics["answer_resolution_call_count"] = preprocessing_metrics["llm_answer_resolution_call_count"]
+            preprocessing_metrics["answer_resolution_keep_separate_count"] = _json_metric_int(result.metrics.get("answer_resolution", {}), "kept_separate_count")
             preprocessing_metrics["elapsed_seconds"] = round(
                 time.monotonic() - processing_started_monotonic,
                 1,
@@ -5061,3 +5020,85 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", error_message)
             raise ValidationError(error_message) from exc
+    async def _run_answer_resolution_publication_pipeline(
+        self,
+        *,
+        repo: KnowledgeRepositoryPort,
+        project_id: str,
+        document_id: str,
+        mode: KnowledgePreprocessingMode,
+        file_name: str,
+        source_chunks: Sequence[SourceChunk],
+        compiler_run_id: str,
+        compiled_entries: Sequence[KnowledgePreprocessingEntry],
+        latest_result: KnowledgePreprocessingResult,
+        preprocessor: KnowledgePreprocessorPort,
+        active_model: str,
+        active_prompt_version: str,
+        raw_candidate_count: int,
+        technical_batches_count: int,
+        extraction_concurrency: int,
+        processing_started_monotonic: float,
+    ) -> tuple[KnowledgePreprocessingResult, tuple[CanonicalKnowledgeEntry, ...], JsonObject]:
+        source_excerpts_before_cleanup = tuple(
+            _source_excerpts_from_preprocessing_entry(entry) for entry in compiled_entries
+        )
+        cleanup_result = _mechanically_cleanup_compiled_entries(
+            entries=compiled_entries,
+            source_excerpts_by_entry=source_excerpts_before_cleanup,
+        )
+        existing_project_titles = await _existing_project_titles_for_answer_resolution(
+            repo=repo, project_id=project_id, document_id=document_id
+        )
+
+        async def persist_answer_resolution_progress(metrics: JsonObject) -> None:
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=mode,
+                status=PREPROCESSING_STATUS_PROCESSING,
+                model=active_model,
+                prompt_version=active_prompt_version,
+                metrics={"stage": "answer_resolution", "answer_resolution": {**metrics, "raw_draft_count": raw_candidate_count}},
+            )
+
+        tightened_entries, _, answer_resolution_metrics = await _resolve_compiled_answer_cases(
+            preprocessor=preprocessor,
+            mode=mode,
+            file_name=file_name,
+            entries=cleanup_result.entries,
+            source_excerpts_by_entry=cleanup_result.source_excerpts_by_entry,
+            existing_project_titles=existing_project_titles,
+            on_progress=persist_answer_resolution_progress,
+        )
+        result = _preprocessing_result_from_entries(
+            mode=mode,
+            template=latest_result,
+            entries=tightened_entries,
+            metrics={"raw_draft_count": raw_candidate_count, "answer_resolution": answer_resolution_metrics, "answer_resolution_enabled": True},
+        )
+        canonical_entries = _canonical_entries_from_preprocessing_result(
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            result=result,
+            source_chunks=source_chunks,
+        )
+        if not canonical_entries:
+            raise ValidationError("Knowledge preprocessing produced no grounded answer entries")
+        await _persist_stage_e_compiler_outputs(
+            repo=repo,
+            project_id=project_id,
+            document_id=document_id,
+            compiler_run_id=compiler_run_id,
+            source_chunks=source_chunks,
+            entries=canonical_entries,
+        )
+        metrics: JsonObject = dict(result.metrics)
+        metrics["stage"] = "completed"
+        metrics["model"] = active_model
+        metrics["prompt_version"] = active_prompt_version
+        metrics["technical_chunk_total_count"] = technical_batches_count
+        metrics["technical_chunk_processed_count"] = technical_batches_count
+        metrics["extraction_concurrency"] = extraction_concurrency
+        metrics["elapsed_seconds"] = round(time.monotonic() - processing_started_monotonic, 1)
+        return result, canonical_entries, metrics
