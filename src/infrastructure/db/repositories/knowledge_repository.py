@@ -3084,6 +3084,25 @@ class KnowledgeRepository:
             )
         return int(count or 0)
 
+    async def count_document_canonical_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM knowledge_entries
+                WHERE project_id = $1
+                  AND document_id = $2
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        return int(count or 0)
+
     async def list_active_document_pipeline_jobs(
         self,
         *,

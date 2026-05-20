@@ -79,6 +79,7 @@ async def test_processing_report_uses_answer_resolution_pending_state(
     repo.count_document_runtime_entries = AsyncMock(return_value=0)
     repo.count_document_retrieval_surface_entries = AsyncMock(return_value=0)
     repo.count_document_missing_embedding_entries = AsyncMock(return_value=0)
+    repo.count_document_canonical_entries = AsyncMock(return_value=0)
     repo.list_active_document_pipeline_jobs = AsyncMock(return_value=())
 
     report = await _build_report(service, repo=repo)
@@ -86,7 +87,7 @@ async def test_processing_report_uses_answer_resolution_pending_state(
 
 
 @pytest.mark.asyncio
-async def test_processing_report_returns_resume_action_when_raw_candidates_ready(
+async def test_processing_report_does_not_emit_resume_action_before_resume_endpoint_exists(
     service: KnowledgeService,
 ) -> None:
     repo = Mock()
@@ -110,11 +111,46 @@ async def test_processing_report_returns_resume_action_when_raw_candidates_ready
     repo.count_document_runtime_entries = AsyncMock(return_value=0)
     repo.count_document_retrieval_surface_entries = AsyncMock(return_value=0)
     repo.count_document_missing_embedding_entries = AsyncMock(return_value=0)
+    repo.count_document_canonical_entries = AsyncMock(return_value=0)
     repo.list_active_document_pipeline_jobs = AsyncMock(return_value=())
 
     report = await _build_report(service, repo=repo)
     action_ids = {item.id for item in report.allowed_actions}
-    assert "resume_knowledge_compilation" in action_ids
+    assert "resume_knowledge_compilation" not in action_ids
+
+
+@pytest.mark.asyncio
+async def test_processing_report_uses_db_canonical_entry_count_not_metrics_only(
+    service: KnowledgeService,
+) -> None:
+    repo = Mock()
+    repo.get_document = AsyncMock(
+        return_value=_document(preprocessing_metrics={"canonical_entry_count": 0})
+    )
+    repo.list_document_compiler_batches = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                status="completed",
+                batch_count=1,
+                tokens_input=0,
+                tokens_output=0,
+                tokens_total=0,
+            )
+        ]
+    )
+    repo.get_document_answer_candidate_summary = AsyncMock(
+        return_value=SimpleNamespace(
+            raw_count=0, total_count=2, grounded_count=2, rejected_count=0
+        )
+    )
+    repo.count_document_runtime_entries = AsyncMock(return_value=2)
+    repo.count_document_retrieval_surface_entries = AsyncMock(return_value=2)
+    repo.count_document_missing_embedding_entries = AsyncMock(return_value=0)
+    repo.count_document_canonical_entries = AsyncMock(return_value=2)
+    repo.list_active_document_pipeline_jobs = AsyncMock(return_value=())
+
+    report = await _build_report(service, repo=repo)
+    assert report.state == "processed"
 
 
 @pytest.mark.asyncio
@@ -142,76 +178,9 @@ async def test_processing_report_returns_retry_action_when_failed_batches_exist(
     repo.count_document_runtime_entries = AsyncMock(return_value=0)
     repo.count_document_retrieval_surface_entries = AsyncMock(return_value=0)
     repo.count_document_missing_embedding_entries = AsyncMock(return_value=0)
+    repo.count_document_canonical_entries = AsyncMock(return_value=0)
     repo.list_active_document_pipeline_jobs = AsyncMock(return_value=())
 
     report = await _build_report(service, repo=repo)
     action_ids = {item.id for item in report.allowed_actions}
     assert "retry_failed_compiler_batches" in action_ids
-
-
-@pytest.mark.asyncio
-async def test_processing_report_returns_open_curation_console_when_canonical_entries_exist(
-    service: KnowledgeService,
-) -> None:
-    repo = Mock()
-    repo.get_document = AsyncMock(
-        return_value=_document(preprocessing_metrics={"canonical_entry_count": 2})
-    )
-    repo.list_document_compiler_batches = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                status="completed",
-                batch_count=1,
-                tokens_input=0,
-                tokens_output=0,
-                tokens_total=0,
-            )
-        ]
-    )
-    repo.get_document_answer_candidate_summary = AsyncMock(
-        return_value=SimpleNamespace(
-            raw_count=0, total_count=2, grounded_count=2, rejected_count=0
-        )
-    )
-    repo.count_document_runtime_entries = AsyncMock(return_value=2)
-    repo.count_document_retrieval_surface_entries = AsyncMock(return_value=2)
-    repo.count_document_missing_embedding_entries = AsyncMock(return_value=0)
-    repo.list_active_document_pipeline_jobs = AsyncMock(return_value=())
-
-    report = await _build_report(service, repo=repo)
-    action_ids = {item.id for item in report.allowed_actions}
-    assert "open_curation_console" in action_ids
-
-
-@pytest.mark.asyncio
-async def test_processing_report_does_not_return_review_published_as_dead_span_action(
-    service: KnowledgeService,
-) -> None:
-    repo = Mock()
-    repo.get_document = AsyncMock(
-        return_value=_document(preprocessing_metrics={"canonical_entry_count": 2})
-    )
-    repo.list_document_compiler_batches = AsyncMock(
-        return_value=[
-            SimpleNamespace(
-                status="completed",
-                batch_count=1,
-                tokens_input=0,
-                tokens_output=0,
-                tokens_total=0,
-            )
-        ]
-    )
-    repo.get_document_answer_candidate_summary = AsyncMock(
-        return_value=SimpleNamespace(
-            raw_count=0, total_count=2, grounded_count=2, rejected_count=0
-        )
-    )
-    repo.count_document_runtime_entries = AsyncMock(return_value=2)
-    repo.count_document_retrieval_surface_entries = AsyncMock(return_value=2)
-    repo.count_document_missing_embedding_entries = AsyncMock(return_value=0)
-    repo.list_active_document_pipeline_jobs = AsyncMock(return_value=())
-
-    report = await _build_report(service, repo=repo)
-    action_ids = {item.id for item in report.actions}
-    assert "review_published" not in action_ids

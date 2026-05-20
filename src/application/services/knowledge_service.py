@@ -639,6 +639,10 @@ class KnowledgeService:
             project_id=project_id,
             document_id=document_id,
         )
+        canonical_entry_count = await repo.count_document_canonical_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
         active_jobs = await repo.list_active_document_pipeline_jobs(
             project_id=project_id,
             document_id=document_id,
@@ -682,9 +686,6 @@ class KnowledgeService:
             or _json_int_metric(answer_resolution_metrics, "entry_count_after")
             or _json_int_metric(document_metrics, "canonical_entry_count")
             or _json_int_metric(document_metrics, "published_entry_count")
-        )
-        canonical_entry_count = _json_int_metric(
-            document_metrics, "canonical_entry_count"
         )
         active_error_payload = (
             document_metrics.get("active_error")
@@ -737,7 +738,11 @@ class KnowledgeService:
             metrics=document_metrics,
         )
         pipeline_state = resolve_pipeline_state(snapshot)
-        pipeline_commands = allowed_actions_for_state(pipeline_state, snapshot)
+        pipeline_commands = tuple(
+            command
+            for command in allowed_actions_for_state(pipeline_state, snapshot)
+            if command != KnowledgePipelineCommand.RESUME_KNOWLEDGE_COMPILATION
+        )
         backend_actions = tuple(
             _action_from_pipeline_command(command, is_processing=is_processing)
             for command in pipeline_commands

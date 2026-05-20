@@ -290,6 +290,13 @@ class KnowledgeRepositoryPort(Protocol):
         document_id: str,
     ) -> int: ...
 
+    async def count_document_canonical_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int: ...
+
     async def list_active_document_pipeline_jobs(
         self,
         *,

@@ -4,6 +4,7 @@ from .errors import KnowledgePipelineValidationError
 from .resolver import resolve_pipeline_state
 from .snapshot import KnowledgePipelineSnapshot
 from .states import KnowledgePipelineState
+from .validation import validate_pipeline_command
 
 __all__ = [
     "KnowledgePipelineCommand",
@@ -12,4 +13,5 @@ __all__ = [
     "KnowledgePipelineValidationError",
     "allowed_actions_for_state",
     "resolve_pipeline_state",
+    "validate_pipeline_command",
 ]

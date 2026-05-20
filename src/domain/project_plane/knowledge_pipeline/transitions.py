@@ -3,9 +3,11 @@ from collections.abc import Mapping
 from .commands import KnowledgePipelineCommand
 from .states import KnowledgePipelineState
 
-TransitionTable = Mapping[KnowledgePipelineState, tuple[KnowledgePipelineCommand, ...]]
+AllowedCommandTable = Mapping[
+    KnowledgePipelineState, tuple[KnowledgePipelineCommand, ...]
+]
 
-STATE_ALLOWED_COMMANDS: TransitionTable = {
+STATE_ALLOWED_COMMANDS: AllowedCommandTable = {
     KnowledgePipelineState.COMPILER_PARTIAL_FAILED: (
         KnowledgePipelineCommand.RETRY_FAILED_COMPILER_BATCHES,
         KnowledgePipelineCommand.PUBLISH_RAW_DRAFTS_WITHOUT_RESOLUTION,

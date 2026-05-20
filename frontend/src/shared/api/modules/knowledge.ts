@@ -103,8 +103,16 @@ export type KnowledgeProcessingReport = {
   title: string;
   message: string;
   recoverable: boolean;
+  state: string;
+  state_version: number;
+  state_hash: string;
   steps: KnowledgeProcessingStep[];
+  allowed_actions: KnowledgeProcessingAction[];
   actions: KnowledgeProcessingAction[];
+  active_error: Record<string, unknown> | null;
+  last_error: Record<string, unknown> | null;
+  recommended_next_action: Record<string, unknown> | null;
+  diagnostics: Record<string, unknown>;
   metrics: Record<string, unknown>;
 };
 
