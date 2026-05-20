@@ -1,5 +1,21 @@
+import os
 import asyncpg
 import pytest
+
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql://test:test@localhost:5432/test"
+)
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-unit-tests")
+os.environ.setdefault("ADMIN_CHAT_ID", "123456789")
+os.environ.setdefault("GROQ_API_KEY", "test-groq-api-key")
+os.environ.setdefault(
+    "TOKEN_ENCRYPTION_KEY", "test-token-encryption-key-long-enough"
+)
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("MODEL_USAGE_MONTHLY_TOKEN_BUDGET", "1000000")
+os.environ.setdefault("VOYAGE_FREE_MONTHLY_TOKENS", "1000000")
+os.environ.setdefault("MODEL_USAGE_COUNTER_ENABLED", "false")
+
 from src.infrastructure.config.settings import Settings
 from src.infrastructure.db.repositories import ProjectRepository
 from src.infrastructure.db.repositories.thread.lifecycle import (
@@ -14,7 +30,10 @@ settings = Settings(_env_file=".env.test")
 # Function‑scoped pool – создаётся для каждого теста, использует тот же loop, что и тест
 @pytest.fixture(scope="function")
 async def db_pool():
-    pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=10)
+    test_database_url = os.getenv("TEST_DATABASE_URL")
+    if not test_database_url:
+        pytest.skip("TEST_DATABASE_URL is not set for integration/db tests")
+    pool = await asyncpg.create_pool(test_database_url, min_size=1, max_size=10)
     yield pool
     await pool.close()
 

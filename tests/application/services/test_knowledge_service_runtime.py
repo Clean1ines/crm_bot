@@ -21,7 +21,7 @@ class FakeJwt:
         return {"sub": "user-1"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
     project_repo = Mock()
     project_repo.user_has_project_role = AsyncMock(return_value=True)
@@ -92,7 +92,7 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_upload_marks_document_error_when_enqueue_fails():
     project_repo = Mock()
     project_repo.user_has_project_role = AsyncMock(return_value=True)
@@ -137,7 +137,7 @@ async def test_upload_marks_document_error_when_enqueue_fails():
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_clear_project_knowledge_uses_pool_repo():
     project_repo = Mock()
     project_repo.user_has_project_role = AsyncMock(return_value=True)
@@ -169,7 +169,7 @@ async def test_clear_project_knowledge_uses_pool_repo():
     repo.clear_project_knowledge.assert_awaited_once_with("project-1")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retry_document_failed_batches_queues_retry_task():
     from src.infrastructure.queue.job_types import TASK_RETRY_KNOWLEDGE_FAILED_BATCHES
 
@@ -240,7 +240,7 @@ async def test_retry_document_failed_batches_queues_retry_task():
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_publish_document_ready_answers_queues_publish_task():
     from src.infrastructure.queue.job_types import TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS
 
@@ -311,7 +311,7 @@ async def test_publish_document_ready_answers_queues_publish_task():
     )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_retry_document_failed_batches_returns_existing_job_on_idempotency_replay():
     from src.infrastructure.queue.job_types import TASK_RETRY_KNOWLEDGE_FAILED_BATCHES
 
@@ -366,7 +366,7 @@ async def test_retry_document_failed_batches_returns_existing_job_on_idempotency
     queue_repo.enqueue.assert_not_awaited()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_publish_document_ready_answers_raises_state_conflict_when_expected_mismatch():
     from src.infrastructure.queue.job_types import TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS
 
@@ -416,7 +416,7 @@ async def test_publish_document_ready_answers_raises_state_conflict_when_expecte
         )
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_cancel_document_processing_raises_state_conflict_when_expected_mismatch():
     project_repo = Mock()
     project_repo.user_has_project_role = AsyncMock(return_value=True)
