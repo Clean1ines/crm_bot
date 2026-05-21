@@ -644,7 +644,7 @@ async def run_rag_eval_for_document(
         KnowledgeRepository,
     )
     from src.infrastructure.llm.query_expander import GroqQueryExpander
-    from src.infrastructure.llm.rag_contract import KnowledgeSearchRepository
+    from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
     from src.infrastructure.llm.rag_service import RAGService
     from src.infrastructure.rag_eval.adapters import (
         GroqRagEvalJsonLlmAdapter,
@@ -653,7 +653,7 @@ async def run_rag_eval_for_document(
 
     knowledge_repo = KnowledgeRepository(pool)
     rag_service = RAGService(
-        cast(KnowledgeSearchRepository, knowledge_repo),
+        cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
         query_expander=GroqQueryExpander(),
     )
     rag_eval_repo = RagEvalRepository(pool)

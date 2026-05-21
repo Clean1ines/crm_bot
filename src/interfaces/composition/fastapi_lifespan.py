@@ -71,7 +71,8 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     adapters, LLM services, and the process-wide tool registry together.
     """
     from src.infrastructure.llm.query_expander import GroqQueryExpander
-    from src.infrastructure.llm.rag_service import KnowledgeSearchRepository, RAGService
+    from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+    from src.infrastructure.llm.rag_service import RAGService
 
     knowledge_repo = KnowledgeRepository(db_pool)
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
@@ -80,7 +81,7 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     project_members = ProjectMemberRepository(db_pool)
 
     rag_service = RAGService(
-        cast(KnowledgeSearchRepository, knowledge_repo),
+        cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
         query_expander=GroqQueryExpander(),
     )
 

@@ -6,18 +6,24 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import cast
+from typing import Protocol, cast
 
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
+from src.application.ports.knowledge import (
+    KnowledgeDocumentPort,
+    KnowledgeSourceMaterialPort,
+    KnowledgeCompilationTracePort,
+    KnowledgeAnswerCandidatePort,
+    KnowledgeCanonicalEntryPort,
+    KnowledgeRuntimeRetrievalPort,
+)
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     KnowledgePreprocessorPort,
-    KnowledgeRepositoryFactoryPort,
-    KnowledgeRepositoryPort,
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_normalization_service import (
@@ -89,6 +95,24 @@ from src.domain.project_plane.knowledge_acquisition import (
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
 )
+
+
+class KnowledgeIngestionRepositoryPort(
+    KnowledgeDocumentPort,
+    KnowledgeSourceMaterialPort,
+    KnowledgeCompilationTracePort,
+    KnowledgeAnswerCandidatePort,
+    KnowledgeCanonicalEntryPort,
+    KnowledgeRuntimeRetrievalPort,
+    Protocol,
+):
+    """Repository subset required by knowledge ingestion workflows."""
+
+
+class KnowledgeIngestionRepositoryFactoryPort(Protocol):
+    def __call__(
+        self, pool: KnowledgeDbPoolPort
+    ) -> KnowledgeIngestionRepositoryPort: ...
 
 
 _PLAIN_CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
@@ -2122,7 +2146,7 @@ def _apply_answer_resolution_decisions(
 
 async def _existing_project_titles_for_answer_resolution(
     *,
-    repo: KnowledgeRepositoryPort,
+    repo: KnowledgeIngestionRepositoryPort,
     project_id: str,
     document_id: str,
 ) -> tuple[str, ...]:
@@ -3483,7 +3507,7 @@ def _stage_e_compilation_metrics(
 
 async def _persist_stage_e_compiler_outputs(
     *,
-    repo: KnowledgeRepositoryPort,
+    repo: KnowledgeIngestionRepositoryPort,
     project_id: str,
     document_id: str,
     compiler_run_id: str,
@@ -3535,7 +3559,7 @@ class KnowledgeIngestionService:
     async def _persist_plain_chunks(
         self,
         *,
-        repo: KnowledgeRepositoryPort,
+        repo: KnowledgeIngestionRepositoryPort,
         project_id: str,
         document_id: str,
         file_name: str,
@@ -3641,7 +3665,7 @@ class KnowledgeIngestionService:
         project_id: str,
         document_id: str,
         file_name: str,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort,
         logger: LoggerPort,
@@ -3936,7 +3960,7 @@ class KnowledgeIngestionService:
         *,
         project_id: str,
         document_id: str,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> JsonObject:
         repo = knowledge_repo_factory(self.pool)
@@ -4045,7 +4069,7 @@ class KnowledgeIngestionService:
         *,
         project_id: str,
         document_id: str,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort,
         logger: LoggerPort,
@@ -4294,7 +4318,7 @@ class KnowledgeIngestionService:
         file_name: str,
         chunks: list[JsonObject],
         mode: KnowledgePreprocessingMode,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
         logger: LoggerPort,

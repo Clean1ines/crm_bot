@@ -22,7 +22,7 @@ from src.application.rag_eval.schemas import RagEvalRun, RagQualityReport, new_e
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
 from src.infrastructure.llm.query_expander import GroqQueryExpander
-from src.infrastructure.llm.rag_contract import KnowledgeSearchRepository
+from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.llm.groq_keyring import has_configured_groq_api_key
@@ -603,7 +603,7 @@ async def _run_full_document_rag_eval(
 
     knowledge_repo = KnowledgeRepository(db_pool)
     rag_service = RAGService(
-        cast(KnowledgeSearchRepository, knowledge_repo),
+        cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
         query_expander=GroqQueryExpander(),
     )
 

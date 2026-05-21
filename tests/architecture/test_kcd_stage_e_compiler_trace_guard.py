@@ -37,17 +37,40 @@ def test_stage_e_migration_persists_compiler_trace() -> None:
 
 
 def test_knowledge_port_exposes_stage_e_trace_methods() -> None:
-    source = inspect.getsource(knowledge_port.KnowledgeRepositoryPort)
+    source_material = inspect.getsource(knowledge_port.KnowledgeSourceMaterialPort)
+    compilation_trace = inspect.getsource(knowledge_port.KnowledgeCompilationTracePort)
+    answer_candidates = inspect.getsource(knowledge_port.KnowledgeAnswerCandidatePort)
+    canonical_entries = inspect.getsource(knowledge_port.KnowledgeCanonicalEntryPort)
 
-    assert "create_compiler_run" in source
-    assert "complete_compiler_run" in source
-    assert "fail_compiler_run" in source
-    assert "create_compiler_batches" in source
-    assert "mark_compiler_batch_processing" in source
-    assert "complete_compiler_batch" in source
-    assert "fail_compiler_batch" in source
-    assert "add_answer_candidates" in source
-    assert "add_candidate_clusters" in source
+    for method_name in (
+        "add_source_chunks",
+        "list_document_source_chunks",
+        "delete_document_chunks",
+    ):
+        assert method_name in source_material
+
+    for method_name in (
+        "create_compiler_run",
+        "complete_compiler_run",
+        "fail_compiler_run",
+        "create_compiler_batches",
+        "mark_compiler_batch_processing",
+        "complete_compiler_batch",
+        "fail_compiler_batch",
+        "list_document_compiler_batches",
+    ):
+        assert method_name in compilation_trace
+
+    for method_name in (
+        "delete_raw_answer_candidates_for_batch",
+        "add_answer_candidates",
+        "add_candidate_clusters",
+        "list_document_raw_answer_candidates",
+        "get_document_answer_candidate_summary",
+    ):
+        assert method_name in answer_candidates
+
+    assert "add_canonical_entries" in canonical_entries
 
 
 def test_repository_persists_stage_e_trace_tables() -> None:
