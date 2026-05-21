@@ -52,14 +52,61 @@ def test_knowledge_port_exposes_stage_e_trace_methods() -> None:
 
 def test_repository_persists_stage_e_trace_tables() -> None:
     source = inspect.getsource(KnowledgeRepository)
+    compiler_persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_compiler_run_persistence.py"
+    ).read_text(encoding="utf-8")
+    candidate_persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_answer_candidate_persistence.py"
+    ).read_text(encoding="utf-8")
 
-    assert "INSERT INTO knowledge_compiler_runs" in source
-    assert "INSERT INTO knowledge_compilation_metrics" in source
-    assert "INSERT INTO knowledge_compiler_batches" in source
-    assert "UPDATE knowledge_compiler_batches" in source
-    assert "INSERT INTO knowledge_answer_candidates" in source
-    assert "INSERT INTO knowledge_candidate_clusters" in source
-    assert "INSERT INTO knowledge_candidate_cluster_members" in source
+    assert "create_compiler_run" in source
+    assert "complete_compiler_run" in source
+    assert "fail_compiler_run" in source
+    assert "create_compiler_batches" in source
+    assert "mark_compiler_batch_processing" in source
+    assert "complete_compiler_batch" in source
+    assert "fail_compiler_batch" in source
+    assert "delete_raw_answer_candidates_for_batch" in source
+    assert "add_answer_candidates" in source
+    assert "add_candidate_clusters" in source
+
+    assert "await upsert_compiler_run(" in source
+    assert "await upsert_compiler_batch(" in source
+    assert "await persist_mark_compiler_batch_processing(" in source
+    assert "await persist_complete_compiler_batch(" in source
+    assert "await persist_fail_compiler_batch(" in source
+    assert "await persist_complete_compiler_run(" in source
+    assert "await persist_fail_compiler_run(" in source
+    assert "await persist_delete_raw_answer_candidates_for_batch(" in source
+    assert "await upsert_answer_candidates(" in source
+    assert "await upsert_candidate_clusters(" in source
+
+    assert "INSERT INTO knowledge_compiler_runs" not in source
+    assert "INSERT INTO knowledge_compilation_metrics" not in source
+    assert "INSERT INTO knowledge_compiler_batches" not in source
+    assert "UPDATE knowledge_compiler_batches" not in source
+    assert "INSERT INTO knowledge_answer_candidates" not in source
+    assert "INSERT INTO knowledge_candidate_clusters" not in source
+    assert "INSERT INTO knowledge_candidate_cluster_members" not in source
+    assert "DELETE FROM knowledge_candidate_cluster_members" not in source
+    assert "DELETE FROM knowledge_answer_candidates" not in source
+
+    assert "INSERT INTO knowledge_compiler_runs" in compiler_persistence_source
+    assert "INSERT INTO knowledge_compilation_metrics" in compiler_persistence_source
+    assert "INSERT INTO knowledge_compiler_batches" in compiler_persistence_source
+    assert "UPDATE knowledge_compiler_batches" in compiler_persistence_source
+    assert "INSERT INTO knowledge_answer_candidates" in candidate_persistence_source
+    assert "INSERT INTO knowledge_candidate_clusters" in candidate_persistence_source
+    assert (
+        "INSERT INTO knowledge_candidate_cluster_members"
+        in candidate_persistence_source
+    )
+    assert (
+        "DELETE FROM knowledge_candidate_cluster_members"
+        in candidate_persistence_source
+    )
+    assert "DELETE FROM knowledge_answer_candidates" in candidate_persistence_source
+
     assert "DELETE FROM knowledge_compiler_runs WHERE document_id = $1" in source
 
 

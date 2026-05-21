@@ -68,15 +68,31 @@ def test_repository_runtime_entry_kinds_are_canonical_surface() -> None:
 
 
 def test_knowledge_repository_filters_by_entry_kind_not_old_column() -> None:
-    source = inspect.getsource(KnowledgeRepository.search)
-    source += inspect.getsource(KnowledgeRepository.preview_search)
+    import inspect
 
-    assert "knowledge_retrieval_surface AS rs" in source
-    assert "rs.entry_kind = ANY" in source
-    assert "rs.status = 'published'" in source
-    assert "rs.visibility = 'runtime'" in source
-    assert "kb.entry_kind = ANY" not in source
-    assert "entry_type" not in source
+    from src.infrastructure.db.repositories.knowledge_search_queries import (
+        RUNTIME_HYBRID_SEARCH_SQL,
+        RUNTIME_PREVIEW_SEARCH_SQL,
+        RUNTIME_VECTOR_SEARCH_SQL,
+    )
+
+    repository_source = inspect.getsource(KnowledgeRepository.search)
+    query_source = "\n".join(
+        (
+            RUNTIME_VECTOR_SEARCH_SQL,
+            RUNTIME_HYBRID_SEARCH_SQL,
+            RUNTIME_PREVIEW_SEARCH_SQL,
+        )
+    )
+
+    assert "RUNTIME_VECTOR_SEARCH_SQL" in repository_source
+    assert "RUNTIME_HYBRID_SEARCH_SQL" in repository_source
+    assert "knowledge_retrieval_surface AS rs" in query_source
+    assert "rs.entry_kind = ANY" in query_source
+    assert "rs.status = 'published'" in query_source
+    assert "rs.visibility = 'runtime'" in query_source
+    assert "chunk_type" not in query_source
+    assert "entry_type" not in query_source
 
 
 def test_rag_eval_repository_filters_by_entry_kind_not_old_column() -> None:

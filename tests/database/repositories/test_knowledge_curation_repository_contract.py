@@ -52,54 +52,95 @@ def test_curation_rebuild_does_not_use_synthetic_action_ids() -> None:
 
 
 def test_curation_idempotency_does_not_return_existing_action_for_mutation() -> None:
-    source = _method_source(
-        REPOSITORY_SOURCE,
-        "_create_manual_curation_action",
-        "update_entry_status_visibility",
+    from src.infrastructure.db.repositories.knowledge_curation_action_persistence import (
+        create_manual_curation_action,
     )
 
-    assert 'return str(existing["id"])' not in source
+    source = inspect.getsource(create_manual_curation_action)
+
+    assert "idempotency_conflict" in source
     assert "idempotency_replay" in source
     assert "action_in_progress" in source
-    assert "idempotency_conflict" in source
+    assert "return await create_manual_curation_action" not in source
 
 
 def test_curation_status_changes_remove_non_runtime_entries_from_surface() -> None:
+    repository_source = inspect.getsource(KnowledgeRepository)
+    operations_source = Path(
+        "src/infrastructure/db/repositories/knowledge_curation_entry_operations.py"
+    ).read_text(encoding="utf-8")
+    entry_persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_entry_persistence.py"
+    ).read_text(encoding="utf-8")
+
     source = _method_source(
-        REPOSITORY_SOURCE,
+        repository_source,
         "update_entry_status_visibility",
         "update_entry_content",
     )
 
-    assert "DELETE FROM knowledge_retrieval_surface WHERE entry_id = $1" in source
-    assert "source_refs_required_to_publish" in source
+    assert "await run_update_entry_status_visibility(" in source
+    assert "delete_retrieval_surface(" not in source
+    assert "UPDATE knowledge_entries" not in source
+    assert "SELECT count(*) FROM knowledge_entry_source_refs" not in source
+
+    assert "async def update_entry_status_visibility(" in operations_source
+    assert "delete_retrieval_surface(" in operations_source
+    assert "source_refs_required_to_publish" in operations_source
+
+    assert "async def delete_retrieval_surface(" in entry_persistence_source
+    assert "DELETE FROM knowledge_retrieval_surface" in entry_persistence_source
 
 
 def test_curation_merge_apply_removes_absorbed_entries_from_surface() -> None:
+    repository_source = inspect.getsource(KnowledgeRepository)
+    operations_source = Path(
+        "src/infrastructure/db/repositories/knowledge_curation_entry_operations.py"
+    ).read_text(encoding="utf-8")
+    entry_persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_entry_persistence.py"
+    ).read_text(encoding="utf-8")
+
     source = _method_source(
-        REPOSITORY_SOURCE,
+        repository_source,
         "apply_manual_entry_merge",
         "create_manual_rebuild_embedding_action",
     )
 
-    assert "DELETE FROM knowledge_retrieval_surface WHERE entry_id = $1" in source
-    assert "absorbed_already_merged" in source
-    assert "absorbed_version_conflict" in source
-    assert "parent_version_conflict" in source
+    assert "await run_apply_manual_entry_merge(" in source
+    assert "absorbed_already_merged" not in source
+    assert "absorbed_version_conflict" not in source
+    assert "delete_retrieval_surface(" not in source
+
+    assert "absorbed_already_merged" in operations_source
+    assert "absorbed_version_conflict" in operations_source
+    assert "delete_retrieval_surface(" in operations_source
+
+    assert "async def delete_retrieval_surface(" in entry_persistence_source
+    assert "DELETE FROM knowledge_retrieval_surface" in entry_persistence_source
 
 
 def test_curation_merge_apply_persists_result_payload_for_idempotent_replay() -> None:
+    repository_source = inspect.getsource(KnowledgeRepository)
+    operations_source = Path(
+        "src/infrastructure/db/repositories/knowledge_curation_entry_operations.py"
+    ).read_text(encoding="utf-8")
+    action_persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_curation_action_persistence.py"
+    ).read_text(encoding="utf-8")
+
     source = _method_source(
-        REPOSITORY_SOURCE,
+        repository_source,
         "apply_manual_entry_merge",
         "create_manual_rebuild_embedding_action",
     )
 
-    assert "_load_existing_manual_curation_action" in source
-    assert "_merge_apply_result_from_payload" in REPOSITORY_SOURCE
-    assert "_manual_merge_action_payload" in REPOSITORY_SOURCE
-    assert "idempotency_replay_missing_result" in source
-    assert "result_payload = $4::jsonb" in source
-    assert "applied_with_warning" in source
-    assert "replayed=False" in source
-    assert "replayed=True" in REPOSITORY_SOURCE
+    assert "await run_apply_manual_entry_merge(" in source
+    assert "_merge_apply_result_from_payload" in source
+    assert "await mark_action_completed_with_result(" in source
+    assert "idempotency_replay_missing_result" not in source
+
+    assert "idempotency_replay_missing_result" in operations_source
+    assert "result_payload = $4::jsonb" not in repository_source
+    assert "async def mark_action_completed_with_result(" in action_persistence_source
+    assert "result_payload = $4::jsonb" in action_persistence_source

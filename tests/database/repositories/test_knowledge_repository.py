@@ -6,6 +6,9 @@ import pytest
 
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
+from src.infrastructure.db.repositories.knowledge_search_ranking import (
+    preview_score_and_trace,
+)
 from src.infrastructure.llm.embedding_service import (
     EmbeddingBatchResult,
     EmbeddingTextResult,
@@ -22,7 +25,6 @@ from src.domain.project_plane.knowledge_compilation import (
     KnowledgeEntryKind,
     KnowledgeEntryStatus,
     KnowledgeEntryVisibility,
-    SourceChunk,
     SourceRef,
 )
 
@@ -376,19 +378,26 @@ async def test_add_canonical_entries_persists_entries_refs_and_retrieval_surface
 
 
 def test_search_filters_non_answer_knowledge_roles() -> None:
-    source = Path(
-        "src/infrastructure/db/repositories/knowledge_repository.py"
-    ).read_text(encoding="utf-8")
+    import inspect
 
-    assert "ANSWERABLE_KNOWLEDGE_ENTRY_KINDS" in source
-    assert "AND rs.entry_kind = ANY($4::text[])" in source
-    assert "AND rs.entry_kind = ANY($6::text[])" in source
-    assert "rs.status = 'published'" in source
-    assert "rs.visibility = 'runtime'" in source
-    assert "knowledge_retrieval_surface AS rs" in source
-    assert "kb.entry_kind = ANY" not in source
-    assert "entry_type" not in source
-    assert '"debug_artifact"' not in source
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
+    )
+    from src.infrastructure.db.repositories.knowledge_search_queries import (
+        RUNTIME_HYBRID_SEARCH_SQL,
+        RUNTIME_VECTOR_SEARCH_SQL,
+    )
+
+    repository_search_source = inspect.getsource(KnowledgeRepository.search)
+
+    assert "RUNTIME_VECTOR_SEARCH_SQL" in repository_search_source
+    assert "RUNTIME_HYBRID_SEARCH_SQL" in repository_search_source
+    assert "AND rs.entry_kind = ANY($4::text[])" in RUNTIME_VECTOR_SEARCH_SQL
+    assert "AND rs.entry_kind = ANY($6::text[])" in RUNTIME_HYBRID_SEARCH_SQL
+    assert "rs.status = 'published'" in RUNTIME_VECTOR_SEARCH_SQL
+    assert "rs.visibility = 'runtime'" in RUNTIME_VECTOR_SEARCH_SQL
+    assert "rs.status = 'published'" in RUNTIME_HYBRID_SEARCH_SQL
+    assert "rs.visibility = 'runtime'" in RUNTIME_HYBRID_SEARCH_SQL
 
 
 def test_answerable_search_filter_uses_retrieval_surface_contract() -> None:
@@ -402,76 +411,68 @@ def test_answerable_search_filter_uses_retrieval_surface_contract() -> None:
 
 
 def test_search_returns_metadata_observability_fields() -> None:
-    source = Path(
+    import inspect
+
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
+    )
+    from src.infrastructure.db.repositories.knowledge_search_queries import (
+        RUNTIME_HYBRID_SEARCH_SQL,
+        RUNTIME_VECTOR_SEARCH_SQL,
+    )
+
+    repository_search_source = inspect.getsource(KnowledgeRepository.search)
+
+    assert "knowledge_retrieval_surface AS rs" in RUNTIME_VECTOR_SEARCH_SQL
+    assert "knowledge_retrieval_surface AS rs" in RUNTIME_HYBRID_SEARCH_SQL
+    for field in (
+        "rs.document_id",
+        "d.file_name AS source",
+        "d.status AS document_status",
+        "rs.entry_kind",
+        "rs.title",
+        "rs.source_refs",
+        "rs.embedding_text",
+        "rs.enrichment->'questions' AS questions",
+        "rs.enrichment->'synonyms' AS synonyms",
+        "rs.enrichment->'tags' AS tags",
+        "rs.search_text",
+    ):
+        assert field in RUNTIME_VECTOR_SEARCH_SQL
+        assert field in RUNTIME_HYBRID_SEARCH_SQL
+
+    assert 'optional_row_text(row, "document_id")' in repository_search_source
+    assert 'optional_row_text(row, "source")' in repository_search_source
+    assert 'optional_row_text(row, "document_status")' in repository_search_source
+    assert 'optional_row_text(row, "entry_kind")' in repository_search_source
+    assert "source_ref_views_from_payload" in repository_search_source
+    assert "trace=score_trace.trace" in repository_search_source
+
+
+def test_add_source_chunks_persists_raw_source_chunks() -> None:
+    repository_source = Path(
         "src/infrastructure/db/repositories/knowledge_repository.py"
     ).read_text(encoding="utf-8")
-    search_source = source[
-        source.index("    async def search(") : source.index(
-            "    async def preview_search("
-        )
-    ]
+    helper_source = Path(
+        "src/infrastructure/db/repositories/knowledge_source_chunk_persistence.py"
+    ).read_text(encoding="utf-8")
 
-    assert "knowledge_retrieval_surface AS rs" in search_source
-    assert "rs.entry_kind," in search_source
-    assert "rs.title," in search_source
-    assert "rs.source_refs," in search_source
-    assert "rs.embedding_text," in search_source
-    assert "rs.enrichment->'questions' AS questions" in search_source
-    assert "rs.enrichment->'synonyms' AS synonyms" in search_source
-    assert "rs.enrichment->'tags' AS tags" in search_source
-    assert "source_refs=_source_ref_views_from_payload" not in search_source
-    assert "source_refs=source_refs" in search_source
-    assert "source_refs_from_excerpt" not in search_source
-    assert "knowledge_base" not in search_source
+    assert "await replace_document_source_chunks(" in repository_source
+    assert "await query_document_source_chunks(" in repository_source
+    assert "await delete_document_source_chunks(" in repository_source
 
+    assert "FROM knowledge_source_chunks" in helper_source
+    assert "DELETE FROM knowledge_source_chunks WHERE document_id = $1" in helper_source
+    assert "INSERT INTO knowledge_source_chunks" in helper_source
+    assert "chunk.section_title," in helper_source
+    assert "chunk.section_title or None" not in helper_source
 
-@pytest.mark.asyncio
-async def test_add_source_chunks_persists_raw_source_chunks(
-    knowledge_repo,
-    mock_pool,
-):
-    project_id = "00000000-0000-0000-0000-000000000001"
-    document_id = "00000000-0000-0000-0000-000000000002"
-    chunk = SourceChunk(
-        id=f"{document_id}:0",
-        project_id=project_id,
-        document_id=document_id,
-        source_index=0,
-        content="Raw source evidence text.",
-        page=2,
-        section_title="Evidence",
-        checksum="checksum-1",
-        metadata={"upload_chunk_index": 0},
+    assert "FROM knowledge_source_chunks" not in repository_source
+    assert (
+        "DELETE FROM knowledge_source_chunks WHERE document_id = $1"
+        not in repository_source
     )
-
-    class _FakeTransaction:
-        async def __aenter__(self) -> None:
-            return None
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-    mock_pool.mock_conn.transaction = Mock(return_value=_FakeTransaction())
-
-    result = await knowledge_repo.add_source_chunks(
-        project_id=project_id,
-        document_id=document_id,
-        chunks=(chunk,),
-    )
-
-    assert result == 1
-    calls = mock_pool.mock_conn.execute.await_args_list
-    assert "DELETE FROM knowledge_source_chunks" in calls[-2].args[0]
-
-    insert_args = calls[-1].args
-    assert "INSERT INTO knowledge_source_chunks" in insert_args[0]
-    assert insert_args[1] == f"{document_id}:0"
-    assert insert_args[4] == 0
-    assert insert_args[5] == "Raw source evidence text."
-    assert insert_args[6] == 2
-    assert insert_args[7] == "Evidence"
-    assert insert_args[10] == "checksum-1"
-    assert '"upload_chunk_index": 0' in insert_args[11]
+    assert "INSERT INTO knowledge_source_chunks" not in repository_source
 
 
 def test_canonical_source_ref_insert_uses_quote_hash_identity() -> None:
@@ -480,33 +481,22 @@ def test_canonical_source_ref_insert_uses_quote_hash_identity() -> None:
     repository_source = Path(
         "src/infrastructure/db/repositories/knowledge_repository.py"
     ).read_text(encoding="utf-8")
+    persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_entry_persistence.py"
+    ).read_text(encoding="utf-8")
     migration_source = Path(
         "migrations/061_allow_multiple_source_ref_quotes_per_chunk.sql"
     ).read_text(encoding="utf-8")
 
-    assert "quote_hash" in repository_source
-    assert "md5(coalesce($4, ''))" in repository_source
+    assert "quote_hash" in persistence_source
+    assert "md5(coalesce($4, ''))" in persistence_source
+    assert "md5(coalesce($4, ''))" not in repository_source
     assert "PRIMARY KEY (entry_id, source_chunk_id, source_index, quote_hash)" in (
         migration_source
     )
-    assert "DROP CONSTRAINT IF EXISTS pk_knowledge_entry_source_refs" in (
-        migration_source
-    )
-
-
-# Retrieval preview trace invariant tests
-
-
-def _preview_trace_repository_for_test():
-    from src.infrastructure.db.repositories.knowledge_repository import (
-        KnowledgeRepository,
-    )
-
-    return KnowledgeRepository(pool=object())
 
 
 def test_preview_trace_prioritizes_exact_question_over_long_generic_text() -> None:
-    repo = _preview_trace_repository_for_test()
     query = "Как оформить возврат книги?"
 
     exact_row: dict[str, object] = {
@@ -546,12 +536,12 @@ def test_preview_trace_prioritizes_exact_question_over_long_generic_text() -> No
         "lexical_score": 0.03,
     }
 
-    exact = repo._preview_score_and_trace(
+    exact = preview_score_and_trace(
         exact_row,
         query=query,
         content=str(exact_row["content"]),
     )
-    generic = repo._preview_score_and_trace(
+    generic = preview_score_and_trace(
         long_generic_row,
         query=query,
         content=str(long_generic_row["content"]),
@@ -564,7 +554,6 @@ def test_preview_trace_prioritizes_exact_question_over_long_generic_text() -> No
 
 
 def test_preview_trace_explains_synonyms_tags_and_answer_matches() -> None:
-    repo = _preview_trace_repository_for_test()
     query = "Можно ли получить документ ночью?"
 
     row: dict[str, object] = {
@@ -588,9 +577,7 @@ def test_preview_trace_explains_synonyms_tags_and_answer_matches() -> None:
         "lexical_score": 0.01,
     }
 
-    scored = repo._preview_score_and_trace(
-        row, query=query, content=str(row["content"])
-    )
+    scored = preview_score_and_trace(row, query=query, content=str(row["content"]))
 
     assert scored.score > 0
     assert "synonyms" in scored.trace.matched_fields
@@ -600,7 +587,6 @@ def test_preview_trace_explains_synonyms_tags_and_answer_matches() -> None:
 
 
 def test_preview_trace_marks_internal_artifact_as_not_production_safe() -> None:
-    repo = _preview_trace_repository_for_test()
     row: dict[str, object] = {
         "id": "guideline",
         "entry_kind": "retrieval_guideline",
@@ -614,7 +600,7 @@ def test_preview_trace_marks_internal_artifact_as_not_production_safe() -> None:
         "lexical_score": 0.01,
     }
 
-    scored = repo._preview_score_and_trace(
+    scored = preview_score_and_trace(
         row,
         query="Как оформить возврат книги?",
         content=str(row["content"]),

@@ -66,22 +66,65 @@ def test_stage_h_application_service_is_application_layer_only() -> None:
 
 def test_stage_h_knowledge_repository_owns_entry_mutations() -> None:
     repository = _read("src/infrastructure/db/repositories/knowledge_repository.py")
+    operations = _read(
+        "src/infrastructure/db/repositories/knowledge_curation_entry_operations.py"
+    )
+    action_persistence = _read(
+        "src/infrastructure/db/repositories/knowledge_curation_action_persistence.py"
+    )
+    entry_persistence = _read(
+        "src/infrastructure/db/repositories/knowledge_entry_persistence.py"
+    )
 
-    required = [
+    repository_required = [
         "create_or_get_knowledge_edit_action",
         "mark_knowledge_edit_action_applied",
         "mark_knowledge_edit_action_rejected",
         "mark_knowledge_edit_action_failed",
         "attach_question_to_entry",
         "rebuild_entry_embedding",
+        "run_attach_question_to_entry",
+        "run_rebuild_entry_embedding",
+    ]
+    for marker in repository_required:
+        assert marker in repository
+
+    operations_required = [
+        "async def attach_question_to_entry",
+        "async def rebuild_entry_embedding",
+        "UPDATE knowledge_entries",
+        "FROM knowledge_entries",
+        "FROM knowledge_entry_source_refs",
+        "embed_batch([embedding_text])",
+        "await update_retrieval_surface_metadata(",
+        "await upsert_retrieval_surface_from_payload(",
+        "await write_version_snapshot(",
+    ]
+    for marker in operations_required:
+        assert marker in operations
+
+    persistence_required = [
         "knowledge_edit_actions",
         "knowledge_entry_versions",
         "knowledge_retrieval_surface",
-        "embed_batch([embedding_text])",
     ]
+    combined_persistence = "\n".join((action_persistence, entry_persistence))
+    for marker in persistence_required:
+        assert marker in combined_persistence
 
-    for marker in required:
-        assert marker in repository
+    attach_start = repository.index("async def attach_question_to_entry")
+    rebuild_start = repository.index("async def rebuild_entry_embedding", attach_start)
+    delete_chunks_start = repository.index(
+        "async def delete_document_chunks", rebuild_start
+    )
+    attach_wrapper = repository[attach_start:rebuild_start]
+    rebuild_wrapper = repository[rebuild_start:delete_chunks_start]
+
+    assert "UPDATE knowledge_entries" not in attach_wrapper
+    assert "UPDATE knowledge_entries" not in rebuild_wrapper
+    assert "FROM knowledge_entry_source_refs" not in attach_wrapper
+    assert "FROM knowledge_entry_source_refs" not in rebuild_wrapper
+    assert "embed_batch([embedding_text])" not in rebuild_wrapper
 
 
 def test_stage_h_rag_eval_repository_exposes_action_source_loader() -> None:
