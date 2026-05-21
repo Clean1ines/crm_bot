@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React from 'react';
 import { Edit3, EyeOff, GitMerge, History, RefreshCw, RotateCcw, SearchCheck, XCircle } from 'lucide-react';
 import type { KnowledgeCurationEntry } from '../../../shared/api/modules/knowledgeCuration';
@@ -26,12 +27,12 @@ export const KnowledgeEntryCurationCard: React.FC<{
         </div>
         <p className="mt-2 line-clamp-3 text-sm text-[var(--text-secondary)]">{entry.answer}</p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-          <span>kind: {entry.entry_kind}</span>
-          <span>source refs: {entry.source_refs.length}</span>
+          <span>{t('ragEval.curation.entry.kindPrefix')} {entry.entry_kind}</span>
+          <span>{t('ragEval.curation.entry.sourceRefsPrefix')} {entry.source_refs.length}</span>
           <span>questions: {listCount(entry.enrichment.questions)}</span>
           <span>tags: {listCount(entry.enrichment.tags)}</span>
-          <span>embedding: {entry.has_embedding ? 'yes' : 'no'}</span>
-          <span>retrieval row: {entry.has_retrieval_surface ? 'yes' : 'no'}</span>
+          <span>{t('ragEval.curation.entry.embeddingPrefix')} {entry.has_embedding ? t('ragEval.curation.boolean.yes') : t('ragEval.curation.boolean.no')}</span>
+          <span>{t('ragEval.curation.entry.retrievalRowPrefix')} {entry.has_retrieval_surface ? t('ragEval.curation.boolean.yes') : t('ragEval.curation.boolean.no')}</span>
         </div>
         {!!entry.issues.length && (
           <div className="mt-3 flex flex-wrap gap-2">

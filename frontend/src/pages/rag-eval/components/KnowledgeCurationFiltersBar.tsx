@@ -1,11 +1,12 @@
+import { t } from '@shared/i18n';
 import React from 'react';
 
 export type CurationFilter = 'all' | 'published' | 'needs_review' | 'hidden' | 'rejected' | 'merged' | 'possible_duplicates' | 'missing_source_refs' | 'missing_embedding' | 'no_retrieval_surface' | 'fallback_chunk' | 'suspicious_short' | 'changed_recently';
 export type CurationSort = 'most_suspicious' | 'title' | 'status' | 'updated_at' | 'source_refs_count' | 'questions_count' | 'duplicate_group_size';
 
 const filters: Array<[CurationFilter, string]> = [
-  ['all', 'Все'], ['published', 'Published'], ['needs_review', 'Needs review'], ['hidden', 'Hidden'], ['rejected', 'Rejected'], ['merged', 'Merged'],
-  ['possible_duplicates', 'Duplicates'], ['missing_source_refs', 'Без source refs'], ['missing_embedding', 'Без embedding'], ['no_retrieval_surface', 'Нет retrieval row'], ['fallback_chunk', 'Fallback'], ['suspicious_short', 'Короткие'], ['changed_recently', 'Недавно изменены'],
+  ['all', t('ragEval.curation.filter.all')], ['published', t('ragEval.curation.filter.published')], ['needs_review', t('ragEval.curation.filter.needsReview')], ['hidden', t('ragEval.curation.filter.hidden')], ['rejected', t('ragEval.curation.filter.rejected')], ['merged', t('ragEval.curation.filter.merged')],
+  ['possible_duplicates', t('ragEval.curation.filter.possibleDuplicates')], ['missing_source_refs', t('ragEval.curation.filter.missingSourceRefs')], ['missing_embedding', t('ragEval.curation.filter.missingEmbedding')], ['no_retrieval_surface', t('ragEval.curation.filter.noRetrievalSurface')], ['fallback_chunk', t('ragEval.curation.filter.fallbackChunk')], ['suspicious_short', t('ragEval.curation.filter.suspiciousShort')], ['changed_recently', t('ragEval.curation.filter.changedRecently')],
 ];
 
 export const KnowledgeCurationFiltersBar: React.FC<{
@@ -21,15 +22,15 @@ export const KnowledgeCurationFiltersBar: React.FC<{
       ))}
     </div>
     <label className="mt-3 block text-sm text-[var(--text-muted)]">
-      Сортировка
+      {t('ragEval.curation.sort.label')}
       <select value={sort} onChange={(event) => onSortChange(event.target.value as CurationSort)} className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)] sm:w-72">
-        <option value="most_suspicious">Самые подозрительные</option>
-        <option value="title">Title</option>
-        <option value="status">Status</option>
-        <option value="updated_at">Updated at</option>
-        <option value="source_refs_count">Source refs count</option>
-        <option value="questions_count">Questions count</option>
-        <option value="duplicate_group_size">Duplicate group size</option>
+        <option value="most_suspicious">{t('ragEval.curation.sort.mostSuspicious')}</option>
+        <option value="title">{t('ragEval.curation.sort.title')}</option>
+        <option value="status">{t('ragEval.curation.sort.status')}</option>
+        <option value="updated_at">{t('ragEval.curation.sort.updatedAt')}</option>
+        <option value="source_refs_count">{t('ragEval.curation.sort.sourceRefsCount')}</option>
+        <option value="questions_count">{t('ragEval.curation.sort.questionsCount')}</option>
+        <option value="duplicate_group_size">{t('ragEval.curation.sort.duplicateGroupSize')}</option>
       </select>
     </label>
   </section>
