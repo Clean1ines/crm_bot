@@ -86,15 +86,15 @@ const confidenceLabel = (score: number): string => {
 
 const previewTraceLabel = (value: string): string => {
   const labels: Record<string, string> = {
-    title: 'title',
-    questions: 'questions',
-    synonyms: 'synonyms',
-    tags: 'tags',
-    answer: 'answer',
-    search_text: 'search',
-    embedding_text: 'embedding text',
-    exact: 'exact',
-    embedding: 'embedding',
+    title: t('knowledge.preview.trace.field.title'),
+    questions: t('knowledge.preview.trace.field.questions'),
+    synonyms: t('knowledge.preview.trace.field.synonyms'),
+    tags: t('knowledge.preview.trace.field.tags'),
+    answer: t('knowledge.preview.trace.field.answer'),
+    search_text: t('knowledge.preview.trace.field.searchText'),
+    embedding_text: t('knowledge.preview.trace.field.embeddingText'),
+    exact: t('knowledge.preview.trace.field.exact'),
+    embedding: t('knowledge.preview.trace.field.embedding'),
   };
 
   return labels[value] || value;
@@ -532,15 +532,15 @@ const processingDetailRows = (doc: Document): string[] => {
   if (completedParts !== null && totalParts !== null) {
     rows.push(t('knowledge.document.extractedPartsProgress', { current: formatNumber(completedParts), total: formatNumber(totalParts) }));
   }
-  if (failedParts !== null) rows.push(`Failed parts: ${formatNumber(failedParts)}`);
-  if (rawDrafts !== null) rows.push(`Raw drafts saved: ${formatNumber(rawDrafts)}`);
-  if (safelyCombined !== null) rows.push(`Duplicate answers combined safely: ${formatNumber(safelyCombined)}`);
-  if (resolutionPasses !== null) rows.push(`Answer resolution passes: ${formatNumber(resolutionPasses)}`);
-  if (answerResolutionCases !== null) rows.push(`Answer resolver cases: ${formatNumber(answerResolutionCases)}`);
-  if (appliedAnswerResolutions !== null) rows.push(`Answer resolutions applied: ${formatNumber(appliedAnswerResolutions)}`);
-  if (keptSeparate !== null) rows.push(`Kept separate by resolver: ${formatNumber(keptSeparate)}`);
-  if (invalidResolverOutputs !== null) rows.push(`Rejected/invalid resolver outputs: ${formatNumber(invalidResolverOutputs)}`);
-  if (publishedEntries !== null) rows.push(`Published entries: ${formatNumber(publishedEntries)}`);
+  if (failedParts !== null) rows.push(t('knowledge.document.failedParts', { count: formatNumber(failedParts) }));
+  if (rawDrafts !== null) rows.push(t('knowledge.document.rawDraftsSaved', { count: formatNumber(rawDrafts) }));
+  if (safelyCombined !== null) rows.push(t('knowledge.document.duplicateAnswersCombinedSafely', { count: formatNumber(safelyCombined) }));
+  if (resolutionPasses !== null) rows.push(t('knowledge.document.answerResolutionPasses', { count: formatNumber(resolutionPasses) }));
+  if (answerResolutionCases !== null) rows.push(t('knowledge.document.answerResolverCases', { count: formatNumber(answerResolutionCases) }));
+  if (appliedAnswerResolutions !== null) rows.push(t('knowledge.document.answerResolutionsApplied', { count: formatNumber(appliedAnswerResolutions) }));
+  if (keptSeparate !== null) rows.push(t('knowledge.document.keptSeparateByResolver', { count: formatNumber(keptSeparate) }));
+  if (invalidResolverOutputs !== null) rows.push(t('knowledge.document.rejectedInvalidResolverOutputs', { count: formatNumber(invalidResolverOutputs) }));
+  if (publishedEntries !== null) rows.push(t('knowledge.document.publishedEntries', { count: formatNumber(publishedEntries) }));
 
   return rows;
 };
@@ -615,15 +615,21 @@ const PreviewResultCard: React.FC<{
       {result.entry_kind && <span>entry: {result.entry_kind}</span>}
       {result.trace && (
         <span>
-          trace: {result.trace.matched_fields.map(previewTraceLabel).join(', ') || 'none'}
-          {' · '}lexical {formatPreviewScore(result.trace.lexical_score)}
-          {' · '}vector {formatPreviewScore(result.trace.vector_score)}
-          {' · '}final {formatPreviewScore(result.trace.final_score)}
-          {' · '}field {result.trace.displayed_field}
-          {' · '}{result.trace.is_production_safe ? 'production-safe' : 'not production-safe'}
-          {result.trace.title_match ? ' · title match' : ''}
-          {result.trace.exact_question_match ? ' · question match' : ''}
-          {result.trace.length_penalty > 0 ? ` · penalty ${formatPreviewScore(result.trace.length_penalty)}` : ''}
+          {t('knowledge.preview.trace.summary', {
+            fields: result.trace.matched_fields.map(previewTraceLabel).join(', ') || t('knowledge.preview.trace.none'),
+            lexical: formatPreviewScore(result.trace.lexical_score),
+            vector: formatPreviewScore(result.trace.vector_score),
+            final: formatPreviewScore(result.trace.final_score),
+            field: previewTraceLabel(result.trace.displayed_field),
+          })}
+          {' · '}{result.trace.is_production_safe
+            ? t('knowledge.preview.trace.productionSafe')
+            : t('knowledge.preview.trace.notProductionSafe')}
+          {result.trace.title_match ? ` · ${t('knowledge.preview.trace.titleMatch')}` : ''}
+          {result.trace.exact_question_match ? ` · ${t('knowledge.preview.trace.questionMatch')}` : ''}
+          {result.trace.length_penalty > 0
+            ? ` · ${t('knowledge.preview.trace.penalty', { penalty: formatPreviewScore(result.trace.length_penalty) })}`
+            : ''}
         </span>
       )}
     </div>
@@ -942,7 +948,7 @@ const SourceUnitsSummary: React.FC<{
               title={sourceUnitTitle(sourceUnit)}
             >
               #{sourceUnit.source_index} · {sourceUnitTitle(sourceUnit)}
-              {sourceUnit.draft_count > 0 ? ` · drafts ${sourceUnit.draft_count}` : ''}
+              {sourceUnit.draft_count > 0 ? ` · ${t('knowledge.sourceUnits.badge.drafts', { count: formatNumber(sourceUnit.draft_count) })}` : ''}
             </div>
           ))}
         </div>
@@ -1039,9 +1045,9 @@ const SourceUnitsModal: React.FC<{
                         #{sourceUnit.source_index} · {sourceUnitTitle(sourceUnit)}
                       </div>
                       <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-                        {sourceUnit.draft_count > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">drafts {sourceUnit.draft_count}</span>}
-                        {typeof sourceUnit.start_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">offset {sourceUnit.start_offset}</span>}
-                        {typeof sourceUnit.end_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">end {sourceUnit.end_offset}</span>}
+                        {sourceUnit.draft_count > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{t('knowledge.sourceUnits.badge.drafts', { count: formatNumber(sourceUnit.draft_count) })}</span>}
+                        {typeof sourceUnit.start_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{t('knowledge.sourceUnits.badge.offset', { value: formatNumber(sourceUnit.start_offset) })}</span>}
+                        {typeof sourceUnit.end_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{t('knowledge.sourceUnits.badge.end', { value: formatNumber(sourceUnit.end_offset) })}</span>}
                       </div>
                     </div>
                     <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -1049,23 +1055,23 @@ const SourceUnitsModal: React.FC<{
 
                   {isExpanded && (
                     <div className="space-y-4 border-t border-[var(--border-subtle)] px-3 py-3">
-                      <DraftDetailRow label="Source text">
+                      <DraftDetailRow label={t('knowledge.sourceUnits.fields.sourceText')}>
                         <div className="whitespace-pre-wrap">{sourceUnit.content || '—'}</div>
                       </DraftDetailRow>
 
                       {sourceUnit.draft_titles.length > 0 && (
-                        <DraftDetailRow label="Drafts extracted from this source">
+                        <DraftDetailRow label={t('knowledge.sourceUnits.fields.extractedDrafts')}>
                           <ul className="list-disc space-y-1 pl-5">
                             {sourceUnit.draft_titles.map((title) => <li key={title}>{title}</li>)}
                           </ul>
                         </DraftDetailRow>
                       )}
 
-                      <DraftDetailRow label="Metadata">
+                      <DraftDetailRow label={t('knowledge.sourceUnits.fields.metadata')}>
                         <div className="flex flex-wrap gap-1.5 text-xs text-[var(--text-muted)]">
-                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">id: {sourceUnit.id}</span>
-                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_index: {sourceUnit.source_index}</span>
-                          {typeof sourceUnit.page === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">page: {sourceUnit.page}</span>}
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">{t('knowledge.sourceUnits.badge.id', { value: sourceUnit.id })}</span>
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">{t('knowledge.sourceUnits.badge.sourceIndex', { value: formatNumber(sourceUnit.source_index) })}</span>
+                          {typeof sourceUnit.page === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">{t('knowledge.sourceUnits.badge.page', { value: formatNumber(sourceUnit.page) })}</span>}
                         </div>
                       </DraftDetailRow>
                     </div>
@@ -1523,7 +1529,7 @@ export const KnowledgePage: React.FC = () => {
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
 
       const response = await knowledgeApi.upload(projectId, file, preprocessingMode);
 
@@ -1547,7 +1553,7 @@ export const KnowledgePage: React.FC = () => {
 
   const previewMutation = useMutation<KnowledgePreviewResponse, unknown, string>({
     mutationFn: async (question: string) => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
       const { data } = await knowledgeApi.preview(projectId, question, 5);
       return data;
     },
@@ -1558,7 +1564,7 @@ export const KnowledgePage: React.FC = () => {
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
       await knowledgeApi.clear(projectId);
     },
     onSuccess: async () => {
@@ -1578,7 +1584,7 @@ export const KnowledgePage: React.FC = () => {
 
   const cancelProcessingMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
       await knowledgeApi.cancel(projectId, documentId);
     },
     onSuccess: async () => {
@@ -1594,7 +1600,7 @@ export const KnowledgePage: React.FC = () => {
 
   const retightenMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
       await knowledgeApi.retighten(projectId, documentId);
     },
     onSuccess: async () => {
@@ -1610,7 +1616,7 @@ export const KnowledgePage: React.FC = () => {
 
   const retryFailedBatchesMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
       await knowledgeApi.retryFailedBatches(projectId, documentId);
     },
     onSuccess: async () => {
@@ -1626,7 +1632,7 @@ export const KnowledgePage: React.FC = () => {
 
   const publishReadyMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error('Project ID is missing');
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
       await knowledgeApi.publishReady(projectId, documentId);
     },
     onSuccess: async () => {
