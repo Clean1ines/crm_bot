@@ -19,9 +19,9 @@ import json
 import re
 from typing import Mapping
 
+from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.infrastructure.llm.rag_contract import (
-    KnowledgeSearchRepository,
     QueryExpander,
     RAGCandidate,
     RAGPipelineConfig,
@@ -41,7 +41,7 @@ class _NoOpQueryExpander:
 class RAGService:
     def __init__(
         self,
-        knowledge_repo: KnowledgeSearchRepository,
+        knowledge_repo: KnowledgeRuntimeRetrievalPort,
         *,
         query_expander: QueryExpander | None = None,
         config: RAGPipelineConfig | None = None,

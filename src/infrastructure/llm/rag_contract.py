@@ -181,16 +181,3 @@ class QueryExpander(Protocol):
     """
 
     async def expand(self, query: str, *, max_expansions: int) -> list[str]: ...
-
-
-class KnowledgeSearchRepository(Protocol):
-    """Repository port used by RAGService."""
-
-    async def search(
-        self,
-        project_id: str,
-        query: str,
-        limit: int = 10,
-        hybrid_fallback: bool = True,
-        thread_id: str | None = None,
-    ) -> list[Mapping[str, object] | KnowledgeSearchResultView]: ...
