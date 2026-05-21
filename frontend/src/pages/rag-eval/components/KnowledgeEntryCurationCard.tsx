@@ -48,8 +48,8 @@ export const KnowledgeEntryCurationCard: React.FC<{
       <button type="button" onClick={() => onStatus('restore_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><RotateCcw className="mr-1 inline h-4 w-4" />Restore</button>
       <button type="button" onClick={() => onStatus(entry.status === 'published' ? 'unpublish_entry' : 'publish_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><SearchCheck className="mr-1 inline h-4 w-4" />{entry.status === 'published' ? 'Unpublish' : 'Publish'}</button>
       <button type="button" onClick={onRebuild} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><RefreshCw className="mr-1 inline h-4 w-4" />Rebuild search</button>
-      <button type="button" onClick={onVersions} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><History className="mr-1 inline h-4 w-4" />Versions</button>
-      <button type="button" onClick={onDiagnostics} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><GitMerge className="mr-1 inline h-4 w-4" />Diagnostics</button>
+      <button type="button" onClick={onVersions} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><History className="mr-1 inline h-4 w-4" />{t('ragEval.curation.versions.title')}</button>
+      <button type="button" onClick={onDiagnostics} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><GitMerge className="mr-1 inline h-4 w-4" />{t('ragEval.curation.diagnostics.title')}</button>
     </div>
   </article>
 );
