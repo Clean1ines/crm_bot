@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { t } from '@shared/i18n';
 import type {
   KnowledgeCurationEntry,
   KnowledgeEntryMergeIncludeOptions,
@@ -31,6 +32,20 @@ const includeKeys: Array<keyof KnowledgeEntryMergeIncludeOptions> = [
   'source_refs',
   'metadata',
 ];
+
+const includeKeyLabel = (key: keyof KnowledgeEntryMergeIncludeOptions): string => {
+  if (key === 'answers') return t('ragEval.curation.merge.include.answers');
+  if (key === 'questions') return t('ragEval.curation.merge.include.questions');
+  if (key === 'paraphrases') return t('ragEval.curation.merge.include.paraphrases');
+  if (key === 'synonyms') return t('ragEval.curation.merge.include.synonyms');
+  if (key === 'typo_queries') return t('ragEval.curation.merge.include.typoQueries');
+  if (key === 'colloquial_queries') return t('ragEval.curation.merge.include.colloquialQueries');
+  if (key === 'tags') return t('ragEval.curation.merge.include.tags');
+  if (key === 'retrieval_guards') return t('ragEval.curation.merge.include.retrievalGuards');
+  if (key === 'source_refs') return t('ragEval.curation.merge.include.sourceRefs');
+  if (key === 'metadata') return t('ragEval.curation.merge.include.metadata');
+  return key;
+};
 
 type MergeExcludeState = KnowledgeEntryMergePreviewRequest['exclude'];
 
@@ -179,10 +194,10 @@ export const KnowledgeEntryMergeDrawer: React.FC<{
       <div className="ml-auto flex h-full max-w-6xl flex-col rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-xl">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Merge canonical entries</h2>
-            <p className="text-sm text-[var(--text-muted)]">Preview не мутирует базу. Apply доступен только для свежего preview без blocking errors.</p>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.title')}</h2>
+            <p className="text-sm text-[var(--text-muted)]">{t('ragEval.curation.merge.description')}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-sm text-[var(--text-muted)]">Закрыть</button>
+          <button type="button" onClick={onClose} className="text-sm text-[var(--text-muted)]">{t('common.actions.close')}</button>
         </div>
 
         <div className="mt-4 grid min-h-0 flex-1 gap-4 overflow-auto xl:grid-cols-[420px_1fr]">
@@ -190,14 +205,14 @@ export const KnowledgeEntryMergeDrawer: React.FC<{
             {error && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">{error}</div>}
 
             <div className="rounded-xl bg-[var(--control-bg)] p-3">
-              <div className="text-sm font-semibold text-[var(--text-primary)]">Parent / survivor</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.parentSurvivor')}</div>
               <div className="mt-2 space-y-2">
                 {entries.map((entry) => (
                   <label key={entry.id} className="flex items-start gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-2 text-sm text-[var(--text-secondary)]">
                     <input type="radio" checked={activeParentId === entry.id} onChange={() => setParentId(entry.id)} className="mt-1" />
                     <span>
                       <span className="block font-medium text-[var(--text-primary)]">{entry.title}</span>
-                      <span className="text-xs text-[var(--text-muted)]">v{entry.version} · {entry.status} · source refs: {entry.source_refs.length}</span>
+                      <span className="text-xs text-[var(--text-muted)]">v{entry.version} · {entry.status} · {t('ragEval.curation.merge.sourceRefsCount', { count: String(entry.source_refs.length) })}</span>
                     </span>
                   </label>
                 ))}
@@ -207,101 +222,101 @@ export const KnowledgeEntryMergeDrawer: React.FC<{
             <input
               value={finalTitle}
               onChange={(event) => setFinalTitle(event.target.value)}
-              placeholder={`Final title: ${parent?.title ?? ''}`}
+              placeholder={t('ragEval.curation.merge.finalTitlePlaceholder', { title: parent?.title ?? '' })}
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)]"
             />
             <textarea
               value={finalAnswer}
               onChange={(event) => setFinalAnswer(event.target.value)}
-              placeholder="Final answer override. Empty means backend builds merged answer."
+              placeholder={t('ragEval.curation.merge.finalAnswerPlaceholder')}
               rows={6}
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)]"
             />
             <textarea
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              placeholder="Merge instruction/reason: что забрать, что не тащить, почему это один canonical entry."
+              placeholder={t('ragEval.curation.merge.instructionPlaceholder')}
               rows={3}
               className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)]"
             />
 
             <div className="rounded-xl bg-[var(--control-bg)] p-3">
-              <div className="text-sm font-semibold text-[var(--text-primary)]">Include groups</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.includeGroups')}</div>
               <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-[var(--text-muted)]">
                 {includeKeys.map((key) => (
                   <label key={key} className="flex items-center gap-2">
                     <input type="checkbox" checked={include[key]} onChange={(event) => setInclude({ ...include, [key]: event.target.checked })} />
-                    {key}
+                    {includeKeyLabel(key)}
                   </label>
                 ))}
               </div>
             </div>
 
             <div className="rounded-xl bg-[var(--control-bg)] p-3 text-xs text-[var(--text-muted)]">
-              <div className="font-semibold text-[var(--text-primary)]">Retrieval consequences</div>
+              <div className="font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.retrievalConsequences')}</div>
               <div className="mt-2 space-y-1">
-                <div>Absorbed entries: {absorbed.length} → status merged, removed from retrieval surface.</div>
-                <div>Parent embedding: rebuild after merge.</div>
-                <div>RAG eval rerun: off for this operation.</div>
+                <div>{t('ragEval.curation.merge.absorbedEntriesConsequence', { count: String(absorbed.length) })}</div>
+                <div>{t('ragEval.curation.merge.parentEmbeddingConsequence')}</div>
+                <div>{t('ragEval.curation.merge.ragEvalRerunConsequence')}</div>
               </div>
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="rounded-xl bg-[var(--control-bg)] p-3 text-sm text-[var(--text-muted)]">
-              Selected: {entries.length}. Parent: <span className="font-semibold text-[var(--text-primary)]">{parent?.title}</span>. Absorbed: {absorbed.length}.
+              {t('ragEval.curation.merge.selectedSummary', { selected: String(entries.length), absorbed: String(absorbed.length) })} <span className="font-semibold text-[var(--text-primary)]">{parent?.title}</span>
             </div>
 
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="rounded-xl bg-[var(--control-bg)] p-3">
-                <div className="text-sm font-semibold text-[var(--text-primary)]">Before</div>
+                <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.before')}</div>
                 <div className="mt-2 space-y-2 text-sm text-[var(--text-muted)]">
                   <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                    <div className="font-medium text-[var(--text-primary)]">Parent: {parent?.title}</div>
-                    <div>answer: {parent?.answer.length ?? 0} chars · source refs: {parent?.source_refs.length ?? 0}</div>
+                    <div className="font-medium text-[var(--text-primary)]">{t('ragEval.curation.merge.parentPrefix')} {parent?.title}</div>
+                    <div>{t('ragEval.curation.merge.answerSourceRefsStats', { chars: String(parent?.answer.length ?? 0), refs: String(parent?.source_refs.length ?? 0) })}</div>
                   </div>
                   {absorbed.map((entry) => (
                     <div key={entry.id} className="rounded-lg bg-[var(--surface-elevated)] p-2">
                       <div className="font-medium text-[var(--text-primary)]">{entry.title}</div>
-                      <div>v{entry.version} · {entry.status} · questions: {listFromEnrichment(entry, 'questions').length} · refs: {entry.source_refs.length}</div>
+                      <div>{t('ragEval.curation.merge.absorbedEntryStats', { version: String(entry.version), status: entry.status, questions: String(listFromEnrichment(entry, 'questions').length), refs: String(entry.source_refs.length) })}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
               <div className="rounded-xl bg-[var(--control-bg)] p-3">
-                <div className="text-sm font-semibold text-[var(--text-primary)]">After preview</div>
+                <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.afterPreview')}</div>
                 {preview ? (
                   <div className="mt-2 space-y-2 text-sm text-[var(--text-muted)]">
-                    {previewIsStale && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-amber-600">Preview устарел после изменений. Нажмите Preview ещё раз.</div>}
-                    {!!preview.blocking_errors.length && <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 text-red-500">Blocking: {preview.blocking_errors.join(', ')}</div>}
-                    {!!preview.warnings.length && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-amber-600">Warnings: {preview.warnings.join(', ')}</div>}
+                    {previewIsStale && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-amber-600">{t('ragEval.curation.merge.previewStaleWarning')}</div>}
+                    {!!preview.blocking_errors.length && <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-2 text-red-500">{t('ragEval.curation.merge.blockingPrefix')} {preview.blocking_errors.join(', ')}</div>}
+                    {!!preview.warnings.length && <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-amber-600">{t('ragEval.curation.merge.warningsPrefix')} {preview.warnings.join(', ')}</div>}
                     <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
                       <div className="font-medium text-[var(--text-primary)]">{proposedTitle}</div>
                       <div className="mt-1 line-clamp-5 whitespace-pre-wrap">{proposedAnswer}</div>
-                      <div className="mt-2 text-xs">source refs: {proposedSourceRefs} · questions: {arrayCount(enrichment, 'questions')} · synonyms: {arrayCount(enrichment, 'synonyms')} · tags: {arrayCount(enrichment, 'tags')}</div>
+                      <div className="mt-2 text-xs">{t('ragEval.curation.merge.proposedStats', { sourceRefs: String(proposedSourceRefs), questions: String(arrayCount(enrichment, 'questions')), synonyms: String(arrayCount(enrichment, 'synonyms')), tags: String(arrayCount(enrichment, 'tags')) })}</div>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      {Object.entries(preview.included_counts).map(([key, value]) => <div key={key} className="rounded-lg bg-[var(--surface-elevated)] p-2">included {key}: {value}</div>)}
+                      {Object.entries(preview.included_counts).map(([key, value]) => <div key={key} className="rounded-lg bg-[var(--surface-elevated)] p-2">{t('ragEval.curation.merge.includedCount', { key, value: String(value) })}</div>)}
                     </div>
                     <details className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                      <summary className="cursor-pointer text-xs font-semibold text-[var(--text-primary)]">Diagnostics JSON</summary>
+                      <summary className="cursor-pointer text-xs font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.diagnosticsJson')}</summary>
                       <pre className="mt-2 max-h-72 overflow-auto text-xs text-[var(--text-secondary)]">{JSON.stringify(preview, null, 2)}</pre>
                     </details>
                   </div>
                 ) : (
-                  <div className="mt-2 rounded-lg bg-[var(--surface-elevated)] p-3 text-sm text-[var(--text-muted)]">Нажмите Preview, чтобы увидеть before/after без мутаций.</div>
+                  <div className="mt-2 rounded-lg bg-[var(--surface-elevated)] p-3 text-sm text-[var(--text-muted)]">{t('ragEval.curation.merge.previewPrompt')}</div>
                 )}
               </div>
             </div>
 
             <div className="rounded-xl bg-[var(--control-bg)] p-3">
-              <div className="text-sm font-semibold text-[var(--text-primary)]">Exclude selected values</div>
+              <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.curation.merge.excludeSelectedValues')}</div>
               <div className="mt-3 space-y-3 text-xs text-[var(--text-muted)]">
-                <ChipGroup title="Questions / paraphrases / typo queries" values={questionValues} disabled={!include.questions && !include.paraphrases && !include.typo_queries && !include.colloquial_queries} excluded={exclude.question_values} onToggle={(value) => toggleExcluded('question_values', value)} />
-                <ChipGroup title="Synonyms" values={synonymValues} disabled={!include.synonyms} excluded={exclude.synonym_values} onToggle={(value) => toggleExcluded('synonym_values', value)} />
-                <ChipGroup title="Tags" values={tagValues} disabled={!include.tags} excluded={exclude.tag_values} onToggle={(value) => toggleExcluded('tag_values', value)} />
-                <ChipGroup title="Source refs" values={sourceRefKeys} disabled={!include.source_refs} excluded={exclude.source_ref_keys} onToggle={(value) => toggleExcluded('source_ref_keys', value)} />
+                <ChipGroup title={t('ragEval.curation.merge.questionValues')} values={questionValues} disabled={!include.questions && !include.paraphrases && !include.typo_queries && !include.colloquial_queries} excluded={exclude.question_values} onToggle={(value) => toggleExcluded('question_values', value)} />
+                <ChipGroup title={t('ragEval.curation.merge.synonymValues')} values={synonymValues} disabled={!include.synonyms} excluded={exclude.synonym_values} onToggle={(value) => toggleExcluded('synonym_values', value)} />
+                <ChipGroup title={t('ragEval.curation.merge.tagValues')} values={tagValues} disabled={!include.tags} excluded={exclude.tag_values} onToggle={(value) => toggleExcluded('tag_values', value)} />
+                <ChipGroup title={t('ragEval.curation.merge.sourceRefValues')} values={sourceRefKeys} disabled={!include.source_refs} excluded={exclude.source_ref_keys} onToggle={(value) => toggleExcluded('source_ref_keys', value)} />
               </div>
             </div>
           </div>
@@ -309,11 +324,11 @@ export const KnowledgeEntryMergeDrawer: React.FC<{
 
         <div className="mt-4 flex items-center justify-between gap-2">
           <div className="text-xs text-[var(--text-muted)]">
-            {previewIsStale ? 'Preview stale: Apply disabled.' : preview ? 'Preview fresh.' : 'Preview required before apply.'}
+            {previewIsStale ? t('ragEval.curation.merge.previewStatusStale') : preview ? t('ragEval.curation.merge.previewStatusFresh') : t('ragEval.curation.merge.previewStatusRequired')}
           </div>
           <div className="flex gap-2">
-            <button type="button" onClick={handlePreview} disabled={pending} className="rounded-xl bg-[var(--control-bg)] px-4 py-2 text-sm text-[var(--text-primary)] disabled:opacity-50">Preview</button>
-            <button type="button" onClick={handleApply} disabled={applyDisabled} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Apply merge</button>
+            <button type="button" onClick={handlePreview} disabled={pending} className="rounded-xl bg-[var(--control-bg)] px-4 py-2 text-sm text-[var(--text-primary)] disabled:opacity-50">{t('ragEval.curation.merge.previewButton')}</button>
+            <button type="button" onClick={handleApply} disabled={applyDisabled} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{t('ragEval.curation.merge.applyButton')}</button>
           </div>
         </div>
       </div>
@@ -345,7 +360,7 @@ const ChipGroup: React.FC<{
             {value.length > 80 ? `${value.slice(0, 80)}…` : value}
           </button>
         );
-      }) : <span className="text-[var(--text-muted)]">Нет значений.</span>}
+      }) : <span className="text-[var(--text-muted)]">{t('ragEval.curation.merge.noValues')}</span>}
     </div>
   </div>
 );
