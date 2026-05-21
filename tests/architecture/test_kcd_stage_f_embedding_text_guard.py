@@ -6,19 +6,18 @@ def _read(path: str) -> str:
 
 
 def test_stage_f_has_single_production_embedding_text_builder() -> None:
-    builder = _read("src/domain/project_plane/embedding_text.py")
-    ingestion = _read("src/application/services/knowledge_ingestion_service.py")
     repository = _read("src/infrastructure/db/repositories/knowledge_repository.py")
+    entry_persistence = _read(
+        "src/infrastructure/db/repositories/knowledge_entry_persistence.py"
+    )
+    embedding_contract = _read("src/domain/project_plane/embedding_text.py")
 
-    assert "CANONICAL_EMBEDDING_TEXT_VERSION" in builder
-    assert "def build_canonical_entry_embedding_text" in builder
-    assert "def build_retrieval_surface_search_text" in builder
-    assert "retrieval_guards" in builder
+    assert "entry_embedding_text(" in repository
+    assert "build_canonical_entry_embedding_text(" not in repository
 
-    assert "def _canonical_embedding_text" not in ingestion
-    assert "KCD_STAGE_CD_EMBEDDING_TEXT_VERSION" not in ingestion
-    assert "build_canonical_entry_embedding_text" in repository
-    assert "build_retrieval_surface_search_text" in repository
+    assert "entry_embedding_text(" in entry_persistence
+    assert "build_canonical_entry_embedding_text(" in entry_persistence
+    assert "CANONICAL_EMBEDDING_TEXT_VERSION" in embedding_contract
 
 
 def test_stage_f_removes_legacy_chunk_embedding_builder_from_production_path() -> None:

@@ -28,14 +28,14 @@ def test_answer_resolution_progress_metrics_are_persisted_before_publication() -
 
 
 def test_processing_report_exposes_answer_resolution_step() -> None:
-    source = Path("src/application/services/knowledge_service.py").read_text(
-        encoding="utf-8"
-    )
+    source = Path(
+        "src/application/services/knowledge_processing_report_builder.py"
+    ).read_text(encoding="utf-8")
 
     assert 'id="answer_resolution"' in source
     assert 'label="Разрешение ответов"' in source
-    assert 'title = "Разрешаем похожие ответы"' in source
-    assert '"Черновики уже сохранены.' in source
+    assert "answer_resolution_metrics" in source
+    assert 'current_stage == "answer_resolution"' in source
 
 
 def test_frontend_references_answer_resolution_step_key() -> None:

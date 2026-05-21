@@ -5,9 +5,7 @@ from datetime import UTC, datetime
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
     KnowledgeAnswerDraftsResponseDto,
-    KnowledgeProcessingActionDto,
     KnowledgeProcessingReportDto,
-    KnowledgeProcessingStepDto,
     KnowledgePreviewRequestDto,
     KnowledgePreviewResponseDto,
     KnowledgeSourceUnitDto,
@@ -35,10 +33,16 @@ from src.application.ports.knowledge_port import (
     PlatformUserAdminPort,
 )
 from src.application.ports.logger_port import LoggerPort
-from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.application.services.knowledge_chunk_normalizer import (
+    log_knowledge_chunk_audit,
+    normalize_knowledge_chunks,
+)
+from src.application.services.knowledge_processing_report_builder import (
+    build_knowledge_processing_report,
+)
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import AnswerCandidate
 from src.domain.project_plane.knowledge_views import (
-    KnowledgeCompilerBatchView,
     KnowledgeSearchResultView,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -71,24 +75,6 @@ def _dedupe_preview_results_by_exact_answer(
             seen.add(fingerprint)
         deduped.append(result)
     return deduped
-
-
-def _answer_resolution_metrics(metrics: JsonObject) -> JsonObject:
-    value = metrics.get("answer_resolution")
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _json_int_metric(metrics: JsonObject, key: str) -> int:
-    value = metrics.get(key)
-    if isinstance(value, bool) or value is None:
-        return 0
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return 0
 
 
 def _candidate_source_indexes_for_report(candidate: object) -> tuple[int, ...]:
@@ -124,119 +110,6 @@ def _json_int_value(value: object) -> int | None:
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
     return None
-
-
-def _answer_resolution_report_status(
-    metrics: JsonObject, *, is_processing: bool
-) -> str:
-    status = str(metrics.get("status") or "")
-    if status == "failed_fallback_published":
-        return "failed"
-    if status in {"processing", "completed", "failed"}:
-        return status
-    if is_processing:
-        return "waiting"
-    return "completed" if metrics else "pending"
-
-
-def _batch_status_count(
-    batches: Sequence[KnowledgeCompilerBatchView], status: str
-) -> int:
-    return sum(1 for batch in batches if batch.status == status)
-
-
-def _knowledge_processing_title(
-    *, document_status: str, preprocessing_status: str
-) -> str:
-    if preprocessing_status == "completed" or document_status == "processed":
-        return "Готово: база знаний обновлена"
-    if preprocessing_status == "failed" or document_status == "error":
-        return "Обработка остановилась, но прогресс сохранён"
-    if preprocessing_status == "cancelled" or document_status == "cancelled":
-        return "Обработка остановлена"
-    if preprocessing_status == "processing" or document_status in {
-        "processing",
-        "pending",
-    }:
-        return "Ищем ответы в документе"
-    return "Документ подготовлен"
-
-
-def _knowledge_processing_message(
-    *,
-    batch_total: int,
-    batch_completed: int,
-    batch_failed: int,
-    raw_answer_count: int,
-    published_answer_count: int,
-) -> str:
-    if batch_failed > 0 and published_answer_count > 0:
-        return (
-            f"Опубликовано ответов: {published_answer_count}. "
-            f"Обработано {batch_completed} из {batch_total} частей. "
-            f"Черновиков сохранено: {raw_answer_count}. "
-            "Проблемные части можно повторить позже."
-        )
-    if batch_failed > 0:
-        return (
-            f"Обработано {batch_completed} из {batch_total} частей. "
-            f"Найдено черновиков: {raw_answer_count}. "
-            "Проблемные части можно повторить без потери уже сохранённого прогресса."
-        )
-    if batch_total > 0 and batch_completed < batch_total:
-        return (
-            f"Обработано {batch_completed} из {batch_total} частей. "
-            f"Найдено черновиков: {raw_answer_count}. Черновики сохраняются после каждого шага."
-        )
-    if published_answer_count > 0:
-        return f"Опубликовано ответов: {published_answer_count}. Черновики можно проверить или удалить позже."
-    if raw_answer_count > 0:
-        return f"Найдено черновиков: {raw_answer_count}. Их можно проверить и опубликовать."
-    return "Документ ожидает обработки или пока не дал пригодных ответов."
-
-
-def _knowledge_processing_actions(
-    *,
-    batch_failed: int,
-    raw_answer_count: int,
-    published_answer_count: int,
-    is_processing: bool,
-) -> tuple[KnowledgeProcessingActionDto, ...]:
-    actions: list[KnowledgeProcessingActionDto] = []
-    if is_processing:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="cancel",
-                label="Остановить обработку",
-                kind="destructive",
-            )
-        )
-    if batch_failed > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="retry_failed_batches",
-                label="Повторить проблемные части",
-                kind="primary",
-            )
-        )
-    if raw_answer_count > published_answer_count:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="publish_ready",
-                label="Опубликовать готовые ответы",
-                kind="primary",
-                enabled=not is_processing,
-            )
-        )
-    if published_answer_count > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="review_published",
-                label="Проверить опубликованные ответы",
-                kind="secondary",
-            )
-        )
-    return tuple(actions)
 
 
 @dataclass(frozen=True)
@@ -369,7 +242,7 @@ class KnowledgeService:
             chunker_factory=chunker_factory,
             logger=logger,
         )
-        _log_chunk_audit(logger, chunks, context="upload_normalized")
+        log_knowledge_chunk_audit(logger, chunks, context="upload_normalized")
         if not chunks:
             logger.warning("No text extracted from file")
             return KnowledgeUploadResultDto.create(
@@ -562,180 +435,11 @@ class KnowledgeService:
             document_id=document_id,
         )
 
-        batch_total = max((batch.batch_count for batch in batches), default=0)
-        batch_completed = _batch_status_count(batches, "completed")
-        batch_failed = _batch_status_count(batches, "failed")
-        batch_processing = _batch_status_count(batches, "processing")
-        batch_pending = _batch_status_count(batches, "pending")
-        is_processing = document.status in {"processing", "pending"} or (
-            document.preprocessing_status == "processing"
-        )
-        published_answer_count = int(document.structured_entries or 0)
-        document_metrics = (
-            dict(document.preprocessing_metrics)
-            if isinstance(document.preprocessing_metrics, Mapping)
-            else {}
-        )
-        answer_resolution_metrics = _answer_resolution_metrics(document_metrics)
-        current_stage = str(document_metrics.get("stage") or "")
-        answer_resolution_status = _answer_resolution_report_status(
-            answer_resolution_metrics,
-            is_processing=is_processing,
-        )
-        if (
-            current_stage == "answer_resolution"
-            and answer_resolution_status == "waiting"
-        ):
-            answer_resolution_status = "processing"
-        answer_resolution_total = _json_int_metric(
-            answer_resolution_metrics,
-            "suspect_case_count",
-        )
-        answer_resolution_current = _json_int_metric(
-            answer_resolution_metrics,
-            "processed_case_count",
-        )
-        answer_resolution_final_count = (
-            _json_int_metric(answer_resolution_metrics, "final_entry_count")
-            or _json_int_metric(answer_resolution_metrics, "entry_count_after")
-            or _json_int_metric(document_metrics, "canonical_entry_count")
-            or _json_int_metric(document_metrics, "published_entry_count")
-        )
-
-        steps = (
-            KnowledgeProcessingStepDto(
-                id="prepare",
-                label="Подготовка документа",
-                status="completed"
-                if batch_total > 0 or document.chunk_count > 0
-                else "pending",
-                current=document.chunk_count,
-                total=document.chunk_count,
-                message="Исходные части документа сохранены",
-            ),
-            KnowledgeProcessingStepDto(
-                id="extract",
-                label="Извлечение ответов",
-                status=(
-                    "failed"
-                    if batch_failed > 0
-                    else "completed"
-                    if batch_total > 0 and batch_completed >= batch_total
-                    else "processing"
-                    if is_processing
-                    else "pending"
-                ),
-                current=batch_completed,
-                total=batch_total,
-                message=f"Черновиков найдено: {candidate_summary.raw_count}",
-            ),
-            KnowledgeProcessingStepDto(
-                id="answer_resolution",
-                label="Разрешение ответов",
-                status=answer_resolution_status,
-                current=answer_resolution_current,
-                total=answer_resolution_total,
-                message=(
-                    f"Проверено случаев: {answer_resolution_current} из {answer_resolution_total}"
-                    if answer_resolution_total > 0
-                    else "Ожидаем завершения извлечения"
-                ),
-            ),
-            KnowledgeProcessingStepDto(
-                id="publish",
-                label="Публикация в базу знаний",
-                status=(
-                    "completed"
-                    if published_answer_count > 0
-                    else "waiting"
-                    if current_stage == "answer_resolution" and is_processing
-                    else "pending"
-                ),
-                current=published_answer_count,
-                total=max(answer_resolution_final_count, published_answer_count),
-                message=(
-                    "Ожидаем завершения разрешения похожих ответов"
-                    if current_stage == "answer_resolution" and is_processing
-                    else f"Опубликовано ответов: {published_answer_count}"
-                ),
-            ),
-        )
-
-        metrics: JsonObject = {
-            "source_chunk_count": _json_int_metric(
-                document_metrics,
-                "source_chunk_count",
-            ),
-            "raw_source_chunk_count": _json_int_metric(
-                document_metrics,
-                "raw_source_chunk_count",
-            ),
-            "markdown_semantic_units_total": _json_int_metric(
-                document_metrics,
-                "markdown_semantic_units_total",
-            ),
-            "markdown_child_sections_total": _json_int_metric(
-                document_metrics,
-                "markdown_child_sections_total",
-            ),
-            "canonical_entry_count": (
-                _json_int_metric(document_metrics, "canonical_entry_count")
-                or document.chunk_count
-            ),
-            "retrieval_surface_entry_count": document.structured_entries,
-            "batch_total": batch_total,
-            "batch_completed": batch_completed,
-            "batch_failed": batch_failed,
-            "batch_processing": batch_processing,
-            "batch_pending": batch_pending,
-            "draft_answer_count": candidate_summary.raw_count,
-            "answer_candidate_count": candidate_summary.total_count,
-            "published_answer_count": published_answer_count,
-            "grounded_candidate_count": candidate_summary.grounded_count,
-            "rejected_answer_count": candidate_summary.rejected_count,
-            "tokens_input": sum(batch.tokens_input for batch in batches),
-            "tokens_output": sum(batch.tokens_output for batch in batches),
-            "tokens_total": sum(batch.tokens_total for batch in batches),
-            "answer_resolution": answer_resolution_metrics,
-        }
-
-        if current_stage == "answer_resolution" and is_processing:
-            title = "Разрешаем похожие ответы"
-            message = (
-                "Черновики уже сохранены. Сейчас система проверяет смысловые дубли "
-                "и выбирает итоговые ответы перед публикацией."
-            )
-        else:
-            title = (
-                "Опубликовано частично: есть проблемные части"
-                if batch_failed > 0 and published_answer_count > 0
-                else _knowledge_processing_title(
-                    document_status=document.status,
-                    preprocessing_status=document.preprocessing_status or "",
-                )
-            )
-            message = _knowledge_processing_message(
-                batch_total=batch_total,
-                batch_completed=batch_completed,
-                batch_failed=batch_failed,
-                raw_answer_count=candidate_summary.raw_count,
-                published_answer_count=published_answer_count,
-            )
-        return KnowledgeProcessingReportDto(
+        return build_knowledge_processing_report(
             document_id=document_id,
-            status=document.preprocessing_status or document.status,
-            title=title,
-            message=message,
-            recoverable=batch_failed > 0
-            or candidate_summary.raw_count > published_answer_count,
-            steps=steps,
-            actions=_knowledge_processing_actions(
-                batch_failed=batch_failed,
-                raw_answer_count=candidate_summary.raw_count,
-                published_answer_count=published_answer_count,
-                is_processing=is_processing,
-            ),
-            metrics=metrics,
+            document=document,
+            batches=batches,
+            candidate_summary=candidate_summary,
         )
 
     async def cancel_document_processing(
@@ -986,7 +690,7 @@ class KnowledgeService:
             logger.error(f"Chunking failed: {exc}")
             raise ValidationError(str(exc)) from None
 
-        return _normalize_chunks(raw_chunks)
+        return normalize_knowledge_chunks(raw_chunks)
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -1010,16 +714,6 @@ def _subject_from_payload(payload: object) -> str:
     return user_id
 
 
-def _normalize_chunks(raw_chunks: Sequence[object]) -> list[JsonObject]:
-    chunks: list[JsonObject] = []
-    for chunk in raw_chunks:
-        normalized = _normalize_chunk(chunk)
-        if normalized is not None:
-            chunks.append(normalized)
-
-    return chunks
-
-
 _CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
     "content",
     "entry_kind",
@@ -1030,87 +724,3 @@ _CHUNK_AUDIT_FIELDS: tuple[str, ...] = (
     "tags",
     "embedding_text",
 )
-
-
-def _is_present_chunk_value(value: object) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    if isinstance(value, (list, tuple, set, dict)):
-        return bool(value)
-    return True
-
-
-def _chunk_field_counts(chunks: Sequence[JsonObject]) -> dict[str, int]:
-    return {
-        field: sum(1 for chunk in chunks if _is_present_chunk_value(chunk.get(field)))
-        for field in _CHUNK_AUDIT_FIELDS
-    }
-
-
-def _chunk_unknown_field_counts(chunks: Sequence[JsonObject]) -> dict[str, int]:
-    known = set(_CHUNK_AUDIT_FIELDS)
-    counts: dict[str, int] = {}
-    for chunk in chunks:
-        for key, value in chunk.items():
-            if key in known or not _is_present_chunk_value(value):
-                continue
-            counts[key] = counts.get(key, 0) + 1
-    return counts
-
-
-def _chunk_content_length_stats(chunks: Sequence[JsonObject]) -> JsonObject:
-    lengths = [len(str(chunk.get("content") or "").strip()) for chunk in chunks]
-    if not lengths:
-        return {"min": 0, "max": 0, "avg": 0}
-    return {
-        "min": min(lengths),
-        "max": max(lengths),
-        "avg": round(sum(lengths) / len(lengths), 2),
-    }
-
-
-def _log_chunk_audit(
-    logger: LoggerPort,
-    chunks: Sequence[JsonObject],
-    *,
-    context: str,
-) -> None:
-    logger.info(
-        "Knowledge upload chunk audit",
-        extra={
-            "context": context,
-            "chunk_count": len(chunks),
-            "field_counts": _chunk_field_counts(chunks),
-            "unknown_field_counts": _chunk_unknown_field_counts(chunks),
-            "content_length": _chunk_content_length_stats(chunks),
-        },
-    )
-
-
-def _normalize_chunk(chunk: object) -> JsonObject | None:
-    if isinstance(chunk, str):
-        return _chunk_from_text(chunk)
-
-    if isinstance(chunk, Mapping):
-        return _chunk_from_mapping(chunk)
-
-    return None
-
-
-def _chunk_from_text(value: str) -> JsonObject | None:
-    content = value.strip()
-    return {"content": content} if content else None
-
-
-def _chunk_from_mapping(value: Mapping[object, object]) -> JsonObject | None:
-    content = str(value.get("content") or "").strip()
-    if not content:
-        return None
-
-    normalized = {
-        str(key): json_value_from_unknown(item) for key, item in value.items()
-    }
-    normalized["content"] = content
-    return normalized

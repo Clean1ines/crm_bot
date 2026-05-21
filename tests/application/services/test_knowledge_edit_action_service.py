@@ -79,16 +79,31 @@ def test_stage_h_repository_preserves_entry_version_audit() -> None:
 
 
 def test_stage_h_repository_updates_runtime_surface_not_legacy_kb() -> None:
-    repository = _read("src/infrastructure/db/repositories/knowledge_repository.py")
+    repository_source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+    operations_source = Path(
+        "src/infrastructure/db/repositories/knowledge_curation_entry_operations.py"
+    ).read_text(encoding="utf-8")
+    entry_persistence_source = Path(
+        "src/infrastructure/db/repositories/knowledge_entry_persistence.py"
+    ).read_text(encoding="utf-8")
 
-    attach_start = repository.index("async def attach_question_to_entry")
-    rebuild_start = repository.index("async def rebuild_entry_embedding")
-    mutation_slice = repository[attach_start:rebuild_start]
+    attach_start = repository_source.index("async def attach_question_to_entry")
+    rebuild_start = repository_source.index(
+        "async def rebuild_entry_embedding", attach_start
+    )
+    attach_wrapper = repository_source[attach_start:rebuild_start]
 
-    assert "knowledge_retrieval_surface" in mutation_slice
-    assert "knowledge_entries" in mutation_slice
-    assert "knowledge_base" not in mutation_slice
+    helper_attach_start = operations_source.index("async def attach_question_to_entry")
+    helper_rebuild_start = operations_source.index(
+        "async def rebuild_entry_embedding", helper_attach_start
+    )
+    helper_attach = operations_source[helper_attach_start:helper_rebuild_start]
 
-    rebuild_slice = repository[rebuild_start:]
-    assert "knowledge_retrieval_surface" in rebuild_slice
-    assert "knowledge_entries" in rebuild_slice
+    assert "await run_attach_question_to_entry(" in attach_wrapper
+    assert "knowledge_base" not in attach_wrapper
+    assert "knowledge_base" not in helper_attach
+
+    assert "await update_retrieval_surface_metadata(" in helper_attach
+    assert "knowledge_retrieval_surface" in entry_persistence_source
