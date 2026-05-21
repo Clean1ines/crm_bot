@@ -2,6 +2,10 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.knowledge_import_quality import (
+    DocumentImportIssue,
+    DocumentImportQualityReport,
+)
 from src.domain.project_plane.knowledge_compilation import (
     AnswerCandidate,
     SourceChunk,
@@ -559,6 +563,80 @@ class KnowledgeSourceUnitsResponseDto:
                 source_unit.to_dict() for source_unit in self.source_units
             ],
             "total_count": self.total_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeImportIssueDto:
+    code: str
+    severity: str
+    message: str
+
+    @classmethod
+    def from_domain(cls, issue: DocumentImportIssue) -> "KnowledgeImportIssueDto":
+        return cls(code=issue.code, severity=issue.severity, message=issue.message)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "severity": self.severity,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeImportQualityReportDto:
+    document_id: str
+    status: str
+    safe_to_compile: bool
+    source_format: str
+    extracted_text_chars: int
+    source_units_count: int
+    empty_units_count: int
+    short_units_count: int
+    table_like_units_count: int
+    duplicated_headings_count: int
+    source_refs_ready: bool
+    warnings: tuple[KnowledgeImportIssueDto, ...]
+    recommended_action: str
+
+    @classmethod
+    def from_domain(
+        cls, report: DocumentImportQualityReport
+    ) -> "KnowledgeImportQualityReportDto":
+        return cls(
+            document_id=report.document_id,
+            status=report.status,
+            safe_to_compile=report.safe_to_compile,
+            source_format=report.source_format,
+            extracted_text_chars=report.extracted_text_chars,
+            source_units_count=report.source_units_count,
+            empty_units_count=report.empty_units_count,
+            short_units_count=report.short_units_count,
+            table_like_units_count=report.table_like_units_count,
+            duplicated_headings_count=report.duplicated_headings_count,
+            source_refs_ready=report.source_refs_ready,
+            warnings=tuple(
+                KnowledgeImportIssueDto.from_domain(issue) for issue in report.warnings
+            ),
+            recommended_action=report.recommended_action,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "document_id": self.document_id,
+            "status": self.status,
+            "safe_to_compile": self.safe_to_compile,
+            "source_format": self.source_format,
+            "extracted_text_chars": self.extracted_text_chars,
+            "source_units_count": self.source_units_count,
+            "empty_units_count": self.empty_units_count,
+            "short_units_count": self.short_units_count,
+            "table_like_units_count": self.table_like_units_count,
+            "duplicated_headings_count": self.duplicated_headings_count,
+            "source_refs_ready": self.source_refs_ready,
+            "warnings": [warning.to_dict() for warning in self.warnings],
+            "recommended_action": self.recommended_action,
         }
 
 

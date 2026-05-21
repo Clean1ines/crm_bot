@@ -6,6 +6,7 @@ from typing import Protocol
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
     KnowledgeAnswerDraftsResponseDto,
+    KnowledgeImportQualityReportDto,
     KnowledgeProcessingReportDto,
     KnowledgePreviewRequestDto,
     KnowledgePreviewResponseDto,
@@ -49,6 +50,10 @@ from src.application.services.knowledge_processing_report_builder import (
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import AnswerCandidate
+from src.domain.project_plane.knowledge_import_quality import (
+    ImportQualitySourceUnit,
+    build_document_import_quality_report,
+)
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
 )
@@ -430,6 +435,55 @@ class KnowledgeService:
             source_units=units,
             total_count=len(source_chunks),
         )
+
+    async def import_quality_report(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> KnowledgeImportQualityReportDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+
+        source_chunks = await repo.list_document_source_chunks(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        report = build_document_import_quality_report(
+            document_id=document_id,
+            file_name=document.file_name,
+            document_status=document.status,
+            preprocessing_status=document.preprocessing_status,
+            preprocessing_metrics=document.preprocessing_metrics,
+            source_units=tuple(
+                ImportQualitySourceUnit(
+                    content=source_chunk.content,
+                    section_title=source_chunk.section_title,
+                    metadata=source_chunk.metadata,
+                )
+                for source_chunk in source_chunks
+            ),
+        )
+
+        logger.info(
+            "Knowledge import quality report built",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "status": report.status,
+                "source_units_count": report.source_units_count,
+                "warning_count": len(report.warnings),
+            },
+        )
+        return KnowledgeImportQualityReportDto.from_domain(report)
 
     async def processing_report(
         self,

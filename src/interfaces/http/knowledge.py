@@ -290,6 +290,40 @@ async def knowledge_source_units(
     return result.to_dict()
 
 
+@router.get("/{document_id}/import-quality")
+async def knowledge_import_quality_report(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns a user-facing import quality report for a knowledge document."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    result = await service.import_quality_report(
+        project_id,
+        document_id,
+        authorization,
+        knowledge_repo_factory=make_knowledge_repo,
+        logger=logger,
+    )
+    return result.to_dict()
+
+
 @router.get("/{document_id}/progress")
 async def knowledge_processing_progress(
     project_id: str,
