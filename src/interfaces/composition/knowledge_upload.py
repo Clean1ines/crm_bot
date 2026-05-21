@@ -16,13 +16,13 @@ from src.application.ports.knowledge_port import (
     KnowledgePreprocessorPort,
     KnowledgeProjectAccessPort,
     KnowledgeQueuePort,
-    KnowledgeRepositoryPort,
     PlatformUserAdminPort,
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_service import (
     KnowledgeService,
     KnowledgeServiceConfig,
+    KnowledgeServiceRepositoryPort,
 )
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
@@ -41,8 +41,10 @@ def make_chunker() -> KnowledgeChunkerPort:
     return cast(KnowledgeChunkerPort, ChunkerService())
 
 
-def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
-    return cast(KnowledgeRepositoryPort, KnowledgeRepository(cast(asyncpg.Pool, pool)))
+def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort:
+    return cast(
+        KnowledgeServiceRepositoryPort, KnowledgeRepository(cast(asyncpg.Pool, pool))
+    )
 
 
 def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:

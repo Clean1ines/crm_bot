@@ -12,6 +12,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
 )
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
 from src.application.services.knowledge_ingestion_service import (
+    KnowledgeIngestionRepositoryPort,
     KnowledgeIngestionService,
 )
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
@@ -23,7 +24,6 @@ from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
-    KnowledgeRepositoryPort,
     ModelUsageRepositoryPort,
 )
 
@@ -39,8 +39,10 @@ def make_model_usage_repository(
     return cast(ModelUsageRepositoryPort, ModelUsageRepository(pool))
 
 
-def make_knowledge_repository(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
-    return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
+def make_knowledge_repository(
+    pool: KnowledgeDbPoolPort,
+) -> KnowledgeIngestionRepositoryPort:
+    return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
 
 
 async def handle_process_knowledge_upload(
