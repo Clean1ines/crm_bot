@@ -4,7 +4,7 @@ import type { KnowledgeCurationAction } from '../../../shared/api/modules/knowle
 
 export const KnowledgeCurationActionsPanel: React.FC<{ actions: KnowledgeCurationAction[] }> = ({ actions }) => (
   <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
-    <h3 className="text-base font-semibold text-[var(--text-primary)]">Audit/action history</h3>
+    <h3 className="text-base font-semibold text-[var(--text-primary)]">{t('ragEval.curation.actions.historyTitle')}</h3>
     <div className="mt-3 space-y-2">
       {!actions.length && <div className="text-sm text-[var(--text-muted)]">{t('ragEval.curation.actions.empty')}</div>}
       {actions.slice(0, 20).map((action) => <div key={action.id} className="rounded-xl bg-[var(--control-bg)] p-3 text-sm text-[var(--text-secondary)]">
