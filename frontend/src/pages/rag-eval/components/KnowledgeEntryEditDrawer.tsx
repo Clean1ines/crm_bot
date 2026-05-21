@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n';
 import React, { useMemo, useState } from 'react';
 import type { KnowledgeCurationEntry, KnowledgeEntryPatchRequest } from '../../../shared/api/modules/knowledgeCuration';
 
@@ -20,7 +21,7 @@ const parseObjectJson = (value: string): { ok: true; value: Record<string, unkno
   try {
     const parsed = JSON.parse(value) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { ok: false, error: 'Advanced JSON должен быть объектом.' };
+      return { ok: false, error: t('ragEval.curation.edit.advancedJsonObjectError') };
     }
     return { ok: true, value: parsed as Record<string, unknown> };
   } catch (error) {
@@ -83,77 +84,77 @@ export const KnowledgeEntryEditDrawer: React.FC<{
       <div className="ml-auto flex h-full max-w-4xl flex-col rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-xl">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Edit canonical entry</h2>
-            <p className="text-sm text-[var(--text-muted)]">Source refs пока read-only: backend не принимает их silent-edit и вернёт 400 при попытке изменить.</p>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.curation.edit.title')}</h2>
+            <p className="text-sm text-[var(--text-muted)]">{t('ragEval.curation.edit.sourceRefsReadOnly')}</p>
           </div>
-          <button type="button" onClick={onClose} className="text-sm text-[var(--text-muted)]">Закрыть</button>
+          <button type="button" onClick={onClose} className="text-sm text-[var(--text-muted)]">{t('common.actions.close')}</button>
         </div>
 
         <div className="mt-4 grid min-h-0 flex-1 gap-4 overflow-auto xl:grid-cols-[1fr_360px]">
           <div className="space-y-3">
             {error && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">{error}</div>}
-            {!advancedParse.ok && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">Invalid advanced JSON: {advancedParse.error}</div>}
+            {!advancedParse.ok && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">{t('ragEval.curation.edit.invalidAdvancedJson', { error: advancedParse.error })}</div>}
 
             <label className="block text-sm text-[var(--text-muted)]">
-              Title
+              {t('ragEval.curation.edit.fieldTitle')}
               <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)]" />
             </label>
 
             <label className="block text-sm text-[var(--text-muted)]">
-              Answer
+              {t('ragEval.curation.edit.fieldAnswer')}
               <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} rows={8} className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)]" />
             </label>
 
             <div className="grid gap-3 md:grid-cols-2">
-              <ListEditor title="Questions" value={questions} onChange={setQuestions} />
-              <ListEditor title="Paraphrases" value={paraphrases} onChange={setParaphrases} />
-              <ListEditor title="Synonyms" value={synonyms} onChange={setSynonyms} />
-              <ListEditor title="Typo queries" value={typoQueries} onChange={setTypoQueries} />
-              <ListEditor title="Colloquial queries" value={colloquialQueries} onChange={setColloquialQueries} />
-              <ListEditor title="Tags" value={tags} onChange={setTags} />
+              <ListEditor title={t('ragEval.curation.edit.questions')} value={questions} onChange={setQuestions} />
+              <ListEditor title={t('ragEval.curation.edit.paraphrases')} value={paraphrases} onChange={setParaphrases} />
+              <ListEditor title={t('ragEval.curation.edit.synonyms')} value={synonyms} onChange={setSynonyms} />
+              <ListEditor title={t('ragEval.curation.edit.typoQueries')} value={typoQueries} onChange={setTypoQueries} />
+              <ListEditor title={t('ragEval.curation.edit.colloquialQueries')} value={colloquialQueries} onChange={setColloquialQueries} />
+              <ListEditor title={t('ragEval.curation.edit.tags')} value={tags} onChange={setTags} />
             </div>
 
-            <ListEditor title="Retrieval guards" value={retrievalGuards} onChange={setRetrievalGuards} rows={3} />
+            <ListEditor title={t('ragEval.curation.edit.retrievalGuards')} value={retrievalGuards} onChange={setRetrievalGuards} rows={3} />
 
             <details className="rounded-xl bg-[var(--control-bg)] p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">Advanced enrichment JSON</summary>
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.curation.edit.advancedJsonTitle')}</summary>
               <textarea value={advancedJson} onChange={(event) => setAdvancedJson(event.target.value)} rows={10} className="mt-3 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]" />
             </details>
 
             <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
               <input type="checkbox" checked={rebuildEmbedding} onChange={(event) => setRebuildEmbedding(event.target.checked)} />
-              Rebuild embedding after save
+              {t('ragEval.curation.edit.rebuildEmbeddingAfterSave')}
             </label>
           </div>
 
           <div className="space-y-3">
             <div className="rounded-xl bg-[var(--control-bg)] p-3 text-sm text-[var(--text-muted)]">
-              <div className="font-semibold text-[var(--text-primary)]">Entry state</div>
+              <div className="font-semibold text-[var(--text-primary)]">{t('ragEval.curation.edit.entryStateTitle')}</div>
               <div className="mt-2">id: {entry.id}</div>
-              <div>version: {entry.version}</div>
-              <div>status: {entry.status}</div>
-              <div>visibility: {entry.visibility}</div>
-              <div>embedding: {entry.has_embedding ? 'yes' : 'no'}</div>
-              <div>retrieval surface: {entry.has_retrieval_surface ? 'yes' : 'no'}</div>
+              <div>{t('ragEval.curation.edit.versionPrefix')} {entry.version}</div>
+              <div>{t('ragEval.curation.edit.statusPrefix')} {entry.status}</div>
+              <div>{t('ragEval.curation.edit.visibilityPrefix')} {entry.visibility}</div>
+              <div>{t('ragEval.curation.entry.embeddingPrefix')} {entry.has_embedding ? t('ragEval.curation.boolean.yes') : t('ragEval.curation.boolean.no')}</div>
+              <div>{t('ragEval.curation.edit.retrievalSurfacePrefix')} {entry.has_retrieval_surface ? t('ragEval.curation.boolean.yes') : t('ragEval.curation.boolean.no')}</div>
             </div>
 
             <div className="rounded-xl bg-[var(--control-bg)] p-3 text-xs text-[var(--text-muted)]">
-              <div className="font-semibold text-[var(--text-primary)]">Source refs · read-only · {entry.source_refs.length}</div>
+              <div className="font-semibold text-[var(--text-primary)]">{t('ragEval.curation.edit.sourceRefsTitle', { count: String(entry.source_refs.length) })}</div>
               <div className="mt-2 max-h-[420px] space-y-2 overflow-auto">
                 {entry.source_refs.length ? entry.source_refs.map((ref, index) => (
                   <div key={`${entry.id}-source-ref-${index}`} className="rounded-lg bg-[var(--surface-elevated)] p-2">
                     <div className="font-medium text-[var(--text-primary)]">#{index + 1}</div>
                     <pre className="mt-1 overflow-auto whitespace-pre-wrap">{JSON.stringify(ref, null, 2)}</pre>
                   </div>
-                )) : <div>Нет source refs.</div>}
+                )) : <div>{t('ragEval.curation.edit.noSourceRefs')}</div>}
               </div>
             </div>
           </div>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-xl bg-[var(--control-bg)] px-4 py-2 text-sm text-[var(--text-primary)]">Cancel</button>
-          <button type="button" disabled={saveDisabled} onClick={save} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save</button>
+          <button type="button" onClick={onClose} className="rounded-xl bg-[var(--control-bg)] px-4 py-2 text-sm text-[var(--text-primary)]">{t('common.actions.cancel')}</button>
+          <button type="button" disabled={saveDisabled} onClick={save} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{t('common.actions.save')}</button>
         </div>
       </div>
     </div>
@@ -172,7 +173,7 @@ const ListEditor: React.FC<{
       value={value}
       onChange={(event) => onChange(event.target.value)}
       rows={rows}
-      placeholder="One value per line"
+      placeholder={t('ragEval.curation.edit.oneValuePerLine')}
       className="mt-1 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-[var(--text-primary)]"
     />
   </label>
