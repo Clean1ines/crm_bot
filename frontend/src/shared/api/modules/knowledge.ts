@@ -148,6 +148,32 @@ export type KnowledgeSourceUnitsResponse = {
   total_count: number;
 };
 
+export type KnowledgeImportQualityStatus = 'good' | 'needs_review' | 'unsafe' | string;
+
+export type KnowledgeImportIssueSeverity = 'info' | 'warning' | 'error' | string;
+
+export type KnowledgeImportIssue = {
+  code: string;
+  severity: KnowledgeImportIssueSeverity;
+  message: string;
+};
+
+export type KnowledgeImportQualityReport = {
+  document_id: string;
+  status: KnowledgeImportQualityStatus;
+  safe_to_compile: boolean;
+  source_format: string;
+  extracted_text_chars: number;
+  source_units_count: number;
+  empty_units_count: number;
+  short_units_count: number;
+  table_like_units_count: number;
+  duplicated_headings_count: number;
+  source_refs_ready: boolean;
+  warnings: KnowledgeImportIssue[];
+  recommended_action: string;
+};
+
 export type KnowledgeUsageBreakdown = {
   provider: string;
   model: string;
@@ -227,6 +253,14 @@ export const knowledgeApi = {
   sourceUnits: (projectId: string, documentId: string, limit = 1000) =>
     authedJsonRequest<KnowledgeSourceUnitsResponse>(
       `/api/projects/${projectId}/knowledge/${documentId}/source-units?limit=${limit}`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  importQuality: (projectId: string, documentId: string) =>
+    authedJsonRequest<KnowledgeImportQualityReport>(
+      `/api/projects/${projectId}/knowledge/${documentId}/import-quality`,
       {
         method: 'GET',
       },

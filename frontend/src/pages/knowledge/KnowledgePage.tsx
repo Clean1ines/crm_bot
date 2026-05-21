@@ -25,6 +25,7 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
+  type KnowledgeImportQualityReport,
   type KnowledgeAnswerDraft,
   type KnowledgeAnswerDraftsResponse,
   type KnowledgeSourceUnit,
@@ -36,6 +37,7 @@ import { t } from '@shared/i18n';
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
 type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingReport>;
+type KnowledgeImportQualityByDocument = Record<string, KnowledgeImportQualityReport>;
 type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
 type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
 
@@ -143,6 +145,27 @@ const sourceUnitSearchText = (sourceUnit: KnowledgeSourceUnit): string => [
   ...sourceUnit.draft_titles,
   JSON.stringify(sourceUnit.metadata || {}),
 ].join(' ').toLowerCase();
+
+const importQualityStatusLabel = (status: string): string => {
+  if (status === 'good') return t('knowledge.importQuality.status.good');
+  if (status === 'needs_review') return t('knowledge.importQuality.status.needsReview');
+  if (status === 'unsafe') return t('knowledge.importQuality.status.unsafe');
+  return status || t('knowledge.common.unspecified');
+};
+
+const importQualityStatusClassName = (status: string): string => {
+  if (status === 'good') return 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]';
+  if (status === 'unsafe') return 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]';
+  return 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]';
+};
+
+const importQualityActionLabel = (action: string): string => {
+  if (action === 'continue_to_knowledge_compilation') return t('knowledge.importQuality.action.continue');
+  if (action === 'review_source_units') return t('knowledge.importQuality.action.reviewSourceUnits');
+  if (action === 'wait_for_processing') return t('knowledge.importQuality.action.waitForProcessing');
+  if (action === 'replace_or_review_document') return t('knowledge.importQuality.action.replaceOrReview');
+  return action || t('knowledge.common.unspecified');
+};
 
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
@@ -1109,6 +1132,77 @@ const AnswerResolutionTracePanel: React.FC<{
 };
 
 
+interface ImportQualitySummaryProps {
+  report?: KnowledgeImportQualityReport;
+  isLoading: boolean;
+}
+
+const ImportQualitySummary: React.FC<ImportQualitySummaryProps> = ({ report, isLoading }) => {
+  if (isLoading && !report) {
+    return (
+      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+        {t('knowledge.importQuality.loading')}
+      </div>
+    );
+  }
+
+  if (!report) {
+    return null;
+  }
+
+  const visibleWarnings = report.warnings.slice(0, 2);
+
+  return (
+    <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="font-semibold text-[var(--text-primary)]">
+          {t('knowledge.importQuality.title')}
+        </div>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${importQualityStatusClassName(report.status)}`}>
+          {importQualityStatusLabel(report.status)}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.sourceUnits')}</span>
+          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.source_units_count)}</div>
+        </div>
+        <div>
+          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.extractedText')}</span>
+          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.extracted_text_chars)}</div>
+        </div>
+        <div>
+          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.shortUnits')}</span>
+          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.short_units_count)}</div>
+        </div>
+        <div>
+          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.tableLikeUnits')}</span>
+          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.table_like_units_count)}</div>
+        </div>
+      </div>
+
+      {visibleWarnings.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {visibleWarnings.map((warning) => (
+            <li key={`${warning.code}-${warning.severity}`} className="leading-relaxed">
+              {warning.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
+        <span className="font-medium text-[var(--text-primary)]">
+          {t('knowledge.importQuality.recommendedAction')}
+        </span>{' '}
+        <span>{importQualityActionLabel(report.recommended_action)}</span>
+      </div>
+    </div>
+  );
+};
+
+
 const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
   const llmBreakdown = llmUsageBreakdown(usage.breakdown);
   const answerBreakdown = usageBySources(llmBreakdown, USER_ANSWER_USAGE_SOURCES);
@@ -1237,6 +1331,35 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const processingReports = processingReportsQuery.data || {};
+  const importQualityDocumentIds = documents.map((doc) => doc.id).sort();
+  const importQualityReportsQuery = useQuery({
+    queryKey: ['knowledge-import-quality-reports', projectId, importQualityDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || importQualityDocumentIds.length === 0) return {};
+
+      const reports = await Promise.all(
+        importQualityDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.importQuality(projectId, documentId);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return reports.reduce<KnowledgeImportQualityByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && importQualityDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const importQualityReports = importQualityReportsQuery.data || {};
   const draftPreviewDocumentIds = Object.values(processingReports)
     .filter((report) => {
       const document = documents.find((doc) => doc.id === report.document_id);
@@ -1777,6 +1900,7 @@ export const KnowledgePage: React.FC = () => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
             const processingReport = processingReports[doc.id];
+            const importQualityReport = importQualityReports[doc.id];
 
             return (
               <div
@@ -1827,6 +1951,11 @@ export const KnowledgePage: React.FC = () => {
                     </>
                   )}
                 </div>
+
+                <ImportQualitySummary
+                  report={importQualityReport}
+                  isLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
+                />
 
                 {processingReport && (
                   <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
