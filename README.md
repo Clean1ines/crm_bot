@@ -1,23 +1,70 @@
-# CRM Bot Runtime
+# Axole — AI Knowledge & Support Console
 
-CRM Bot Runtime is a multi-tenant customer communication backend for Telegram-based customer support, CRM-style project administration, manager handoff, event persistence, and LLM/RAG-assisted responses.
+Axole helps businesses turn documents into verified AI support knowledge bases and run Telegram assistants with human handoff.
 
-The backend is built around FastAPI, PostgreSQL with pgvector, Redis, Telegram webhooks, and a typed agent runtime. The frontend lives in `frontend/` and consumes the generated OpenAPI contract.
+## What Axole does
 
-## What this project does
+1. Imports business knowledge documents.
+2. Extracts source units and draft knowledge entries.
+3. Builds canonical knowledge entries with source references.
+4. Shows what needs review: duplicates, weak entries, missing sources, unsafe answers.
+5. Tests retrieval quality before the assistant talks to customers.
+6. Lets humans edit, merge, hide, reject, publish, and rebuild knowledge.
+7. Connects published knowledge to a Telegram assistant.
+8. Escalates risky or unresolved customer questions to a manager.
 
-The system provides:
+## Why this is not just a chatbot
 
-* Telegram client bot webhook handling for customer conversations.
-* Telegram platform/admin and manager flows.
-* FastAPI HTTP API for frontend and integrations.
-* Multi-project administration, memberships, bot token storage, and webhook secrets.
-* Customer/client profile and thread lifecycle persistence.
-* Knowledge document ingestion, chunking, embeddings, and RAG search.
-* LLM-backed intent extraction, query expansion, and response generation.
-* Queue-based background jobs for notifications, metrics, and retries.
-* Event timeline persistence for auditability.
-* Architecture tests that protect runtime boundaries.
+Most AI chatbot tools say: upload documents and the bot will answer.
+Axole treats that as unsafe.
+
+The product exists because customer-facing AI needs a quality loop:
+
+Document → source units → draft answers → canonical entries → review → retrieval testing → publication → assistant runtime → real conversation feedback.
+
+## Main product workflow
+
+Upload document
+→ Import / extraction
+→ Knowledge compilation
+→ Human curation
+→ Retrieval review
+→ Publish retrieval surface
+→ Telegram assistant
+→ Manager handoff
+→ Improve knowledge from real questions
+
+## Current product scope
+
+Ready / implemented:
+- Telegram client assistant
+- Web panel for owners/admins/managers
+- Knowledge upload and preprocessing modes
+- Canonical knowledge entries
+- Source units / source references
+- RAG preview
+- RAG evaluation/review console
+- Human curation actions
+- Manager handoff
+- Client/thread/message/event persistence
+- Multi-project administration
+
+Not positioned as ready universal features:
+- full CRM replacement
+- website chat widget
+- WhatsApp/Instagram/email channels
+- universal CRM integrations
+- perfect OCR for scanned PDFs
+- automatic legal/financial decisions
+
+## Who it is for
+
+- service businesses
+- online schools
+- consultants and expert businesses
+- support teams
+- AI automation agencies
+- teams preparing customer-facing AI assistants
 
 ## Repository layout
 
