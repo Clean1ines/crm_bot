@@ -29,13 +29,23 @@ def test_stage_cd_migration_declares_canonical_entries_source_refs_and_surface()
 def test_application_port_exposes_canonical_entry_write_not_legacy_chunk_write() -> (
     None
 ):
-    source = _read("src/application/ports/knowledge_port.py")
+    source = _read("src/application/ports/knowledge/canonical_entries.py")
+    aggregate_source = _read("src/application/ports/knowledge_port.py")
 
     assert "CanonicalKnowledgeEntry" in source
     assert "add_canonical_entries" in source
     assert "add_knowledge_chunks" not in source
     assert "from src.domain.project_plane.knowledge_chunks import" not in source
     assert "chunks: Sequence[KnowledgeChunk]" not in source
+
+    assert "KnowledgeCanonicalEntryPort" in aggregate_source
+    assert "CanonicalKnowledgeEntry" not in aggregate_source
+    assert "add_canonical_entries" not in aggregate_source
+    assert "add_knowledge_chunks" not in aggregate_source
+    assert (
+        "from src.domain.project_plane.knowledge_chunks import" not in aggregate_source
+    )
+    assert "chunks: Sequence[KnowledgeChunk]" not in aggregate_source
 
 
 def test_ingestion_writes_source_chunks_then_canonical_entries() -> None:
