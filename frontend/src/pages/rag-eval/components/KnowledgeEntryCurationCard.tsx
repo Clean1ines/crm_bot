@@ -42,12 +42,12 @@ export const KnowledgeEntryCurationCard: React.FC<{
       </div>
     </div>
     <div className="mt-4 flex flex-wrap gap-2">
-      <button type="button" onClick={onEdit} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><Edit3 className="mr-1 inline h-4 w-4" />Edit</button>
-      <button type="button" onClick={() => onStatus('hide_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><EyeOff className="mr-1 inline h-4 w-4" />Hide</button>
-      <button type="button" onClick={() => onStatus('reject_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-red-500"><XCircle className="mr-1 inline h-4 w-4" />Reject</button>
-      <button type="button" onClick={() => onStatus('restore_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><RotateCcw className="mr-1 inline h-4 w-4" />Restore</button>
+      <button type="button" onClick={onEdit} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><Edit3 className="mr-1 inline h-4 w-4" />{t('ragEval.curation.entry.action.edit')}</button>
+      <button type="button" onClick={() => onStatus('hide_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><EyeOff className="mr-1 inline h-4 w-4" />{t('ragEval.curation.entry.action.hide')}</button>
+      <button type="button" onClick={() => onStatus('reject_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-red-500"><XCircle className="mr-1 inline h-4 w-4" />{t('ragEval.curation.entry.action.reject')}</button>
+      <button type="button" onClick={() => onStatus('restore_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><RotateCcw className="mr-1 inline h-4 w-4" />{t('ragEval.curation.entry.action.restore')}</button>
       <button type="button" onClick={() => onStatus(entry.status === 'published' ? 'unpublish_entry' : 'publish_entry')} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><SearchCheck className="mr-1 inline h-4 w-4" />{entry.status === 'published' ? 'Unpublish' : 'Publish'}</button>
-      <button type="button" onClick={onRebuild} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><RefreshCw className="mr-1 inline h-4 w-4" />Rebuild search</button>
+      <button type="button" onClick={onRebuild} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><RefreshCw className="mr-1 inline h-4 w-4" />{t('ragEval.curation.entry.action.rebuildSearch')}</button>
       <button type="button" onClick={onVersions} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><History className="mr-1 inline h-4 w-4" />{t('ragEval.curation.versions.title')}</button>
       <button type="button" onClick={onDiagnostics} className="rounded-xl bg-[var(--control-bg)] px-3 py-1.5 text-sm text-[var(--text-primary)]"><GitMerge className="mr-1 inline h-4 w-4" />{t('ragEval.curation.diagnostics.title')}</button>
     </div>
