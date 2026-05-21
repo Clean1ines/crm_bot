@@ -136,7 +136,7 @@ const draftSourceChunkIndexes = (draft: KnowledgeAnswerDraft): number[] => {
 };
 
 const sourceUnitTitle = (sourceUnit: KnowledgeSourceUnit): string => (
-  sourceUnit.title.trim() || `Source unit ${sourceUnit.source_index}`
+  sourceUnit.title.trim() || t('knowledge.sourceUnits.fallbackTitle', { index: String(sourceUnit.source_index) })
 );
 
 const sourceUnitSearchText = (sourceUnit: KnowledgeSourceUnit): string => [
@@ -441,22 +441,22 @@ const retightenReportRows = (doc: Document): string[] => {
     rows.push(t('knowledge.retightenReport.combinedEntries', { count: formatNumber(combinedEntries) }));
   }
   if (deterministicCombined !== null) {
-    rows.push(`Детерминированно объединено очевидных дублей: ${formatNumber(deterministicCombined)}`);
+    rows.push(t('knowledge.retightenReport.deterministicCombined', { count: formatNumber(deterministicCombined) }));
   }
   if (deterministicExactAnswer !== null) {
-    rows.push(`Объединено точных дублей ответов: ${formatNumber(deterministicExactAnswer)}`);
+    rows.push(t('knowledge.retightenReport.deterministicExactAnswer', { count: formatNumber(deterministicExactAnswer) }));
   }
   if (deterministicContainment !== null) {
-    rows.push(`Объединено вложенных/почти одинаковых ответов: ${formatNumber(deterministicContainment)}`);
+    rows.push(t('knowledge.retightenReport.deterministicContainment', { count: formatNumber(deterministicContainment) }));
   }
   if (answerResolutionCombined !== null) {
-    rows.push(`Дополнительно объединено проверкой ответов: ${formatNumber(answerResolutionCombined)}`);
+    rows.push(t('knowledge.retightenReport.answerResolutionCombined', { count: formatNumber(answerResolutionCombined) }));
   }
   if (dedupedQuestions !== null) {
-    rows.push(`Удалено повторов в вопросах/вариантах: ${formatNumber(dedupedQuestions)}`);
+    rows.push(t('knowledge.retightenReport.dedupedQuestions', { count: formatNumber(dedupedQuestions) }));
   }
   if (suspiciousMeta !== null) {
-    rows.push(`Подозрительных служебных/meta-ответов найдено: ${formatNumber(suspiciousMeta)}`);
+    rows.push(t('knowledge.retightenReport.suspiciousMeta', { count: formatNumber(suspiciousMeta) }));
   }
   if (groups !== null) {
     rows.push(t('knowledge.retightenReport.groups', { count: formatNumber(groups) }));
@@ -528,9 +528,9 @@ const processingDetailRows = (doc: Document): string[] => {
   const publishedEntries = metricNumber(metrics, 'canonical_entry_count')
     ?? metricNumber(metrics, 'published_entry_count');
 
-  if (totalParts !== null) rows.push(`Технических частей всего: ${formatNumber(totalParts)}`);
+  if (totalParts !== null) rows.push(t('knowledge.document.technicalPartsTotal', { total: formatNumber(totalParts) }));
   if (completedParts !== null && totalParts !== null) {
-    rows.push(`Извлечено частей: ${formatNumber(completedParts)} / ${formatNumber(totalParts)}`);
+    rows.push(t('knowledge.document.extractedPartsProgress', { current: formatNumber(completedParts), total: formatNumber(totalParts) }));
   }
   if (failedParts !== null) rows.push(`Failed parts: ${formatNumber(failedParts)}`);
   if (rawDrafts !== null) rows.push(`Raw drafts saved: ${formatNumber(rawDrafts)}`);
@@ -548,9 +548,9 @@ const processingDetailRows = (doc: Document): string[] => {
 const processingStatusMessage = (doc: Document): string => {
   const message = metricText(doc.preprocessing_metrics, 'status_message');
   if (message) return message;
-  if (isDocumentProcessing(doc)) return 'Документ разбирается. Черновики сохраняются после каждого шага.';
-  if (doc.status === 'error') return 'Обработка завершилась с ошибкой, но уже сохранённые черновики доступны.';
-  return 'База знаний обновлена. Сырые черновики сохранены для проверки.';
+  if (isDocumentProcessing(doc)) return t('knowledge.document.draftStatus.processing');
+  if (doc.status === 'error') return t('knowledge.document.draftStatus.error');
+  return t('knowledge.document.draftStatus.ready');
 };
 
 const documentLlmTokenText = (doc: Document): string | null => {
@@ -904,7 +904,7 @@ const SourceUnitsSummary: React.FC<{
       <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)]">
         <div className="flex items-center gap-2">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>Загружаем source units…</span>
+          <span>{t('knowledge.sourceUnits.loading')}</span>
         </div>
       </div>
     );
@@ -918,10 +918,10 @@ const SourceUnitsSummary: React.FC<{
       <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="font-medium text-[var(--text-primary)]">
-            Source units: {formatNumber(response.total_count)}
+            {t('knowledge.sourceUnits.total', { total: formatNumber(response.total_count) })}
           </div>
           <div className="mt-0.5 text-[var(--text-muted)]">
-            Смысловые блоки / source evidence перед extraction
+            {t('knowledge.sourceUnits.description')}
           </div>
         </div>
         <button
@@ -929,7 +929,7 @@ const SourceUnitsSummary: React.FC<{
           onClick={onOpen}
           className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
         >
-          Открыть source units
+          {t('knowledge.sourceUnits.open')}
         </button>
       </div>
 
@@ -948,7 +948,7 @@ const SourceUnitsSummary: React.FC<{
         </div>
       ) : (
         <div className="rounded-lg bg-[var(--control-bg)] px-2 py-2 text-[var(--text-muted)]">
-          Source units пока не сохранены.
+          {t('knowledge.sourceUnits.empty')}
         </div>
       )}
     </div>
@@ -986,7 +986,7 @@ const SourceUnitsModal: React.FC<{
     <BaseModal
       isOpen
       onClose={onClose}
-      title="Source units"
+      title={t('knowledge.sourceUnits.title')}
       cancelLabel={t('common.actions.close')}
       maxWidthClassName="max-w-4xl"
     >
@@ -998,7 +998,7 @@ const SourceUnitsModal: React.FC<{
             type="text"
             value={filter}
             onChange={(event) => onFilterChange(event.target.value)}
-            placeholder="Искать по source units"
+            placeholder={t('knowledge.sourceUnits.searchPlaceholder')}
             className="min-h-10 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/15"
           />
         </div>
@@ -1007,19 +1007,19 @@ const SourceUnitsModal: React.FC<{
           {isLoading && !response && (
             <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Загружаем source units…</span>
+              <span>{t('knowledge.sourceUnits.loading')}</span>
             </div>
           )}
 
           {response && response.source_units.length === 0 && (
             <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              Source units пока не сохранены.
+              {t('knowledge.sourceUnits.empty')}
             </div>
           )}
 
           {response && response.source_units.length > 0 && filteredSourceUnits.length === 0 && (
             <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              Ничего не найдено.
+              {t('knowledge.sourceUnits.noFilterResults')}
             </div>
           )}
 
@@ -1096,7 +1096,7 @@ const AnswerResolutionTracePanel: React.FC<{
   return (
     <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
       <div className="mb-2 font-medium text-[var(--text-primary)]">
-        Разрешение ответов: {formatNumber(traceRows.length)} решений
+        {t('knowledge.answerResolutionTrace.title', { count: formatNumber(traceRows.length) })}
       </div>
       <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
         {traceRows.map((row, index) => {
@@ -1117,10 +1117,14 @@ const AnswerResolutionTracePanel: React.FC<{
               </summary>
               <div className="mt-2 space-y-2 text-[var(--text-muted)]">
                 <div>case_id: {caseId}</div>
-                {canonicalAnswerPreview && <div className="whitespace-pre-wrap">Итоговый answer: {canonicalAnswerPreview}</div>}
+                {canonicalAnswerPreview && (
+                  <div className="whitespace-pre-wrap">
+                    {t('knowledge.answerResolutionTrace.finalAnswer', { answer: canonicalAnswerPreview })}
+                  </div>
+                )}
                 {candidates.length > 0 && (
                   <div>
-                    <div className="mb-1 font-medium text-[var(--text-primary)]">Сжимало:</div>
+                    <div className="mb-1 font-medium text-[var(--text-primary)]">{t('knowledge.answerResolutionTrace.compressed')}</div>
                     <ul className="list-disc space-y-1 pl-5">
                       {candidates.map((candidate, candidateIndex) => {
                         const title = metricText(candidate, 'title') || metricText(candidate, 'candidate_id') || `candidate-${candidateIndex + 1}`;
