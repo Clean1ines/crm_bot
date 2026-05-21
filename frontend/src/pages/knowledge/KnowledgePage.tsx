@@ -167,6 +167,19 @@ const importQualityActionLabel = (action: string): string => {
   return action || t('knowledge.common.unspecified');
 };
 
+const importQualityWarningLabel = (code: string): string => {
+  if (code === 'processing_failed') return t('knowledge.importQuality.warning.processingFailed');
+  if (code === 'processing_cancelled') return t('knowledge.importQuality.warning.processingCancelled');
+  if (code === 'processing_not_finished') return t('knowledge.importQuality.warning.processingNotFinished');
+  if (code === 'no_source_units') return t('knowledge.importQuality.warning.noSourceUnits');
+  if (code === 'very_little_text') return t('knowledge.importQuality.warning.veryLittleText');
+  if (code === 'many_empty_units') return t('knowledge.importQuality.warning.manyEmptyUnits');
+  if (code === 'many_short_units') return t('knowledge.importQuality.warning.manyShortUnits');
+  if (code === 'table_like_content') return t('knowledge.importQuality.warning.tableLikeContent');
+  if (code === 'duplicated_headings') return t('knowledge.importQuality.warning.duplicatedHeadings');
+  return t('knowledge.importQuality.warning.unknown');
+};
+
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
@@ -1186,7 +1199,7 @@ const ImportQualitySummary: React.FC<ImportQualitySummaryProps> = ({ report, isL
         <ul className="mt-3 space-y-1">
           {visibleWarnings.map((warning) => (
             <li key={`${warning.code}-${warning.severity}`} className="leading-relaxed">
-              {warning.message}
+              {importQualityWarningLabel(warning.code)}
             </li>
           ))}
         </ul>
