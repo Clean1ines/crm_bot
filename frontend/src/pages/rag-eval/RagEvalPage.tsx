@@ -58,9 +58,9 @@ const formatDurationMs = (durationMs: number): string => {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}ч ${minutes}м`;
-  if (minutes > 0) return `${minutes}м ${seconds}с`;
-  return `${seconds}с`;
+  if (hours > 0) return t('ragEval.units.hoursMinutes', { hours: String(hours), minutes: String(minutes) });
+  if (minutes > 0) return t('ragEval.units.minutesSeconds', { minutes: String(minutes), seconds: String(seconds) });
+  return t('ragEval.units.seconds', { seconds: String(seconds) });
 };
 
 const timestampMs = (value: unknown): number | null => {
@@ -617,7 +617,7 @@ const RagEvalResultsPanel: React.FC<{
                   <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.results.detailsTitle')}</div>
                   <div className="mt-1 text-xs">
                     <div>{t('ragEval.results.typePrefix')} {result.question_type || '—'}</div>
-                    <div>{t('ragEval.results.latencyPrefix')} {typeof result.latency_ms === 'number' ? `${result.latency_ms} мс` : '—'}</div>
+                    <div>{t('ragEval.results.latencyPrefix')} {typeof result.latency_ms === 'number' ? t('ragEval.units.milliseconds', { value: String(result.latency_ms) }) : '—'}</div>
                     {result.notes && <div>{t('ragEval.results.notesPrefix')} {result.notes}</div>}
                   </div>
                 </div>
@@ -636,20 +636,20 @@ type EvalReviewFilter = 'all' | 'problematic' | 'wrong_top1' | 'missing' | 'good
 type EvalReviewSort = 'most_problematic' | 'most_questions' | 'worst_confusion' | 'best_candidates';
 
 const REVIEW_FILTERS: Array<{ id: EvalReviewFilter; label: string }> = [
-  { id: 'all', label: 'Все фрагменты' },
-  { id: 'problematic', label: 'Только проблемные' },
-  { id: 'wrong_top1', label: 'Только wrong top-1' },
-  { id: 'missing', label: 'Только не найденные' },
-  { id: 'good_candidates', label: 'Хорошие кандидаты' },
-  { id: 'fallback', label: 'Fallback-generated' },
-  { id: 'typo_short_vague', label: 'Typo / short / vague' },
+  { id: 'all', label: t('ragEval.review.filter.all') },
+  { id: 'problematic', label: t('ragEval.review.filter.problematic') },
+  { id: 'wrong_top1', label: t('ragEval.review.filter.wrongTop1') },
+  { id: 'missing', label: t('ragEval.review.filter.missing') },
+  { id: 'good_candidates', label: t('ragEval.review.filter.goodCandidates') },
+  { id: 'fallback', label: t('ragEval.review.filter.fallbackGenerated') },
+  { id: 'typo_short_vague', label: t('ragEval.review.filter.typoShortVague') },
 ];
 
 const REVIEW_SORTS: Array<{ id: EvalReviewSort; label: string }> = [
-  { id: 'most_problematic', label: 'Сначала самые проблемные' },
-  { id: 'most_questions', label: 'Сначала больше вопросов' },
-  { id: 'worst_confusion', label: 'Сначала worst top-1 confusion' },
-  { id: 'best_candidates', label: 'Сначала хорошие кандидаты' },
+  { id: 'most_problematic', label: t('ragEval.review.sort.mostProblematic') },
+  { id: 'most_questions', label: t('ragEval.review.sort.mostQuestions') },
+  { id: 'worst_confusion', label: t('ragEval.review.sort.worstConfusion') },
+  { id: 'best_candidates', label: t('ragEval.review.sort.bestCandidates') },
 ];
 
 const questionIsProblem = (question: RagEvalReviewQuestion): boolean => question.retrieval_status !== 'reliable';
@@ -698,32 +698,32 @@ const DocumentEvalOverviewCard: React.FC<{ review: RagEvalReviewPayload; documen
     <section className="overflow-hidden rounded-3xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-7">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-[var(--accent-primary)]">Проверка завершена</p>
-          <h2 className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">Проверка поиска по документу</h2>
+          <p className="text-sm font-medium text-[var(--accent-primary)]">{t('ragEval.review.overview.completed')}</p>
+          <h2 className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.title')}</h2>
           <p className="mt-1 text-sm text-[var(--text-muted)]">{documentName}</p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <span className="rounded-full bg-[var(--accent-primary)]/10 px-3 py-1 text-sm font-semibold text-[var(--accent-primary)]">Статус: {summary.readiness}</span>
-            <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">Готовность: {summary.score} / 100</span>
+            <span className="rounded-full bg-[var(--accent-primary)]/10 px-3 py-1 text-sm font-semibold text-[var(--accent-primary)]">{t('ragEval.review.overview.statusPrefix')} {readinessLabel(summary.readiness)}</span>
+            <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.readinessScore', { score: String(summary.score) })}</span>
           </div>
           <p className="mt-4 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{summary.human_summary}</p>
         </div>
         <div className="rounded-2xl bg-[var(--control-bg)] p-4 text-center">
           <div className="text-4xl font-semibold text-[var(--text-primary)]">{summary.score}</div>
-          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">качество поиска</div>
+          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.review.overview.searchQuality')}</div>
         </div>
       </div>
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <StatPill label="Фрагментов" value={formatNumber(summary.fragments_total)} />
-        <StatPill label="Вопросов" value={formatNumber(summary.questions_total)} />
-        <StatPill label="Проблем поиска" value={formatNumber(summary.problem_questions)} />
-        <StatPill label="Найдено хорошо" value={formatNumber(summary.reliable_questions)} />
-        <StatPill label="Нестабильно" value={formatNumber(summary.weak_questions)} />
-        <StatPill label="Не найдено" value={formatNumber(summary.missing_questions)} />
+        <StatPill label={t('ragEval.review.overview.fragments')} value={formatNumber(summary.fragments_total)} />
+        <StatPill label={t('ragEval.review.overview.questions')} value={formatNumber(summary.questions_total)} />
+        <StatPill label={t('ragEval.review.overview.searchProblems')} value={formatNumber(summary.problem_questions)} />
+        <StatPill label={t('ragEval.review.overview.reliable')} value={formatNumber(summary.reliable_questions)} />
+        <StatPill label={t('ragEval.review.overview.weak')} value={formatNumber(summary.weak_questions)} />
+        <StatPill label={t('ragEval.review.overview.missing')} value={formatNumber(summary.missing_questions)} />
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
-        <button type="button" onClick={onShowProblems} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white">Разобрать {formatNumber(summary.problem_questions)} проблем</button>
-        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">Показать хорошие вопросы для добавления</button>
-        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">Показать фрагменты, которые путаются</button>
+        <button type="button" onClick={onShowProblems} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white">{t('ragEval.review.overview.reviewProblems', { count: formatNumber(summary.problem_questions) })}</button>
+        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.showGoodQuestions')}</button>
+        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.showConfusedFragments')}</button>
       </div>
     </section>
   );
@@ -732,30 +732,30 @@ const DocumentEvalOverviewCard: React.FC<{ review: RagEvalReviewPayload; documen
 const EvalProblemMap: React.FC<{ review: RagEvalReviewPayload }> = ({ review }) => (
   <section className="grid gap-4 lg:grid-cols-3">
     <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
-      <h3 className="text-base font-semibold text-[var(--text-primary)]">Самые проблемные фрагменты</h3>
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">{t('ragEval.review.problemMap.mostProblematicFragments')}</h3>
       <div className="mt-3 space-y-3">
         {review.problem_map.most_problematic_fragments.filter((group) => group.problem_count > 0).slice(0, 4).map((group) => (
           <div key={group.entry_id} className="rounded-xl bg-[var(--control-bg)] p-3">
             <div className="text-sm font-semibold text-[var(--text-primary)]">{group.title}</div>
-            <div className="mt-1 text-xs text-[var(--text-muted)]">{formatNumber(group.question_count)} вопросов · {formatNumber(group.problem_count)} проблем</div>
+            <div className="mt-1 text-xs text-[var(--text-muted)]">{t('ragEval.review.problemMap.questionProblemStats', { questions: formatNumber(group.question_count), problems: formatNumber(group.problem_count) })}</div>
             <p className="mt-2 text-xs text-[var(--text-secondary)]">{group.issue_summary}</p>
           </div>
         ))}
       </div>
     </div>
     <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
-      <h3 className="text-base font-semibold text-[var(--text-primary)]">Лучшие фрагменты</h3>
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">{t('ragEval.review.problemMap.bestFragments')}</h3>
       <div className="mt-3 space-y-3">
         {review.problem_map.best_fragments.slice(0, 4).map((group) => (
           <div key={group.entry_id} className="rounded-xl bg-emerald-500/5 p-3">
             <div className="text-sm font-semibold text-[var(--text-primary)]">{group.title}</div>
-            <div className="mt-1 text-xs text-emerald-600">{formatNumber(group.question_count)}/{formatNumber(group.question_count)} вопросов найдены правильно</div>
+            <div className="mt-1 text-xs text-emerald-600">{t('ragEval.review.problemMap.questionsFoundCorrectly', { found: formatNumber(group.question_count), total: formatNumber(group.question_count) })}</div>
           </div>
         ))}
       </div>
     </div>
     <div className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
-      <h3 className="text-base font-semibold text-[var(--text-primary)]">Типы проблем</h3>
+      <h3 className="text-base font-semibold text-[var(--text-primary)]">{t('ragEval.review.problemMap.problemTypes')}</h3>
       <div className="mt-3 space-y-2">
         {review.problem_map.problem_types.map((item) => (
           <div key={item.type} className="flex items-center justify-between rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm">
@@ -781,7 +781,7 @@ const EvalFiltersBar: React.FC<{
       ))}
     </div>
     <label className="mt-3 block max-w-sm text-sm text-[var(--text-secondary)]">
-      Сортировка
+      {t('ragEval.review.sort.label')}
       <select value={sort} onChange={(event) => onSortChange(event.target.value as EvalReviewSort)} className="mt-1 w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none">
         {REVIEW_SORTS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select>
@@ -790,12 +790,12 @@ const EvalFiltersBar: React.FC<{
 );
 
 const fragmentReviewStatusLabel = (value: RagEvalReviewGroup['review_status']): string => {
-  if (value === 'queued') return 'Ожидает проверки';
-  if (value === 'generating_questions') return 'Генерируем вопросы';
-  if (value === 'checking_retrieval') return 'Проверяем поиск';
-  if (value === 'ready_for_review') return 'Готов к ревью';
-  if (value === 'failed') return 'Ошибка проверки';
-  return 'Готов к ревью';
+  if (value === 'queued') return t('ragEval.review.fragmentStatus.queued');
+  if (value === 'generating_questions') return t('ragEval.review.fragmentStatus.generatingQuestions');
+  if (value === 'checking_retrieval') return t('ragEval.review.fragmentStatus.checkingRetrieval');
+  if (value === 'ready_for_review') return t('ragEval.review.fragmentStatus.readyForReview');
+  if (value === 'failed') return t('ragEval.review.fragmentStatus.failed');
+  return t('ragEval.review.fragmentStatus.readyForReview');
 };
 
 const fragmentReviewStatusClass = (value: RagEvalReviewGroup['review_status']): string => {
@@ -833,43 +833,43 @@ const FragmentReviewCard: React.FC<{
     <article className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
       <div>
-        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Фрагмент · {group.title}</h3>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.titlePrefix')} {group.title}</h3>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className={`rounded-full px-2 py-1 text-xs font-semibold ${fragmentReviewStatusClass(group.review_status)}`}>
             {fragmentReviewStatusLabel(group.review_status)}
           </span>
-          <span className="text-sm text-[var(--text-muted)]">Статус поиска: {group.status}</span>
+          <span className="text-sm text-[var(--text-muted)]">{t('ragEval.review.fragment.searchStatusPrefix')} {group.status}</span>
         </div>
         {group.review_status === 'failed' && group.error && (
           <p className="mt-2 text-sm text-red-500">{group.error}</p>
         )}
       </div>
-      <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">{formatNumber(group.problem_count)} проблем</span>
+      <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.problemCount', { count: formatNumber(group.problem_count) })}</span>
     </div>
     <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4">
-      <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">Ответ / знание</div>
-      <p className="mt-2 line-clamp-4 text-sm leading-6 text-[var(--text-secondary)]">{group.content || 'Текст фрагмента не найден в текущем поисковом представлении.'}</p>
+      <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">{t('ragEval.review.fragment.answerKnowledge')}</div>
+      <p className="mt-2 line-clamp-4 text-sm leading-6 text-[var(--text-secondary)]">{group.content || t('ragEval.review.fragment.noContent')}</p>
     </div>
     <div className="mt-4 grid gap-4 lg:grid-cols-2">
       <div>
-        <div className="text-sm font-semibold text-[var(--text-primary)]">Уже есть вопросы</div>
+        <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.existingQuestions')}</div>
         <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
           {existingQuestions.slice(0, 4).map((item) => <li key={item}>— {item}</li>)}
-          {!existingQuestions.length && <li className="text-[var(--text-muted)]">Нет сохранённых вопросов.</li>}
+          {!existingQuestions.length && <li className="text-[var(--text-muted)]">{t('ragEval.review.fragment.noExistingQuestions')}</li>}
         </ul>
       </div>
       <div>
-        <div className="text-sm font-semibold text-[var(--text-primary)]">Предложение системы</div>
+        <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.systemProposal')}</div>
         <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
           {proposedImprovements.map((item) => <li key={item}>— {item}</li>)}
         </ul>
       </div>
     </div>
     <div className="mt-4 space-y-2">
-      <div className="text-sm font-semibold text-[var(--text-primary)]">Сгенерированные вопросы</div>
+      <div className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.generatedQuestions')}</div>
       {questions.length === 0 && (
         <div className="rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-muted)]">
-          Карточка появится здесь, когда вопросы фрагмента будут сгенерированы и проверены.
+          {t('ragEval.review.fragment.generatedQuestionsPending')}
         </div>
       )}
       {questions.slice(0, 8).map((question) => (
@@ -880,9 +880,9 @@ const FragmentReviewCard: React.FC<{
       ))}
     </div>
     <div className="mt-4 flex flex-wrap gap-2">
-      <button type="button" onClick={() => firstQuestion && onOpenQuestion(firstQuestion, group)} className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Рассмотреть вопросы</button>
-      <button type="button" onClick={() => onAcceptGroup(group)} className="rounded-xl bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white">Принять хорошие</button>
-      <button type="button" className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">Пересобрать</button>
+      <button type="button" onClick={() => firstQuestion && onOpenQuestion(firstQuestion, group)} className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.reviewQuestions')}</button>
+      <button type="button" onClick={() => onAcceptGroup(group)} className="rounded-xl bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white">{t('ragEval.review.fragment.acceptGood')}</button>
+      <button type="button" className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.rebuild')}</button>
     </div>
   </article>
   );
@@ -908,50 +908,50 @@ const QuestionReviewDrawer: React.FC<{
       <aside className="h-full w-full max-w-xl overflow-auto bg-[var(--surface-elevated)] p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-[var(--accent-primary)]">Вопрос-кандидат</p>
+            <p className="text-sm font-medium text-[var(--accent-primary)]">{t('ragEval.review.questionDrawer.candidate')}</p>
             <h3 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">“{question.effective_question}”</h3>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg border border-[var(--border-primary)] px-3 py-1 text-sm text-[var(--text-primary)]">Закрыть</button>
+          <button type="button" onClick={onClose} className="rounded-lg border border-[var(--border-primary)] px-3 py-1 text-sm text-[var(--text-primary)]">{t('common.actions.close')}</button>
         </div>
         <div className="mt-5 space-y-4">
           <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-secondary)]">
-            <div>Тип: <span className="font-semibold text-[var(--text-primary)]">{question.question_type_label}</span></div>
-            <div className="mt-1">Статус: <span className="font-semibold text-[var(--text-primary)]">{question.retrieval_status_label}</span></div>
-            <div className="mt-1">Review state: <span className="font-semibold text-[var(--text-primary)]">{question.review.status}</span></div>
+            <div>{t('ragEval.review.questionDrawer.typePrefix')} <span className="font-semibold text-[var(--text-primary)]">{question.question_type_label}</span></div>
+            <div className="mt-1">{t('ragEval.review.questionDrawer.statusPrefix')} <span className="font-semibold text-[var(--text-primary)]">{question.retrieval_status_label}</span></div>
+            <div className="mt-1">{t('ragEval.review.questionDrawer.reviewStatePrefix')} <span className="font-semibold text-[var(--text-primary)]">{question.review.status}</span></div>
           </div>
           <section>
-            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Ожидался фрагмент</h4>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.expectedFragment')}</h4>
             <p className="mt-2 rounded-xl bg-[var(--control-bg)] p-3 text-sm leading-6 text-[var(--text-secondary)]">{group.content || group.title}</p>
           </section>
           <section>
-            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что нашёл поиск</h4>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.retrievedBySearch')}</h4>
             <ol className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
               {retrievedEntries.map((entry, index) => <li key={`${entry.id}-${index}`} className="rounded-xl bg-[var(--control-bg)] p-3">{index + 1}. {entry.title || entry.id}<p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{entry.content}</p></li>)}
-              {!retrievedEntries.length && <li className="rounded-xl bg-[var(--control-bg)] p-3">Поиск не вернул фрагменты.</li>}
+              {!retrievedEntries.length && <li className="rounded-xl bg-[var(--control-bg)] p-3">{t('ragEval.review.questionDrawer.noRetrievedFragments')}</li>}
             </ol>
           </section>
           <section>
-            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Почему это проблема</h4>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.whyProblem')}</h4>
             <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{question.why_it_matters}</p>
           </section>
           <section>
-            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Что можно сделать</h4>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.whatToDo')}</h4>
             <ul className="mt-2 space-y-1 text-sm text-[var(--text-secondary)]">
               {proposedImprovements.map((item) => <li key={item}>☑ {item}</li>)}
-              <li>☐ Отклонить как плохой вопрос</li>
+              <li>{t('ragEval.review.questionDrawer.rejectAsBadQuestion')}</li>
             </ul>
           </section>
           <section>
-            <h4 className="text-sm font-semibold text-[var(--text-primary)]">Редактировать формулировку</h4>
+            <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.editQuestion')}</h4>
             <textarea value={currentEditValue} onChange={(event) => setEditValue(event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-3 text-sm text-[var(--text-primary)] outline-none" />
           </section>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={mutating} onClick={() => onAccept(question.question_id)} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Принять</button>
-            <button type="button" disabled={mutating} onClick={() => onEdit(question.question_id, currentEditValue)} className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] disabled:opacity-50">Сохранить редакцию</button>
-            <button type="button" disabled={mutating} onClick={() => onReject(question.question_id)} className="rounded-xl border border-red-500/30 px-4 py-2 text-sm font-semibold text-red-500 disabled:opacity-50">Отклонить</button>
+            <button type="button" disabled={mutating} onClick={() => onAccept(question.question_id)} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{t('ragEval.review.questionDrawer.accept')}</button>
+            <button type="button" disabled={mutating} onClick={() => onEdit(question.question_id, currentEditValue)} className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] disabled:opacity-50">{t('ragEval.review.questionDrawer.saveEdit')}</button>
+            <button type="button" disabled={mutating} onClick={() => onReject(question.question_id)} className="rounded-xl border border-red-500/30 px-4 py-2 text-sm font-semibold text-red-500 disabled:opacity-50">{t('ragEval.review.questionDrawer.reject')}</button>
           </div>
           <details className="rounded-xl border border-[var(--border-primary)] p-3">
-            <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">Диагностика</summary>
+            <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.diagnostics')}</summary>
             <div className="mt-3"><ReportJsonBlock value={question.diagnostics} /></div>
           </details>
         </div>
@@ -964,11 +964,11 @@ const ApplyAcceptedQuestionsPanel: React.FC<{ acceptedCount: number; onApply: ()
   <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)]">
     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
-        <h3 className="text-lg font-semibold text-[var(--text-primary)]">Apply / Improve Workflow</h3>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">Eval не улучшает базу сам: применяются только вопросы, которые человек принял.</p>
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">{t('ragEval.review.applyPanel.title')}</h3>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">{t('ragEval.review.applyPanel.description')}</p>
       </div>
       <button type="button" onClick={onApply} disabled={!acceptedCount || applying} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-        {applying ? 'Применяем...' : `Добавить к фрагментам (${formatNumber(acceptedCount)})`}
+        {applying ? t('ragEval.review.applyPanel.applying') : t('ragEval.review.applyPanel.addToFragments', { count: formatNumber(acceptedCount) })}
       </button>
     </div>
   </section>
@@ -976,7 +976,7 @@ const ApplyAcceptedQuestionsPanel: React.FC<{ acceptedCount: number; onApply: ()
 
 const TechnicalDiagnosticsDisclosure: React.FC<{ value: unknown }> = ({ value }) => (
   <details className="rounded-2xl border border-[var(--border-primary)] bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
-    <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">Техническая диагностика</summary>
+    <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.technicalDiagnostics')}</summary>
     <div className="mt-3"><ReportJsonBlock value={value} /></div>
   </details>
 );
@@ -1114,22 +1114,22 @@ const JobProgressCard: React.FC<{
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatPill label="Фрагменты: готовы к ревью / всего" value={entriesTotal ? `${entriesReady}/${entriesTotal}` : entriesReady || '—'} />
-        <StatPill label="Фрагменты в очереди" value={entriesQueued} />
-        <StatPill label="Генерируем фрагментов" value={entriesGenerating || activeGenerationWorkers} />
-        <StatPill label="Проверяем поиск по фрагментам" value={entriesChecking} />
-        <StatPill label="Фрагменты с ошибкой" value={entriesFailed} />
-        <StatPill label="Вопросы созданы" value={generatedQuestions} />
-        <StatPill label="Вопросы проверены" value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
-        <StatPill label="Вопросы в очереди" value={queuedQuestions} />
-        <StatPill label="Активные проверки поиска" value={activeRetrievalWorkers} />
-        <StatPill label="Проблемы поиска" value={failedRetrievalCount} />
-        <StatPill label="Предложено улучшений" value={actionableImprovementsCount} />
-        <StatPill label="Скорость: вопросов/мин" value={questionsPerMinute || '—'} />
-        <StatPill label="Скорость: фрагментов/мин" value={entriesPerMinute || '—'} />
-        <StatPill label="Последнее обновление" value={`${lastUpdateSecondsAgo} сек назад`} />
-        <StatPill label="Модель вопросов" value={questionModel || '—'} />
-        <StatPill label="Fallback использован" value={`${fallbackUsedCount} раз`} />
+        <StatPill label={t('ragEval.progress.stats.fragmentsReadyTotal')} value={entriesTotal ? `${entriesReady}/${entriesTotal}` : entriesReady || '—'} />
+        <StatPill label={t('ragEval.progress.stats.fragmentsQueued')} value={entriesQueued} />
+        <StatPill label={t('ragEval.progress.stats.fragmentsGenerating')} value={entriesGenerating || activeGenerationWorkers} />
+        <StatPill label={t('ragEval.progress.stats.fragmentsChecking')} value={entriesChecking} />
+        <StatPill label={t('ragEval.progress.stats.fragmentsFailed')} value={entriesFailed} />
+        <StatPill label={t('ragEval.progress.stats.questionsCreated')} value={generatedQuestions} />
+        <StatPill label={t('ragEval.progress.stats.questionsChecked')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
+        <StatPill label={t('ragEval.progress.stats.questionsQueued')} value={queuedQuestions} />
+        <StatPill label={t('ragEval.progress.stats.activeRetrievalChecks')} value={activeRetrievalWorkers} />
+        <StatPill label={t('ragEval.progress.stats.searchProblems')} value={failedRetrievalCount} />
+        <StatPill label={t('ragEval.progress.stats.proposedImprovements')} value={actionableImprovementsCount} />
+        <StatPill label={t('ragEval.progress.stats.questionsPerMinute')} value={questionsPerMinute || '—'} />
+        <StatPill label={t('ragEval.progress.stats.fragmentsPerMinute')} value={entriesPerMinute || '—'} />
+        <StatPill label={t('ragEval.progress.stats.lastUpdate')} value={t('ragEval.units.secondsAgo', { seconds: String(lastUpdateSecondsAgo) })} />
+        <StatPill label={t('ragEval.progress.stats.questionModel')} value={questionModel || '—'} />
+        <StatPill label={t('ragEval.progress.stats.fallbackUsed')} value={t('ragEval.units.times', { count: String(fallbackUsedCount) })} />
         <StatPill label={t('ragEval.stats.elapsed')} value={startedAt === null ? '—' : formatDurationMs(elapsedMs)} />
         <StatPill label={t('ragEval.stats.jsonFailures')} value={jsonParseFailures} />
         <StatPill label={t('ragEval.stats.providerFailures')} value={providerFailures} />
@@ -1354,37 +1354,37 @@ export const RagEvalPage: React.FC = () => {
   const reviewQuestionMutation = useMutation({
     mutationFn: async ({ questionId, status: nextStatus }: { questionId: string; status: 'accepted' | 'rejected' }) => ragEvalApi.reviewQuestion(questionId, nextStatus),
     onSuccess: async () => {
-      toast.success('Решение по вопросу сохранено');
+      toast.success(t('ragEval.review.toast.questionDecisionSaved'));
       setSelectedReviewQuestion(null);
       setSelectedReviewGroup(null);
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось сохранить решение по вопросу'));
+      toast.error(getErrorMessage(error, t('ragEval.review.toast.questionDecisionSaveFailed')));
     },
   });
 
   const editQuestionMutation = useMutation({
     mutationFn: async ({ questionId, question }: { questionId: string; question: string }) => ragEvalApi.editQuestion(questionId, question),
     onSuccess: async () => {
-      toast.success('Формулировка сохранена');
+      toast.success(t('ragEval.review.toast.questionEditSaved'));
       setSelectedReviewQuestion(null);
       setSelectedReviewGroup(null);
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось отредактировать вопрос'));
+      toast.error(getErrorMessage(error, t('ragEval.review.toast.questionEditFailed')));
     },
   });
 
   const applyAcceptedMutation = useMutation({
     mutationFn: async (runId: string) => ragEvalApi.applyAcceptedQuestions(runId),
     onSuccess: async (result) => {
-      toast.success(`Применено вопросов: ${formatNumber(result.applied_questions)}`);
+      toast.success(t('ragEval.review.toast.appliedQuestions', { count: formatNumber(result.applied_questions) }));
       await invalidateEvalQueries();
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Не удалось применить принятые вопросы'));
+      toast.error(getErrorMessage(error, t('ragEval.review.toast.applyAcceptedQuestionsFailed')));
     },
   });
 
@@ -1517,14 +1517,14 @@ export const RagEvalPage: React.FC = () => {
             onClick={() => setActiveReviewTab('curation')}
             className={`rounded-xl px-4 py-2 text-sm font-semibold ${activeReviewTab === 'curation' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
           >
-            Сборка знаний / Курация знаний
+            {t('ragEval.tabs.knowledgeCuration')}
           </button>
           <button
             type="button"
             onClick={() => setActiveReviewTab('retrieval')}
             className={`rounded-xl px-4 py-2 text-sm font-semibold ${activeReviewTab === 'retrieval' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
           >
-            Проверка поиска
+            {t('ragEval.tabs.searchReview')}
           </button>
         </div>
       </section>
@@ -1538,7 +1538,7 @@ export const RagEvalPage: React.FC = () => {
         />
       ) : reviewQuery.isLoading && !review ? (
         <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
-          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> Загружаем review console...
+          <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> {t('ragEval.review.loadingConsole')}
         </section>
       ) : review ? (
         <>
@@ -1571,7 +1571,7 @@ export const RagEvalPage: React.FC = () => {
             ))}
             {!reviewGroups.length && (
               <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
-                По выбранному фильтру фрагментов нет.
+                {t('ragEval.review.emptyFilteredFragments')}
               </section>
             )}
           </div>
