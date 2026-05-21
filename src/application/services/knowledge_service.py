@@ -1,6 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Protocol
 
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
@@ -21,15 +22,21 @@ from src.application.errors import (
     UnauthorizedError,
     ValidationError,
 )
+from src.application.ports.knowledge import (
+    KnowledgeAnswerCandidatePort,
+    KnowledgeCompilationTracePort,
+    KnowledgeDocumentPort,
+    KnowledgeRuntimeRetrievalPort,
+    KnowledgeSourceMaterialPort,
+)
 from src.application.ports.knowledge_port import (
     JwtDecoderPort,
     KnowledgeChunkerFactoryPort,
     KnowledgeDbPoolPort,
-    ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     KnowledgeProjectAccessPort,
     KnowledgeQueuePort,
-    KnowledgeRepositoryFactoryPort,
+    ModelUsageRepositoryFactoryPort,
     PlatformUserAdminPort,
 )
 from src.application.ports.logger_port import LoggerPort
@@ -51,6 +58,21 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
+
+
+class KnowledgeServiceRepositoryPort(
+    KnowledgeDocumentPort,
+    KnowledgeSourceMaterialPort,
+    KnowledgeCompilationTracePort,
+    KnowledgeAnswerCandidatePort,
+    KnowledgeRuntimeRetrievalPort,
+    Protocol,
+):
+    """Repository subset required by knowledge management workflows."""
+
+
+class KnowledgeServiceRepositoryFactoryPort(Protocol):
+    def __call__(self, pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort: ...
 
 
 BEARER_PREFIX = "Bearer "
@@ -202,7 +224,7 @@ class KnowledgeService:
         authorization: str | None,
         *,
         chunker_factory: KnowledgeChunkerFactoryPort,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
         queue_repo: KnowledgeQueuePort,
         knowledge_upload_task_type: str,
@@ -308,7 +330,7 @@ class KnowledgeService:
         document_id: str,
         authorization: str | None,
         *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
         limit: int = 20,
     ) -> KnowledgeAnswerDraftsResponseDto:
@@ -351,7 +373,7 @@ class KnowledgeService:
         document_id: str,
         authorization: str | None,
         *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
         limit: int = 1000,
     ) -> KnowledgeSourceUnitsResponseDto:
@@ -415,7 +437,7 @@ class KnowledgeService:
         document_id: str,
         authorization: str | None,
         *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> KnowledgeProcessingReportDto:
         await self.require_access(project_id, authorization)
@@ -448,7 +470,7 @@ class KnowledgeService:
         document_id: str,
         authorization: str | None,
         *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> None:
         await self.require_access(project_id, authorization)
@@ -588,7 +610,7 @@ class KnowledgeService:
         request: KnowledgePreviewRequestDto,
         authorization: str | None,
         *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> KnowledgePreviewResponseDto:
         await self.require_access(project_id, authorization)
@@ -618,7 +640,7 @@ class KnowledgeService:
         project_id: str,
         authorization: str | None,
         *,
-        knowledge_repo_factory: KnowledgeRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> None:
         await self.require_access(project_id, authorization)

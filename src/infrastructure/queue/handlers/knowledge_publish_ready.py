@@ -6,11 +6,9 @@ from typing import cast
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
-from src.application.ports.knowledge_port import (
-    KnowledgeDbPoolPort,
-    KnowledgeRepositoryPort,
-)
+from src.application.ports.knowledge_port import KnowledgeDbPoolPort
 from src.application.services.knowledge_ingestion_service import (
+    KnowledgeIngestionRepositoryPort,
     KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -23,8 +21,10 @@ from src.infrastructure.queue.job_exceptions import PermanentJobError, Transient
 logger = get_logger(__name__)
 
 
-def make_knowledge_repository(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
-    return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
+def make_knowledge_repository(
+    pool: KnowledgeDbPoolPort,
+) -> KnowledgeIngestionRepositoryPort:
+    return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
 
 
 def _payload(job: Mapping[str, object]) -> Mapping[str, object]:

@@ -8,10 +8,10 @@ import asyncpg
 from src.application.errors import EmbeddingProviderError, ValidationError
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
-    KnowledgeRepositoryPort,
     ModelUsageRepositoryPort,
 )
 from src.application.services.knowledge_ingestion_service import (
+    KnowledgeIngestionRepositoryPort,
     KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -48,8 +48,10 @@ def _required_text(payload: Mapping[str, object], key: str) -> str:
     return value
 
 
-def make_knowledge_repository(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
-    return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
+def make_knowledge_repository(
+    pool: KnowledgeDbPoolPort,
+) -> KnowledgeIngestionRepositoryPort:
+    return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
 
 
 async def handle_retighten_knowledge_document(

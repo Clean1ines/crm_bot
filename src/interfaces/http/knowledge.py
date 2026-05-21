@@ -26,12 +26,12 @@ from src.application.ports.knowledge_port import (
     KnowledgeChunkerPort,
     KnowledgeDbPoolPort,
     KnowledgePreprocessorPort,
-    KnowledgeRepositoryPort,
     ModelUsageRepositoryPort,
 )
 from src.application.services.knowledge_service import (
     KnowledgeService,
     KnowledgeServiceConfig,
+    KnowledgeServiceRepositoryPort,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.config.settings import settings
@@ -89,8 +89,8 @@ def make_chunker() -> KnowledgeChunkerPort:
     return cast(KnowledgeChunkerPort, ChunkerService())
 
 
-def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeRepositoryPort:
-    return cast(KnowledgeRepositoryPort, KnowledgeRepository(pool))
+def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort:
+    return cast(KnowledgeServiceRepositoryPort, KnowledgeRepository(pool))
 
 
 def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:
