@@ -211,6 +211,20 @@ export type KnowledgePriceFactsResponse = {
   is_empty: boolean;
 };
 
+
+export type KnowledgePriceFactsMutationResponse = {
+  knowledge_document_id: string;
+  price_document_id: string;
+  affected_count: number;
+  facts: KnowledgePriceFact[];
+  items: KnowledgePriceFact[];
+};
+
+export type KnowledgePriceFactsActionRequest = {
+  fact_ids: string[];
+  reason?: string;
+};
+
 export type KnowledgeImportQualityStatus = 'good' | 'needs_review' | 'unsafe' | string;
 
 export type KnowledgeImportIssueSeverity = 'info' | 'warning' | 'error' | string;
@@ -326,6 +340,32 @@ export const knowledgeApi = {
       `/api/projects/${projectId}/knowledge/${documentId}/price-facts`,
       {
         method: 'GET',
+      },
+    ),
+
+  publishPriceFacts: (
+    projectId: string,
+    documentId: string,
+    payload: KnowledgePriceFactsActionRequest,
+  ) =>
+    authedJsonRequest<KnowledgePriceFactsMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/price-facts/publish`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  rejectPriceFacts: (
+    projectId: string,
+    documentId: string,
+    payload: KnowledgePriceFactsActionRequest,
+  ) =>
+    authedJsonRequest<KnowledgePriceFactsMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/price-facts/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
       },
     ),
 
