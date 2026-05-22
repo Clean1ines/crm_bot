@@ -182,3 +182,34 @@ def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_route
 
         assert policy_param not in route
         assert "policy=policy" not in route
+
+
+def test_commercial_truth_review_policy_preview_is_document_scoped_today() -> None:
+    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+
+    review_method_start = service_source.index("async def commercial_truth_review(")
+    review_method_end = service_source.index(
+        "async def cancel_document_processing(",
+        review_method_start,
+    )
+    review_method = service_source[review_method_start:review_method_end]
+
+    assert "get_price_document_by_knowledge_document" in review_method
+    assert "list_price_facts_for_document" in review_method
+    assert "price_document_id=price_document.id" in review_method
+    assert "knowledge_document_id=document_id" in review_method
+
+    # Important product boundary:
+    # current policy preview is a read-only per-document review. It can preview
+    # policy effects for conflicts present inside the loaded document's facts,
+    # but it is not yet a project-wide or upload-batch Commercial Truth surface.
+    #
+    # Cross-document conflicts such as:
+    # - prices_may.md says Pro = 2490 RUB
+    # - faq_old.md says Pro = 2990 RUB
+    #
+    # require a separate project/batch review port that can load multiple
+    # price_documents and their KnowledgeDocument metadata together.
+    assert "list_price_documents_for_project" not in review_method
+    assert "list_price_facts_for_project" not in review_method
+    assert "list_project_commercial_truth" not in review_method
