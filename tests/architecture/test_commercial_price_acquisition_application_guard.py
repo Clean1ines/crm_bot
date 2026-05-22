@@ -87,3 +87,14 @@ def test_price_acquisition_adapter_boundary_carries_project_context() -> None:
     assert "project_id: str" in port_source
     assert "project_id: str" in service_source
     assert "project_id=price_document.project_id" in preparation_source
+
+
+def test_markdown_price_acquisition_adapter_stays_in_infrastructure() -> None:
+    adapter_path = (
+        ROOT / "src/infrastructure/commercial_price/markdown_acquisition_adapter.py"
+    )
+    source = adapter_path.read_text(encoding="utf-8")
+
+    assert "MarkdownPriceAcquisitionAdapter" in source
+    assert "CommercialPriceAcquisitionAdapterPort" in source
+    assert "PriceAcquisitionResult" in source
