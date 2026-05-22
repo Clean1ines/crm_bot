@@ -486,3 +486,38 @@ def test_source_descriptor_ignores_invalid_observed_at_without_failing_review() 
 
     assert descriptor.kind == CommercialSourceKind.UNKNOWN
     assert descriptor.observed_at is None
+
+
+def test_review_fact_dto_includes_source_title_and_observed_at() -> None:
+    fact = _fact(fact_id="pro", amount="2490")
+    price_document = PriceDocument(
+        id=fact.price_document_id,
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.MARKDOWN,
+        input_kind=PriceDocumentInputKind.MIXED,
+        status=PriceDocumentStatus.READY,
+    )
+    descriptor = commercial_source_descriptor_from_price_document(
+        price_document,
+        knowledge_document=_knowledge_document(
+            preprocessing_mode="price_list",
+            file_name="prices_may.md",
+            created_at="2026-05-01T12:30:00+00:00",
+        ),
+    )
+
+    report = CommercialTruthReviewService().review_price_facts(
+        facts=(fact,),
+        sources_by_price_document_id={fact.price_document_id: descriptor},
+    )
+    payload = report.to_dict()
+    facts_payload = _mapping_list(payload["facts"])
+    surface_payload = _mapping_list(payload["surface_facts"])
+
+    assert report.facts[0].source_title == "prices_may.md"
+    assert report.facts[0].source_observed_at == "2026-05-01T12:30:00+00:00"
+    assert facts_payload[0]["source_title"] == "prices_may.md"
+    assert facts_payload[0]["source_observed_at"] == "2026-05-01T12:30:00+00:00"
+    assert surface_payload[0]["source_title"] == "prices_may.md"
+    assert surface_payload[0]["source_observed_at"] == "2026-05-01T12:30:00+00:00"

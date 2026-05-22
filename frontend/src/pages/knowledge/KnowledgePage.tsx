@@ -802,6 +802,19 @@ const CommercialTruthReviewSummary: React.FC<{
                   {fact.value_text || priceFactValueKindLabel(fact.value_kind)}
                 </span>
                 {' · '}
+                {fact.source_title && (
+                  <>
+                    {' · '}
+                    <span title={fact.source_title}>{fact.source_title}</span>
+                  </>
+                )}
+                {fact.source_observed_at && (
+                  <>
+                    {' · '}
+                    <span>{fact.source_observed_at.slice(0, 10)}</span>
+                  </>
+                )}
+                {' · '}
                 {t('knowledge.commercialTruth.fields.sourceKind')}: {fact.source_kind}
                 {fact.source_quote && (
                   <>
@@ -855,6 +868,19 @@ const CommercialTruthReviewSummary: React.FC<{
                     <span className="font-semibold text-[var(--text-primary)]">
                       {option.value_text || priceFactValueKindLabel(option.value_kind)}
                     </span>
+                    {' · '}
+                    {option.source_title && (
+                      <>
+                        {' · '}
+                        <span title={option.source_title}>{option.source_title}</span>
+                      </>
+                    )}
+                    {option.source_observed_at && (
+                      <>
+                        {' · '}
+                        <span>{option.source_observed_at.slice(0, 10)}</span>
+                      </>
+                    )}
                     {' · '}
                     {t('knowledge.commercialTruth.fields.sourceKind')}: {option.source_kind}
                     {' · '}

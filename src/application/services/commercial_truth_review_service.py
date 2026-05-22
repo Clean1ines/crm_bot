@@ -37,6 +37,8 @@ class CommercialTruthFactReviewDto:
     value_text: str
     source_quote: str
     source_id: str
+    source_title: str
+    source_observed_at: str
     source_kind: str
     source_authority: str
     is_runtime_eligible: bool
@@ -56,6 +58,10 @@ class CommercialTruthFactReviewDto:
             value_text=commercial_truth_fact_value_text(snapshot.fact),
             source_quote=commercial_truth_source_quote(snapshot.fact),
             source_id=snapshot.source.id,
+            source_title=snapshot.source.title,
+            source_observed_at=commercial_truth_source_observed_at_text(
+                snapshot.source.observed_at
+            ),
             source_kind=snapshot.source.kind.value,
             source_authority=snapshot.source.effective_authority.value,
             is_runtime_eligible=snapshot.fact.is_runtime_eligible,
@@ -72,6 +78,8 @@ class CommercialTruthFactReviewDto:
             "value_text": self.value_text,
             "source_quote": self.source_quote,
             "source_id": self.source_id,
+            "source_title": self.source_title,
+            "source_observed_at": self.source_observed_at,
             "source_kind": self.source_kind,
             "source_authority": self.source_authority,
             "is_runtime_eligible": self.is_runtime_eligible,
@@ -179,6 +187,12 @@ class CommercialTruthReviewReport:
             "facts": [fact.to_dict() for fact in self.facts],
             "conflicts": [conflict.to_dict() for conflict in self.conflicts],
         }
+
+
+def commercial_truth_source_observed_at_text(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return value.isoformat()
 
 
 def commercial_truth_fact_value_text(fact: PublishedPriceFact) -> str:
