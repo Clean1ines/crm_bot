@@ -11,9 +11,13 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingValidationError,
 )
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
+from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryPort,
     KnowledgeIngestionService,
+)
+from src.infrastructure.db.repositories.commercial_price_repository import (
+    CommercialPriceRepository,
 )
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.model_usage_repository import (
@@ -37,6 +41,12 @@ def make_model_usage_repository(
     pool: KnowledgeDbPoolPort,
 ) -> ModelUsageRepositoryPort:
     return cast(ModelUsageRepositoryPort, ModelUsageRepository(pool))
+
+
+def make_commercial_price_repository(
+    pool: KnowledgeDbPoolPort,
+) -> CommercialPriceKnowledgePort:
+    return cast(CommercialPriceKnowledgePort, CommercialPriceRepository(pool))
 
 
 def make_knowledge_repository(
@@ -72,6 +82,7 @@ async def handle_process_knowledge_upload(
             model_usage_repo_factory=make_model_usage_repository,
             preprocessor_factory=GroqKnowledgePreprocessor,
             logger=logger,
+            commercial_price_repo_factory=make_commercial_price_repository,
         )
     except (KnowledgePreprocessingValidationError, ValidationError) as exc:
         raise PermanentJobError(str(exc)) from exc

@@ -11,6 +11,7 @@ from typing import Protocol, cast
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
+from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.ports.knowledge import (
     KnowledgeDocumentPort,
     KnowledgeSourceMaterialPort,
@@ -26,6 +27,9 @@ from src.application.ports.knowledge_port import (
     KnowledgePreprocessorPort,
 )
 from src.application.ports.logger_port import LoggerPort
+from src.application.services.commercial_price_ingestion_service import (
+    CommercialPriceIngestionService,
+)
 from src.application.services.knowledge_normalization_service import (
     KnowledgeNormalizationService,
 )
@@ -52,6 +56,7 @@ from src.domain.project_plane.knowledge_semantic_builder import (
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
+    MODE_PRICE_LIST,
     PREPROCESSING_STATUS_COMPLETED,
     PREPROCESSING_STATUS_FAILED,
     PREPROCESSING_STATUS_NOT_REQUESTED,
@@ -107,6 +112,10 @@ class KnowledgeIngestionRepositoryPort(
     Protocol,
 ):
     """Repository subset required by knowledge ingestion workflows."""
+
+
+class CommercialPriceRepositoryFactoryPort(Protocol):
+    def __call__(self, pool: KnowledgeDbPoolPort) -> CommercialPriceKnowledgePort: ...
 
 
 class KnowledgeIngestionRepositoryFactoryPort(Protocol):
@@ -4322,6 +4331,8 @@ class KnowledgeIngestionService:
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
         logger: LoggerPort,
+        commercial_price_repo_factory: CommercialPriceRepositoryFactoryPort
+        | None = None,
     ) -> KnowledgeDocumentProcessingResult:
         repo = knowledge_repo_factory(self.pool)
         usage_repo = model_usage_repo_factory(self.pool)
@@ -4343,6 +4354,27 @@ class KnowledgeIngestionService:
             document_id=document_id,
             chunks=indexable_chunks,
         )
+        if mode == MODE_PRICE_LIST and commercial_price_repo_factory is not None:
+            price_result = (
+                await CommercialPriceIngestionService().persist_price_source_material(
+                    project_id=project_id,
+                    knowledge_document_id=document_id,
+                    file_name=file_name,
+                    chunks=indexable_chunks,
+                    price_repo=commercial_price_repo_factory(self.pool),
+                )
+            )
+            logger.info(
+                "Commercial price source material persisted",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "price_document_id": price_result.price_document_id,
+                    "price_source_unit_count": price_result.source_unit_count,
+                    "price_document_status": price_result.status.value,
+                },
+            )
+
         compiler_run_id = _stage_e_compiler_run_id(document_id=document_id, mode=mode)
         await repo.create_compiler_run(
             _stage_e_compiler_run(
