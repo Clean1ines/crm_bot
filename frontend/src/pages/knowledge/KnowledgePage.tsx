@@ -30,6 +30,8 @@ import {
   type KnowledgeAnswerDraftsResponse,
   type KnowledgeSourceUnit,
   type KnowledgeSourceUnitsResponse,
+  type KnowledgePriceFact,
+  type KnowledgePriceFactsResponse,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
@@ -40,6 +42,7 @@ type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingRep
 type KnowledgeImportQualityByDocument = Record<string, KnowledgeImportQualityReport>;
 type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
 type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
+type KnowledgePriceFactsByDocument = Record<string, KnowledgePriceFactsResponse>;
 
 interface Document {
   id: string;
@@ -238,6 +241,53 @@ const usageModelRows = (breakdown: KnowledgeUsageBreakdown[]): string[] => {
   return events > 0 ? [t('knowledge.metrics.operations', { count: formatNumber(events) })] : [];
 };
 
+
+
+const priceFactStatusLabel = (status: string): string => {
+  if (status === 'needs_review') return t('knowledge.priceFacts.status.needsReview');
+  if (status === 'published') return t('knowledge.priceFacts.status.published');
+  if (status === 'rejected') return t('knowledge.priceFacts.status.rejected');
+  if (status === 'draft') return t('knowledge.priceFacts.status.draft');
+  if (status === 'superseded') return t('knowledge.priceFacts.status.superseded');
+  return status;
+};
+
+const priceFactValueKindLabel = (valueKind: string): string => {
+  if (valueKind === 'exact') return t('knowledge.priceFacts.value.exact');
+  if (valueKind === 'starting_from') return t('knowledge.priceFacts.value.startingFrom');
+  if (valueKind === 'range') return t('knowledge.priceFacts.value.range');
+  if (valueKind === 'on_request') return t('knowledge.priceFacts.value.onRequest');
+  return valueKind;
+};
+
+const priceMoneyText = (amount: { amount: string; currency: string }): string => (
+  `${amount.amount} ${amount.currency}`
+);
+
+const priceFactValueText = (fact: KnowledgePriceFact): string => {
+  if (fact.amount) return priceMoneyText(fact.amount);
+  if (fact.price_range) {
+    return `${priceMoneyText(fact.price_range.min_amount)} – ${priceMoneyText(fact.price_range.max_amount)}`;
+  }
+  if (fact.price_text.trim()) return fact.price_text;
+  return priceFactValueKindLabel(fact.value_kind);
+};
+
+const shouldFetchPriceFactsForDocument = (
+  doc: Document,
+  report: KnowledgeProcessingReport | undefined,
+): boolean => {
+  if (doc.preprocessing_mode === 'price_list') return true;
+
+  const candidateCount = report
+    ? metricNumber(report.metrics, 'price_acquisition_fact_candidate_count')
+    : null;
+  const reviewFactCount = report
+    ? metricNumber(report.metrics, 'price_review_fact_count')
+    : null;
+
+  return (candidateCount ?? 0) > 0 || (reviewFactCount ?? 0) > 0;
+};
 
 const metricNumber = (
   metrics: KnowledgeProcessingMetrics | null | undefined,
@@ -669,6 +719,93 @@ const UsageScenarioCard: React.FC<{
   );
 };
 
+
+
+const PriceFactsSummary: React.FC<{
+  response: KnowledgePriceFactsResponse | undefined;
+  isLoading: boolean;
+}> = ({ response, isLoading }) => {
+  if (isLoading && !response) {
+    return (
+      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>{t('knowledge.priceFacts.loading')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!response || response.facts.length === 0) return null;
+
+  const previewFacts = response.facts.slice(0, 3);
+  const needsReviewCount = response.facts.filter((fact) => fact.status === 'needs_review').length;
+
+  return (
+    <div className="mb-4 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--accent-primary)]/5 p-3 text-xs">
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="font-semibold text-[var(--text-primary)]">
+            {t('knowledge.priceFacts.title')}
+          </div>
+          <div className="mt-0.5 leading-relaxed text-[var(--text-muted)]">
+            {t('knowledge.priceFacts.subtitle')}
+          </div>
+        </div>
+        {needsReviewCount > 0 && (
+          <span className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2 py-0.5 font-medium text-[var(--accent-primary)]">
+            {t('knowledge.priceFacts.status.needsReview')}: {formatNumber(needsReviewCount)}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        {previewFacts.map((fact) => {
+          const firstSourceRef = fact.source_refs[0];
+          return (
+            <div
+              key={fact.id}
+              className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2"
+            >
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-[var(--text-primary)]" title={fact.item_name}>
+                    {fact.item_name}
+                  </div>
+                  <div className="mt-0.5 text-[var(--text-muted)]">
+                    {priceFactValueKindLabel(fact.value_kind)} · {t('knowledge.priceFacts.fields.unit')}: {fact.unit || '—'}
+                  </div>
+                </div>
+                <div className="font-semibold text-[var(--text-primary)]">
+                  {priceFactValueText(fact)}
+                </div>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
+                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                  {priceFactStatusLabel(fact.status)}
+                </span>
+                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                  {t('knowledge.priceFacts.fields.confidence')}: {fact.confidence}
+                </span>
+                {Object.keys(fact.variant).length > 0 && (
+                  <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                    {t('knowledge.priceFacts.fields.variant')}: {Object.entries(fact.variant).map(([key, value]) => `${key}=${value}`).join(', ')}
+                  </span>
+                )}
+                {firstSourceRef?.quote && (
+                  <span className="max-w-full truncate rounded-full bg-[var(--control-bg)] px-2 py-0.5" title={firstSourceRef.quote}>
+                    {t('knowledge.priceFacts.fields.source')}: {firstSourceRef.quote}
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const DraftsSummary: React.FC<{
   response: KnowledgeAnswerDraftsResponse | undefined;
@@ -1460,6 +1597,38 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const sourceUnits = sourceUnitsQuery.data || {};
+  const priceFactDocumentIds = documents
+    .filter((doc) => shouldFetchPriceFactsForDocument(doc, processingReports[doc.id]))
+    .map((doc) => doc.id)
+    .sort();
+  const priceFactsQuery = useQuery({
+    queryKey: ['knowledge-price-facts', projectId, priceFactDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || priceFactDocumentIds.length === 0) return {};
+
+      const priceFacts = await Promise.all(
+        priceFactDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.priceFacts(projectId, documentId);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return priceFacts.reduce<KnowledgePriceFactsByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && priceFactDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const priceFacts = priceFactsQuery.data || {};
   const draftsDocument = draftsDocumentId
     ? documents.find((doc) => doc.id === draftsDocumentId) ?? null
     : null;
@@ -1924,6 +2093,10 @@ export const KnowledgePage: React.FC = () => {
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
             const processingReport = processingReports[doc.id];
             const importQualityReport = importQualityReports[doc.id];
+            const priceFactsResponse = priceFacts[doc.id];
+            const shouldLoadPriceFacts = priceFactDocumentIds.includes(doc.id);
+            const isPriceFactsLoading = shouldLoadPriceFacts
+              && (priceFactsQuery.isLoading || (priceFactsQuery.isFetching && !priceFactsResponse));
 
             return (
               <div
@@ -1978,6 +2151,11 @@ export const KnowledgePage: React.FC = () => {
                 <ImportQualitySummary
                   report={importQualityReport}
                   isLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
+                />
+
+                <PriceFactsSummary
+                  response={priceFactsResponse}
+                  isLoading={isPriceFactsLoading}
                 />
 
                 {processingReport && (
