@@ -7,6 +7,7 @@ from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
     KnowledgeAnswerDraftsResponseDto,
     KnowledgeImportQualityReportDto,
+    KnowledgePriceFactsMutationResultDto,
     KnowledgePriceFactsResponseDto,
     KnowledgeProcessingReportDto,
     KnowledgePreviewRequestDto,
@@ -151,6 +152,20 @@ class KnowledgeServiceConfig:
     model_usage_monthly_token_budget: int = 0
     voyage_free_monthly_tokens: int = 0
     model_usage_counter_enabled: bool = True
+
+
+def _clean_price_fact_ids(fact_ids: Sequence[str]) -> tuple[str, ...]:
+    cleaned = tuple(fact_id.strip() for fact_id in fact_ids if fact_id.strip())
+    if not cleaned:
+        raise ValidationError("At least one price fact id is required")
+    return cleaned
+
+
+def _clean_price_rejection_reason(reason: str) -> str:
+    cleaned = reason.strip()
+    if not cleaned:
+        raise ValidationError("Price fact rejection reason is required")
+    return cleaned
 
 
 class KnowledgeService:
@@ -554,6 +569,91 @@ class KnowledgeService:
         return KnowledgePriceFactsResponseDto.from_facts(
             knowledge_document_id=document_id,
             price_document_id=price_document.id,
+            facts=facts,
+        )
+
+    async def publish_price_facts(
+        self,
+        project_id: str,
+        document_id: str,
+        fact_ids: Sequence[str],
+        authorization: str | None,
+        *,
+        commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
+        logger: LoggerPort,
+    ) -> KnowledgePriceFactsMutationResultDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        cleaned_fact_ids = _clean_price_fact_ids(fact_ids)
+        repo = commercial_price_repo_factory(self.pool)
+        price_document = await repo.get_price_document_by_knowledge_document(
+            project_id=project_id,
+            knowledge_document_id=document_id,
+        )
+        if price_document is None:
+            raise NotFoundError(
+                "Price document was not found for this knowledge document"
+            )
+
+        affected_count = await repo.publish_price_facts(
+            project_id=project_id,
+            price_document_id=price_document.id,
+            fact_ids=cleaned_fact_ids,
+        )
+        facts = await repo.list_price_facts_for_document(
+            project_id=project_id,
+            price_document_id=price_document.id,
+            include_non_runtime=True,
+        )
+        return KnowledgePriceFactsMutationResultDto.from_facts(
+            knowledge_document_id=document_id,
+            price_document_id=price_document.id,
+            affected_count=affected_count,
+            facts=facts,
+        )
+
+    async def reject_price_facts(
+        self,
+        project_id: str,
+        document_id: str,
+        fact_ids: Sequence[str],
+        reason: str,
+        authorization: str | None,
+        *,
+        commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
+        logger: LoggerPort,
+    ) -> KnowledgePriceFactsMutationResultDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        cleaned_fact_ids = _clean_price_fact_ids(fact_ids)
+        cleaned_reason = _clean_price_rejection_reason(reason)
+        repo = commercial_price_repo_factory(self.pool)
+        price_document = await repo.get_price_document_by_knowledge_document(
+            project_id=project_id,
+            knowledge_document_id=document_id,
+        )
+        if price_document is None:
+            raise NotFoundError(
+                "Price document was not found for this knowledge document"
+            )
+
+        affected_count = await repo.reject_price_facts(
+            project_id=project_id,
+            price_document_id=price_document.id,
+            fact_ids=cleaned_fact_ids,
+            reason=cleaned_reason,
+        )
+        facts = await repo.list_price_facts_for_document(
+            project_id=project_id,
+            price_document_id=price_document.id,
+            include_non_runtime=True,
+        )
+        return KnowledgePriceFactsMutationResultDto.from_facts(
+            knowledge_document_id=document_id,
+            price_document_id=price_document.id,
+            affected_count=affected_count,
             facts=facts,
         )
 

@@ -866,6 +866,40 @@ class KnowledgePriceFactDto:
 
 
 @dataclass(frozen=True, slots=True)
+class KnowledgePriceFactsMutationResultDto:
+    knowledge_document_id: str
+    price_document_id: str
+    affected_count: int
+    facts: tuple[KnowledgePriceFactDto, ...]
+
+    @classmethod
+    def from_facts(
+        cls,
+        *,
+        knowledge_document_id: str,
+        price_document_id: str,
+        affected_count: int,
+        facts: tuple[PublishedPriceFact, ...],
+    ) -> "KnowledgePriceFactsMutationResultDto":
+        return cls(
+            knowledge_document_id=knowledge_document_id,
+            price_document_id=price_document_id,
+            affected_count=affected_count,
+            facts=tuple(KnowledgePriceFactDto.from_domain(fact) for fact in facts),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        facts = [fact.to_dict() for fact in self.facts]
+        return {
+            "knowledge_document_id": self.knowledge_document_id,
+            "price_document_id": self.price_document_id,
+            "affected_count": self.affected_count,
+            "facts": facts,
+            "items": facts,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class KnowledgePriceFactsResponseDto:
     knowledge_document_id: str
     price_document_id: str | None

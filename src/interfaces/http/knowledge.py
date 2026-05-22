@@ -66,6 +66,11 @@ router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowled
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 
 
+class KnowledgePriceFactsActionRequestModel(BaseModel):
+    fact_ids: list[str] = Field(default_factory=list)
+    reason: str = Field(default="")
+
+
 class KnowledgePreviewRequestModel(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     limit: int = Field(default=5, ge=1, le=10)
@@ -395,6 +400,79 @@ async def knowledge_price_facts(
     result = await service.price_facts(
         project_id,
         document_id,
+        authorization,
+        commercial_price_repo_factory=make_commercial_price_repo,
+        logger=logger,
+    )
+    return result.to_dict()
+
+
+@router.post("/{document_id}/price-facts/publish")
+async def publish_knowledge_price_facts(
+    project_id: str,
+    document_id: str,
+    payload: KnowledgePriceFactsActionRequestModel,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Publishes reviewed commercial price facts for runtime use."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    result = await service.publish_price_facts(
+        project_id,
+        document_id,
+        payload.fact_ids,
+        authorization,
+        commercial_price_repo_factory=make_commercial_price_repo,
+        logger=logger,
+    )
+    return result.to_dict()
+
+
+@router.post("/{document_id}/price-facts/reject")
+async def reject_knowledge_price_facts(
+    project_id: str,
+    document_id: str,
+    payload: KnowledgePriceFactsActionRequestModel,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Rejects reviewed commercial price facts without publishing them."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    result = await service.reject_price_facts(
+        project_id,
+        document_id,
+        payload.fact_ids,
+        payload.reason,
         authorization,
         commercial_price_repo_factory=make_commercial_price_repo,
         logger=logger,
