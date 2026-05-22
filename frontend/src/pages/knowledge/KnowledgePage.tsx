@@ -32,6 +32,7 @@ import {
   type KnowledgeSourceUnitsResponse,
   type KnowledgePriceFact,
   type KnowledgePriceFactsResponse,
+  type KnowledgeCommercialTruthReviewResponse,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
@@ -43,6 +44,7 @@ type KnowledgeImportQualityByDocument = Record<string, KnowledgeImportQualityRep
 type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
 type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
 type KnowledgePriceFactsByDocument = Record<string, KnowledgePriceFactsResponse>;
+type KnowledgeCommercialTruthReviewsByDocument = Record<string, KnowledgeCommercialTruthReviewResponse>;
 type PriceFactActionVariables = {
   documentId: string;
   factId: string;
@@ -725,6 +727,117 @@ const UsageScenarioCard: React.FC<{
   );
 };
 
+
+
+
+const commercialTruthResolutionStatusLabel = (status: string): string => {
+  if (status === 'resolved_by_policy') return t('knowledge.commercialTruth.status.resolved');
+  if (status === 'unresolved') return t('knowledge.commercialTruth.status.unresolved');
+  return status;
+};
+
+const commercialTruthRuntimeEligibleText = (value: boolean): string => (
+  value ? 'true' : 'false'
+);
+
+const CommercialTruthReviewSummary: React.FC<{
+  response: KnowledgeCommercialTruthReviewResponse | undefined;
+  isLoading: boolean;
+}> = ({ response, isLoading }) => {
+  if (isLoading && !response) {
+    return (
+      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+        <div className="flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>{t('knowledge.commercialTruth.loading')}</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!response) return null;
+
+  const previewConflicts = response.conflicts.slice(0, 2);
+  const surfacePreviewCount = response.surface_fact_ids.length;
+
+  return (
+    <div className="mb-4 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--surface-secondary)] p-3 text-xs">
+      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="font-semibold text-[var(--text-primary)]">
+            {t('knowledge.commercialTruth.title')}
+          </div>
+          <div className="mt-0.5 leading-relaxed text-[var(--text-muted)]">
+            {t('knowledge.commercialTruth.subtitle')}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <span className="w-fit rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 font-medium text-[var(--text-primary)]">
+            {t('knowledge.commercialTruth.conflicts')}: {formatNumber(response.conflict_count)}
+          </span>
+          <span className="w-fit rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 font-medium text-[var(--text-primary)]">
+            {t('knowledge.commercialTruth.unresolvedConflicts')}: {formatNumber(response.unresolved_conflict_count)}
+          </span>
+          <span className="w-fit rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 font-medium text-[var(--text-primary)]">
+            {t('knowledge.commercialTruth.surfacePreview')}: {formatNumber(surfacePreviewCount)}
+          </span>
+        </div>
+      </div>
+
+      {response.fact_count === 0 ? (
+        <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2 text-[var(--text-muted)]">
+          {t('knowledge.commercialTruth.empty')}
+        </div>
+      ) : previewConflicts.length === 0 ? (
+        <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2 text-[var(--text-muted)]">
+          {t('knowledge.commercialTruth.noConflicts')}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {previewConflicts.map((conflict) => (
+            <div
+              key={conflict.identity_key}
+              className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2"
+            >
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-[var(--text-primary)]" title={conflict.identity_key}>
+                    {t('knowledge.commercialTruth.fields.identity')}: {conflict.identity_key}
+                  </div>
+                  <div className="mt-0.5 text-[var(--text-muted)]">
+                    {t('knowledge.commercialTruth.fields.reason')}: {conflict.reason}
+                  </div>
+                </div>
+                <span className="w-fit rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                  {commercialTruthResolutionStatusLabel(conflict.resolution_status)}
+                </span>
+              </div>
+
+              <div className="mt-2 space-y-1">
+                {conflict.options.slice(0, 3).map((option) => (
+                  <div
+                    key={option.fact_id}
+                    className="rounded-md bg-[var(--control-bg)] px-2 py-1 text-[10px] text-[var(--text-muted)]"
+                  >
+                    <span className="font-medium text-[var(--text-primary)]">{option.item_name}</span>
+                    {' · '}
+                    {priceFactValueKindLabel(option.value_kind)}
+                    {' · '}
+                    {t('knowledge.commercialTruth.fields.sourceKind')}: {option.source_kind}
+                    {' · '}
+                    {t('knowledge.commercialTruth.fields.sourceAuthority')}: {option.source_authority}
+                    {' · '}
+                    {t('knowledge.commercialTruth.fields.runtimeEligible')}: {commercialTruthRuntimeEligibleText(option.is_runtime_eligible)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 
 const PriceFactsSummary: React.FC<{
@@ -1661,6 +1774,34 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const priceFacts = priceFactsQuery.data || {};
+  const commercialTruthReviewQuery = useQuery({
+    queryKey: ['knowledge-commercial-truth-review', projectId, priceFactDocumentIds.join(',')],
+    queryFn: async () => {
+      if (!projectId || priceFactDocumentIds.length === 0) return {};
+
+      const reviews = await Promise.all(
+        priceFactDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.commercialTruthReview(projectId, documentId);
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return reviews.reduce<KnowledgeCommercialTruthReviewsByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && priceFactDocumentIds.length > 0,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
+  const commercialTruthReviews = commercialTruthReviewQuery.data || {};
   const draftsDocument = draftsDocumentId
     ? documents.find((doc) => doc.id === draftsDocumentId) ?? null
     : null;
@@ -2198,9 +2339,12 @@ export const KnowledgePage: React.FC = () => {
             const processingReport = processingReports[doc.id];
             const importQualityReport = importQualityReports[doc.id];
             const priceFactsResponse = priceFacts[doc.id];
+            const commercialTruthReviewResponse = commercialTruthReviews[doc.id];
             const shouldLoadPriceFacts = priceFactDocumentIds.includes(doc.id);
             const isPriceFactsLoading = shouldLoadPriceFacts
               && (priceFactsQuery.isLoading || (priceFactsQuery.isFetching && !priceFactsResponse));
+            const isCommercialTruthReviewLoading = shouldLoadPriceFacts
+              && (commercialTruthReviewQuery.isLoading || (commercialTruthReviewQuery.isFetching && !commercialTruthReviewResponse));
             const mutatingPriceFactId = priceFactActionMutation.variables?.documentId === doc.id
               ? priceFactActionMutation.variables.factId
               : null;
@@ -2266,6 +2410,10 @@ export const KnowledgePage: React.FC = () => {
                   onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
                   onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
                   mutatingFactId={mutatingPriceFactId}
+                />
+                <CommercialTruthReviewSummary
+                  response={commercialTruthReviewResponse}
+                  isLoading={isCommercialTruthReviewLoading}
                 />
 
                 {processingReport && (
