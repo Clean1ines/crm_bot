@@ -227,6 +227,8 @@ export type KnowledgeCommercialTruthFactReview = {
   value_kind: string;
   status: string;
   unit: string;
+  value_text: string;
+  source_quote: string;
   source_id: string;
   source_kind: string;
   source_authority: string;

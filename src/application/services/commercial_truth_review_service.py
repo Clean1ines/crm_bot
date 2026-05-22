@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 
 from src.domain.commercial.commercial_truth import (
     CommercialConflictResolution,
@@ -14,6 +15,7 @@ from src.domain.commercial.commercial_truth import (
     detect_commercial_fact_conflicts,
     resolve_commercial_conflict_by_policy,
 )
+from src.domain.commercial.pricing import MoneyAmount
 from src.domain.commercial.price_knowledge import (
     PriceDocument,
     PriceDocumentInputKind,
@@ -30,6 +32,8 @@ class CommercialTruthFactReviewDto:
     value_kind: str
     status: str
     unit: str
+    value_text: str
+    source_quote: str
     source_id: str
     source_kind: str
     source_authority: str
@@ -47,6 +51,8 @@ class CommercialTruthFactReviewDto:
             value_kind=snapshot.fact.value_kind.value,
             status=snapshot.fact.status.value,
             unit=snapshot.fact.unit,
+            value_text=commercial_truth_fact_value_text(snapshot.fact),
+            source_quote=commercial_truth_source_quote(snapshot.fact),
             source_id=snapshot.source.id,
             source_kind=snapshot.source.kind.value,
             source_authority=snapshot.source.effective_authority.value,
@@ -61,6 +67,8 @@ class CommercialTruthFactReviewDto:
             "value_kind": self.value_kind,
             "status": self.status,
             "unit": self.unit,
+            "value_text": self.value_text,
+            "source_quote": self.source_quote,
             "source_id": self.source_id,
             "source_kind": self.source_kind,
             "source_authority": self.source_authority,
@@ -159,6 +167,37 @@ class CommercialTruthReviewReport:
             "facts": [fact.to_dict() for fact in self.facts],
             "conflicts": [conflict.to_dict() for conflict in self.conflicts],
         }
+
+
+def commercial_truth_fact_value_text(fact: PublishedPriceFact) -> str:
+    if fact.amount is not None:
+        return _money_text(fact.amount)
+
+    if fact.price_range is not None:
+        return (
+            f"{_money_text(fact.price_range.min_amount)} – "
+            f"{_money_text(fact.price_range.max_amount)}"
+        )
+
+    if fact.price_text.strip():
+        return fact.price_text
+
+    return fact.value_kind.value
+
+
+def commercial_truth_source_quote(fact: PublishedPriceFact) -> str:
+    for source_ref in fact.source_refs:
+        if source_ref.quote.strip():
+            return source_ref.quote
+    return ""
+
+
+def _money_text(amount: MoneyAmount) -> str:
+    return f"{_decimal_text(amount.amount)} {amount.currency}"
+
+
+def _decimal_text(value: Decimal) -> str:
+    return format(value, "f")
 
 
 def commercial_source_descriptor_from_price_document(

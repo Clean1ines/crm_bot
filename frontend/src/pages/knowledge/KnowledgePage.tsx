@@ -821,13 +821,21 @@ const CommercialTruthReviewSummary: React.FC<{
                   >
                     <span className="font-medium text-[var(--text-primary)]">{option.item_name}</span>
                     {' · '}
-                    {priceFactValueKindLabel(option.value_kind)}
+                    <span className="font-semibold text-[var(--text-primary)]">
+                      {option.value_text || priceFactValueKindLabel(option.value_kind)}
+                    </span>
                     {' · '}
                     {t('knowledge.commercialTruth.fields.sourceKind')}: {option.source_kind}
                     {' · '}
                     {t('knowledge.commercialTruth.fields.sourceAuthority')}: {option.source_authority}
                     {' · '}
                     {t('knowledge.commercialTruth.fields.runtimeEligible')}: {commercialTruthRuntimeEligibleText(option.is_runtime_eligible)}
+                    {option.source_quote && (
+                      <>
+                        {' · '}
+                        <span title={option.source_quote}>{option.source_quote}</span>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
