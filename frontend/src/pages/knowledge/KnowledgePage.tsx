@@ -43,6 +43,12 @@ type KnowledgeImportQualityByDocument = Record<string, KnowledgeImportQualityRep
 type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
 type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
 type KnowledgePriceFactsByDocument = Record<string, KnowledgePriceFactsResponse>;
+type PriceFactActionVariables = {
+  documentId: string;
+  factId: string;
+  reason?: string;
+};
+
 
 interface Document {
   id: string;
@@ -724,7 +730,10 @@ const UsageScenarioCard: React.FC<{
 const PriceFactsSummary: React.FC<{
   response: KnowledgePriceFactsResponse | undefined;
   isLoading: boolean;
-}> = ({ response, isLoading }) => {
+  onPublishFact: (fact: KnowledgePriceFact) => void;
+  onRejectFact: (fact: KnowledgePriceFact) => void;
+  mutatingFactId: string | null;
+}> = ({ response, isLoading, onPublishFact, onRejectFact, mutatingFactId }) => {
   if (isLoading && !response) {
     return (
       <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
@@ -762,6 +771,8 @@ const PriceFactsSummary: React.FC<{
       <div className="space-y-2">
         {previewFacts.map((fact) => {
           const firstSourceRef = fact.source_refs[0];
+          const isReviewFact = fact.status === 'needs_review';
+          const isMutatingFact = mutatingFactId === fact.id;
           return (
             <div
               key={fact.id}
@@ -799,6 +810,27 @@ const PriceFactsSummary: React.FC<{
                   </span>
                 )}
               </div>
+
+              {isReviewFact && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onPublishFact(fact)}
+                    disabled={isMutatingFact}
+                    className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {isMutatingFact ? t('common.states.loading') : t('knowledge.priceFacts.actions.publish')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRejectFact(fact)}
+                    disabled={isMutatingFact}
+                    className="rounded-full bg-[var(--accent-danger-bg)] px-2 py-1 text-[10px] font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {isMutatingFact ? t('common.states.loading') : t('knowledge.priceFacts.actions.reject')}
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -1815,6 +1847,78 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+
+  const priceFactActionMutation = useMutation<
+    'publish' | 'reject',
+    unknown,
+    PriceFactActionVariables
+  >({
+    mutationFn: async ({ documentId, factId, reason }) => {
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+
+      if (reason !== undefined) {
+        await knowledgeApi.rejectPriceFacts(projectId, documentId, {
+          fact_ids: [factId],
+          reason,
+        });
+        return 'reject';
+      }
+
+      await knowledgeApi.publishPriceFacts(projectId, documentId, {
+        fact_ids: [factId],
+      });
+      return 'publish';
+    },
+    onSuccess: async (action) => {
+      toast.success(
+        action === 'reject'
+          ? t('knowledge.priceFacts.actions.rejectSuccess')
+          : t('knowledge.priceFacts.actions.publishSuccess'),
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ['knowledge-price-facts', projectId],
+      });
+    },
+    onError: (err: unknown, variables) => {
+      toast.error(
+        getErrorMessage(
+          err,
+          variables.reason !== undefined
+            ? t('knowledge.priceFacts.actions.rejectFailed')
+            : t('knowledge.priceFacts.actions.publishFailed'),
+        ),
+      );
+    },
+  });
+
+
+  const handlePublishPriceFact = (documentId: string, fact: KnowledgePriceFact): void => {
+    priceFactActionMutation.mutate({
+      documentId,
+      factId: fact.id,
+    });
+  };
+
+  const handleRejectPriceFact = (documentId: string, fact: KnowledgePriceFact): void => {
+    const reason = window.prompt(
+      t('knowledge.priceFacts.actions.reasonPlaceholder'),
+      '',
+    );
+    if (reason === null) return;
+
+    const cleanedReason = reason.trim();
+    if (!cleanedReason) {
+      toast.error(t('knowledge.priceFacts.actions.rejectReasonRequired'));
+      return;
+    }
+
+    priceFactActionMutation.mutate({
+      documentId,
+      factId: fact.id,
+      reason: cleanedReason,
+    });
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -2097,6 +2201,9 @@ export const KnowledgePage: React.FC = () => {
             const shouldLoadPriceFacts = priceFactDocumentIds.includes(doc.id);
             const isPriceFactsLoading = shouldLoadPriceFacts
               && (priceFactsQuery.isLoading || (priceFactsQuery.isFetching && !priceFactsResponse));
+            const mutatingPriceFactId = priceFactActionMutation.variables?.documentId === doc.id
+              ? priceFactActionMutation.variables.factId
+              : null;
 
             return (
               <div
@@ -2156,6 +2263,9 @@ export const KnowledgePage: React.FC = () => {
                 <PriceFactsSummary
                   response={priceFactsResponse}
                   isLoading={isPriceFactsLoading}
+                  onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
+                  onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
+                  mutatingFactId={mutatingPriceFactId}
                 />
 
                 {processingReport && (
