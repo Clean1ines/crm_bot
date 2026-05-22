@@ -148,6 +148,69 @@ export type KnowledgeSourceUnitsResponse = {
   total_count: number;
 };
 
+
+export type KnowledgePriceValueKind =
+  | 'exact'
+  | 'starting_from'
+  | 'range'
+  | 'on_request'
+  | string;
+
+export type KnowledgePriceFactStatus =
+  | 'draft'
+  | 'needs_review'
+  | 'published'
+  | 'rejected'
+  | 'superseded'
+  | string;
+
+export type KnowledgePriceMoney = {
+  amount: string;
+  currency: string;
+};
+
+export type KnowledgePriceRange = {
+  min_amount: KnowledgePriceMoney;
+  max_amount: KnowledgePriceMoney;
+};
+
+export type KnowledgePriceCondition = {
+  text: string;
+};
+
+export type KnowledgePriceSourceRef = {
+  price_document_id: string;
+  source_unit_id: string;
+  source_row_id?: string;
+  quote: string;
+};
+
+export type KnowledgePriceFact = {
+  id: string;
+  project_id: string;
+  price_document_id: string;
+  item_name: string;
+  value_kind: KnowledgePriceValueKind;
+  status: KnowledgePriceFactStatus;
+  unit: string;
+  amount?: KnowledgePriceMoney;
+  price_range?: KnowledgePriceRange;
+  price_text: string;
+  variant: Record<string, string>;
+  aliases: string[];
+  conditions: KnowledgePriceCondition[];
+  source_refs: KnowledgePriceSourceRef[];
+  confidence: string;
+};
+
+export type KnowledgePriceFactsResponse = {
+  knowledge_document_id: string;
+  price_document_id: string | null;
+  facts: KnowledgePriceFact[];
+  items: KnowledgePriceFact[];
+  is_empty: boolean;
+};
+
 export type KnowledgeImportQualityStatus = 'good' | 'needs_review' | 'unsafe' | string;
 
 export type KnowledgeImportIssueSeverity = 'info' | 'warning' | 'error' | string;
@@ -253,6 +316,14 @@ export const knowledgeApi = {
   sourceUnits: (projectId: string, documentId: string, limit = 1000) =>
     authedJsonRequest<KnowledgeSourceUnitsResponse>(
       `/api/projects/${projectId}/knowledge/${documentId}/source-units?limit=${limit}`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  priceFacts: (projectId: string, documentId: string) =>
+    authedJsonRequest<KnowledgePriceFactsResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/price-facts`,
       {
         method: 'GET',
       },
