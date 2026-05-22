@@ -14,7 +14,12 @@ from src.domain.commercial.commercial_truth import (
     detect_commercial_fact_conflicts,
     resolve_commercial_conflict_by_policy,
 )
-from src.domain.commercial.price_knowledge import PublishedPriceFact
+from src.domain.commercial.price_knowledge import (
+    PriceDocument,
+    PriceDocumentInputKind,
+    PriceDocumentSourceFormat,
+    PublishedPriceFact,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +159,41 @@ class CommercialTruthReviewReport:
             "facts": [fact.to_dict() for fact in self.facts],
             "conflicts": [conflict.to_dict() for conflict in self.conflicts],
         }
+
+
+def commercial_source_descriptor_from_price_document(
+    document: PriceDocument,
+) -> CommercialSourceDescriptor:
+    return CommercialSourceDescriptor(
+        id=document.id,
+        kind=commercial_source_kind_from_price_document(document),
+        title=document.knowledge_document_id,
+    )
+
+
+def commercial_source_kind_from_price_document(
+    document: PriceDocument,
+) -> CommercialSourceKind:
+    if document.source_format in {
+        PriceDocumentSourceFormat.CSV,
+        PriceDocumentSourceFormat.XLSX,
+        PriceDocumentSourceFormat.PDF_TABLE,
+    }:
+        return CommercialSourceKind.STRUCTURED_PRICE_LIST
+
+    if document.input_kind == PriceDocumentInputKind.TABLE:
+        return CommercialSourceKind.STRUCTURED_PRICE_LIST
+
+    if document.input_kind in {
+        PriceDocumentInputKind.STRUCTURED_TEXT,
+        PriceDocumentInputKind.MIXED,
+    }:
+        return CommercialSourceKind.COMMERCIAL_OFFER
+
+    if document.input_kind == PriceDocumentInputKind.UNSTRUCTURED_TEXT:
+        return CommercialSourceKind.DOCUMENT
+
+    return CommercialSourceKind.UNKNOWN
 
 
 class CommercialTruthReviewService:
