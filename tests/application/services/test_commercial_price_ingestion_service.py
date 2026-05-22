@@ -6,6 +6,15 @@ from typing import cast
 import pytest
 
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
+from src.application.ports.commercial_price_acquisition import (
+    CommercialPriceAcquisitionServicePort,
+)
+from src.application.services.commercial_price_acquisition_service import (
+    CommercialPriceAcquisitionService,
+)
+from src.infrastructure.commercial_price.markdown_acquisition_adapter import (
+    MarkdownPriceAcquisitionAdapter,
+)
 
 from src.application.services.commercial_price_ingestion_service import (
     CommercialPriceIngestionService,
@@ -175,3 +184,36 @@ async def test_service_marks_price_document_failed_when_no_source_units() -> Non
             "No indexable price source units extracted",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_service_runs_optional_acquisition_for_price_source_material() -> None:
+    repo = FakeCommercialPriceRepo()
+    acquisition_service = CommercialPriceAcquisitionService(
+        adapters=(MarkdownPriceAcquisitionAdapter(),)
+    )
+
+    result = await CommercialPriceIngestionService().persist_price_source_material(
+        project_id="project-1",
+        knowledge_document_id="document-1",
+        file_name="prices.md",
+        chunks=(
+            {
+                "content": "| Тариф | Цена |\n| --- | --- |\n| Pro | 2490 ₽ |",
+                "source_index": 0,
+                "kind": "table",
+            },
+        ),
+        price_repo=cast(CommercialPriceKnowledgePort, repo),
+        acquisition_service=cast(
+            CommercialPriceAcquisitionServicePort,
+            acquisition_service,
+        ),
+    )
+
+    assert result.status == PriceDocumentStatus.READY
+    assert result.acquisition_result is not None
+    assert result.acquisition_row_count == 1
+    assert result.acquisition_fact_candidate_count == 1
+    assert result.acquisition_issue_count == 0
+    assert result.acquisition_result.fact_candidates[0].project_id == "project-1"

@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from pathlib import PurePath
 
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
+from src.application.ports.commercial_price_acquisition import (
+    CommercialPriceAcquisitionServicePort,
+)
+from src.domain.commercial.price_acquisition import PriceAcquisitionResult
+from src.application.services.commercial_price_acquisition_preparation_service import (
+    CommercialPriceAcquisitionPreparationService,
+)
 from src.domain.commercial.price_knowledge import (
     PriceDocument,
     PriceDocumentInputKind,
@@ -25,6 +32,27 @@ class CommercialPriceSourceIngestionResult:
     price_document_id: str
     source_unit_count: int
     status: PriceDocumentStatus
+    acquisition_result: PriceAcquisitionResult | None = None
+
+    @property
+    def acquisition_row_count(self) -> int:
+        return (
+            0 if self.acquisition_result is None else len(self.acquisition_result.rows)
+        )
+
+    @property
+    def acquisition_fact_candidate_count(self) -> int:
+        if self.acquisition_result is None:
+            return 0
+        return len(self.acquisition_result.fact_candidates)
+
+    @property
+    def acquisition_issue_count(self) -> int:
+        return (
+            0
+            if self.acquisition_result is None
+            else len(self.acquisition_result.issues)
+        )
 
 
 class CommercialPriceIngestionService:
@@ -44,6 +72,7 @@ class CommercialPriceIngestionService:
         file_name: str,
         chunks: Sequence[JsonObject],
         price_repo: CommercialPriceKnowledgePort,
+        acquisition_service: CommercialPriceAcquisitionServicePort | None = None,
     ) -> CommercialPriceSourceIngestionResult:
         price_document_id = price_document_id_for_knowledge_document(
             project_id=project_id,
@@ -91,6 +120,21 @@ class CommercialPriceIngestionService:
             price_document_id=price_document_id,
             units=source_units,
         )
+        acquisition_result = None
+        if acquisition_service is not None:
+            acquisition_result = await CommercialPriceAcquisitionPreparationService().acquire_from_source_units(
+                price_document=PriceDocument(
+                    id=price_document_id,
+                    project_id=project_id,
+                    knowledge_document_id=knowledge_document_id,
+                    source_format=source_format,
+                    input_kind=input_kind,
+                    status=PriceDocumentStatus.READY,
+                ),
+                source_units=source_units,
+                acquisition_service=acquisition_service,
+            )
+
         await price_repo.update_price_document_status(
             project_id=project_id,
             price_document_id=price_document_id,
@@ -101,6 +145,7 @@ class CommercialPriceIngestionService:
             price_document_id=price_document_id,
             source_unit_count=len(source_units),
             status=PriceDocumentStatus.READY,
+            acquisition_result=acquisition_result,
         )
 
 

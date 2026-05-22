@@ -20,17 +20,14 @@ def test_commercial_price_acquisition_composition_wires_infrastructure_adapters(
     assert "make_commercial_price_acquisition_service" in source
 
 
-def test_commercial_price_acquisition_is_not_started_by_ingestion_yet() -> None:
-    combined = (
-        INGESTION_SERVICE.read_text(encoding="utf-8")
-        + "\n"
-        + QUEUE_HANDLER.read_text(encoding="utf-8")
-    )
+def test_commercial_price_acquisition_is_started_by_price_list_ingestion_only() -> None:
+    ingestion_source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    queue_source = QUEUE_HANDLER.read_text(encoding="utf-8")
 
-    assert "make_commercial_price_acquisition_service" not in combined
-    assert "CommercialPriceAcquisitionPreparationService" not in combined
-    assert "CommercialPriceAcquisitionService(" not in combined
-    assert "MarkdownPriceAcquisitionAdapter" not in combined
+    assert "commercial_price_acquisition_service_factory" in ingestion_source
+    assert "make_commercial_price_acquisition_service" in queue_source
+    assert "CommercialPriceAcquisitionPreparationService" not in queue_source
+    assert "MarkdownPriceAcquisitionAdapter" not in queue_source
 
 
 def test_composition_does_not_touch_runtime_lookup_path() -> None:
