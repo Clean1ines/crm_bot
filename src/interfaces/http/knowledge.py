@@ -436,6 +436,7 @@ async def knowledge_commercial_truth_review(
         document_id,
         authorization,
         commercial_price_repo_factory=make_commercial_price_repo,
+        knowledge_repo_factory=make_knowledge_repo,
         logger=logger,
     )
     return result.to_dict()
