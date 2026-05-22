@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from src.application.dto.knowledge_dto import KnowledgePriceFactsResponseDto
+from src.application.dto.knowledge_dto import (
+    KnowledgePriceFactsMutationResultDto,
+    KnowledgePriceFactsResponseDto,
+)
 from src.domain.commercial.price_knowledge import (
     PriceFactStatus,
     PriceSourceRef,
@@ -77,3 +80,19 @@ def test_price_facts_response_empty_when_document_has_no_price_document() -> Non
     assert payload["facts"] == []
     assert payload["items"] == []
     assert payload["is_empty"] is True
+
+
+def test_price_facts_mutation_result_serializes_affected_count() -> None:
+    response = KnowledgePriceFactsMutationResultDto.from_facts(
+        knowledge_document_id="knowledge-doc-1",
+        price_document_id="price-doc-1",
+        affected_count=1,
+        facts=(_fact(),),
+    )
+
+    payload = response.to_dict()
+
+    assert payload["knowledge_document_id"] == "knowledge-doc-1"
+    assert payload["price_document_id"] == "price-doc-1"
+    assert payload["affected_count"] == 1
+    assert payload["items"] == payload["facts"]
