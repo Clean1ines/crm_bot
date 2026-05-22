@@ -7,6 +7,7 @@ from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
     KnowledgeAnswerDraftsResponseDto,
     KnowledgeImportQualityReportDto,
+    KnowledgePriceFactsResponseDto,
     KnowledgeProcessingReportDto,
     KnowledgePreviewRequestDto,
     KnowledgePreviewResponseDto,
@@ -17,6 +18,7 @@ from src.application.dto.knowledge_dto import (
     KnowledgeUploadResultDto,
 )
 from src.application.dto.model_usage_dto import ModelUsageSummaryDto
+from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.errors import (
     ForbiddenError,
     NotFoundError,
@@ -63,6 +65,10 @@ from src.domain.project_plane.knowledge_preprocessing import (
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
+
+
+class CommercialPriceKnowledgeFactoryPort(Protocol):
+    def __call__(self, pool: KnowledgeDbPoolPort) -> CommercialPriceKnowledgePort: ...
 
 
 class KnowledgeServiceRepositoryPort(
@@ -516,6 +522,39 @@ class KnowledgeService:
             document=document,
             batches=batches,
             candidate_summary=candidate_summary,
+        )
+
+    async def price_facts(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
+        logger: LoggerPort,
+    ) -> KnowledgePriceFactsResponseDto:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = commercial_price_repo_factory(self.pool)
+        price_document = await repo.get_price_document_by_knowledge_document(
+            project_id=project_id,
+            knowledge_document_id=document_id,
+        )
+        if price_document is None:
+            return KnowledgePriceFactsResponseDto.empty(
+                knowledge_document_id=document_id,
+            )
+
+        facts = await repo.list_price_facts_for_document(
+            project_id=project_id,
+            price_document_id=price_document.id,
+            include_non_runtime=True,
+        )
+        return KnowledgePriceFactsResponseDto.from_facts(
+            knowledge_document_id=document_id,
+            price_document_id=price_document.id,
+            facts=facts,
         )
 
     async def cancel_document_processing(

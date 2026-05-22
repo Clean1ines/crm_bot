@@ -21,6 +21,7 @@ from src.application.dto.knowledge_dto import (
     KnowledgePreviewRequestDto,
     KnowledgeUploadRequestDto,
 )
+from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.ports.knowledge_port import (
     JwtDecoderPort,
     KnowledgeChunkerPort,
@@ -35,6 +36,9 @@ from src.application.services.knowledge_service import (
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.config.settings import settings
+from src.infrastructure.db.repositories.commercial_price_repository import (
+    CommercialPriceRepository,
+)
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
@@ -91,6 +95,12 @@ def make_chunker() -> KnowledgeChunkerPort:
 
 def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort:
     return cast(KnowledgeServiceRepositoryPort, KnowledgeRepository(pool))
+
+
+def make_commercial_price_repo(
+    pool: KnowledgeDbPoolPort,
+) -> CommercialPriceKnowledgePort:
+    return cast(CommercialPriceKnowledgePort, CommercialPriceRepository(pool))
 
 
 def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:
@@ -353,6 +363,40 @@ async def knowledge_processing_progress(
         document_id,
         authorization,
         knowledge_repo_factory=make_knowledge_repo,
+        logger=logger,
+    )
+    return result.to_dict()
+
+
+@router.get("/{document_id}/price-facts")
+async def knowledge_price_facts(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns extracted commercial price facts for review, including non-runtime facts."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    result = await service.price_facts(
+        project_id,
+        document_id,
+        authorization,
+        commercial_price_repo_factory=make_commercial_price_repo,
         logger=logger,
     )
     return result.to_dict()

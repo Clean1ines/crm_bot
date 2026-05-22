@@ -1,6 +1,13 @@
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 
+from src.domain.commercial.price_knowledge import (
+    PriceCondition,
+    PriceRange,
+    PriceSourceRef,
+    PublishedPriceFact,
+)
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_import_quality import (
     DocumentImportIssue,
@@ -697,4 +704,204 @@ class KnowledgeProcessingReportDto:
             "steps": [step.to_dict() for step in self.steps],
             "actions": [action.to_dict() for action in self.actions],
             "metrics": self.metrics,
+        }
+
+
+def _decimal_to_text(value: Decimal) -> str:
+    return format(value, "f")
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePriceMoneyDto:
+    amount: str
+    currency: str
+
+    @classmethod
+    def from_domain_amount(cls, amount: object) -> "KnowledgePriceMoneyDto":
+        raw_amount = getattr(amount, "amount")
+        raw_currency = getattr(amount, "currency")
+        if not isinstance(raw_amount, Decimal):
+            raw_amount = Decimal(str(raw_amount))
+        return cls(amount=_decimal_to_text(raw_amount), currency=str(raw_currency))
+
+    def to_dict(self) -> dict[str, object]:
+        return {"amount": self.amount, "currency": self.currency}
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePriceRangeDto:
+    min_amount: KnowledgePriceMoneyDto
+    max_amount: KnowledgePriceMoneyDto
+
+    @classmethod
+    def from_domain(cls, price_range: PriceRange) -> "KnowledgePriceRangeDto":
+        return cls(
+            min_amount=KnowledgePriceMoneyDto.from_domain_amount(
+                price_range.min_amount
+            ),
+            max_amount=KnowledgePriceMoneyDto.from_domain_amount(
+                price_range.max_amount
+            ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "min_amount": self.min_amount.to_dict(),
+            "max_amount": self.max_amount.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePriceConditionDto:
+    text: str
+
+    @classmethod
+    def from_domain(cls, condition: PriceCondition) -> "KnowledgePriceConditionDto":
+        return cls(text=condition.text)
+
+    def to_dict(self) -> dict[str, object]:
+        return {"text": self.text}
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePriceSourceRefDto:
+    price_document_id: str
+    source_unit_id: str
+    quote: str
+    source_row_id: str | None = None
+
+    @classmethod
+    def from_domain(cls, source_ref: PriceSourceRef) -> "KnowledgePriceSourceRefDto":
+        return cls(
+            price_document_id=source_ref.price_document_id,
+            source_unit_id=source_ref.source_unit_id,
+            source_row_id=source_ref.source_row_id,
+            quote=source_ref.quote,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "price_document_id": self.price_document_id,
+            "source_unit_id": self.source_unit_id,
+            "quote": self.quote,
+        }
+        if self.source_row_id is not None:
+            payload["source_row_id"] = self.source_row_id
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePriceFactDto:
+    id: str
+    project_id: str
+    price_document_id: str
+    item_name: str
+    value_kind: str
+    status: str
+    unit: str
+    amount: KnowledgePriceMoneyDto | None = None
+    price_range: KnowledgePriceRangeDto | None = None
+    price_text: str = ""
+    variant: Mapping[str, str] | None = None
+    aliases: tuple[str, ...] = ()
+    conditions: tuple[KnowledgePriceConditionDto, ...] = ()
+    source_refs: tuple[KnowledgePriceSourceRefDto, ...] = ()
+    confidence: str = "0"
+
+    @classmethod
+    def from_domain(cls, fact: PublishedPriceFact) -> "KnowledgePriceFactDto":
+        return cls(
+            id=fact.id,
+            project_id=fact.project_id,
+            price_document_id=fact.price_document_id,
+            item_name=fact.item_name,
+            value_kind=fact.value_kind.value,
+            status=fact.status.value,
+            unit=fact.unit,
+            amount=(
+                KnowledgePriceMoneyDto.from_domain_amount(fact.amount)
+                if fact.amount is not None
+                else None
+            ),
+            price_range=(
+                KnowledgePriceRangeDto.from_domain(fact.price_range)
+                if fact.price_range is not None
+                else None
+            ),
+            price_text=fact.price_text,
+            variant=dict(fact.variant),
+            aliases=fact.aliases,
+            conditions=tuple(
+                KnowledgePriceConditionDto.from_domain(condition)
+                for condition in fact.conditions
+            ),
+            source_refs=tuple(
+                KnowledgePriceSourceRefDto.from_domain(source_ref)
+                for source_ref in fact.source_refs
+            ),
+            confidence=_decimal_to_text(fact.confidence),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "id": self.id,
+            "project_id": self.project_id,
+            "price_document_id": self.price_document_id,
+            "item_name": self.item_name,
+            "value_kind": self.value_kind,
+            "status": self.status,
+            "unit": self.unit,
+            "price_text": self.price_text,
+            "variant": dict(self.variant or {}),
+            "aliases": list(self.aliases),
+            "conditions": [condition.to_dict() for condition in self.conditions],
+            "source_refs": [source_ref.to_dict() for source_ref in self.source_refs],
+            "confidence": self.confidence,
+        }
+        if self.amount is not None:
+            payload["amount"] = self.amount.to_dict()
+        if self.price_range is not None:
+            payload["price_range"] = self.price_range.to_dict()
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgePriceFactsResponseDto:
+    knowledge_document_id: str
+    price_document_id: str | None
+    facts: tuple[KnowledgePriceFactDto, ...]
+
+    @classmethod
+    def empty(
+        cls,
+        *,
+        knowledge_document_id: str,
+    ) -> "KnowledgePriceFactsResponseDto":
+        return cls(
+            knowledge_document_id=knowledge_document_id,
+            price_document_id=None,
+            facts=(),
+        )
+
+    @classmethod
+    def from_facts(
+        cls,
+        *,
+        knowledge_document_id: str,
+        price_document_id: str,
+        facts: tuple[PublishedPriceFact, ...],
+    ) -> "KnowledgePriceFactsResponseDto":
+        return cls(
+            knowledge_document_id=knowledge_document_id,
+            price_document_id=price_document_id,
+            facts=tuple(KnowledgePriceFactDto.from_domain(fact) for fact in facts),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "knowledge_document_id": self.knowledge_document_id,
+            "price_document_id": self.price_document_id,
+            "facts": [fact.to_dict() for fact in self.facts],
+            "items": [fact.to_dict() for fact in self.facts],
+            "is_empty": not self.facts,
         }
