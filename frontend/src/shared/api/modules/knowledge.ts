@@ -220,6 +220,11 @@ export type KnowledgePriceFactsMutationResponse = {
   items: KnowledgePriceFact[];
 };
 
+export type KnowledgeCommercialTruthReviewPolicy =
+  | 'manual_review'
+  | 'higher_authority_wins'
+  | 'newer_source_wins';
+
 export type KnowledgeCommercialTruthFactReview = {
   fact_id: string;
   price_document_id: string;
@@ -381,9 +386,13 @@ export const knowledgeApi = {
       },
     ),
 
-  commercialTruthReview: (projectId: string, documentId: string) =>
+  commercialTruthReview: (
+    projectId: string,
+    documentId: string,
+    policy: KnowledgeCommercialTruthReviewPolicy = 'manual_review',
+  ) =>
     authedJsonRequest<KnowledgeCommercialTruthReviewResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/commercial-truth-review`,
+      `/api/projects/${projectId}/knowledge/${documentId}/commercial-truth-review?policy=${policy}`,
       {
         method: 'GET',
       },

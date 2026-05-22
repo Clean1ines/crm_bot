@@ -65,6 +65,7 @@ from src.domain.project_plane.knowledge_import_quality import (
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
 )
+from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     PREPROCESSING_STATUS_NOT_REQUESTED,
@@ -671,6 +672,9 @@ class KnowledgeService:
         commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
         knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
+        policy: CommercialTruthResolutionPolicy = (
+            CommercialTruthResolutionPolicy.MANUAL_REVIEW
+        ),
     ) -> CommercialTruthReviewReport:
         await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
@@ -684,6 +688,7 @@ class KnowledgeService:
             return CommercialTruthReviewService().review_price_facts(
                 facts=(),
                 sources_by_price_document_id={},
+                policy=policy,
             )
 
         knowledge_repo = knowledge_repo_factory(self.pool)
@@ -707,6 +712,7 @@ class KnowledgeService:
                     knowledge_document=knowledge_document,
                 )
             },
+            policy=policy,
         )
 
     async def cancel_document_processing(

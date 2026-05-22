@@ -33,6 +33,7 @@ import {
   type KnowledgePriceFact,
   type KnowledgePriceFactsResponse,
   type KnowledgeCommercialTruthReviewResponse,
+  type KnowledgeCommercialTruthReviewPolicy,
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
@@ -45,6 +46,12 @@ type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsRespo
 type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
 type KnowledgePriceFactsByDocument = Record<string, KnowledgePriceFactsResponse>;
 type KnowledgeCommercialTruthReviewsByDocument = Record<string, KnowledgeCommercialTruthReviewResponse>;
+
+const COMMERCIAL_TRUTH_REVIEW_POLICIES: KnowledgeCommercialTruthReviewPolicy[] = [
+  'manual_review',
+  'higher_authority_wins',
+  'newer_source_wins',
+];
 type PriceFactActionVariables = {
   documentId: string;
   factId: string;
@@ -730,6 +737,15 @@ const UsageScenarioCard: React.FC<{
 
 
 
+const commercialTruthPolicyLabel = (
+  policy: KnowledgeCommercialTruthReviewPolicy,
+): string => {
+  if (policy === 'manual_review') return t('knowledge.commercialTruth.policy.manualReview');
+  if (policy === 'higher_authority_wins') return t('knowledge.commercialTruth.policy.higherAuthorityWins');
+  if (policy === 'newer_source_wins') return t('knowledge.commercialTruth.policy.newerSourceWins');
+  return policy;
+};
+
 const commercialTruthResolutionStatusLabel = (status: string): string => {
   if (status === 'resolved_by_policy') return t('knowledge.commercialTruth.status.resolved');
   if (status === 'unresolved') return t('knowledge.commercialTruth.status.unresolved');
@@ -743,7 +759,9 @@ const commercialTruthRuntimeEligibleText = (value: boolean): string => (
 const CommercialTruthReviewSummary: React.FC<{
   response: KnowledgeCommercialTruthReviewResponse | undefined;
   isLoading: boolean;
-}> = ({ response, isLoading }) => {
+  policy: KnowledgeCommercialTruthReviewPolicy;
+  onPolicyChange: (policy: KnowledgeCommercialTruthReviewPolicy) => void;
+}> = ({ response, isLoading, policy, onPolicyChange }) => {
   if (isLoading && !response) {
     return (
       <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
@@ -770,6 +788,27 @@ const CommercialTruthReviewSummary: React.FC<{
           </div>
           <div className="mt-0.5 leading-relaxed text-[var(--text-muted)]">
             {t('knowledge.commercialTruth.subtitle')}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
+            {t('knowledge.commercialTruth.policy.label')}
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {COMMERCIAL_TRUTH_REVIEW_POLICIES.map((candidate) => (
+              <button
+                key={candidate}
+                type="button"
+                onClick={() => onPolicyChange(candidate)}
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
+                  candidate === policy
+                    ? 'bg-[var(--accent-primary)] text-white'
+                    : 'bg-[var(--surface-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {commercialTruthPolicyLabel(candidate)}
+              </button>
+            ))}
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -1839,15 +1878,16 @@ export const KnowledgePage: React.FC = () => {
     refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const priceFacts = priceFactsQuery.data || {};
+  const [commercialTruthReviewPolicy, setCommercialTruthReviewPolicy] = useState<KnowledgeCommercialTruthReviewPolicy>('manual_review');
   const commercialTruthReviewQuery = useQuery({
-    queryKey: ['knowledge-commercial-truth-review', projectId, priceFactDocumentIds.join(',')],
+    queryKey: ['knowledge-commercial-truth-review', projectId, priceFactDocumentIds.join(','), commercialTruthReviewPolicy],
     queryFn: async () => {
       if (!projectId || priceFactDocumentIds.length === 0) return {};
 
       const reviews = await Promise.all(
         priceFactDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.commercialTruthReview(projectId, documentId);
+            const { data } = await knowledgeApi.commercialTruthReview(projectId, documentId, commercialTruthReviewPolicy);
             return [documentId, data] as const;
           } catch {
             return null;
@@ -2479,6 +2519,8 @@ export const KnowledgePage: React.FC = () => {
                 <CommercialTruthReviewSummary
                   response={commercialTruthReviewResponse}
                   isLoading={isCommercialTruthReviewLoading}
+                  policy={commercialTruthReviewPolicy}
+                  onPolicyChange={setCommercialTruthReviewPolicy}
                 />
 
                 {processingReport && (
