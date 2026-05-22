@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -28,7 +29,9 @@ from src.domain.commercial.price_knowledge import (
     PriceDocumentInputKind,
     PriceDocumentSourceFormat,
     PriceDocumentStatus,
+    PriceFactStatus,
     PriceSourceUnit,
+    PublishedPriceFact,
 )
 
 
@@ -186,9 +189,27 @@ async def test_service_marks_price_document_failed_when_no_source_units() -> Non
     ]
 
 
+class FakeCommercialPriceRepoWithFacts(FakeCommercialPriceRepo):
+    def __init__(self) -> None:
+        super().__init__()
+        self.price_facts: list[PublishedPriceFact] = []
+        self.fact_replacements: list[tuple[str, str, int]] = []
+
+    async def replace_price_facts_for_document(
+        self,
+        *,
+        project_id: str,
+        price_document_id: str,
+        facts: Sequence[PublishedPriceFact],
+    ) -> int:
+        self.price_facts = list(facts)
+        self.fact_replacements.append((project_id, price_document_id, len(facts)))
+        return len(facts)
+
+
 @pytest.mark.asyncio
 async def test_service_runs_optional_acquisition_for_price_source_material() -> None:
-    repo = FakeCommercialPriceRepo()
+    repo = FakeCommercialPriceRepoWithFacts()
     acquisition_service = CommercialPriceAcquisitionService(
         adapters=(MarkdownPriceAcquisitionAdapter(),)
     )
@@ -217,3 +238,9 @@ async def test_service_runs_optional_acquisition_for_price_source_material() -> 
     assert result.acquisition_fact_candidate_count == 1
     assert result.acquisition_issue_count == 0
     assert result.acquisition_result.fact_candidates[0].project_id == "project-1"
+    assert result.review_fact_count == 1
+    assert repo.fact_replacements == [("project-1", result.price_document_id, 1)]
+    assert len(repo.price_facts) == 1
+    assert repo.price_facts[0].status == PriceFactStatus.NEEDS_REVIEW
+    assert repo.price_facts[0].is_runtime_eligible is False
+    assert repo.price_facts[0].item_name == "Pro"
