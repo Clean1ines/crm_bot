@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from src.domain.commercial.commercial_truth import (
@@ -16,6 +17,7 @@ from src.domain.commercial.commercial_truth import (
     resolve_commercial_conflict_by_policy,
 )
 from src.domain.commercial.pricing import MoneyAmount
+from src.domain.project_plane.knowledge_views import KnowledgeDocumentDetailView
 from src.domain.commercial.price_knowledge import (
     PriceDocument,
     PriceDocumentInputKind,
@@ -212,17 +214,33 @@ def _decimal_text(value: Decimal) -> str:
 
 def commercial_source_descriptor_from_price_document(
     document: PriceDocument,
+    *,
+    knowledge_document: KnowledgeDocumentDetailView | None = None,
 ) -> CommercialSourceDescriptor:
     return CommercialSourceDescriptor(
         id=document.id,
-        kind=commercial_source_kind_from_price_document(document),
-        title=document.knowledge_document_id,
+        kind=commercial_source_kind_from_price_document(
+            document,
+            knowledge_document=knowledge_document,
+        ),
+        title=_commercial_source_title(document, knowledge_document),
+        observed_at=_commercial_source_observed_at(knowledge_document),
     )
 
 
 def commercial_source_kind_from_price_document(
     document: PriceDocument,
+    *,
+    knowledge_document: KnowledgeDocumentDetailView | None = None,
 ) -> CommercialSourceKind:
+    preprocessing_mode = _knowledge_document_preprocessing_mode(knowledge_document)
+    if preprocessing_mode == "price_list":
+        return CommercialSourceKind.STRUCTURED_PRICE_LIST
+    if preprocessing_mode == "faq":
+        return CommercialSourceKind.FAQ
+    if preprocessing_mode in {"instruction", "plain"}:
+        return CommercialSourceKind.DOCUMENT
+
     if document.source_format in {
         PriceDocumentSourceFormat.CSV,
         PriceDocumentSourceFormat.XLSX,
@@ -243,6 +261,50 @@ def commercial_source_kind_from_price_document(
         return CommercialSourceKind.DOCUMENT
 
     return CommercialSourceKind.UNKNOWN
+
+
+def _knowledge_document_preprocessing_mode(
+    knowledge_document: KnowledgeDocumentDetailView | None,
+) -> str:
+    if knowledge_document is None or knowledge_document.preprocessing_mode is None:
+        return ""
+    return str(knowledge_document.preprocessing_mode).strip().lower()
+
+
+def _commercial_source_title(
+    document: PriceDocument,
+    knowledge_document: KnowledgeDocumentDetailView | None,
+) -> str:
+    if knowledge_document is not None and knowledge_document.file_name.strip():
+        return knowledge_document.file_name
+    return document.knowledge_document_id
+
+
+def _commercial_source_observed_at(
+    knowledge_document: KnowledgeDocumentDetailView | None,
+) -> datetime | None:
+    if knowledge_document is None:
+        return None
+    return _parse_observed_at(knowledge_document.created_at)
+
+
+def _parse_observed_at(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
 
 
 class CommercialTruthReviewService:

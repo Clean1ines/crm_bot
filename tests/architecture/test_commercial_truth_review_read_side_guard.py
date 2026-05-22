@@ -82,3 +82,24 @@ def test_commercial_truth_review_read_side_exposes_surface_fact_reviews() -> Non
     assert '"surface_facts": [' in source
     assert "surface_fact_reviews" in source
     assert "surface_fact_ids" in source
+
+
+def test_commercial_truth_review_uses_knowledge_document_metadata_for_source_semantics() -> (
+    None
+):
+    review_source = REVIEW_SERVICE.read_text(encoding="utf-8")
+    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+    http_source = HTTP.read_text(encoding="utf-8")
+
+    assert "KnowledgeDocumentDetailView" in review_source
+    assert "knowledge_document: KnowledgeDocumentDetailView | None" in review_source
+    assert 'preprocessing_mode == "price_list"' in review_source
+    assert 'preprocessing_mode == "faq"' in review_source
+    assert "observed_at=_commercial_source_observed_at" in review_source
+    assert "title=_commercial_source_title" in review_source
+    assert (
+        "knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort"
+        in service_source
+    )
+    assert "knowledge_repo.get_document(document_id)" in service_source
+    assert "knowledge_repo_factory=make_knowledge_repo" in http_source

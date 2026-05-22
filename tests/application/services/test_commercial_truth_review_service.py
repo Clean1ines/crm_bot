@@ -26,6 +26,7 @@ from src.domain.commercial.price_knowledge import (
     PublishedPriceFact,
 )
 from src.domain.commercial.pricing import MoneyAmount
+from src.domain.project_plane.knowledge_views import KnowledgeDocumentDetailView
 
 
 def _mapping_list(value: object) -> list[Mapping[str, object]]:
@@ -37,6 +38,27 @@ def _mapping_list(value: object) -> list[Mapping[str, object]]:
         items.append(item)
 
     return items
+
+
+def _knowledge_document(
+    *,
+    preprocessing_mode: str | None,
+    file_name: str = "prices.md",
+    created_at: str = "2026-05-01T12:30:00+00:00",
+) -> KnowledgeDocumentDetailView:
+    return KnowledgeDocumentDetailView(
+        id="knowledge-doc-1",
+        project_id="project-1",
+        file_name=file_name,
+        file_size=1024,
+        status="processed",
+        error=None,
+        uploaded_by=None,
+        created_at=created_at,
+        updated_at=created_at,
+        chunk_count=1,
+        preprocessing_mode=preprocessing_mode,
+    )
 
 
 def _source_ref() -> PriceSourceRef:
@@ -374,3 +396,93 @@ def test_review_report_surface_facts_stay_empty_for_unresolved_conflicts() -> No
     assert report.surface_fact_ids == ()
     assert report.surface_fact_reviews == ()
     assert payload["surface_facts"] == []
+
+
+def test_source_kind_prefers_price_list_preprocessing_mode_over_fallback_shape() -> (
+    None
+):
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.MARKDOWN,
+        input_kind=PriceDocumentInputKind.MIXED,
+        status=PriceDocumentStatus.READY,
+    )
+
+    source_kind = commercial_source_kind_from_price_document(
+        document,
+        knowledge_document=_knowledge_document(preprocessing_mode="price_list"),
+    )
+    descriptor = commercial_source_descriptor_from_price_document(
+        document,
+        knowledge_document=_knowledge_document(preprocessing_mode="price_list"),
+    )
+
+    assert source_kind == CommercialSourceKind.STRUCTURED_PRICE_LIST
+    assert descriptor.kind == CommercialSourceKind.STRUCTURED_PRICE_LIST
+    assert descriptor.title == "prices.md"
+    assert descriptor.observed_at is not None
+    assert descriptor.observed_at.isoformat() == "2026-05-01T12:30:00+00:00"
+
+
+def test_source_kind_classifies_faq_preprocessing_mode_as_supporting_faq() -> None:
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.MARKDOWN,
+        input_kind=PriceDocumentInputKind.MIXED,
+        status=PriceDocumentStatus.READY,
+    )
+
+    descriptor = commercial_source_descriptor_from_price_document(
+        document,
+        knowledge_document=_knowledge_document(
+            preprocessing_mode="faq",
+            file_name="faq.md",
+        ),
+    )
+
+    assert descriptor.kind == CommercialSourceKind.FAQ
+    assert descriptor.effective_authority.value == "supporting"
+    assert descriptor.title == "faq.md"
+
+
+def test_source_kind_keeps_price_document_fallback_without_knowledge_metadata() -> None:
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.CSV,
+        input_kind=PriceDocumentInputKind.TABLE,
+        status=PriceDocumentStatus.READY,
+    )
+
+    descriptor = commercial_source_descriptor_from_price_document(document)
+
+    assert descriptor.kind == CommercialSourceKind.STRUCTURED_PRICE_LIST
+    assert descriptor.title == "knowledge-doc-1"
+    assert descriptor.observed_at is None
+
+
+def test_source_descriptor_ignores_invalid_observed_at_without_failing_review() -> None:
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.UNKNOWN,
+        input_kind=PriceDocumentInputKind.UNKNOWN,
+        status=PriceDocumentStatus.READY,
+    )
+
+    descriptor = commercial_source_descriptor_from_price_document(
+        document,
+        knowledge_document=_knowledge_document(
+            preprocessing_mode=None,
+            created_at="not-a-date",
+        ),
+    )
+
+    assert descriptor.kind == CommercialSourceKind.UNKNOWN
+    assert descriptor.observed_at is None

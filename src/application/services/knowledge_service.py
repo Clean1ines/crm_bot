@@ -669,13 +669,14 @@ class KnowledgeService:
         authorization: str | None,
         *,
         commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> CommercialTruthReviewReport:
         await self.require_access(project_id, authorization)
         await self._ensure_project_exists(project_id, logger)
 
-        repo = commercial_price_repo_factory(self.pool)
-        price_document = await repo.get_price_document_by_knowledge_document(
+        price_repo = commercial_price_repo_factory(self.pool)
+        price_document = await price_repo.get_price_document_by_knowledge_document(
             project_id=project_id,
             knowledge_document_id=document_id,
         )
@@ -685,7 +686,15 @@ class KnowledgeService:
                 sources_by_price_document_id={},
             )
 
-        facts = await repo.list_price_facts_for_document(
+        knowledge_repo = knowledge_repo_factory(self.pool)
+        knowledge_document = await knowledge_repo.get_document(document_id)
+        if (
+            knowledge_document is not None
+            and knowledge_document.project_id != project_id
+        ):
+            knowledge_document = None
+
+        facts = await price_repo.list_price_facts_for_document(
             project_id=project_id,
             price_document_id=price_document.id,
             include_non_runtime=True,
@@ -694,7 +703,8 @@ class KnowledgeService:
             facts=facts,
             sources_by_price_document_id={
                 price_document.id: commercial_source_descriptor_from_price_document(
-                    price_document
+                    price_document,
+                    knowledge_document=knowledge_document,
                 )
             },
         )
