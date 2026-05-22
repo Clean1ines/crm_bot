@@ -35,6 +35,7 @@ class CommercialPriceAcquisitionService:
     async def acquire(
         self,
         *,
+        project_id: str,
         price_document_id: str,
         source_format: PriceDocumentSourceFormat,
         input_kind: PriceDocumentInputKind,
@@ -59,6 +60,7 @@ class CommercialPriceAcquisitionService:
                             f"{source_format.value}/{input_kind.value}."
                         ),
                         metadata={
+                            "project_id": project_id,
                             "source_format": source_format.value,
                             "input_kind": input_kind.value,
                         },
@@ -68,6 +70,7 @@ class CommercialPriceAcquisitionService:
 
         try:
             return await adapter.acquire(
+                project_id=project_id,
                 price_document_id=price_document_id,
                 source_format=source_format,
                 input_kind=input_kind,
@@ -88,6 +91,7 @@ class CommercialPriceAcquisitionService:
                             f"{type(exc).__name__}"
                         ),
                         metadata={
+                            "project_id": project_id,
                             "adapter_name": adapter.adapter_name,
                             "error": str(exc)[:500],
                         },

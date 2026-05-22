@@ -55,6 +55,7 @@ class FakeAcquisitionAdapter:
     async def acquire(
         self,
         *,
+        project_id: str,
         price_document_id: str,
         source_format: PriceDocumentSourceFormat,
         input_kind: PriceDocumentInputKind,
@@ -87,6 +88,7 @@ async def test_service_selects_first_supporting_adapter() -> None:
     result = await CommercialPriceAcquisitionService(
         adapters=(unsupported, supported),
     ).acquire(
+        project_id="project-1",
         price_document_id="price-doc-1",
         source_format=PriceDocumentSourceFormat.CSV,
         input_kind=PriceDocumentInputKind.TABLE,
@@ -103,6 +105,7 @@ async def test_service_selects_first_supporting_adapter() -> None:
 @pytest.mark.asyncio
 async def test_service_returns_review_issue_when_no_adapter_supports_format() -> None:
     result = await CommercialPriceAcquisitionService(adapters=()).acquire(
+        project_id="project-1",
         price_document_id="price-doc-1",
         source_format=PriceDocumentSourceFormat.UNKNOWN,
         input_kind=PriceDocumentInputKind.UNKNOWN,
@@ -113,6 +116,7 @@ async def test_service_returns_review_issue_when_no_adapter_supports_format() ->
     assert result.needs_review is True
     assert result.issues[0].severity == PriceCompilationIssueSeverity.WARNING
     assert result.issues[0].code == PriceCompilationIssueCode.UNKNOWN_SOURCE_FORMAT
+    assert result.issues[0].metadata["project_id"] == "project-1"
     assert result.issues[0].metadata["source_format"] == "unknown"
 
 
@@ -126,6 +130,7 @@ async def test_service_converts_adapter_failure_to_error_issue() -> None:
     )
 
     result = await CommercialPriceAcquisitionService(adapters=(failing,)).acquire(
+        project_id="project-1",
         price_document_id="price-doc-1",
         source_format=PriceDocumentSourceFormat.CSV,
         input_kind=PriceDocumentInputKind.TABLE,
@@ -135,4 +140,5 @@ async def test_service_converts_adapter_failure_to_error_issue() -> None:
     assert result.has_errors is True
     assert result.issues[0].severity == PriceCompilationIssueSeverity.ERROR
     assert result.issues[0].code == PriceCompilationIssueCode.NEEDS_HUMAN_REVIEW
+    assert result.issues[0].metadata["project_id"] == "project-1"
     assert result.issues[0].metadata["adapter_name"] == "csv"

@@ -35,6 +35,7 @@ class CommercialPriceAcquisitionAdapterPort(Protocol):
     async def acquire(
         self,
         *,
+        project_id: str,
         price_document_id: str,
         source_format: PriceDocumentSourceFormat,
         input_kind: PriceDocumentInputKind,
@@ -46,6 +47,7 @@ class CommercialPriceAcquisitionServicePort(Protocol):
     async def acquire(
         self,
         *,
+        project_id: str,
         price_document_id: str,
         source_format: PriceDocumentSourceFormat,
         input_kind: PriceDocumentInputKind,
