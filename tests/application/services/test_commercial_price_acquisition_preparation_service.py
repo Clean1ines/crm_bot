@@ -50,20 +50,21 @@ def _source_unit() -> PriceSourceUnit:
 
 @dataclass
 class FakeAcquisitionService:
-    calls: list[tuple[str, PriceDocumentSourceFormat, PriceDocumentInputKind]] = field(
-        default_factory=list
+    calls: list[tuple[str, str, PriceDocumentSourceFormat, PriceDocumentInputKind]] = (
+        field(default_factory=list)
     )
     units_seen: tuple[PriceAcquisitionUnit, ...] = ()
 
     async def acquire(
         self,
         *,
+        project_id: str,
         price_document_id: str,
         source_format: PriceDocumentSourceFormat,
         input_kind: PriceDocumentInputKind,
         units: Sequence[PriceAcquisitionUnit],
     ) -> PriceAcquisitionResult:
-        self.calls.append((price_document_id, source_format, input_kind))
+        self.calls.append((project_id, price_document_id, source_format, input_kind))
         self.units_seen = tuple(units)
         return PriceAcquisitionResult(
             price_document_id=price_document_id,
@@ -143,7 +144,12 @@ async def test_preparation_service_delegates_to_acquisition_service() -> None:
 
     assert result.units == acquisition_service.units_seen
     assert acquisition_service.calls == [
-        ("price-doc-1", PriceDocumentSourceFormat.CSV, PriceDocumentInputKind.TABLE)
+        (
+            "project-1",
+            "price-doc-1",
+            PriceDocumentSourceFormat.CSV,
+            PriceDocumentInputKind.TABLE,
+        )
     ]
     assert result.price_document_id == "price-doc-1"
 

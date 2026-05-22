@@ -57,6 +57,7 @@ class CommercialPriceAcquisitionPreparationService:
             )
 
         return await acquisition_service.acquire(
+            project_id=price_document.project_id,
             price_document_id=price_document.id,
             source_format=price_document.source_format,
             input_kind=price_document.input_kind,

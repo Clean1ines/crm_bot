@@ -77,3 +77,13 @@ def test_price_acquisition_preparation_bridges_source_material_to_acquisition_un
     assert "PriceAcquisitionUnit" in source
     assert "price_acquisition_unit_from_source_unit" in source
     assert "CommercialPriceAcquisitionServicePort" in source
+
+
+def test_price_acquisition_adapter_boundary_carries_project_context() -> None:
+    port_source = PORT_FILE.read_text(encoding="utf-8")
+    service_source = SERVICE_FILE.read_text(encoding="utf-8")
+    preparation_source = PREPARATION_FILE.read_text(encoding="utf-8")
+
+    assert "project_id: str" in port_source
+    assert "project_id: str" in service_source
+    assert "project_id=price_document.project_id" in preparation_source
