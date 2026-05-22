@@ -1879,6 +1879,21 @@ export const KnowledgePage: React.FC = () => {
   });
   const priceFacts = priceFactsQuery.data || {};
   const [commercialTruthReviewPolicy, setCommercialTruthReviewPolicy] = useState<KnowledgeCommercialTruthReviewPolicy>('manual_review');
+  const projectCommercialTruthReviewQuery = useQuery({
+    queryKey: ['project-commercial-truth-review', projectId, commercialTruthReviewPolicy],
+    queryFn: async () => {
+      if (!projectId) return undefined;
+
+      const { data } = await knowledgeApi.projectCommercialTruthReview(
+        projectId,
+        commercialTruthReviewPolicy,
+      );
+      return data;
+    },
+    enabled: !!projectId,
+    retry: false,
+    refetchInterval: hasProcessingDocuments ? 3000 : false,
+  });
   const commercialTruthReviewQuery = useQuery({
     queryKey: ['knowledge-commercial-truth-review', projectId, priceFactDocumentIds.join(','), commercialTruthReviewPolicy],
     queryFn: async () => {
@@ -2437,7 +2452,18 @@ export const KnowledgePage: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
+        <>
+          <CommercialTruthReviewSummary
+            response={projectCommercialTruthReviewQuery.data}
+            isLoading={
+              projectCommercialTruthReviewQuery.isLoading
+              || (projectCommercialTruthReviewQuery.isFetching && !projectCommercialTruthReviewQuery.data)
+            }
+            policy={commercialTruthReviewPolicy}
+            onPolicyChange={setCommercialTruthReviewPolicy}
+          />
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
@@ -2700,7 +2726,8 @@ export const KnowledgePage: React.FC = () => {
               </div>
             );
           })}
-        </div>
+          </div>
+        </>
       )}
 
       {draftsDocumentId && draftsDocument && (
