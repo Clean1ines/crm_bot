@@ -22,6 +22,7 @@ def test_agent_graph_contract_declares_allowed_states_and_entrypoint():
         AgentGraphNode.RULES_CHECK,
         AgentGraphNode.INTENT_EXTRACTOR,
         AgentGraphNode.POLICY_ENGINE,
+        AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP,
         AgentGraphNode.KB_SEARCH,
         AgentGraphNode.TOOL_EXECUTOR,
         AgentGraphNode.ESCALATE,
@@ -57,7 +58,14 @@ def test_agent_graph_contract_declares_transitions():
         for transition in transition_map[AgentGraphNode.POLICY_ENGINE]
     }
     assert policy_targets[AgentGraphDecision.RESPOND] == AgentGraphNode.RESPONDER
-    assert policy_targets[AgentGraphDecision.LLM_GENERATE] == AgentGraphNode.KB_SEARCH
+    assert (
+        policy_targets[AgentGraphDecision.LLM_GENERATE]
+        == AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP
+    )
+    assert (
+        transition_map[AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP][0].target
+        == AgentGraphNode.KB_SEARCH
+    )
     assert policy_targets[AgentGraphDecision.CALL_TOOL] == AgentGraphNode.TOOL_EXECUTOR
     assert (
         policy_targets[AgentGraphDecision.ESCALATE_TO_HUMAN] == AgentGraphNode.ESCALATE
@@ -81,8 +89,16 @@ def test_agent_graph_contract_declares_side_effects_and_fallbacks():
     )
 
     assert (
+        AgentGraphSideEffect.LOOKUP_COMMERCIAL_CONTEXT
+        in contracts[AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP].side_effects
+    )
+    assert (
         AgentGraphSideEffect.SEARCH_KNOWLEDGE
         in contracts[AgentGraphNode.KB_SEARCH].side_effects
+    )
+    assert (
+        AgentGraphFallback.EMPTY_COMMERCIAL_CONTEXT
+        in contracts[AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP].fallbacks
     )
     assert (
         AgentGraphFallback.EMPTY_KNOWLEDGE
@@ -123,6 +139,10 @@ def test_agent_graph_contract_declares_dependency_injection_requirements():
     assert (
         AgentGraphDependency.THREAD_REPOSITORY
         in contracts[AgentGraphNode.LOAD_STATE].required_dependencies
+    )
+    assert (
+        AgentGraphDependency.TOOL_REGISTRY
+        in contracts[AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP].required_dependencies
     )
     assert (
         AgentGraphDependency.TOOL_REGISTRY

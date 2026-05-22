@@ -78,6 +78,9 @@ class AgentState(TypedDict):
     conversation_summary: str | None
     history: list[HistoryMessage] | None
     knowledge_chunks: list[KnowledgeChunkState] | None
+    commercial_context: dict[str, object] | None
+    commercial_context_status: str | None
+    commercial_context_sources: list[dict[str, object]] | None
     decision: str | None  # e.g., "RESPOND", "TOOL", "ESCALATE", "COLLECT"
     tool_name: str | None
     tool_args: ToolArguments | None
