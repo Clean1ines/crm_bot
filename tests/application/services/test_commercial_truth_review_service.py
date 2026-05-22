@@ -330,3 +330,47 @@ def test_commercial_truth_fact_value_text_handles_on_request_price_text() -> Non
     assert (
         commercial_truth_fact_value_text(fact) == "Цена рассчитывается индивидуально."
     )
+
+
+def test_review_report_serializes_surface_fact_reviews() -> None:
+    fact = _fact(fact_id="pro", amount="2490")
+
+    report = CommercialTruthReviewService().review_price_facts(
+        facts=(fact,),
+        sources_by_price_document_id={
+            fact.price_document_id: _source(
+                "prices-may",
+                CommercialSourceKind.STRUCTURED_PRICE_LIST,
+            )
+        },
+    )
+    payload = report.to_dict()
+    surface_payload = _mapping_list(payload["surface_facts"])
+
+    assert report.surface_fact_ids == ("pro",)
+    assert tuple(item.fact_id for item in report.surface_fact_reviews) == ("pro",)
+    assert surface_payload[0]["fact_id"] == "pro"
+    assert surface_payload[0]["value_text"] == "2490 RUB"
+    assert surface_payload[0]["source_quote"] == "Pro — 2490 ₽/мес."
+
+
+def test_review_report_surface_facts_stay_empty_for_unresolved_conflicts() -> None:
+    price_list = _fact(fact_id="price-list", amount="2490")
+    faq = _fact(fact_id="faq", amount="2990")
+
+    report = CommercialTruthReviewService().review_price_facts(
+        facts=(price_list, faq),
+        sources_by_price_document_id={
+            price_list.price_document_id: _source(
+                "prices-may",
+                CommercialSourceKind.STRUCTURED_PRICE_LIST,
+            ),
+            faq.price_document_id: _source("faq-old", CommercialSourceKind.FAQ),
+        },
+        policy=CommercialTruthResolutionPolicy.MANUAL_REVIEW,
+    )
+    payload = report.to_dict()
+
+    assert report.surface_fact_ids == ()
+    assert report.surface_fact_reviews == ()
+    assert payload["surface_facts"] == []

@@ -73,3 +73,12 @@ def test_commercial_truth_review_read_side_exposes_value_text_and_source_quote()
     assert "commercial_truth_source_quote" in source
     assert '"value_text": self.value_text' in source
     assert '"source_quote": self.source_quote' in source
+
+
+def test_commercial_truth_review_read_side_exposes_surface_fact_reviews() -> None:
+    source = REVIEW_SERVICE.read_text(encoding="utf-8")
+
+    assert "def surface_fact_reviews(self)" in source
+    assert '"surface_facts": [' in source
+    assert "surface_fact_reviews" in source
+    assert "surface_fact_ids" in source
