@@ -230,6 +230,8 @@ export type KnowledgeCommercialTruthFactReview = {
   value_text: string;
   source_quote: string;
   source_id: string;
+  source_title: string;
+  source_observed_at: string;
   source_kind: string;
   source_authority: string;
   is_runtime_eligible: boolean;

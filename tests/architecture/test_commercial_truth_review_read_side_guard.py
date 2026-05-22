@@ -103,3 +103,17 @@ def test_commercial_truth_review_uses_knowledge_document_metadata_for_source_sem
     )
     assert "knowledge_repo.get_document(document_id)" in service_source
     assert "knowledge_repo_factory=make_knowledge_repo" in http_source
+
+
+def test_commercial_truth_review_read_side_exposes_source_title_and_observed_at() -> (
+    None
+):
+    source = REVIEW_SERVICE.read_text(encoding="utf-8")
+
+    assert "source_title: str" in source
+    assert "source_observed_at: str" in source
+    assert "commercial_truth_source_observed_at_text" in source
+    assert '"source_title": self.source_title' in source
+    assert '"source_observed_at": self.source_observed_at' in source
+    assert "source_title=snapshot.source.title" in source
+    assert "source_observed_at=commercial_truth_source_observed_at_text" in source
