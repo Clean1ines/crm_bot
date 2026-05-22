@@ -9,6 +9,7 @@ KNOWLEDGE_REPOSITORY = (
     ROOT / "src/infrastructure/db/repositories/knowledge_repository.py"
 )
 KNOWLEDGE_PAGE = ROOT / "frontend/src/pages/knowledge/KnowledgePage.tsx"
+EN_LOCALE = ROOT / "frontend/src/shared/i18n/locales/en.ts"
 RU_LOCALE = ROOT / "frontend/src/shared/i18n/locales/ru.ts"
 
 
@@ -71,7 +72,9 @@ def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
 
 def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> None:
     frontend_source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
+    en_locale = EN_LOCALE.read_text(encoding="utf-8")
     ru_locale = RU_LOCALE.read_text(encoding="utf-8")
+    user_facing_source = f"{frontend_source}\n{en_locale}\n{ru_locale}"
 
     assert "processingDetailRows" in frontend_source
     assert "sourceChunkCount" in frontend_source
@@ -81,20 +84,66 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> N
     assert "incomingAnswerCandidateCount" in frontend_source
     assert "appliedAnswerResolutions" in frontend_source
 
-    assert "knowledge.document.sourceChunksPrefix" in frontend_source
-    assert "Published entries" in frontend_source
-    assert "knowledge.document.incomingAnswersPrefix" in frontend_source
+    assert_any(
+        frontend_source,
+        (
+            "knowledge.document.sourceChunksPrefix",
+            "knowledge.document.sourceChunks",
+        ),
+        label="source chunks progress i18n key",
+    )
+    assert_any(
+        frontend_source,
+        (
+            "knowledge.document.publishedEntriesPrefix",
+            "knowledge.document.publishedEntries",
+        ),
+        label="published entries progress i18n key",
+    )
+    assert_any(
+        frontend_source,
+        (
+            "knowledge.document.incomingAnswersPrefix",
+            "knowledge.document.incomingAnswers",
+            "knowledge.document.incomingAnswerCandidates",
+        ),
+        label="incoming answer progress i18n key",
+    )
 
-    assert (
-        "'knowledge.document.sourceChunksPrefix': 'Технические фрагменты:'" in ru_locale
+    assert_any(
+        user_facing_source,
+        (
+            "Published entries",
+            "Published entries:",
+        ),
+        label="published entries user-facing label",
     )
-    assert (
-        "'knowledge.document.incomingAnswersPrefix': 'Новых кандидатов ответов на последнем этапе:'"
-        in ru_locale
+
+    assert_any(
+        ru_locale,
+        (
+            "'knowledge.document.sourceChunksPrefix': 'Технические фрагменты:'",
+            "'knowledge.document.sourceChunks': 'Технические фрагменты: {count}'",
+        ),
+        label="Russian source chunks label",
     )
-    assert (
-        "'knowledge.document.answerResolutionsPrefix': 'Объединено ответов:'"
-        in ru_locale
+    assert_any(
+        ru_locale,
+        (
+            "'knowledge.document.incomingAnswersPrefix': 'Новых кандидатов ответов на последнем этапе:'",
+            "'knowledge.document.incomingAnswers': 'Новых кандидатов ответов на последнем этапе: {count}'",
+            "'knowledge.document.incomingAnswerCandidates': 'Новых кандидатов ответов на последнем этапе: {count}'",
+        ),
+        label="Russian incoming answers label",
+    )
+    assert_any(
+        ru_locale,
+        (
+            "'knowledge.document.answerResolutionsPrefix': 'Объединено ответов:'",
+            "'knowledge.document.answerResolutions': 'Объединено ответов: {count}'",
+            "'knowledge.document.answerResolutionsApplied': 'Объединений ответов применено: {count}'",
+        ),
+        label="Russian answer resolution label",
     )
 
 
