@@ -12,6 +12,9 @@ from src.tools.builtins import TicketCreateTool
 from langgraph.graph import END, StateGraph
 
 from src.agent.nodes.escalate import create_escalate_node
+from src.agent.nodes.commercial_context_lookup import (
+    create_commercial_context_lookup_node,
+)
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
 from src.agent.nodes.kb_search import create_kb_search_node
 from src.agent.nodes.load_state import create_load_state_node
@@ -94,6 +97,9 @@ def create_agent(
         memory_repo=memory_repo,
     )
     tool_registry = cast(ToolRegistry, tool_registry)
+    commercial_context_lookup_node = create_commercial_context_lookup_node(
+        tool_registry
+    )
     kb_search_node = create_kb_search_node(tool_registry)
     intent_extractor_node = create_intent_extractor_node()
     policy_engine_node = create_policy_engine_node(event_repo=event_repo)
@@ -125,6 +131,10 @@ def create_agent(
 
     graph_builder.add_node(AgentGraphNode.LOAD_STATE.value, load_state_node)
     graph_builder.add_node(AgentGraphNode.RULES_CHECK.value, rules_node)
+    graph_builder.add_node(
+        AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP.value,
+        commercial_context_lookup_node,
+    )
     graph_builder.add_node(AgentGraphNode.KB_SEARCH.value, kb_search_node)
     graph_builder.add_node(AgentGraphNode.INTENT_EXTRACTOR.value, intent_extractor_node)
     graph_builder.add_node(AgentGraphNode.POLICY_ENGINE.value, policy_engine_node)
@@ -181,7 +191,7 @@ def create_agent(
             "RESPOND_TEMPLATE": AgentGraphNode.TEMPLATE_RESPONSE.value,
             _decision_value(
                 AgentGraphDecision.LLM_GENERATE
-            ): AgentGraphNode.KB_SEARCH.value,
+            ): AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP.value,
             _decision_value(
                 AgentGraphDecision.ESCALATE_TO_HUMAN
             ): AgentGraphNode.ESCALATE.value,
@@ -192,6 +202,10 @@ def create_agent(
         },
     )
 
+    graph_builder.add_edge(
+        AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP.value,
+        AgentGraphNode.KB_SEARCH.value,
+    )
     graph_builder.add_edge(
         AgentGraphNode.KB_SEARCH.value,
         AgentGraphNode.RESPONSE_GENERATOR.value,

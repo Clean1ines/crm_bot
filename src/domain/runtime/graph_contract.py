@@ -20,6 +20,7 @@ class AgentGraphNode(StrEnum):
     RULES_CHECK = "rules_check"
     INTENT_EXTRACTOR = "intent_extractor"
     POLICY_ENGINE = "policy_engine"
+    COMMERCIAL_CONTEXT_LOOKUP = "commercial_context_lookup"
     KB_SEARCH = "kb_search"
     TOOL_EXECUTOR = "tool_executor"
     ESCALATE = "escalate"
@@ -44,6 +45,7 @@ class AgentGraphSideEffect(StrEnum):
     LOAD_THREAD_STATE = "load_thread_state"
     LOAD_USER_MEMORY = "load_user_memory"
     CALL_INTENT_LLM = "call_intent_llm"
+    LOOKUP_COMMERCIAL_CONTEXT = "lookup_commercial_context"
     SEARCH_KNOWLEDGE = "search_knowledge"
     CALL_RESPONSE_LLM = "call_response_llm"
     EXECUTE_TOOL = "execute_tool"
@@ -60,6 +62,7 @@ class AgentGraphSideEffect(StrEnum):
 
 class AgentGraphFallback(StrEnum):
     EMPTY_PATCH = "empty_patch"
+    EMPTY_COMMERCIAL_CONTEXT = "empty_commercial_context"
     EMPTY_KNOWLEDGE = "empty_knowledge"
     EMPTY_USER_MEMORY = "empty_user_memory"
     HUMAN_HANDOFF = "human_handoff"
@@ -149,6 +152,7 @@ AGENT_GRAPH_NODES: tuple[AgentGraphNode, ...] = (
     AgentGraphNode.RULES_CHECK,
     AgentGraphNode.INTENT_EXTRACTOR,
     AgentGraphNode.POLICY_ENGINE,
+    AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP,
     AgentGraphNode.KB_SEARCH,
     AgentGraphNode.TOOL_EXECUTOR,
     AgentGraphNode.ESCALATE,
@@ -178,7 +182,7 @@ AGENT_GRAPH_TRANSITIONS: tuple[AgentGraphTransition, ...] = (
     AgentGraphTransition(AgentGraphNode.INTENT_EXTRACTOR, AgentGraphNode.POLICY_ENGINE),
     AgentGraphTransition(
         AgentGraphNode.POLICY_ENGINE,
-        AgentGraphNode.KB_SEARCH,
+        AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP,
         AgentGraphDecision.LLM_GENERATE,
     ),
     AgentGraphTransition(
@@ -200,6 +204,10 @@ AGENT_GRAPH_TRANSITIONS: tuple[AgentGraphTransition, ...] = (
         AgentGraphNode.POLICY_ENGINE,
         AgentGraphNode.ESCALATE,
         AgentGraphDecision.ESCALATE,
+    ),
+    AgentGraphTransition(
+        AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP,
+        AgentGraphNode.KB_SEARCH,
     ),
     AgentGraphTransition(AgentGraphNode.KB_SEARCH, AgentGraphNode.RESPONSE_GENERATOR),
     AgentGraphTransition(
@@ -242,6 +250,12 @@ AGENT_GRAPH_NODE_CONTRACTS: Mapping[AgentGraphNode, AgentGraphNodeContract] = {
         optional_dependencies=(AgentGraphDependency.EVENT_REPOSITORY,),
         side_effects=(AgentGraphSideEffect.APPEND_EVENTS,),
         fallbacks=(AgentGraphFallback.EMPTY_PATCH,),
+    ),
+    AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP: AgentGraphNodeContract(
+        node=AgentGraphNode.COMMERCIAL_CONTEXT_LOOKUP,
+        required_dependencies=(AgentGraphDependency.TOOL_REGISTRY,),
+        side_effects=(AgentGraphSideEffect.LOOKUP_COMMERCIAL_CONTEXT,),
+        fallbacks=(AgentGraphFallback.EMPTY_COMMERCIAL_CONTEXT,),
     ),
     AgentGraphNode.KB_SEARCH: AgentGraphNodeContract(
         node=AgentGraphNode.KB_SEARCH,
