@@ -386,6 +386,17 @@ export const knowledgeApi = {
       },
     ),
 
+  projectCommercialTruthReview: (
+    projectId: string,
+    policy: KnowledgeCommercialTruthReviewPolicy = 'manual_review',
+  ) =>
+    authedJsonRequest<KnowledgeCommercialTruthReviewResponse>(
+      `/api/projects/${projectId}/knowledge/commercial-truth-review?policy=${policy}`,
+      {
+        method: 'GET',
+      },
+    ),
+
   commercialTruthReview: (
     projectId: string,
     documentId: string,
