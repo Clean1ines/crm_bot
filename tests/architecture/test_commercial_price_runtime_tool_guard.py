@@ -29,11 +29,16 @@ def test_commercial_price_lookup_tool_uses_published_lookup_port_only() -> None:
     assert "reject_price_facts(" not in builtins_source
 
 
-def test_agent_graph_does_not_call_commercial_price_lookup_yet() -> None:
+def test_agent_graph_calls_commercial_price_lookup_only_from_commercial_context_node() -> (
+    None
+):
+    allowed = {"src/agent/nodes/commercial_context_lookup.py"}
     violations: list[str] = []
+
     for path in AGENT_ROOT.rglob("*.py"):
+        rel = path.relative_to(ROOT).as_posix()
         source = path.read_text(encoding="utf-8")
-        if "commercial_price_lookup" in source:
-            violations.append(str(path.relative_to(ROOT)))
+        if "commercial_price_lookup" in source and rel not in allowed:
+            violations.append(rel)
 
     assert violations == []
