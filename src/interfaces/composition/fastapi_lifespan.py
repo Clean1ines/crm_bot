@@ -27,6 +27,9 @@ from src.infrastructure.app.resources import (
 )
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.event_repository import EventRepository
+from src.infrastructure.db.repositories.commercial_price_repository import (
+    CommercialPriceRepository,
+)
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.project import (
@@ -50,6 +53,7 @@ from src.tools.builtins import (
     CRMCollectProfileTool,
     CRMCreateUserTool,
     CRMGetUserTool,
+    CommercialPriceLookupTool,
     EscalateTool,
     SearchKnowledgeTool,
     TelegramSendMessageTool,
@@ -75,6 +79,7 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     from src.infrastructure.llm.rag_service import RAGService
 
     knowledge_repo = KnowledgeRepository(db_pool)
+    commercial_price_repo = CommercialPriceRepository(db_pool)
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     queue_repo = QueueRepository(db_pool)
     project_tokens = ProjectTokenRepository(db_pool)
@@ -87,6 +92,9 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
 
     tool_registry.register(SearchKnowledgeTool(rag_service))
     logger.info("Registered SearchKnowledgeTool")
+
+    tool_registry.register(CommercialPriceLookupTool(commercial_price_repo))
+    logger.info("Registered CommercialPriceLookupTool")
 
     tool_registry.register(
         EscalateTool(

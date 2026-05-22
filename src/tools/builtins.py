@@ -11,7 +11,20 @@ Tool interface for dynamic execution from agent tool calls.
 """
 
 import httpx
+from collections.abc import Mapping
+from decimal import Decimal
 
+from src.application.ports.commercial_price import CommercialPriceLookupPort
+from src.domain.commercial.price_knowledge import (
+    PriceCondition,
+    PriceLookupQuery,
+    PriceLookupResult,
+    PriceRange,
+    PriceSourceRef,
+    PublishedPriceFact,
+    lookup_price_fact,
+)
+from src.domain.commercial.pricing import MoneyAmount
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.domain.project_plane.thread_status import ThreadStatus
 from src.infrastructure.logging.logger import get_logger
@@ -71,6 +84,219 @@ def _knowledge_result_payload(result: KnowledgeSearchResultView) -> dict[str, ob
         "title": None,
         "chunk_index": None,
     }
+
+
+def _as_string_mapping(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+
+    result: dict[str, str] = {}
+    for key, raw_value in value.items():
+        key_text = str(key).strip()
+        value_text = str(raw_value).strip()
+        if key_text and value_text:
+            result[key_text] = value_text
+    return result
+
+
+def _as_optional_positive_int(value: object) -> int | None:
+    if value is None:
+        return None
+    parsed = _as_int(value, 0)
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _decimal_to_tool_text(value: Decimal) -> str:
+    return format(value, "f")
+
+
+def _money_to_tool_payload(amount: MoneyAmount) -> dict[str, object]:
+    return {
+        "amount": _decimal_to_tool_text(amount.amount),
+        "currency": amount.currency,
+    }
+
+
+def _price_range_to_tool_payload(price_range: PriceRange) -> dict[str, object]:
+    return {
+        "min_amount": _money_to_tool_payload(price_range.min_amount),
+        "max_amount": _money_to_tool_payload(price_range.max_amount),
+    }
+
+
+def _price_condition_to_tool_payload(
+    condition: PriceCondition,
+) -> dict[str, object]:
+    return {"text": condition.text}
+
+
+def _price_source_ref_to_tool_payload(
+    source_ref: PriceSourceRef,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "price_document_id": source_ref.price_document_id,
+        "source_unit_id": source_ref.source_unit_id,
+        "quote": source_ref.quote,
+    }
+    if source_ref.source_row_id is not None:
+        payload["source_row_id"] = source_ref.source_row_id
+    return payload
+
+
+def _published_price_fact_to_tool_payload(
+    fact: PublishedPriceFact,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "id": fact.id,
+        "project_id": fact.project_id,
+        "price_document_id": fact.price_document_id,
+        "item_name": fact.item_name,
+        "value_kind": fact.value_kind.value,
+        "status": fact.status.value,
+        "unit": fact.unit,
+        "price_text": fact.price_text,
+        "variant": dict(fact.variant),
+        "aliases": list(fact.aliases),
+        "conditions": [
+            _price_condition_to_tool_payload(condition) for condition in fact.conditions
+        ],
+        "source_refs": [
+            _price_source_ref_to_tool_payload(source_ref)
+            for source_ref in fact.source_refs
+        ],
+        "confidence": _decimal_to_tool_text(fact.confidence),
+    }
+    if fact.amount is not None:
+        payload["amount"] = _money_to_tool_payload(fact.amount)
+    if fact.price_range is not None:
+        payload["price_range"] = _price_range_to_tool_payload(fact.price_range)
+    return payload
+
+
+def _price_lookup_result_to_tool_payload(
+    result: PriceLookupResult,
+    *,
+    candidate_count: int,
+    required_variant_slots: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "decision": result.decision.value,
+        "query": {
+            "project_id": result.query.project_id,
+            "item_name": result.query.item_name,
+            "variant_filters": dict(result.query.variant_filters),
+            "quantity": result.query.quantity,
+        },
+        "facts": [_published_price_fact_to_tool_payload(fact) for fact in result.facts],
+        "missing_slots": list(result.missing_slots),
+        "conflict_reason": result.conflict_reason,
+        "manager_reason": result.manager_reason,
+        "candidate_count": candidate_count,
+        "required_variant_slots": list(required_variant_slots),
+    }
+
+
+class CommercialPriceLookupTool(Tool):
+    """Structured lookup over published commercial price facts."""
+
+    name = "commercial_price_lookup"
+    description = (
+        "Look up published structured prices, tariffs, services, and commercial "
+        "offers before falling back to generic knowledge search."
+    )
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "item_name": {
+                "type": "string",
+                "description": "Concrete product, tariff, service, or offer name",
+                "minLength": 1,
+                "maxLength": 300,
+            },
+            "variant_filters": {
+                "type": "object",
+                "description": "Optional normalized variant filters such as period, region, or package",
+                "additionalProperties": {"type": "string"},
+            },
+            "quantity": {
+                "type": "integer",
+                "description": "Optional positive quantity",
+                "minimum": 1,
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of published candidate facts to inspect",
+                "minimum": 1,
+                "maximum": 20,
+                "default": 20,
+            },
+        },
+        "required": ["item_name"],
+        "additionalProperties": False,
+    }
+
+    def __init__(self, price_repo: CommercialPriceLookupPort) -> None:
+        self._price_repo = price_repo
+        logger.debug("CommercialPriceLookupTool initialized")
+
+    async def run(
+        self, args: dict[str, object], context: dict[str, object]
+    ) -> dict[str, object]:
+        project_id = str(self._require_context_field(context, "project_id"))
+        item_name = _as_text(args.get("item_name")).strip()
+        if not item_name:
+            raise ToolExecutionError(
+                self.name,
+                "Price lookup item_name cannot be empty",
+                {"args": args},
+            )
+
+        query = PriceLookupQuery(
+            project_id=project_id,
+            item_name=item_name,
+            variant_filters=_as_string_mapping(args.get("variant_filters")),
+            quantity=_as_optional_positive_int(args.get("quantity")),
+        )
+        limit = min(_as_int(args.get("limit"), 20), 20)
+
+        try:
+            required_variant_slots = await self._price_repo.list_required_variant_slots(
+                project_id=project_id,
+                item_name=item_name,
+            )
+            facts = await self._price_repo.list_published_price_facts_for_lookup(
+                query=query,
+                limit=limit,
+            )
+            result = lookup_price_fact(
+                query=query,
+                facts=facts,
+                required_variant_slots=required_variant_slots,
+            )
+            return _price_lookup_result_to_tool_payload(
+                result,
+                candidate_count=len(facts),
+                required_variant_slots=required_variant_slots,
+            )
+        except ToolExecutionError:
+            raise
+        except Exception as exc:
+            logger.error(
+                "Commercial price lookup failed",
+                extra={
+                    "project_id": project_id,
+                    "item_name": item_name,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise ToolExecutionError(
+                self.name,
+                "Commercial price lookup failed",
+                {"original_exception": type(exc).__name__},
+            ) from exc
 
 
 class SearchKnowledgeTool(Tool):
