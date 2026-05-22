@@ -9,7 +9,11 @@ from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.ports.commercial_price_acquisition import (
     CommercialPriceAcquisitionServicePort,
 )
-from src.domain.commercial.price_acquisition import PriceAcquisitionResult
+from src.domain.commercial.price_acquisition import (
+    PriceAcquisitionResult,
+    PriceFactCandidate,
+    PriceFactCandidateStatus,
+)
 from src.application.services.commercial_price_acquisition_preparation_service import (
     CommercialPriceAcquisitionPreparationService,
 )
@@ -18,7 +22,9 @@ from src.domain.commercial.price_knowledge import (
     PriceDocumentInputKind,
     PriceDocumentSourceFormat,
     PriceDocumentStatus,
+    PriceFactStatus,
     PriceSourceUnit,
+    PublishedPriceFact,
 )
 from src.domain.project_plane.json_types import JsonObject
 
@@ -33,6 +39,7 @@ class CommercialPriceSourceIngestionResult:
     source_unit_count: int
     status: PriceDocumentStatus
     acquisition_result: PriceAcquisitionResult | None = None
+    review_fact_count: int = 0
 
     @property
     def acquisition_row_count(self) -> int:
@@ -55,13 +62,48 @@ class CommercialPriceSourceIngestionResult:
         )
 
 
+def review_price_fact_from_acquisition_candidate(
+    candidate: PriceFactCandidate,
+) -> PublishedPriceFact:
+    """Convert an acquisition candidate into a non-runtime review fact."""
+
+    return PublishedPriceFact(
+        id=candidate.id,
+        project_id=candidate.project_id,
+        price_document_id=candidate.price_document_id,
+        item_name=candidate.item_name,
+        value_kind=candidate.value_kind,
+        unit=candidate.unit,
+        status=PriceFactStatus.NEEDS_REVIEW,
+        amount=candidate.amount,
+        price_range=candidate.price_range,
+        price_text=candidate.price_text,
+        variant=dict(candidate.variant),
+        aliases=candidate.aliases,
+        conditions=candidate.conditions,
+        source_refs=candidate.source_refs,
+        confidence=candidate.confidence,
+    )
+
+
+def review_price_facts_from_acquisition_result(
+    acquisition_result: PriceAcquisitionResult,
+) -> tuple[PublishedPriceFact, ...]:
+    return tuple(
+        review_price_fact_from_acquisition_candidate(candidate)
+        for candidate in acquisition_result.fact_candidates
+        if candidate.status != PriceFactCandidateStatus.REJECTED
+    )
+
+
 class CommercialPriceIngestionService:
     """Persists the source-material side of commercial price knowledge.
 
-    This service intentionally does not extract concrete price facts yet.
-    Its first responsibility is to give price_list uploads a durable,
-    source-grounded commercial_price_* trace that can later be compiled into
-    PriceFacts and used by runtime price lookup.
+    This service gives price_list uploads a durable, source-grounded
+    commercial_price_* trace and may persist acquisition candidates as
+    needs_review price facts.
+
+    It intentionally does not publish price facts or touch runtime lookup.
     """
 
     async def persist_price_source_material(
@@ -121,6 +163,7 @@ class CommercialPriceIngestionService:
             units=source_units,
         )
         acquisition_result = None
+        review_facts: tuple[PublishedPriceFact, ...] = ()
         if acquisition_service is not None:
             acquisition_result = await CommercialPriceAcquisitionPreparationService().acquire_from_source_units(
                 price_document=PriceDocument(
@@ -134,6 +177,14 @@ class CommercialPriceIngestionService:
                 source_units=source_units,
                 acquisition_service=acquisition_service,
             )
+            review_facts = review_price_facts_from_acquisition_result(
+                acquisition_result
+            )
+            await price_repo.replace_price_facts_for_document(
+                project_id=project_id,
+                price_document_id=price_document_id,
+                facts=review_facts,
+            )
 
         await price_repo.update_price_document_status(
             project_id=project_id,
@@ -146,6 +197,7 @@ class CommercialPriceIngestionService:
             source_unit_count=len(source_units),
             status=PriceDocumentStatus.READY,
             acquisition_result=acquisition_result,
+            review_fact_count=len(review_facts),
         )
 
 

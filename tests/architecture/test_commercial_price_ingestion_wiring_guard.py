@@ -5,6 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
+COMMERCIAL_PRICE_INGESTION_SERVICE = (
+    ROOT / "src/application/services/commercial_price_ingestion_service.py"
+)
 QUEUE_HANDLER = ROOT / "src/infrastructure/queue/handlers/knowledge_upload.py"
 
 
@@ -51,3 +54,15 @@ def test_price_list_ingestion_logs_acquisition_summary_without_runtime_lookup() 
     assert "price_acquisition_fact_candidate_count" in source
     assert "price_acquisition_issue_count" in source
     assert "list_published_price_facts_for_lookup(" not in source
+
+
+def test_price_list_ingestion_persists_review_facts_without_publishing_them() -> None:
+    commercial_source = COMMERCIAL_PRICE_INGESTION_SERVICE.read_text(encoding="utf-8")
+    orchestration_source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    combined = commercial_source + "\n" + orchestration_source
+
+    assert "replace_price_facts_for_document" in commercial_source
+    assert "PriceFactStatus.NEEDS_REVIEW" in commercial_source
+    assert "PriceFactStatus.PUBLISHED" not in combined
+    assert "publish_price_facts(" not in combined
+    assert "list_published_price_facts_for_lookup(" not in combined
