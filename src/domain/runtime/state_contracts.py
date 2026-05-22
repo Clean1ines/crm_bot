@@ -85,6 +85,9 @@ class RuntimeStateInput(TypedDict, total=False):
     history: list[RuntimeHistoryMessage]
     user_memory: RuntimeMemory
     knowledge_chunks: list[KnowledgeChunkPayload]
+    commercial_context: Mapping[str, object]
+    commercial_context_status: str | None
+    commercial_context_sources: list[Mapping[str, object]]
     client_profile: ClientProfileState
     project_configuration: ProjectRuntimeConfigurationState
     decision: str
@@ -128,6 +131,9 @@ class RuntimeStatePatch(TypedDict, total=False):
     history: list[RuntimeHistoryMessage] | list[Mapping[str, object]]
     user_memory: RuntimeMemory | Mapping[str, object]
     knowledge_chunks: list[KnowledgeChunkPayload] | None
+    commercial_context: Mapping[str, object] | None
+    commercial_context_status: str | None
+    commercial_context_sources: list[Mapping[str, object]] | None
     client_profile: ClientProfileState | None
     message_sent: bool
     decision: str

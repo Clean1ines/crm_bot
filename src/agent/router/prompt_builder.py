@@ -4,7 +4,7 @@ Functions for building prompts for graph nodes.
 
 import json
 from pathlib import Path
-from typing import Sequence, cast
+from typing import Mapping, Sequence, cast
 
 from src.agent.router.utils import compact_whitespace, extract_kb_text, truncate_text
 from src.domain.runtime.prompting import (
@@ -226,6 +226,135 @@ def format_project_configuration(
     return "\n".join(lines) if lines else NO_DATA_TEXT
 
 
+COMMERCIAL_CONTEXT_USEFUL_STATUSES = {
+    "answerable",
+    "needs_clarification",
+    "requires_manager",
+    "conflict",
+}
+
+
+def format_commercial_context(
+    commercial_context: Mapping[str, object] | None,
+) -> str:
+    if not commercial_context:
+        return ""
+
+    decision = str(commercial_context.get("decision") or "").strip()
+    if decision not in COMMERCIAL_CONTEXT_USEFUL_STATUSES:
+        return ""
+
+    lines: list[str] = [
+        "STRUCTURED COMMERCIAL CONTEXT — priority over generic KB when relevant.",
+        f"decision={decision}",
+    ]
+
+    missing_slots = commercial_context.get("missing_slots")
+    if isinstance(missing_slots, list) and missing_slots:
+        lines.append(
+            "missing_slots="
+            + ", ".join(truncate_text(str(slot), 80) for slot in missing_slots)
+        )
+
+    manager_reason = commercial_context.get("manager_reason")
+    if manager_reason:
+        lines.append(f"manager_reason={truncate_text(str(manager_reason), 160)}")
+
+    conflict_reason = commercial_context.get("conflict_reason")
+    if conflict_reason:
+        lines.append(f"conflict_reason={truncate_text(str(conflict_reason), 160)}")
+
+    raw_facts = commercial_context.get("facts")
+    if isinstance(raw_facts, list):
+        formatted_facts = [
+            _format_commercial_fact(raw_fact)
+            for raw_fact in raw_facts[:3]
+            if isinstance(raw_fact, Mapping)
+        ]
+        if formatted_facts:
+            lines.append("facts:")
+            lines.extend(formatted_facts)
+
+    lines.append(
+        "Instruction: use this structured commercial context first for prices. "
+        "If decision=needs_clarification, ask only for the missing variant. "
+        "If decision=requires_manager, explain that a manager should confirm the price."
+    )
+    return "\n".join(lines)
+
+
+def _format_commercial_fact(raw_fact: Mapping[str, object]) -> str:
+    item_name = truncate_text(str(raw_fact.get("item_name") or "unknown"), 120)
+    value_kind = truncate_text(str(raw_fact.get("value_kind") or "unknown"), 80)
+    unit = truncate_text(str(raw_fact.get("unit") or ""), 80)
+    price_text = _commercial_fact_price_text(raw_fact)
+    source_text = _commercial_fact_source_text(raw_fact)
+    variant_text = _commercial_fact_variant_text(raw_fact)
+
+    parts = [
+        f"- item={item_name}",
+        f"value_kind={value_kind}",
+    ]
+    if price_text:
+        parts.append(f"price={price_text}")
+    if unit:
+        parts.append(f"unit={unit}")
+    if variant_text:
+        parts.append(f"variant={variant_text}")
+    if source_text:
+        parts.append(f"source={source_text}")
+
+    return " | ".join(parts)
+
+
+def _commercial_fact_price_text(raw_fact: Mapping[str, object]) -> str:
+    amount = raw_fact.get("amount")
+    if isinstance(amount, Mapping):
+        raw_amount = amount.get("amount")
+        currency = amount.get("currency")
+        if raw_amount is not None and currency is not None:
+            return truncate_text(f"{raw_amount} {currency}", 120)
+
+    price_range = raw_fact.get("price_range")
+    if isinstance(price_range, Mapping):
+        min_amount = price_range.get("min_amount")
+        max_amount = price_range.get("max_amount")
+        if isinstance(min_amount, Mapping) and isinstance(max_amount, Mapping):
+            return truncate_text(
+                f"{min_amount.get('amount')} {min_amount.get('currency')} - "
+                f"{max_amount.get('amount')} {max_amount.get('currency')}",
+                160,
+            )
+
+    price_text = raw_fact.get("price_text")
+    return truncate_text(str(price_text), 160) if price_text else ""
+
+
+def _commercial_fact_source_text(raw_fact: Mapping[str, object]) -> str:
+    source_refs = raw_fact.get("source_refs")
+    if not isinstance(source_refs, list) or not source_refs:
+        return ""
+
+    first_ref = source_refs[0]
+    if not isinstance(first_ref, Mapping):
+        return ""
+
+    quote = first_ref.get("quote")
+    return truncate_text(str(quote), 180) if quote else ""
+
+
+def _commercial_fact_variant_text(raw_fact: Mapping[str, object]) -> str:
+    variant = raw_fact.get("variant")
+    if not isinstance(variant, Mapping) or not variant:
+        return ""
+
+    items = [
+        f"{truncate_text(str(key), 60)}={truncate_text(str(value), 80)}"
+        for key, value in variant.items()
+    ]
+    return ", ".join(items)
+
+
 def build_intent_prompt(
     user_input: str,
     conversation_summary: str | None = None,
@@ -254,6 +383,7 @@ def build_response_prompt(
     history: list[HistoryMessage] | None = None,
     user_memory: dict[str, list[dict[str, object]]] | None = None,
     knowledge_chunks: Sequence[object] | None = None,
+    commercial_context: Mapping[str, object] | None = None,
     project_configuration: ProjectRuntimeConfigurationState | None = None,
 ) -> str:
     global _response_prompt_template, _interpretation_block
@@ -268,10 +398,16 @@ def build_response_prompt(
     project_context = format_project_configuration(
         cast(dict[str, object] | None, project_configuration)
     )
-    knowledge_block = (
+    kb_block = (
         format_kb_results(knowledge_chunks, limit=DEFAULT_KB_LIMIT)[0]
         if knowledge_chunks
         else NO_KNOWLEDGE_TEXT
+    )
+    commercial_context_block = format_commercial_context(commercial_context)
+    knowledge_block = (
+        f"{commercial_context_block}\n\nGENERIC KNOWLEDGE BASE:\n{kb_block}"
+        if commercial_context_block
+        else kb_block
     )
 
     return _response_prompt_template.format(

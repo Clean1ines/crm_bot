@@ -158,3 +158,50 @@ async def test_response_generator_repeated_llm_failure_uses_incident_text():
     assert result["technical_failure_count"] == 2
     assert "технический инцидент" in result["response_text"].lower()
     assert result["requires_human"] is False
+
+
+@pytest.mark.asyncio
+async def test_response_generator_passes_commercial_context_to_prompt_builder():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="price answer"))
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_build_response_prompt(**kwargs):
+        captured.update(kwargs)
+        return "prompt with commercial context"
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch(
+            "src.agent.nodes.response_generator.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch(
+            "src.agent.nodes.response_generator.build_response_prompt",
+            side_effect=fake_build_response_prompt,
+        ),
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Сколько стоит Pro?",
+                "project_configuration": {},
+                "commercial_context": {
+                    "decision": "answerable",
+                    "facts": [{"item_name": "Pro"}],
+                },
+                "commercial_context_status": "answerable",
+            }
+        )
+
+    assert result["response_text"] == "price answer"
+    assert captured["commercial_context"] == {
+        "decision": "answerable",
+        "facts": [{"item_name": "Pro"}],
+    }
