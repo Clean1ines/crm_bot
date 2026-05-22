@@ -12,6 +12,9 @@ import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
+from src.application.ports.commercial_price_acquisition import (
+    CommercialPriceAcquisitionServicePort,
+)
 from src.application.ports.knowledge import (
     KnowledgeDocumentPort,
     KnowledgeSourceMaterialPort,
@@ -112,6 +115,10 @@ class KnowledgeIngestionRepositoryPort(
     Protocol,
 ):
     """Repository subset required by knowledge ingestion workflows."""
+
+
+class CommercialPriceAcquisitionServiceFactoryPort(Protocol):
+    def __call__(self) -> CommercialPriceAcquisitionServicePort: ...
 
 
 class CommercialPriceRepositoryFactoryPort(Protocol):
@@ -4333,6 +4340,8 @@ class KnowledgeIngestionService:
         logger: LoggerPort,
         commercial_price_repo_factory: CommercialPriceRepositoryFactoryPort
         | None = None,
+        commercial_price_acquisition_service_factory: CommercialPriceAcquisitionServiceFactoryPort
+        | None = None,
     ) -> KnowledgeDocumentProcessingResult:
         repo = knowledge_repo_factory(self.pool)
         usage_repo = model_usage_repo_factory(self.pool)
@@ -4362,6 +4371,11 @@ class KnowledgeIngestionService:
                     file_name=file_name,
                     chunks=indexable_chunks,
                     price_repo=commercial_price_repo_factory(self.pool),
+                    acquisition_service=(
+                        commercial_price_acquisition_service_factory()
+                        if commercial_price_acquisition_service_factory is not None
+                        else None
+                    ),
                 )
             )
             logger.info(
@@ -4372,6 +4386,9 @@ class KnowledgeIngestionService:
                     "price_document_id": price_result.price_document_id,
                     "price_source_unit_count": price_result.source_unit_count,
                     "price_document_status": price_result.status.value,
+                    "price_acquisition_row_count": price_result.acquisition_row_count,
+                    "price_acquisition_fact_candidate_count": price_result.acquisition_fact_candidate_count,
+                    "price_acquisition_issue_count": price_result.acquisition_issue_count,
                 },
             )
 

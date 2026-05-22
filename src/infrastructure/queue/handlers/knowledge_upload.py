@@ -26,6 +26,9 @@ from src.infrastructure.db.repositories.model_usage_repository import (
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
+from src.interfaces.composition.commercial_price_acquisition import (
+    make_commercial_price_acquisition_service,
+)
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryPort,
@@ -83,6 +86,7 @@ async def handle_process_knowledge_upload(
             preprocessor_factory=GroqKnowledgePreprocessor,
             logger=logger,
             commercial_price_repo_factory=make_commercial_price_repository,
+            commercial_price_acquisition_service_factory=make_commercial_price_acquisition_service,
         )
     except (KnowledgePreprocessingValidationError, ValidationError) as exc:
         raise PermanentJobError(str(exc)) from exc

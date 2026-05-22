@@ -42,3 +42,12 @@ def test_price_list_ingestion_wiring_does_not_touch_runtime_answer_path() -> Non
     assert "PriceLookupTool" not in combined
     assert "PriceLookupResult" not in combined
     assert "list_published_price_facts_for_lookup(" not in combined
+
+
+def test_price_list_ingestion_logs_acquisition_summary_without_runtime_lookup() -> None:
+    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+
+    assert "price_acquisition_row_count" in source
+    assert "price_acquisition_fact_candidate_count" in source
+    assert "price_acquisition_issue_count" in source
+    assert "list_published_price_facts_for_lookup(" not in source
