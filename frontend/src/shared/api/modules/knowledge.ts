@@ -220,6 +220,39 @@ export type KnowledgePriceFactsMutationResponse = {
   items: KnowledgePriceFact[];
 };
 
+export type KnowledgeCommercialTruthFactReview = {
+  fact_id: string;
+  price_document_id: string;
+  item_name: string;
+  value_kind: string;
+  status: string;
+  unit: string;
+  source_id: string;
+  source_kind: string;
+  source_authority: string;
+  is_runtime_eligible: boolean;
+};
+
+export type KnowledgeCommercialTruthConflictReview = {
+  identity_key: string;
+  reason: string;
+  resolution_status: string;
+  resolution_reason: string;
+  selected_fact_id: string | null;
+  options: KnowledgeCommercialTruthFactReview[];
+};
+
+export type KnowledgeCommercialTruthReviewResponse = {
+  policy: string;
+  fact_count: number;
+  conflict_count: number;
+  resolved_conflict_count: number;
+  unresolved_conflict_count: number;
+  surface_fact_ids: string[];
+  facts: KnowledgeCommercialTruthFactReview[];
+  conflicts: KnowledgeCommercialTruthConflictReview[];
+};
+
 export type KnowledgePriceFactsActionRequest = {
   fact_ids: string[];
   reason?: string;
@@ -338,6 +371,14 @@ export const knowledgeApi = {
   priceFacts: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgePriceFactsResponse>(
       `/api/projects/${projectId}/knowledge/${documentId}/price-facts`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  commercialTruthReview: (projectId: string, documentId: string) =>
+    authedJsonRequest<KnowledgeCommercialTruthReviewResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/commercial-truth-review`,
       {
         method: 'GET',
       },
