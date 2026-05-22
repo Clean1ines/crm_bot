@@ -66,6 +66,7 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
 )
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
+from src.domain.project_plane.knowledge_views import KnowledgeDocumentDetailView
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     PREPROCESSING_STATUS_NOT_REQUESTED,
@@ -661,6 +662,66 @@ class KnowledgeService:
             price_document_id=price_document.id,
             affected_count=affected_count,
             facts=facts,
+        )
+
+    async def project_commercial_truth_review(
+        self,
+        project_id: str,
+        authorization: str | None,
+        *,
+        commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
+        logger: LoggerPort,
+        policy: CommercialTruthResolutionPolicy = (
+            CommercialTruthResolutionPolicy.MANUAL_REVIEW
+        ),
+    ) -> CommercialTruthReviewReport:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        price_repo = commercial_price_repo_factory(self.pool)
+        price_documents = await price_repo.list_price_documents_for_project(
+            project_id=project_id,
+        )
+        if not price_documents:
+            return CommercialTruthReviewService().review_price_facts(
+                facts=(),
+                sources_by_price_document_id={},
+                policy=policy,
+            )
+
+        knowledge_repo = knowledge_repo_factory(self.pool)
+        knowledge_documents_by_id: dict[str, KnowledgeDocumentDetailView] = {}
+        for price_document in price_documents:
+            knowledge_document = await knowledge_repo.get_document(
+                price_document.knowledge_document_id
+            )
+            if (
+                knowledge_document is not None
+                and knowledge_document.project_id == project_id
+            ):
+                knowledge_documents_by_id[knowledge_document.id] = knowledge_document
+
+        price_document_ids = tuple(
+            price_document.id for price_document in price_documents
+        )
+        facts = await price_repo.list_price_facts_for_documents(
+            project_id=project_id,
+            price_document_ids=price_document_ids,
+            include_non_runtime=True,
+        )
+        return CommercialTruthReviewService().review_price_facts(
+            facts=facts,
+            sources_by_price_document_id={
+                price_document.id: commercial_source_descriptor_from_price_document(
+                    price_document,
+                    knowledge_document=knowledge_documents_by_id.get(
+                        price_document.knowledge_document_id
+                    ),
+                )
+                for price_document in price_documents
+            },
+            policy=policy,
         )
 
     async def commercial_truth_review(

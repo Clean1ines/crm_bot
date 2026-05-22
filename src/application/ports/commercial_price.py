@@ -30,6 +30,12 @@ class CommercialPriceDocumentPort(Protocol):
         price_document_id: str,
     ) -> PriceDocument | None: ...
 
+    async def list_price_documents_for_project(
+        self,
+        *,
+        project_id: str,
+    ) -> tuple[PriceDocument, ...]: ...
+
     async def update_price_document_status(
         self,
         *,
@@ -88,6 +94,14 @@ class CommercialPriceFactPort(Protocol):
         *,
         project_id: str,
         price_document_id: str,
+        include_non_runtime: bool = False,
+    ) -> tuple[PublishedPriceFact, ...]: ...
+
+    async def list_price_facts_for_documents(
+        self,
+        *,
+        project_id: str,
+        price_document_ids: Sequence[str],
         include_non_runtime: bool = False,
     ) -> tuple[PublishedPriceFact, ...]: ...
 
