@@ -142,3 +142,43 @@ def test_commercial_truth_review_read_side_accepts_policy_preview_without_mutati
     assert "publish_price_facts(" not in review_method
     assert "reject_price_facts(" not in review_method
     assert "list_published_price_facts_for_lookup(" not in review_method
+
+
+def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_route() -> (
+    None
+):
+    source = HTTP.read_text(encoding="utf-8")
+    policy_param = (
+        "policy: CommercialTruthResolutionPolicy = "
+        "CommercialTruthResolutionPolicy.MANUAL_REVIEW"
+    )
+
+    assert source.count(policy_param) == 1
+
+    route_start = source.index("async def knowledge_commercial_truth_review(")
+    route_end = source.index("@router.post", route_start)
+    commercial_truth_route = source[route_start:route_end]
+
+    assert policy_param in commercial_truth_route
+    assert "policy=policy" in commercial_truth_route
+
+    forbidden_route_names = (
+        "async def preview_knowledge(",
+        "async def knowledge_usage(",
+        "async def list_project_knowledge(",
+        "async def upload_project_knowledge(",
+        "async def get_knowledge_processing_report(",
+        "async def knowledge_processing_progress(",
+        "async def knowledge_price_facts(",
+    )
+
+    for route_name in forbidden_route_names:
+        if route_name not in source:
+            continue
+
+        start = source.index(route_name)
+        next_route = source.find("\n@router.", start)
+        route = source[start:] if next_route == -1 else source[start:next_route]
+
+        assert policy_param not in route
+        assert "policy=policy" not in route
