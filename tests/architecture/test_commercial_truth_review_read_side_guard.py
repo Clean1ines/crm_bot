@@ -117,3 +117,28 @@ def test_commercial_truth_review_read_side_exposes_source_title_and_observed_at(
     assert '"source_observed_at": self.source_observed_at' in source
     assert "source_title=snapshot.source.title" in source
     assert "source_observed_at=commercial_truth_source_observed_at_text" in source
+
+
+def test_commercial_truth_review_read_side_accepts_policy_preview_without_mutation() -> (
+    None
+):
+    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+    http_source = HTTP.read_text(encoding="utf-8")
+
+    assert "CommercialTruthResolutionPolicy" in service_source
+    assert "CommercialTruthResolutionPolicy" in http_source
+    assert "policy: CommercialTruthResolutionPolicy" in service_source
+    assert "policy: CommercialTruthResolutionPolicy" in http_source
+    assert "policy=policy" in service_source
+    assert "policy=policy" in http_source
+
+    review_method_start = service_source.index("async def commercial_truth_review(")
+    review_method_end = service_source.index(
+        "async def cancel_document_processing(",
+        review_method_start,
+    )
+    review_method = service_source[review_method_start:review_method_end]
+
+    assert "publish_price_facts(" not in review_method
+    assert "reject_price_facts(" not in review_method
+    assert "list_published_price_facts_for_lookup(" not in review_method

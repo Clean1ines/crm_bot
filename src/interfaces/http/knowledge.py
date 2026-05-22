@@ -34,6 +34,7 @@ from src.application.services.knowledge_service import (
     KnowledgeServiceConfig,
     KnowledgeServiceRepositoryPort,
 )
+from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.commercial_price_repository import (
@@ -135,6 +136,7 @@ async def _read_upload_bytes(file: UploadFile) -> bytearray:
 async def list_knowledge_documents(
     project_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     pool=Depends(get_pool),
@@ -170,6 +172,7 @@ async def preview_knowledge(
     project_id: str,
     request: KnowledgePreviewRequestModel,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     queue_repo=Depends(get_queue_repo),
@@ -207,6 +210,7 @@ async def preview_knowledge(
 async def knowledge_usage(
     project_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -238,6 +242,7 @@ async def knowledge_answer_drafts(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     limit: int = Query(20, ge=1, le=1000),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
@@ -274,6 +279,7 @@ async def knowledge_source_units(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     limit: int = Query(1000, ge=1, le=1000),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
@@ -310,6 +316,7 @@ async def knowledge_import_quality_report(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -344,6 +351,7 @@ async def knowledge_processing_progress(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -378,6 +386,7 @@ async def knowledge_price_facts(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -412,6 +421,7 @@ async def knowledge_commercial_truth_review(
     project_id: str,
     document_id: str,
     authorization: str | None = Header(default=None),
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
@@ -438,6 +448,7 @@ async def knowledge_commercial_truth_review(
         commercial_price_repo_factory=make_commercial_price_repo,
         knowledge_repo_factory=make_knowledge_repo,
         logger=logger,
+        policy=policy,
     )
     return result.to_dict()
 
