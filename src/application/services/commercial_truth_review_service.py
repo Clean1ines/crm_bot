@@ -156,6 +156,15 @@ class CommercialTruthReviewReport:
     def surface_fact_ids(self) -> tuple[str, ...]:
         return tuple(fact.id for fact in self.surface_facts)
 
+    @property
+    def surface_fact_reviews(self) -> tuple[CommercialTruthFactReviewDto, ...]:
+        reviews_by_fact_id = {fact.fact_id: fact for fact in self.facts}
+        return tuple(
+            reviews_by_fact_id[fact_id]
+            for fact_id in self.surface_fact_ids
+            if fact_id in reviews_by_fact_id
+        )
+
     def to_dict(self) -> dict[str, object]:
         return {
             "policy": self.policy.value,
@@ -164,6 +173,7 @@ class CommercialTruthReviewReport:
             "resolved_conflict_count": self.resolved_conflict_count,
             "unresolved_conflict_count": self.unresolved_conflict_count,
             "surface_fact_ids": list(self.surface_fact_ids),
+            "surface_facts": [fact.to_dict() for fact in self.surface_fact_reviews],
             "facts": [fact.to_dict() for fact in self.facts],
             "conflicts": [conflict.to_dict() for conflict in self.conflicts],
         }

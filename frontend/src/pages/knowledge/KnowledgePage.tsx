@@ -759,6 +759,7 @@ const CommercialTruthReviewSummary: React.FC<{
 
   const previewConflicts = response.conflicts.slice(0, 2);
   const surfacePreviewCount = response.surface_fact_ids.length;
+  const surfacePreviewFacts = response.surface_facts.slice(0, 3);
 
   return (
     <div className="mb-4 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--surface-secondary)] p-3 text-xs">
@@ -783,6 +784,36 @@ const CommercialTruthReviewSummary: React.FC<{
           </span>
         </div>
       </div>
+
+      {surfacePreviewFacts.length > 0 && (
+        <div className="mb-2 rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
+          <div className="font-medium text-[var(--text-primary)]">
+            {t('knowledge.commercialTruth.surfacePreview')}
+          </div>
+          <div className="mt-1 space-y-1">
+            {surfacePreviewFacts.map((fact) => (
+              <div
+                key={fact.fact_id}
+                className="rounded-md bg-[var(--control-bg)] px-2 py-1 text-[10px] text-[var(--text-muted)]"
+              >
+                <span className="font-medium text-[var(--text-primary)]">{fact.item_name}</span>
+                {' · '}
+                <span className="font-semibold text-[var(--text-primary)]">
+                  {fact.value_text || priceFactValueKindLabel(fact.value_kind)}
+                </span>
+                {' · '}
+                {t('knowledge.commercialTruth.fields.sourceKind')}: {fact.source_kind}
+                {fact.source_quote && (
+                  <>
+                    {' · '}
+                    <span title={fact.source_quote}>{fact.source_quote}</span>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {response.fact_count === 0 ? (
         <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2 text-[var(--text-muted)]">

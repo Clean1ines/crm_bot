@@ -251,6 +251,7 @@ export type KnowledgeCommercialTruthReviewResponse = {
   resolved_conflict_count: number;
   unresolved_conflict_count: number;
   surface_fact_ids: string[];
+  surface_facts: KnowledgeCommercialTruthFactReview[];
   facts: KnowledgeCommercialTruthFactReview[];
   conflicts: KnowledgeCommercialTruthConflictReview[];
 };
