@@ -139,6 +139,32 @@ class CommercialPriceRepository(CommercialPriceKnowledgePort):
 
         return price_document_from_row(dict(row)) if row is not None else None
 
+    async def list_price_documents_for_project(
+        self,
+        *,
+        project_id: str,
+    ) -> tuple[PriceDocument, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    knowledge_document_id,
+                    source_format,
+                    input_kind,
+                    status,
+                    detected_currency,
+                    detected_locale
+                FROM commercial_price_documents
+                WHERE project_id = $1
+                ORDER BY updated_at DESC, id
+                """,
+                ensure_uuid(project_id),
+            )
+
+        return tuple(price_document_from_row(dict(row)) for row in rows)
+
     async def update_price_document_status(
         self,
         *,
@@ -388,6 +414,55 @@ class CommercialPriceRepository(CommercialPriceKnowledgePort):
                 """,
                 ensure_uuid(project_id),
                 price_document_id,
+                include_non_runtime,
+            )
+
+        return tuple(price_fact_from_row(dict(row)) for row in rows)
+
+    async def list_price_facts_for_documents(
+        self,
+        *,
+        project_id: str,
+        price_document_ids: Sequence[str],
+        include_non_runtime: bool = False,
+    ) -> tuple[PublishedPriceFact, ...]:
+        cleaned_document_ids = tuple(
+            price_document_id
+            for price_document_id in price_document_ids
+            if price_document_id.strip()
+        )
+        if not cleaned_document_ids:
+            return ()
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    id,
+                    project_id,
+                    price_document_id,
+                    item_name,
+                    value_kind,
+                    status,
+                    amount,
+                    min_amount,
+                    max_amount,
+                    currency,
+                    unit,
+                    price_text,
+                    variant,
+                    aliases,
+                    conditions,
+                    source_refs,
+                    confidence
+                FROM commercial_price_facts
+                WHERE project_id = $1
+                  AND price_document_id = ANY($2::text[])
+                  AND ($3::boolean OR status = 'published')
+                ORDER BY updated_at DESC, id
+                """,
+                ensure_uuid(project_id),
+                list(cleaned_document_ids),
                 include_non_runtime,
             )
 
