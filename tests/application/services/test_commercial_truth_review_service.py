@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import Decimal
 
 from src.application.services.commercial_truth_review_service import (
     CommercialTruthReviewService,
+    commercial_truth_fact_value_text,
     commercial_source_descriptor_from_price_document,
     commercial_source_kind_from_price_document,
 )
@@ -24,6 +26,17 @@ from src.domain.commercial.price_knowledge import (
     PublishedPriceFact,
 )
 from src.domain.commercial.pricing import MoneyAmount
+
+
+def _mapping_list(value: object) -> list[Mapping[str, object]]:
+    assert isinstance(value, list)
+
+    items: list[Mapping[str, object]] = []
+    for item in value:
+        assert isinstance(item, Mapping)
+        items.append(item)
+
+    return items
 
 
 def _source_ref() -> PriceSourceRef:
@@ -252,4 +265,68 @@ def test_source_kind_from_price_document_keeps_unknown_when_format_is_unknown() 
     assert (
         commercial_source_kind_from_price_document(document)
         == CommercialSourceKind.UNKNOWN
+    )
+
+
+def test_review_fact_dto_includes_value_text_and_source_quote() -> None:
+    fact = _fact(fact_id="pro", amount="2490")
+
+    report = CommercialTruthReviewService().review_price_facts(
+        facts=(fact,),
+        sources_by_price_document_id={
+            fact.price_document_id: _source(
+                "prices-may",
+                CommercialSourceKind.STRUCTURED_PRICE_LIST,
+            )
+        },
+    )
+    payload = report.to_dict()
+    facts_payload = _mapping_list(payload["facts"])
+
+    assert report.facts[0].value_text == "2490 RUB"
+    assert report.facts[0].source_quote == "Pro — 2490 ₽/мес."
+    assert facts_payload[0]["value_text"] == "2490 RUB"
+    assert facts_payload[0]["source_quote"] == "Pro — 2490 ₽/мес."
+
+
+def test_review_conflict_options_include_value_text_and_source_quote() -> None:
+    price_list = _fact(fact_id="price-list", amount="2490")
+    faq = _fact(fact_id="faq", amount="2990")
+
+    report = CommercialTruthReviewService().review_price_facts(
+        facts=(price_list, faq),
+        sources_by_price_document_id={
+            price_list.price_document_id: _source(
+                "prices-may",
+                CommercialSourceKind.STRUCTURED_PRICE_LIST,
+            ),
+            faq.price_document_id: _source("faq-old", CommercialSourceKind.FAQ),
+        },
+    )
+    payload = report.to_dict()
+    conflicts_payload = _mapping_list(payload["conflicts"])
+    conflict = conflicts_payload[0]
+    options_payload = _mapping_list(conflict["options"])
+
+    assert options_payload[0]["value_text"] == "2490 RUB"
+    assert options_payload[1]["value_text"] == "2990 RUB"
+    assert options_payload[0]["source_quote"] == "Pro — 2490 ₽/мес."
+
+
+def test_commercial_truth_fact_value_text_handles_on_request_price_text() -> None:
+    fact = PublishedPriceFact(
+        id="on-request",
+        project_id="project-1",
+        price_document_id="price-doc-on-request",
+        item_name="Enterprise",
+        value_kind=PriceValueKind.ON_REQUEST,
+        unit="contract",
+        status=PriceFactStatus.PUBLISHED,
+        price_text="Цена рассчитывается индивидуально.",
+        source_refs=(_source_ref(),),
+        confidence=Decimal("0.9"),
+    )
+
+    assert (
+        commercial_truth_fact_value_text(fact) == "Цена рассчитывается индивидуально."
     )

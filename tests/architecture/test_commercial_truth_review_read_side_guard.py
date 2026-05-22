@@ -60,3 +60,16 @@ def test_commercial_truth_review_read_side_does_not_publish_or_touch_runtime_loo
     assert "reject_price_facts(" not in review_method
     assert "list_published_price_facts_for_lookup(" not in review_method
     assert "PriceLookupTool" not in review_method
+
+
+def test_commercial_truth_review_read_side_exposes_value_text_and_source_quote() -> (
+    None
+):
+    source = REVIEW_SERVICE.read_text(encoding="utf-8")
+
+    assert "value_text: str" in source
+    assert "source_quote: str" in source
+    assert "commercial_truth_fact_value_text" in source
+    assert "commercial_truth_source_quote" in source
+    assert '"value_text": self.value_text' in source
+    assert '"source_quote": self.source_quote' in source
