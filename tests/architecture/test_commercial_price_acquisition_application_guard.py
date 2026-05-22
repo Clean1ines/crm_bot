@@ -7,6 +7,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PORT_FILE = ROOT / "src/application/ports/commercial_price_acquisition.py"
 SERVICE_FILE = ROOT / "src/application/services/commercial_price_acquisition_service.py"
+PREPARATION_FILE = (
+    ROOT
+    / "src/application/services/commercial_price_acquisition_preparation_service.py"
+)
 
 
 def _imports(path: Path) -> list[str]:
@@ -30,7 +34,7 @@ def test_price_acquisition_application_layer_has_no_infrastructure_imports() -> 
     )
     violations: list[str] = []
 
-    for path in (PORT_FILE, SERVICE_FILE):
+    for path in (PORT_FILE, SERVICE_FILE, PREPARATION_FILE):
         for module in _imports(path):
             if any(
                 module == prefix or module.startswith(f"{prefix}.")
@@ -62,3 +66,14 @@ def test_price_acquisition_service_does_not_import_specific_format_adapters() ->
     )
 
     assert not any(marker in source for marker in forbidden_markers)
+
+
+def test_price_acquisition_preparation_bridges_source_material_to_acquisition_units() -> (
+    None
+):
+    source = PREPARATION_FILE.read_text(encoding="utf-8")
+
+    assert "PriceSourceUnit" in source
+    assert "PriceAcquisitionUnit" in source
+    assert "price_acquisition_unit_from_source_unit" in source
+    assert "CommercialPriceAcquisitionServicePort" in source
