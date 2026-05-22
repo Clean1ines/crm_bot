@@ -20,6 +20,11 @@ from src.application.dto.knowledge_dto import (
 )
 from src.application.dto.model_usage_dto import ModelUsageSummaryDto
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
+from src.application.services.commercial_truth_review_service import (
+    CommercialTruthReviewReport,
+    CommercialTruthReviewService,
+    commercial_source_descriptor_from_price_document,
+)
 from src.application.errors import (
     ForbiddenError,
     NotFoundError,
@@ -655,6 +660,43 @@ class KnowledgeService:
             price_document_id=price_document.id,
             affected_count=affected_count,
             facts=facts,
+        )
+
+    async def commercial_truth_review(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        commercial_price_repo_factory: CommercialPriceKnowledgeFactoryPort,
+        logger: LoggerPort,
+    ) -> CommercialTruthReviewReport:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = commercial_price_repo_factory(self.pool)
+        price_document = await repo.get_price_document_by_knowledge_document(
+            project_id=project_id,
+            knowledge_document_id=document_id,
+        )
+        if price_document is None:
+            return CommercialTruthReviewService().review_price_facts(
+                facts=(),
+                sources_by_price_document_id={},
+            )
+
+        facts = await repo.list_price_facts_for_document(
+            project_id=project_id,
+            price_document_id=price_document.id,
+            include_non_runtime=True,
+        )
+        return CommercialTruthReviewService().review_price_facts(
+            facts=facts,
+            sources_by_price_document_id={
+                price_document.id: commercial_source_descriptor_from_price_document(
+                    price_document
+                )
+            },
         )
 
     async def cancel_document_processing(

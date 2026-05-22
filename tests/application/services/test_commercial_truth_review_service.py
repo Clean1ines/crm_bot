@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from src.application.services.commercial_truth_review_service import (
     CommercialTruthReviewService,
+    commercial_source_descriptor_from_price_document,
+    commercial_source_kind_from_price_document,
 )
 from src.domain.commercial.commercial_truth import (
     CommercialConflictResolutionStatus,
@@ -12,6 +14,10 @@ from src.domain.commercial.commercial_truth import (
     CommercialTruthResolutionPolicy,
 )
 from src.domain.commercial.price_knowledge import (
+    PriceDocument,
+    PriceDocumentInputKind,
+    PriceDocumentSourceFormat,
+    PriceDocumentStatus,
     PriceFactStatus,
     PriceSourceRef,
     PriceValueKind,
@@ -192,3 +198,58 @@ def test_review_report_serializes_compact_payload_for_future_read_side() -> None
     assert payload["conflict_count"] == 1
     assert payload["surface_fact_ids"] == []
     assert payload["conflicts"]
+
+
+def test_source_kind_from_price_document_classifies_table_price_lists_as_primary() -> (
+    None
+):
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.CSV,
+        input_kind=PriceDocumentInputKind.TABLE,
+        status=PriceDocumentStatus.READY,
+    )
+
+    source_kind = commercial_source_kind_from_price_document(document)
+    descriptor = commercial_source_descriptor_from_price_document(document)
+
+    assert source_kind == CommercialSourceKind.STRUCTURED_PRICE_LIST
+    assert descriptor.id == "price-doc-1"
+    assert descriptor.kind == CommercialSourceKind.STRUCTURED_PRICE_LIST
+    assert descriptor.effective_authority.value == "primary"
+
+
+def test_source_kind_from_price_document_classifies_non_table_commercial_text_conservatively() -> (
+    None
+):
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.MARKDOWN,
+        input_kind=PriceDocumentInputKind.MIXED,
+        status=PriceDocumentStatus.READY,
+    )
+
+    assert (
+        commercial_source_kind_from_price_document(document)
+        == CommercialSourceKind.COMMERCIAL_OFFER
+    )
+
+
+def test_source_kind_from_price_document_keeps_unknown_when_format_is_unknown() -> None:
+    document = PriceDocument(
+        id="price-doc-1",
+        project_id="project-1",
+        knowledge_document_id="knowledge-doc-1",
+        source_format=PriceDocumentSourceFormat.UNKNOWN,
+        input_kind=PriceDocumentInputKind.UNKNOWN,
+        status=PriceDocumentStatus.READY,
+    )
+
+    assert (
+        commercial_source_kind_from_price_document(document)
+        == CommercialSourceKind.UNKNOWN
+    )
