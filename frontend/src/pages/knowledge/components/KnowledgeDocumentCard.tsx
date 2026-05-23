@@ -3,6 +3,8 @@ import { FileText } from 'lucide-react';
 
 import { KnowledgeDocumentDetailsPanel } from './KnowledgeDocumentDetailsPanel';
 import { ImportQualitySummary } from './ImportQualitySummary';
+import { PriceFactsSummary } from './PriceFactsSummary';
+import { CommercialTruthReviewSummary } from './CommercialTruthReviewSummary';
 
 import { t } from '@shared/i18n';
 import { type KnowledgeCommercialTruthReviewPolicy, type KnowledgeCommercialTruthReviewResponse, type KnowledgePriceFact, type KnowledgePriceFactsResponse, type KnowledgeImportQualityReport, type KnowledgeProcessingReport } from '@shared/api/modules/knowledge';
@@ -45,19 +47,6 @@ export const KnowledgeDocumentCard: React.FC<{
   onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
-  PriceFactsSummary: React.ComponentType<{
-    response: KnowledgePriceFactsResponse | undefined;
-    isLoading: boolean;
-    onPublishFact: (fact: KnowledgePriceFact) => void;
-    onRejectFact: (fact: KnowledgePriceFact) => void;
-    mutatingFactId: string | null;
-  }>;
-  CommercialTruthReviewSummary: React.ComponentType<{
-    response: KnowledgeCommercialTruthReviewResponse | undefined;
-    isLoading: boolean;
-    policy: KnowledgeCommercialTruthReviewPolicy;
-    onPolicyChange: (policy: KnowledgeCommercialTruthReviewPolicy) => void;
-  }>;
 }> = ({
   doc,
   importQualityReport,
@@ -83,8 +72,6 @@ export const KnowledgeDocumentCard: React.FC<{
   onStopProcessing,
   formatSize,
   knowledgeProcessingModeLabel,
-  PriceFactsSummary,
-  CommercialTruthReviewSummary,
 }) => (
   <div
     className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
