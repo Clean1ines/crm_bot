@@ -49,6 +49,7 @@ class KnowledgeCurationActionType(StrEnum):
 
 class KnowledgeCurationActionStatus(StrEnum):
     PROPOSED = "proposed"
+    IN_PROGRESS = "in_progress"
     APPLIED = "applied"
     REJECTED = "rejected"
     FAILED = "failed"

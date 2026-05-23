@@ -150,3 +150,25 @@ def test_stage_h_uses_existing_rag_eval_queue_type() -> None:
     assert "run_full_rag_eval" in service
     assert '"mode": "full_document"' in service
     assert '"eval_mode": "retrieval_eval"' in service
+
+
+def test_stage_h_manual_curation_action_lifecycle_allows_in_progress() -> None:
+    migrations = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "migrations").glob("*.sql"))
+    )
+    domain = _read("src/domain/project_plane/knowledge_curation.py")
+    persistence = _read(
+        "src/infrastructure/db/repositories/knowledge_curation_action_persistence.py"
+    )
+    operations = _read(
+        "src/infrastructure/db/repositories/knowledge_curation_entry_operations.py"
+    )
+    repository = _read("src/infrastructure/db/repositories/knowledge_repository.py")
+
+    assert 'IN_PROGRESS = "in_progress"' in domain
+    assert "'in_progress'" in migrations
+    assert "'applied_with_warning'" in migrations
+    assert "status = 'in_progress'" in persistence
+    assert "mark_action_in_progress_raw(conn, action_id)" in operations
+    assert 'status="applied_with_warning" if partial else "applied"' in repository
