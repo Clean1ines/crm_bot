@@ -40,7 +40,9 @@ import { DocumentStatusBlock } from './components/DocumentStatusBlock';
 import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
 import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
 import { DocumentActionsBlock } from './components/DocumentActionsBlock';
+import { KnowledgeReviewInbox } from './components/KnowledgeReviewInbox';
 import { KnowledgeWorkspaceSummary } from './components/KnowledgeWorkspaceSummary';
+import { buildKnowledgeReviewInbox, type KnowledgeReviewTask } from './viewModel/reviewInbox';
 import { buildKnowledgeWorkspaceSummary, type KnowledgeWorkspacePrimaryActionKind } from './viewModel/workspaceSummary';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
@@ -1046,11 +1048,19 @@ export const KnowledgePage: React.FC = () => {
 
 
   const totalDrafts = documents.reduce((acc, doc) => acc + (answerDrafts[doc.id]?.total_count || 0), 0);
+  const firstDraftDocumentId = documents.find((doc) => (answerDrafts[doc.id]?.total_count || 0) > 0)?.id ?? null;
   const workspaceSummary = buildKnowledgeWorkspaceSummary({
     documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
     hasProcessingDocuments,
     totalDrafts,
     projectCommercialTruth: projectCommercialTruthReviewQuery.data,
+  });
+  const reviewInboxTasks = buildKnowledgeReviewInbox({
+    documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
+    hasProcessingDocuments,
+    totalDrafts,
+    firstDraftDocumentId,
+    projectCommercialTruth: projectCommercialTruthReviewQuery.data ?? undefined,
   });
 
   const handleWorkspacePrimaryAction = (kind: KnowledgeWorkspacePrimaryActionKind): void => {
@@ -1071,6 +1081,29 @@ export const KnowledgePage: React.FC = () => {
       documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
+  const handleReviewTaskAction = (task: KnowledgeReviewTask): void => {
+    if (task.action.kind === 'upload_document') {
+      triggerUpload();
+      return;
+    }
+
+    if (task.action.kind === 'open_drafts') {
+      if (task.action.documentId) {
+        setDraftsDocumentId(task.action.documentId);
+      }
+      return;
+    }
+
+    if (task.action.kind === 'open_commerce') {
+      projectCommercialTruthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (task.action.kind === 'open_documents') {
+      documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
   const sourceUnitsModalExpandedIds = sourceUnitsDocumentId ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || [] : [];
   const openDraftsModal = (documentId: string): void => {
@@ -1446,6 +1479,11 @@ export const KnowledgePage: React.FC = () => {
       <KnowledgeWorkspaceSummary
         summary={workspaceSummary}
         onPrimaryAction={handleWorkspacePrimaryAction}
+      />
+
+      <KnowledgeReviewInbox
+        tasks={reviewInboxTasks}
+        onTaskAction={handleReviewTaskAction}
       />
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
