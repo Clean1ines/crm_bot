@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
   Upload,
@@ -1041,6 +1041,9 @@ export const KnowledgePage: React.FC = () => {
     : null;
   const sourceUnitsModalResponse = sourceUnitsDocumentId ? sourceUnits[sourceUnitsDocumentId] : undefined;
 
+  const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
+  const documentsGridRef = useRef<HTMLDivElement | null>(null);
+
 
   const totalDrafts = documents.reduce((acc, doc) => acc + (answerDrafts[doc.id]?.total_count || 0), 0);
   const workspaceSummary = buildKnowledgeWorkspaceSummary({
@@ -1061,11 +1064,11 @@ export const KnowledgePage: React.FC = () => {
       return;
     }
     if (kind === 'review_commercial_truth') {
-      document.getElementById('knowledge-project-commercial-truth')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      projectCommercialTruthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
     if (kind === 'review_documents') {
-      document.getElementById('knowledge-documents-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
   const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
@@ -1594,7 +1597,7 @@ export const KnowledgePage: React.FC = () => {
             onPrimaryAction={handleWorkspacePrimaryAction}
           />
 
-          <div id="knowledge-project-commercial-truth">
+          <div ref={projectCommercialTruthRef} id="knowledge-project-commercial-truth">
           <CommercialTruthReviewSummary
             response={projectCommercialTruthReviewQuery.data}
             isLoading={
@@ -1607,7 +1610,7 @@ export const KnowledgePage: React.FC = () => {
 
           </div>
 
-          <div id="knowledge-documents-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
+          <div ref={documentsGridRef} id="knowledge-documents-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
