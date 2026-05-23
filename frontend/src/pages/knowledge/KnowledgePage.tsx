@@ -40,6 +40,8 @@ import { DocumentStatusBlock } from './components/DocumentStatusBlock';
 import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
 import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
 import { DocumentActionsBlock } from './components/DocumentActionsBlock';
+import { KnowledgeWorkspaceSummary } from './components/KnowledgeWorkspaceSummary';
+import { buildKnowledgeWorkspaceSummary, type KnowledgeWorkspacePrimaryActionKind } from './viewModel/workspaceSummary';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -1038,6 +1040,34 @@ export const KnowledgePage: React.FC = () => {
     ? documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null
     : null;
   const sourceUnitsModalResponse = sourceUnitsDocumentId ? sourceUnits[sourceUnitsDocumentId] : undefined;
+
+
+  const totalDrafts = documents.reduce((acc, doc) => acc + (answerDrafts[doc.id]?.total_count || 0), 0);
+  const workspaceSummary = buildKnowledgeWorkspaceSummary({
+    documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
+    hasProcessingDocuments,
+    totalDrafts,
+    projectCommercialTruth: projectCommercialTruthReviewQuery.data,
+  });
+
+  const handleWorkspacePrimaryAction = (kind: KnowledgeWorkspacePrimaryActionKind): void => {
+    if (kind === 'upload_document') {
+      triggerUpload();
+      return;
+    }
+    if (kind === 'open_drafts') {
+      const target = documents.find((doc) => (answerDrafts[doc.id]?.total_count || 0) > 0);
+      if (target) openDraftsModal(target.id);
+      return;
+    }
+    if (kind === 'review_commercial_truth') {
+      document.getElementById('knowledge-project-commercial-truth')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (kind === 'review_documents') {
+      document.getElementById('knowledge-documents-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
   const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
   const sourceUnitsModalExpandedIds = sourceUnitsDocumentId ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || [] : [];
   const openDraftsModal = (documentId: string): void => {
@@ -1559,6 +1589,12 @@ export const KnowledgePage: React.FC = () => {
         </div>
       ) : (
         <>
+          <KnowledgeWorkspaceSummary
+            summary={workspaceSummary}
+            onPrimaryAction={handleWorkspacePrimaryAction}
+          />
+
+          <div id="knowledge-project-commercial-truth">
           <CommercialTruthReviewSummary
             response={projectCommercialTruthReviewQuery.data}
             isLoading={
@@ -1569,7 +1605,9 @@ export const KnowledgePage: React.FC = () => {
             onPolicyChange={setCommercialTruthReviewPolicy}
           />
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
+          </div>
+
+          <div id="knowledge-documents-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
