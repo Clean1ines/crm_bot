@@ -1443,6 +1443,11 @@ export const KnowledgePage: React.FC = () => {
         </div>
       </div>
 
+      <KnowledgeWorkspaceSummary
+        summary={workspaceSummary}
+        onPrimaryAction={handleWorkspacePrimaryAction}
+      />
+
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -1592,10 +1597,6 @@ export const KnowledgePage: React.FC = () => {
         </div>
       ) : (
         <>
-          <KnowledgeWorkspaceSummary
-            summary={workspaceSummary}
-            onPrimaryAction={handleWorkspacePrimaryAction}
-          />
 
           <div ref={projectCommercialTruthRef} id="knowledge-project-commercial-truth">
           <CommercialTruthReviewSummary
