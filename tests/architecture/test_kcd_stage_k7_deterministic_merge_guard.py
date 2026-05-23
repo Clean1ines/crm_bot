@@ -9,6 +9,9 @@ KNOWLEDGE_REPOSITORY = (
     ROOT / "src/infrastructure/db/repositories/knowledge_repository.py"
 )
 KNOWLEDGE_PAGE = ROOT / "frontend/src/pages/knowledge/KnowledgePage.tsx"
+DOCUMENT_PROCESSING_BLOCK = (
+    ROOT / "frontend/src/pages/knowledge/components/DocumentProcessingBlock.tsx"
+)
 EN_LOCALE = ROOT / "frontend/src/shared/i18n/locales/en.ts"
 RU_LOCALE = ROOT / "frontend/src/shared/i18n/locales/ru.ts"
 
@@ -72,9 +75,11 @@ def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
 
 def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> None:
     frontend_source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
+    processing_block_source = DOCUMENT_PROCESSING_BLOCK.read_text(encoding="utf-8")
+    frontend_components_source = f"{frontend_source}\n{processing_block_source}"
     en_locale = EN_LOCALE.read_text(encoding="utf-8")
     ru_locale = RU_LOCALE.read_text(encoding="utf-8")
-    user_facing_source = f"{frontend_source}\n{en_locale}\n{ru_locale}"
+    user_facing_source = f"{frontend_components_source}\n{en_locale}\n{ru_locale}"
 
     assert "processingDetailRows" in frontend_source
     assert "sourceChunkCount" in frontend_source
@@ -85,7 +90,7 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> N
     assert "appliedAnswerResolutions" in frontend_source
 
     assert_any(
-        frontend_source,
+        frontend_components_source,
         (
             "knowledge.document.sourceChunksPrefix",
             "knowledge.document.sourceChunks",
@@ -101,7 +106,7 @@ def test_kcd_stage_k7_progress_metrics_expose_technical_and_answer_counts() -> N
         label="published entries progress i18n key",
     )
     assert_any(
-        frontend_source,
+        frontend_components_source,
         (
             "knowledge.document.incomingAnswersPrefix",
             "knowledge.document.incomingAnswers",
