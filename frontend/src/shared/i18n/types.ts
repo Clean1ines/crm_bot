@@ -1078,6 +1078,23 @@ export type TranslationKey =
   | 'knowledge.clearModal.clearing'
   | 'knowledge.clearModal.clear'
 
-  ;
+    | 'knowledge.reviewInbox.title'
+  | 'knowledge.reviewInbox.task.commercialConflicts.title'
+  | 'knowledge.reviewInbox.task.commercialConflicts.description'
+  | 'knowledge.reviewInbox.task.failedDocuments.title'
+  | 'knowledge.reviewInbox.task.failedDocuments.description'
+  | 'knowledge.reviewInbox.task.processingDocuments.title'
+  | 'knowledge.reviewInbox.task.processingDocuments.description'
+  | 'knowledge.reviewInbox.task.answerDrafts.title'
+  | 'knowledge.reviewInbox.task.answerDrafts.description'
+  | 'knowledge.reviewInbox.task.emptyKnowledge.title'
+  | 'knowledge.reviewInbox.task.emptyKnowledge.description'
+  | 'knowledge.reviewInbox.task.ready.title'
+  | 'knowledge.reviewInbox.task.ready.description'
+  | 'knowledge.reviewInbox.action.openCommerce'
+  | 'knowledge.reviewInbox.action.openDrafts'
+  | 'knowledge.reviewInbox.action.openDocuments'
+  | 'knowledge.reviewInbox.action.uploadDocument'
+;
 
 export type TranslationDictionary = Record<TranslationKey, string>;
