@@ -41,6 +41,7 @@ import { DraftsModal } from './components/DraftsModal';
 import { SourceUnitsSummary } from './components/SourceUnitsSummary';
 import { SourceUnitsModal } from './components/SourceUnitsModal';
 import { DocumentStatusBlock } from './components/DocumentStatusBlock';
+import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -1761,142 +1762,45 @@ export const KnowledgePage: React.FC = () => {
                   onPolicyChange={setCommercialTruthReviewPolicy}
                 />
 
-                {processingReport && (
-                  <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-                    <div className="mb-1 font-semibold text-[var(--text-primary)]">
-                      {processingReport.title}
-                    </div>
-                    <p className="leading-relaxed">{processingReport.message}</p>
-                    {processingReport.steps.length > 0 && (
-                      <div className="mt-3 space-y-1.5">
-                        {processingReport.steps.map((step) => (
-                          <div
-                            key={step.id}
-                            className={`flex items-start justify-between gap-3 ${step.id === ANSWER_RESOLUTION_STEP_ID ? 'rounded-lg bg-[var(--control-bg)] px-2 py-1' : ''}`}
-                          >
-                            <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
-                            <span className="text-right">
-                              {step.total > 0
-                                ? `${formatNumber(step.current)} / ${formatNumber(step.total)}`
-                                : step.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {draftPreviewDocumentIds.includes(doc.id) && (
-                      <DraftsSummary
-                        response={answerDrafts[doc.id]}
-                        isLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
-                        onOpen={() => openDraftsModal(doc.id)}
-                      />
-                    )}
-
-                    {sourceUnitDocumentIds.includes(doc.id) && (
-                      <SourceUnitsSummary
-                        response={sourceUnits[doc.id]}
-                        isLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
-                        onOpen={() => openSourceUnitsModal(doc.id)}
-                      />
-                    )}
-
-                    <AnswerResolutionTracePanel report={processingReport} />
-
-                    {processingReport.actions.length > 0 && (
-                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
-                        <div className="mb-1 font-medium text-[var(--text-primary)]">
-                          {t('knowledge.processReport.nextActions')}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {processingReport.actions.map((action) => {
-                            const canRetry = action.id === 'retry_failed_batches' && action.enabled;
-                            const canPublishReady = action.id === 'publish_ready' && action.enabled;
-                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
-                              && retryFailedBatchesMutation.variables === doc.id;
-                            const isPublishingThisDoc = publishReadyMutation.isPending
-                              && publishReadyMutation.variables === doc.id;
-
-                            if (canRetry || canPublishReady) {
-                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
-                              const mutationPending = canRetry
-                                ? retryFailedBatchesMutation.isPending
-                                : publishReadyMutation.isPending;
-                              return (
-                                <button
-                                  key={action.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (canRetry) {
-                                      retryFailedBatchesMutation.mutate(doc.id);
-                                    } else {
-                                      publishReadyMutation.mutate(doc.id);
-                                    }
-                                  }}
-                                  disabled={mutationPending}
-                                  className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
-                                >
-                                  {isPending ? t('common.states.loading') : action.label}
-                                </button>
-                              );
-                            }
-
-                            return (
-                              <span
-                                key={action.id}
-                                className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-                              >
-                                {action.label}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {isDocumentProcessing(doc) && (
-                  <div className="mb-4 rounded-xl bg-[var(--accent-primary)]/10 p-3">
-                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--accent-primary)]">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>{processingProgressLabel(doc)}</span>
-                    </div>
-                    {processingProgressPercent(doc) !== null && (
-                      <div className="mb-2 h-2 overflow-hidden rounded-full bg-[var(--surface-secondary)]">
-                        <div
-                          className="h-full rounded-full bg-[var(--accent-primary)] transition-all"
-                          style={{ width: `${processingProgressPercent(doc)}%` }}
-                        />
-                      </div>
-                    )}
-                    <div className="space-y-1 text-xs text-[var(--text-muted)]">
-                      <div className="text-[var(--text-primary)]">{processingStatusMessage(doc)}</div>
-                      <div>{t('knowledge.document.processingModelPrefix')} {processingModelLabel(doc)}</div>
-                      <div>{t('knowledge.document.elapsedPrefix')} {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
-                      {processingDetailRows(doc).map((row) => (
-                        <div key={row}>{row}</div>
-                      ))}
-                      {sourceChunkCount(doc) !== null && (
-                        <div>{t('knowledge.document.sourceChunksPrefix')} {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
-                      )}
-                      {incomingAnswerCandidateCount(doc) !== null && (
-                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingAnswerCandidateCount(doc) ?? 0)}</div>
-                      )}
-                      {answerResolutionCount(doc) !== null && (
-                        <div>
-                          Answer resolver calls: {formatNumber(answerResolutionCount(doc) ?? 0)}
-                        </div>
-                      )}
-                      {documentLlmTokenText(doc) !== null && (
-                        <div>{t('knowledge.document.llmTokensPrefix')} {documentLlmTokenText(doc)}</div>
-                      )}
-                      {documentLlmModels(doc) !== null && (
-                        <div>{t('knowledge.document.llmModelsPrefix')} {documentLlmModels(doc)}</div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
+                <DocumentProcessingBlock
+                  doc={doc}
+                  processingReport={processingReport}
+                  isDocumentProcessing={isDocumentProcessing(doc)}
+                  processingProgressLabel={processingProgressLabel(doc)}
+                  processingProgressPercent={processingProgressPercent(doc)}
+                  processingStatusMessage={processingStatusMessage(doc)}
+                  processingModelLabel={processingModelLabel(doc)}
+                  processingElapsedLabel={formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}
+                  processingDetailRows={processingDetailRows(doc)}
+                  sourceChunkCount={sourceChunkCount(doc)}
+                  incomingAnswerCandidateCount={incomingAnswerCandidateCount(doc)}
+                  answerResolutionCount={answerResolutionCount(doc)}
+                  documentLlmTokenText={documentLlmTokenText(doc)}
+                  documentLlmModels={documentLlmModels(doc)}
+                  answerDraftsResponse={answerDrafts[doc.id]}
+                  answerDraftsLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
+                  showDraftSummary={draftPreviewDocumentIds.includes(doc.id)}
+                  onOpenDrafts={() => openDraftsModal(doc.id)}
+                  sourceUnitsResponse={sourceUnits[doc.id]}
+                  sourceUnitsLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
+                  showSourceUnitsSummary={sourceUnitDocumentIds.includes(doc.id)}
+                  onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                  onRetryFailedBatches={() => retryFailedBatchesMutation.mutate(doc.id)}
+                  onPublishReady={() => publishReadyMutation.mutate(doc.id)}
+                  retryPending={retryFailedBatchesMutation.isPending}
+                  retryTarget={retryFailedBatchesMutation.variables}
+                  publishReadyPending={publishReadyMutation.isPending}
+                  publishReadyTarget={publishReadyMutation.variables}
+                  formatNumber={formatNumber}
+                  answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
+                  renderDraftsSummary={({ response, isLoading, onOpen }) => (
+                    <DraftsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
+                  )}
+                  renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
+                    <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
+                  )}
+                  renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} />}
+                />
                 {(() => {
                   const reportRows = retightenReportRows(doc);
                   if (reportRows.length === 0) return null;
