@@ -17,19 +17,21 @@ export type KnowledgeWorkspacePrimaryActionKind =
   | 'review_commercial_truth'
   | 'review_documents';
 
+import { type TranslationKey } from '@shared/i18n';
+
 export type KnowledgeWorkspaceSummaryVm = {
   status: KnowledgeWorkspaceStatus;
-  headlineKey: string;
-  descriptionKey: string;
+  headlineKey: TranslationKey;
+  descriptionKey: TranslationKey;
   counters: Array<{
     id: string;
-    labelKey: string;
+    labelKey: TranslationKey;
     value: string;
     tone: KnowledgeWorkspaceCounterTone;
   }>;
   primaryAction: {
     kind: KnowledgeWorkspacePrimaryActionKind;
-    labelKey: string;
+    labelKey: TranslationKey;
   };
 };
 
@@ -90,19 +92,38 @@ export function buildKnowledgeWorkspaceSummary(input: {
     counters.push({ id: 'runtime_entries', labelKey: 'knowledge.workspaceSummary.counter.runtimeEntries', value: String(input.runtimeEntryCount), tone: 'neutral' });
   }
 
+  const titleKeyByStatus: Record<KnowledgeWorkspaceStatus, TranslationKey> = {
+    empty: 'knowledge.workspaceSummary.title.empty',
+    processing: 'knowledge.workspaceSummary.title.processing',
+    needs_review: 'knowledge.workspaceSummary.title.needsReview',
+    ready: 'knowledge.workspaceSummary.title.ready',
+    error: 'knowledge.workspaceSummary.title.error',
+  };
+
+  const descriptionKeyByStatus: Record<KnowledgeWorkspaceStatus, TranslationKey> = {
+    empty: 'knowledge.workspaceSummary.description.empty',
+    processing: 'knowledge.workspaceSummary.description.processing',
+    needs_review: 'knowledge.workspaceSummary.description.needsReview',
+    ready: 'knowledge.workspaceSummary.description.ready',
+    error: 'knowledge.workspaceSummary.description.error',
+  };
+
+  const actionLabelByKind: Record<KnowledgeWorkspacePrimaryActionKind, TranslationKey> = {
+    upload_document: 'knowledge.workspaceSummary.action.uploadDocument',
+    open_drafts: 'knowledge.workspaceSummary.action.openDrafts',
+    review_commercial_truth: 'knowledge.workspaceSummary.action.reviewCommercialTruth',
+    review_documents: 'knowledge.workspaceSummary.action.reviewDocuments',
+  };
+
   return {
     status,
-    headlineKey: `knowledge.workspaceSummary.title.${status}`,
-    descriptionKey: `knowledge.workspaceSummary.description.${status}`,
+    headlineKey: titleKeyByStatus[status],
+    descriptionKey: descriptionKeyByStatus[status],
     counters,
     primaryAction: {
       kind: primaryActionKind,
-      labelKey: {
-        upload_document: 'knowledge.workspaceSummary.action.uploadDocument',
-        open_drafts: 'knowledge.workspaceSummary.action.openDrafts',
-        review_commercial_truth: 'knowledge.workspaceSummary.action.reviewCommercialTruth',
-        review_documents: 'knowledge.workspaceSummary.action.reviewDocuments',
-      }[primaryActionKind],
+      labelKey: actionLabelByKind[primaryActionKind],
     },
   };
 }
+
