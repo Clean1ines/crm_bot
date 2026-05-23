@@ -13,6 +13,7 @@ type DocCardDocument = {
   id: string;
   file_name: string;
   file_size: number;
+  chunk_count: number;
   preprocessing_mode?: string | null;
   created_at: string;
   status: string;
@@ -40,6 +41,7 @@ export const KnowledgeDocumentCard: React.FC<{
   retightenReportNode: React.ReactNode;
   statusNode: React.ReactNode;
   hasDrafts: boolean;
+  draftCount?: number;
   hasSourceUnits: boolean;
   isDocumentProcessing: boolean;
   onOpenDrafts: () => void;
@@ -65,6 +67,7 @@ export const KnowledgeDocumentCard: React.FC<{
   retightenReportNode,
   statusNode,
   hasDrafts,
+  draftCount,
   hasSourceUnits,
   isDocumentProcessing,
   onOpenDrafts,
@@ -133,6 +136,29 @@ export const KnowledgeDocumentCard: React.FC<{
           <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
           <span>{knowledgeProcessingModeLabel(doc.preprocessing_mode)}</span>
         </>
+      )}
+    </div>
+
+    <div className="mb-4 flex flex-wrap gap-1.5 text-[10px]">
+      {doc.chunk_count > 0 && (
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+          {t('knowledge.documentCard.counters.chunks')}: {doc.chunk_count}
+        </span>
+      )}
+      {typeof draftCount === 'number' && draftCount > 0 && (
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+          {t('knowledge.documentCard.counters.drafts')}: {draftCount}
+        </span>
+      )}
+      {priceFactsResponse && priceFactsResponse.facts.length > 0 && (
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+          {t('knowledge.documentCard.counters.priceFacts')}: {priceFactsResponse.facts.length}
+        </span>
+      )}
+      {commercialTruthReviewResponse && commercialTruthReviewResponse.unresolved_conflict_count > 0 && (
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+          {t('knowledge.documentCard.counters.commercialConflicts')}: {commercialTruthReviewResponse.unresolved_conflict_count}
+        </span>
       )}
     </div>
 

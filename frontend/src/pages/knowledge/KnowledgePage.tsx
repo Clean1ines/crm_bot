@@ -1664,6 +1664,7 @@ export const KnowledgePage: React.FC = () => {
                   );
                 })()}
                 hasDrafts={draftPreviewDocumentIds.includes(doc.id)}
+                draftCount={answerDrafts[doc.id]?.total_count}
                 hasSourceUnits={sourceUnitDocumentIds.includes(doc.id)}
                 isDocumentProcessing={isDocumentProcessing(doc)}
                 onOpenDrafts={() => openDraftsModal(doc.id)}
