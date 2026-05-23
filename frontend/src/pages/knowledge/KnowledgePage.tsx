@@ -41,6 +41,7 @@ import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
 import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
 import { DocumentActionsBlock } from './components/DocumentActionsBlock';
 import { KnowledgeReviewInbox } from './components/KnowledgeReviewInbox';
+import { KnowledgeDocumentCurationModal } from './components/KnowledgeDocumentCurationModal';
 import { KnowledgeWorkspaceSummary } from './components/KnowledgeWorkspaceSummary';
 import { buildKnowledgeReviewInbox, type KnowledgeReviewTask } from './viewModel/reviewInbox';
 import { buildKnowledgeWorkspaceSummary, type KnowledgeWorkspacePrimaryActionKind } from './viewModel/workspaceSummary';
@@ -791,6 +792,7 @@ export const KnowledgePage: React.FC = () => {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
+  const [curationDocumentId, setCurationDocumentId] = useState<string | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
   const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
@@ -1045,6 +1047,9 @@ export const KnowledgePage: React.FC = () => {
     ? documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null
     : null;
   const sourceUnitsModalResponse = sourceUnitsDocumentId ? sourceUnits[sourceUnitsDocumentId] : undefined;
+  const curationDocument = curationDocumentId
+    ? documents.find((doc) => doc.id === curationDocumentId) ?? null
+    : null;
 
   const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
@@ -1763,6 +1768,7 @@ export const KnowledgePage: React.FC = () => {
                 onOpenDrafts={() => openDraftsModal(doc.id)}
                 onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
                 onStopProcessing={() => cancelProcessingMutation.mutate(doc.id)}
+                onOpenCuration={() => setCurationDocumentId(doc.id)}
                 statusNode={(
                   <DocumentStatusBlock
                     doc={doc}
@@ -1794,6 +1800,15 @@ export const KnowledgePage: React.FC = () => {
           onToggleDraft={(draftId) => toggleDraftExpanded(draftsDocumentId, draftId)}
           isDebugMode={isDebugMode}
           onClose={() => setDraftsDocumentId(null)}
+        />
+      )}
+
+      {curationDocumentId && curationDocument && projectId && (
+        <KnowledgeDocumentCurationModal
+          projectId={projectId}
+          documentId={curationDocumentId}
+          documentName={curationDocument.file_name}
+          onClose={() => setCurationDocumentId(null)}
         />
       )}
 

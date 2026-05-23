@@ -46,6 +46,7 @@ export const KnowledgeDocumentCard: React.FC<{
   isDocumentProcessing: boolean;
   onOpenDrafts: () => void;
   onOpenSourceUnits: () => void;
+  onOpenCuration: () => void;
   onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
@@ -72,6 +73,7 @@ export const KnowledgeDocumentCard: React.FC<{
   isDocumentProcessing,
   onOpenDrafts,
   onOpenSourceUnits,
+  onOpenCuration,
   onStopProcessing,
   formatSize,
   knowledgeProcessingModeLabel,
@@ -111,6 +113,13 @@ export const KnowledgeDocumentCard: React.FC<{
         ) : (
           <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-muted)]">{t('knowledge.documentCard.primaryAction.details')}</span>
         )}
+        <button
+          type="button"
+          onClick={onOpenCuration}
+          className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+        >
+          {t('knowledge.documentCard.primaryAction.curation')}
+        </button>
         <KnowledgeDocumentDetailsPanel
           actionsNode={actionsNode}
           technicalNode={(
