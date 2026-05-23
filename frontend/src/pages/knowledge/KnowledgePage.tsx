@@ -1710,17 +1710,7 @@ export const KnowledgePage: React.FC = () => {
                 onPolicyChange={setCommercialTruthReviewPolicy}
                 onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
                 onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
-                actionsNode={(
-                  <DocumentActionsBlock
-                    showRetighten={isDocumentRetightenable(doc)}
-                    showStop={isDocumentProcessing(doc)}
-                    isRetighteningThisDoc={isRetighteningThisDoc}
-                    retightenPending={retightenMutation.isPending}
-                    cancelPending={cancelProcessingMutation.isPending}
-                    onRetighten={() => retightenMutation.mutate(doc.id)}
-                    onStop={() => cancelProcessingMutation.mutate(doc.id)}
-                  />
-                )}
+                actionsNode={(<DocumentActionsBlock showRetighten={isDocumentRetightenable(doc)} showStop={false} isRetighteningThisDoc={isRetighteningThisDoc} retightenPending={retightenMutation.isPending} cancelPending={cancelProcessingMutation.isPending} onRetighten={() => retightenMutation.mutate(doc.id)} onStop={() => cancelProcessingMutation.mutate(doc.id)} />)}
                 processingNode={(
                   <DocumentProcessingBlock
                     doc={doc}
@@ -1779,6 +1769,12 @@ export const KnowledgePage: React.FC = () => {
                     </div>
                   );
                 })()}
+                hasDrafts={draftPreviewDocumentIds.includes(doc.id)}
+                hasSourceUnits={sourceUnitDocumentIds.includes(doc.id)}
+                isDocumentProcessing={isDocumentProcessing(doc)}
+                onOpenDrafts={() => openDraftsModal(doc.id)}
+                onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                onStopProcessing={() => cancelProcessingMutation.mutate(doc.id)}
                 statusNode={(
                   <DocumentStatusBlock
                     doc={doc}
