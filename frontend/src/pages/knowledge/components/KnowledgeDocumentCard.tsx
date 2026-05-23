@@ -1,6 +1,8 @@
 import React from 'react';
 import { FileText } from 'lucide-react';
 
+import { KnowledgeDocumentActionsMenu } from './KnowledgeDocumentActionsMenu';
+
 import { type KnowledgeCommercialTruthReviewPolicy, type KnowledgeCommercialTruthReviewResponse, type KnowledgePriceFact, type KnowledgePriceFactsResponse, type KnowledgeImportQualityReport, type KnowledgeProcessingReport } from '@shared/api/modules/knowledge';
 
 type DocCardDocument = {
@@ -33,6 +35,12 @@ export const KnowledgeDocumentCard: React.FC<{
   processingNode: React.ReactNode;
   retightenReportNode: React.ReactNode;
   statusNode: React.ReactNode;
+  hasDrafts: boolean;
+  hasSourceUnits: boolean;
+  isDocumentProcessing: boolean;
+  onOpenDrafts: () => void;
+  onOpenSourceUnits: () => void;
+  onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
   ImportQualitySummary: React.ComponentType<{ report?: KnowledgeImportQualityReport; isLoading: boolean }>;
@@ -66,6 +74,12 @@ export const KnowledgeDocumentCard: React.FC<{
   processingNode,
   retightenReportNode,
   statusNode,
+  hasDrafts,
+  hasSourceUnits,
+  isDocumentProcessing,
+  onOpenDrafts,
+  onOpenSourceUnits,
+  onStopProcessing,
   formatSize,
   knowledgeProcessingModeLabel,
   ImportQualitySummary,
@@ -75,11 +89,51 @@ export const KnowledgeDocumentCard: React.FC<{
   <div
     className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
   >
-    <div className="mb-4 flex items-start justify-between">
+    <div className="mb-4 flex items-start justify-between gap-2">
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
         <FileText className="h-5 w-5" />
       </div>
-      {actionsNode}
+      <div className="flex items-center gap-2">
+        {isDocumentProcessing ? (
+          <button
+            type="button"
+            onClick={onStopProcessing}
+            className="rounded-full bg-[var(--accent-danger-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80"
+          >
+            {` ${'Stop'} `}
+          </button>
+        ) : hasDrafts ? (
+          <button
+            type="button"
+            onClick={onOpenDrafts}
+            className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+          >
+            {` ${'Drafts'} `}
+          </button>
+        ) : hasSourceUnits ? (
+          <button
+            type="button"
+            onClick={onOpenSourceUnits}
+            className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+          >
+            {` ${'Sources'} `}
+          </button>
+        ) : (
+          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-muted)]">Details</span>
+        )}
+        <KnowledgeDocumentActionsMenu
+          actionsNode={actionsNode}
+          technicalNode={(
+            <>
+              <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
+              <PriceFactsSummary response={priceFactsResponse} isLoading={isPriceFactsLoading} onPublishFact={onPublishFact} onRejectFact={onRejectFact} mutatingFactId={mutatingPriceFactId} />
+              <CommercialTruthReviewSummary response={commercialTruthReviewResponse} isLoading={isCommercialTruthReviewLoading} policy={commercialTruthReviewPolicy} onPolicyChange={onPolicyChange} />
+              {processingNode}
+              {retightenReportNode}
+            </>
+          )}
+        />
+      </div>
     </div>
 
     <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
@@ -95,27 +149,6 @@ export const KnowledgeDocumentCard: React.FC<{
       )}
     </div>
 
-    <ImportQualitySummary
-      report={importQualityReport}
-      isLoading={importQualityLoading}
-    />
-
-    <PriceFactsSummary
-      response={priceFactsResponse}
-      isLoading={isPriceFactsLoading}
-      onPublishFact={onPublishFact}
-      onRejectFact={onRejectFact}
-      mutatingFactId={mutatingPriceFactId}
-    />
-    <CommercialTruthReviewSummary
-      response={commercialTruthReviewResponse}
-      isLoading={isCommercialTruthReviewLoading}
-      policy={commercialTruthReviewPolicy}
-      onPolicyChange={onPolicyChange}
-    />
-
-    {processingNode}
-    {retightenReportNode}
     {statusNode}
   </div>
 );
