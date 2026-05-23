@@ -32,7 +32,6 @@ import {
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
 import { CommercialTruthReviewSummary } from './components/CommercialTruthReviewSummary';
-import { PriceFactsSummary } from './components/PriceFactsSummary';
 import { DraftsSummary } from './components/DraftsSummary';
 import { DraftsModal } from './components/DraftsModal';
 import { SourceUnitsSummary } from './components/SourceUnitsSummary';
@@ -1683,8 +1682,6 @@ export const KnowledgePage: React.FC = () => {
                 )}
                 formatSize={formatSize}
                 knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}
-                PriceFactsSummary={PriceFactsSummary}
-                CommercialTruthReviewSummary={CommercialTruthReviewSummary}
               />
             );
           })}
