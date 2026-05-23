@@ -1,0 +1,1116 @@
+=== branch ===
+work
+
+=== base ref ===
+ea72c8af20cf2fc6c9aa58954faea41860d4c7ac
+
+=== log BASE..HEAD ===
+1fd057d Refactor KnowledgePage: extract document UI into reusable components and add i18n keys
+6c1db6f Allow commercial truth policy on project review route
+b734cdc Show project commercial truth review on knowledge page
+3370370 Test project commercial truth policy preview
+7d52e00 Add project commercial truth review read side
+1201311 Document commercial truth policy preview scope
+16e4bc6 Scope commercial truth policy query parameter
+e290d1a Add commercial truth review policy preview
+23f1c3b Show commercial truth source metadata
+6d0c886 Use knowledge metadata for commercial truth source semantics
+1839cce Show commercial truth surface preview facts
+741d7f2 Show commercial truth values and source quotes
+c012ac3 Show commercial truth review on knowledge page
+51190c7 Add frontend commercial truth review contract
+3ef26fd Add commercial truth review read side
+f757002 Add commercial truth review service
+e97108a Add commercial truth conflict domain
+8306d35 Add commercial context graph execution smoke test
+f0618ea Use commercial context in response generation
+618bd95 Add commercial context lookup node
+faa9179 Add commercial price lookup tool
+b6be13f Add price fact review actions to knowledge page
+b23c11d Add frontend price facts review action contract
+1448ded Add price facts review actions
+5d2a3b6 Show review price facts on knowledge page
+17b5c28 Add frontend price facts API contract
+a2443be Add price facts review read side
+0f1954c Persist price acquisition candidates for review
+05ab9d9 Run price acquisition during price list ingestion
+96414c7 Add commercial price acquisition composition
+5b3740e Add markdown price acquisition adapter
+c992c2e Add project context to price acquisition boundary
+446ea6f Add commercial price acquisition preparation
+c57c2f8 Add commercial price acquisition application layer
+236684e Add commercial price acquisition domain
+3c2a72f Wire price list source ingestion
+e414f64 Add commercial price ingestion service
+cacafea Add commercial price repository
+f275ed3 Add commercial price knowledge schema
+c37c762 Add commercial price application ports
+48060ef Add commercial price knowledge domain
+1cfaeff Polish knowledge page demo i18n
+4422a7e Update Stage CD guard for bounded knowledge ports
+b74c094 Localize RAG eval review page
+c0ba07f Localize RAG eval curation action labels
+cf71531 Localize RAG eval merge drawer
+fda96f2 Localize RAG eval curation console
+7805148 Localize RAG eval entry edit drawer
+b29e25a Localize RAG eval curation card actions
+51a3022 Localize RAG eval curation leaf UI
+ad8a835 Localize knowledge page review strings
+feab7ba Localize import quality warnings
+ea434c0 Show knowledge import quality in frontend
+0a59912 Add knowledge import quality report
+ae442dd Narrow knowledge service repository wiring
+99c0eb8 Introduce bounded knowledge ports
+476e55f Refactor knowledge repository persistence boundaries
+618ec9e Merge PR #13 knowledge curation console
+c0197cf Merge origin main before PR #13
+3077f3e Complete knowledge curation console hardening
+584c6e5 Fix RAG eval review live projection rendering
+eaa813e Add knowledge curation review console
+c97c15f Fix RAG eval review live projection rendering
+a70b39a Merge RAG Eval Review Console
+33b45bd Harden live RAG eval review projections
+f9d6994 Implement live RAG eval review groups
+a98f243 Refactor RAG eval review console layering
+d8ca271 Add RAG eval review console
+f35ce17 Implement streaming retrieval-only RAG eval
+5c2a6dd Update RAG eval resume boundary guard
+0a86a23 Fix RAG eval retrieval progress semantics
+a38d4cb Parallelize retrieval-only RAG eval pipeline
+3598245 Add retrieval-only RAG eval feedback loop
+596ce97 Finish answer resolution cleanup
+c63e333 Complete answer resolution terminology cleanup
+53eb50f Remove legacy knowledge intent preprocessing
+922b9c5 Remove legacy KCD metric fallbacks from UI
+6a03b5d Purge legacy KCD answer merge contract
+0ccc694 Tighten KCD answer resolver parsing and retrieval text
+f69dfd5 Purge legacy KCD answer merge resolver contract
+ee1ce73 Add answer-only KCD semantic resolver contract
+2f052ca Add deterministic-first answer unit merge
+f3ef32c Fix KCD observability UI wiring
+ebe71b6 feat: merge process progress ui
+ea69777 Add Groq Scout fallback for oversized requests
+0eecff6 Add KAD Markdown source unit extraction
+7b47562 Add semantic merge progress and synthesis guards
+309647f Improve knowledge draft viewing UX
+d1f8bbb Enable online merge in knowledge preprocessing
+811e9f0 Make online merge failure recoverable
+f1f9e26 Enable online merge in knowledge preprocessing
+998ee7a Improve deterministic knowledge retightening
+a9c47d1 Merge PR #4 knowledge compilation process updates
+e9258f4 Apply post-gate formatting fix
+c06bcf4 Expose knowledge answer draft previews
+adadbf9 Add publish-ready knowledge action
+789aa25 Wire failed knowledge batch retry
+723c5ea Show knowledge processing reports in UI
+48fb910 Expose knowledge processing progress report
+cc66f75 Persist knowledge compiler batch progress
+f058fc0 Fix knowledge compiler source evidence dedupe
+696e41a Keep LLM prompts aligned with source language
+18a9fe3 Make FAQ compiler extractor-only
+4cab169 Make FAQ compiler extractor-only
+e117c4d Merge question-first FAQ compiler pipeline
+ed9c257 Require authoritative live evidence
+98e9a36 Add evidence plan domain contract
+f4db125 Update FAQ compiler prompt guard
+59f30ed Harden FAQ known intent fallback handling
+0d0edcb Add mixed FAQ compiler integration coverage
+b717217 Add question-first knowledge compilation context
+878dbab Add retrieval trace and question-aware retighten
+45377ff Show rejected retighten merge examples
+82febf7 Expose rejected retighten merge examples
+fe04c81 Show rejected retighten merge count
+e6fa077 Reject noisy semantic retighten merges
+972007e Show retighten cleanup metrics in UI
+b7d8129 Track semantic retighten cleanup metrics
+af6929f Harden semantic retighten merge text cleanup
+289f72b Show knowledge retighten report in UI
+83355ac Add retrieval trace and improve knowledge ranking
+dd97697 Add knowledge retrieval trace diagnostics
+0cbbd33 Add frontend i18n coverage for runtime UI
+98ea09e Add domain map and commercial evidence contracts
+bee0d5a Harden knowledge retighten batching and log redaction
+830cebf Compact semantic retighten LLM payload
+8965363 Add KCD document retightening flow
+ec5db9f Polish frontend user-facing copy and safe errors
+9909b40 Polish frontend UX copy and safe error handling
+874a022 Improve frontend UX error handling
+656f1b6 Tighten KCD semantic merges before publication
+27ecc0f Improve frontend usage UI and safe error messages
+fa56852 Add KCD semantic merge tightening contract
+4d25f00 Allow multiple source ref quotes per chunk
+629a181 Polish knowledge usage metrics UI
+d42144c Preserve KCD answer compiler source refs
+6e0f20e Enforce strict knowledge preprocessing pipeline
+96fdebe Add knowledge preprocessing progress and cancellation
+c85a2fa Implement Stage K answer-oriented knowledge compiler
+d9b4f5d Improve RAG evaluation user-facing copy
+fd46183 Add frontend RAG eval action execution loop
+b72af18 Expose actionable RAG eval report results
+98b586e Add Stage H.1 RAG eval action execution API
+9dce232 Add Stage H knowledge edit actions
+8d7bac6 Refactor RAG eval evidence model to entries
+83074ff KCD Stage F: centralize canonical embedding text
+729fade feat(knowledge): persist KCD compiler trace
+bd0d51e feat(knowledge): switch KCD runtime to retrieval surface
+0072e47 feat(knowledge): persist raw source chunks for KCD Stage B
+eacdd73 Replace legacy knowledge entry semantics with canonical entry kinds
+97ca2dd Introduce knowledge retrieval surface contracts
+b4dfdba Improve semantic knowledge canonicalization safety
+105de5f feat(knowledge): add semantic document block builder for ingestion
+16f5935 Extract Telegram admin wizard state storage
+3c152fa Add Telegram knowledge upload preprocessing mode
+a415575 Improve knowledge preprocessing query surface
+063e4f4 Expose knowledge search result metadata
+e1f65b0 Filter non-answer knowledge from RAG search
+0f6b090 Improve RAG eval question quality isolation
+6da726d Refactor knowledge ingestion to typed chunk persistence
+b479c3b fix frontend manager email invite result handling
+b1ba9f8 fix: enforce Groq key rotation for agent LLM calls
+351af51 Drop empty legacy schema residue
+13ea363 Harden RAG eval resume and Groq rotation paths
+8151627 Fix RAG eval resume and Groq key rotation boundaries
+7a65ef5 Preserve enriched markdown chunks during structured KB ingestion
+88127fe Enrich markdown knowledge chunks
+e32d31e Refactor knowledge upload through clean composition boundary
+13c523d Fix knowledge document lifecycle cancellation
+bdd454a Fix lossless knowledge ingestion and markdown chunking
+82b66f1 Optimize RAG eval prompts and model usage
+25d8060 Refactor RAG eval fact variant generation
+2e094b8 feat: add Groq API key rotation
+b4ab288 feat: improve rag eval progress reporting
+e878b21 Fix RAG eval terminal job state handling
+a3d98c6 Fix RAG eval job controls, progress heartbeat, and Groq model usage
+ccd2804 Add RAG eval job progress controls
+0ca9157 feat: add RAG eval job progress controls
+ca16834 Fix full-document RAG eval quality gate
+cc00010 Fix full-document RAG eval quality gate
+6c12868 Add authenticated RAG evaluation API and UI
+e0f0a9d Forge RAG evaluation furnace
+036937b Stabilize knowledge upload gate and refresh dependencies
+db7dab1 Improve knowledge upload preprocessing and hybrid search
+9efd0e4 Stabilize dialog sessionization and manager handoff recovery
+9bda3be fix dialog runtime classification and safe fallbacks
+6cd4ba8 Stabilize local 384-dim knowledge embeddings
+9bb0b87 Add Voyage embeddings usage tracking and 1024-dim knowledge migration
+e2be7fb Optimize knowledge ingestion and runtime hot paths
+dfcab55 Fix manager lock regressions and RAG memory errors
+ccf519a Fix manager claim lock lifecycle
+637cfbe Add knowledge preprocessing MVP
+8b6bd26 Add knowledge base preview search sandbox
+669bdcb Fix responsive dialogs layout transitions
+ede408b Add manager-only web panel access controls
+10d9c28 Improve handoff confirmation, ticket UI, and inspector flows
+572cc81 fix: stabilize manual ticket handoff flow
+84b2e72 fix: route manager bot actions through orchestrator boundary
+25e83f8 fix: wire split thread repositories in orchestrator
+effdf13 fix: restore client bot runtime repository wiring
+4bf4631 fix: repair dialog and ticket handoff presentation
+1d48733 feat: normalize readable display names across CRM UI
+758ca1c feat: persist conservative memory context
+44bd137 perf: reduce runtime imports and knowledge query overhead
+1e64b32 refactor: reduce knowledge upload handler complexity
+1df0c05 refactor: inject manager bot telegram transport
+4ea25ed fix: sanitize logging payloads and logger port
+4b7c752 chore: harden static-analysis hotspots
+3bb0b03 docs: add AI agent project standards
+13f8e8f Fix platform manager role downgrade policy
+24d18c4 Fix platform bot service repository wiring
+2729762 Fix platform projects callback service wiring
+6c0f778 Unify CRM frontend visual system
+d84456e Fix mobile bottom navigation profile escape
+554f36d Add time-based automatic theme mode
+7a58bce Add mobile dialogs navigation flow
+ce0a00e Fix mobile login scroll locks
+48ac529 Fix mobile login page scrolling
+74b7a3f Fix dark mode readability for dialogs and settings
+ce0939b Replace dark theme with warm inverted light palette
+9e3a27a Add optional dark theme and responsive CRM pages
+c121c36 fix(clients): handle asyncpg records in client list repository
+b14ecad Document bootstrap and trim unused runtime dependencies
+d7fd519 Harden runtime typing and ignore audit reports
+d10c9e4 perf: lazy-load heavy runtime dependencies
+94a2a98 Refine runtime contracts and typed service boundaries
+cb89597 chore: stabilize quality checks
+82d041e refactor: modernize typing and reduce code complexity
+b04a296 Fix frontend members API reply history method
+bffc44e Clean repository contracts and CQRS facades
+9389e59 Remove application service to_record shortcuts
+c3c51d3 Remove domain view compatibility debt
+64bbd33 refactor: tighten application ports and domain views
+e8d4806 Refine adapter repository wiring and app typing
+bd76d79 Refine adapter repository wiring and app typing
+7e273e3 refactor(http): move project repositories into composition wiring
+1dedad1 refactor(http): move project authorization into application services
+b6ae8e8 refactor(architecture): enforce typed clean architecture contracts
+d0ed8e4 feat(projects): add typed manager reply history
+3dc5bef fix project configuration typed view metadata
+07594bd fix knowledge upload chunking and document listing
+0226011 refactor(frontend): align UI contracts and remove stale tokens
+ca06d7c fix(knowledge): stabilize web upload runtime and listing
+550d867 fix(webpanel): repair response and manager contracts
+df92e59 hotfix: convert metadata from JSONB string to dict in client_views
+e55a84a fix(startup): align orchestrator composition kwargs
+0b9b5da refactor(frontend-api): split api client into core and modules
+0b85310 refactor(frontend-projects): split project query, mutations and UI state
+0d177ee refactor(thread): remove legacy monolithic repository
+c6b2d57 INFRA-THREAD-001 add full thread repository contract suite
+f1db43e INFRA-RAG-001 formalize testable RAG pipeline contract
+ca61593 INFRA-WORKER-001 decompose queue worker runtime
+7dd693a refactor(agent): remove legacy router parser layer
+9d040b0 refactor(agent): remove legacy LangChain tool wrappers
+738c5d5 refactor: formalize agent graph runtime contract
+1311c86 refactor: move FastAPI composition root out of infrastructure
+b924fe0 chore(repo): normalize artifact ignore policy
+9449c22 fix(frontend): centralize visitor storage access
+e973def fix(frontend): remove hygiene debt and restore checks
+4420374 fix(infra): harden exception handling
+9532a35 fix(interfaces): harden webhook and admin exception handling
+be5aa1d fix(agent): harden node exception observability
+1d5e20e refactor(architecture): inject agent runtime into application orchestration
+978567d chore(openapi): add no-server schema generation workflow
+85b10a5 fix(api): fail closed for protected runtime guards
+8c55851 fix(db): complete typed repository view contracts
+17d8abb refactor(db): return typed repository views
+ec2fa15 fix(frontend): remove internal UI wording
+24ea03e fix(frontend): harden CRM pages null safety
+b31b185 fix(logging): decouple infrastructure from agent state
+8bfa648 fix(agent-tools): delegate legacy tools to registry
+6b2eae3 fix(manager-bot): use canonical manager identity flow
+298d4ee fix(project-settings): align settings configuration contract
+a9fb62d fix(db): serialize project channel jsonb config
+6569c02 fix(projects): support bot token disconnect contract
+222be09 fix(auth): prevent false expired-session login state
+a64e446 fix(projects): allow bot token disconnect from frontend
+b397937 fix(contract): align frontend API contract artifacts
+7443749 fix(auth): centralize 401 handling and remove demo thread UI
+dfcd5aa fix(security): prevent traceback leakage in HTTP 500 responses
+de5e7bb refactor: enforce layered architecture and typed application contracts
+53dd02d feat: OMNICA CRM stabilization & feature launch (v3)
+9fe9597 feat: add API tests for all endpoints and register limits router
+60bab83 Add comprehensive unit tests for all database repositories
+1cd2aba fix: add ensure_uuid utility and replace all direct uuid.UUID calls to prevent asyncpg UUID errors
+f2d810c feat: add bot usernames to projects table for web UI display
+b8a4dcf feat: integrate tickets under project scope, add channel settings, remove obsolete project pages
+9679fce feat: redesign landing page with two-column layout and chat preview
+0fa9d01 feat: implement policy decision events and demo mode with explanations
+e3977eb fix(frontend): resolve TypeScript errors and restore Sidebar props
+acfc358 feat(frontend): implement three-column dialog UI with real-time updates
+a2684d5 feat(frontend): integrate new thread, client, and demo endpoints
+6e891c8 feat: add WebSocket support for real-time chat updates and client management endpoints
+8028449 feat: add interaction_mode to threads, knowledge documents, and repository methods for dialog UI
+6a32fea feat: add metrics aggregation and client source tracking
+1bed9da feat: add identity layer and user_id linking for web panel
+ad40784 feat: implement web interface with Telegram authentication and replace bot functionality
+8931613 Improve hybrid RAG retrieval with stronger signal fusion and recall preservation
+1ecaa00 feat: enhance RAG pipeline with query expansion and multi-query search
+5be47ee feat: add REST API endpoints for project management, templates, tickets, and client chat
+35e8d4a fix: json lexically enriched before embedding generation
+fa9bcca feat(embeddings): switch to multilingual model for better Russian support
+fccd209 fix(escalation): add handoff_request intent and improve escalation detection
+e287a8f feat(memory): integrate dialog_state into runtime, policy, and response
+6661ced refactor(agent): replace router with intent/response prompts and cleanup
+7e9492c refactor(agent): replace router with intent-policy-response pipeline
+125901c feat(analytics): add thread analytics columns and lifecycle memory
+1382f70 feat(agent): implement long-term user memory extraction and storage
+2552a38 feat(agent): create ticket record on escalation for reporting
+bef8fa3 feat(memory): add long-term user memory table and repository
+292a482 feat(observability): add trace_id and node execution logging to LangGraph nodes
+6e5f1d7 refactor(router): refractor router and add init.py
+251d445 refactor(router): refractor router and add init.py
+0b462c2 fix(deps): add aiohttp for file download in knowledge upload
+81304c7 fix(admin): resolve import conflict by moving knowledge_upload to admin root
+08f787e feat(router): implement advanced router with KB synthesis, multi-question handling, and fallback logic
+9872c36 feat(admin): implement knowledge base file upload via Telegram documents
+65036af feat(rate-limits): implement model selection and rate limit tracking for Groq models
+53b5f09 debug(rules, kb, router): enhance logging to trace RAG flow and decision making
+b6aeb04 debug(kb, escalate): add detailed logging to trace KB search and payload issues
+472994b fix(rules, orchestrator, manager): improve escalation flow and thread locking
+e0cf7a2 feat(manager-webhook): implement secure webhook secret for manager bot
+e2935c3 fix(graph): add missing kb_search node and integrate into pipeline
+2e88db4 feat(worker): implement notify_manager task handling with retries and notifications to managers
+43d432e feat(router): add Pydantic validation for router LLM output
+1431f7d fix(state): add chat_id field to AgentState for responder node
+ffe941a fix(orchestrator): synchronize responder, router, and orchestrator for message sending
+6f13e33 feat(tools): add CRM, ticket, and Telegram tools; register them in lifespan
+5842af4 feat(graph): replace legacy graph with state machine pipeline
+667522f feat(nodes): add persist and responder nodes for LangGraph pipeline
+aa53ae5 feat: add tool_executor and escalate nodes for LangGraph pipeline
+4e239c2 feat: add load_state, rules, router nodes for new LangGraph pipeline
+52a22ec feat: add idempotency and refactor orchestrator for new pipeline
+e97219a feat(lock): implement Redis-based distributed locking for thread concurrency
+4e4af5d feat(thread-repo): add state persistence methods and migration for state_json
+b0a0be2 feat: extend AgentState and add migration for users/tasks tables
+8937e7f Refactor admin panel with new UI flow and manager access control
+511b919 feat: Modular architecture with token-based routing (Admin/Client/Manager isolation)
+3d675c0 feat: Admin UI with inline keyboards + Workflow runtime foundation
+e019cbd feat: Tool Registry + Event Sourcing Foundation
+fdea8c2 arch: implement Event-Sourced Agent Runtime foundation (migrations 008-012)
+73cca5f feat(knowledge): add endpoint for uploading documents to knowledge base
+ca7ca04 security: encrypt bot tokens and add webhook secret verification
+fab3a53 feat(manager): add per‑project manager bot support with interactive onboarding
+80c218b refactor: integrate structlog logging and centralized configuration
+6d202c6 feat(summary): implement conversation summarization and sliding window context management
+7759131 feat(manager): implement manager reply flow with Redis and callback handling
+aa35016 refactor: implement core configuration, logging, router split, and manager notification with inline button
+fb2723d feat: implement configuration, structured logging, and manager chat tracking
+61686c5 feat(admin): add Telegram bot commands for project management
+318f4fd feat(escalation): implement manager handoff with background queue worker
+
+=== diff stat BASE...HEAD ===
+ .bandit                                            |    2 +
+ .env.example                                       |   38 +-
+ .gitignore                                         |   25 +-
+ .vscode/settings.json                              |    3 +
+ AGENTS.md                                          |  270 +
+ CODEX.md                                           |   40 +
+ Dockerfile                                         |    2 +-
+ Makefile                                           |   32 +
+ README.md                                          |  359 +
+ src/database/__init__.py => __init__.py            |    0
+ ai_manager_knowledge_base.md                       | 1248 ++++
+ dev_scripts/codex_extended_quality_gate.sh         |  248 +
+ docker-compose.yml                                 |    8 +-
+ docs/architecture/crm_bot_domain_map_v1.md         |  293 +
+ frontend/.gitignore                                |   48 +
+ frontend/_redirects                                |    1 +
+ frontend/eslint.config.js                          |   40 +
+ frontend/index.html                                |   12 +
+ frontend/package-lock.json                         | 7625 ++++++++++++++++++++
+ frontend/package.json                              |   67 +-
+ frontend/playwright.config.ts                      |   18 +
+ frontend/postcss.config.js                         |    6 +
+ frontend/public/logo/logo.png                      |  Bin 0 -> 1484386 bytes
+ frontend/src/app/App.tsx                           |  240 +
+ frontend/src/app/Layout.tsx                        |   29 +
+ frontend/src/app/main.tsx                          |   10 +
+ frontend/src/app/store/index.ts                    |   72 +
+ frontend/src/app/styles/global.css                 |  314 +
+ frontend/src/app/styles/landing.css                |   34 +
+ frontend/src/app/test/setup.ts                     |   58 +
+ frontend/src/entities/project/api/index.ts         |    4 +
+ frontend/src/entities/project/api/queryKeys.ts     |    5 +
+ frontend/src/entities/project/api/useCrmData.ts    |  167 +
+ .../entities/project/api/useProjectMutations.ts    |   78 +
+ .../src/entities/project/api/useProjectQueries.ts  |   16 +
+ frontend/src/entities/project/api/useProjects.ts   |   51 +
+ frontend/src/entities/project/index.ts             |   12 +
+ frontend/src/entities/project/model/access.test.ts |   23 +
+ frontend/src/entities/project/model/access.ts      |   22 +
+ frontend/src/entities/project/model/modalState.ts  |   33 +
+ frontend/src/entities/project/model/slice.ts       |   32 +
+ frontend/src/entities/project/model/types.ts       |    9 +
+ frontend/src/entities/project/ui/ProjectItem.tsx   |   35 +
+ .../src/entities/session/model/session.slice.ts    |   17 +
+ frontend/src/entities/thread/model/status.ts       |   41 +
+ frontend/src/entities/thread/model/types.ts        |   73 +
+ .../src/features/auth/google/GoogleAuthButton.tsx  |  135 +
+ frontend/src/features/auth/google/config.ts        |    8 +
+ .../features/chat/send-message/useSendMessage.ts   |   36 +
+ frontend/src/features/project/create/index.ts      |    1 +
+ .../project/create/ui/CreateProjectModal.tsx       |   83 +
+ frontend/src/features/project/edit/index.ts        |    1 +
+ .../features/project/edit/ui/EditProjectModal.tsx  |   86 +
+ .../project/edit/ui/components/BotTokens.tsx       |   51 +
+ .../project/edit/ui/components/KnowledgeUpload.tsx |   77 +
+ .../project/edit/ui/components/ManagersList.tsx    |  225 +
+ frontend/src/pages/ComingSoon.tsx                  |   13 +
+ .../src/pages/channels/ChannelSettingsPage.tsx     |  323 +
+ frontend/src/pages/chat/ClientChatPage.tsx         |  105 +
+ frontend/src/pages/clients/ClientsPage.tsx         |  225 +
+ frontend/src/pages/dialogs/DialogsPage.tsx         |  189 +
+ .../src/pages/dialogs/components/ChatWindow.tsx    |  297 +
+ .../src/pages/dialogs/components/DialogList.tsx    |  244 +
+ .../src/pages/dialogs/components/Inspector.tsx     |  512 ++
+ frontend/src/pages/knowledge/KnowledgePage.tsx     | 1745 +++++
+ .../components/CommercialTruthReviewSummary.tsx    |  233 +
+ .../knowledge/components/DocumentActionsBlock.tsx  |   51 +
+ .../components/DocumentProcessingBlock.tsx         |  203 +
+ .../knowledge/components/DocumentStatusBlock.tsx   |   51 +
+ .../src/pages/knowledge/components/DraftsModal.tsx |  205 +
+ .../pages/knowledge/components/DraftsSummary.tsx   |   76 +
+ .../knowledge/components/ImportQualitySummary.tsx  |  110 +
+ .../knowledge/components/KnowledgeDocumentCard.tsx |  167 +
+ .../components/KnowledgeDocumentDetailsPanel.tsx   |   18 +
+ .../knowledge/components/PriceFactsSummary.tsx     |  152 +
+ .../knowledge/components/SourceUnitsModal.tsx      |  154 +
+ .../knowledge/components/SourceUnitsSummary.tsx    |   75 +
+ frontend/src/pages/login/TelegramLoginPage.tsx     |  414 ++
+ frontend/src/pages/login/components/Button.tsx     |   19 +
+ frontend/src/pages/login/components/ChatWidget.tsx |   51 +
+ .../src/pages/login/components/HeroSection.tsx     |   15 +
+ .../src/pages/login/components/MessageBubble.tsx   |   23 +
+ frontend/src/pages/login/components/Navbar.tsx     |   28 +
+ frontend/src/pages/manager/TicketDetailPage.tsx    |  245 +
+ frontend/src/pages/manager/TicketsPage.tsx         |  156 +
+ frontend/src/pages/managers/ManagersPage.tsx       |  456 ++
+ frontend/src/pages/profile/ProfilePage.tsx         |  264 +
+ frontend/src/pages/rag-eval/RagEvalPage.tsx        | 1678 +++++
+ .../components/KnowledgeCurationActionsPanel.tsx   |   17 +
+ .../components/KnowledgeCurationConsole.tsx        |  194 +
+ .../components/KnowledgeCurationDiagnostics.tsx    |   20 +
+ .../components/KnowledgeCurationFiltersBar.tsx     |   37 +
+ .../components/KnowledgeCurationOverviewCard.tsx   |   44 +
+ .../components/KnowledgeEntryCurationCard.tsx      |   55 +
+ .../components/KnowledgeEntryEditDrawer.tsx        |  180 +
+ .../components/KnowledgeEntryMergeDrawer.tsx       |  366 +
+ .../components/KnowledgeEntryVersionDrawer.tsx     |   24 +
+ .../src/pages/settings/ProjectSettingsPage.tsx     |  284 +
+ frontend/src/shared/api/client.ts                  |   40 +
+ frontend/src/shared/api/core/config.ts             |    4 +
+ frontend/src/shared/api/core/errors.test.ts        |   40 +
+ frontend/src/shared/api/core/errors.ts             |  169 +
+ frontend/src/shared/api/core/http.ts               |   82 +
+ frontend/src/shared/api/core/openapi.ts            |   64 +
+ frontend/src/shared/api/core/session.ts            |   59 +
+ frontend/src/shared/api/core/stream.ts             |   58 +
+ frontend/src/shared/api/fetchWithTimeout.ts        |   73 +
+ frontend/src/shared/api/generated/schema.ts        | 4730 ++++++++++++
+ frontend/src/shared/api/index.ts                   |    9 +
+ frontend/src/shared/api/modules/auth.ts            |   80 +
+ frontend/src/shared/api/modules/chat.ts            |   17 +
+ frontend/src/shared/api/modules/clients.ts         |   23 +
+ frontend/src/shared/api/modules/index.ts           |   20 +
+ frontend/src/shared/api/modules/knowledge.ts       |  471 ++
+ .../src/shared/api/modules/knowledgeCuration.ts    |  226 +
+ frontend/src/shared/api/modules/members.ts         |   92 +
+ frontend/src/shared/api/modules/projectTypes.ts    |   50 +
+ frontend/src/shared/api/modules/projects.ts        |  128 +
+ frontend/src/shared/api/modules/ragEval.ts         |  481 ++
+ frontend/src/shared/api/modules/threads.ts         |   72 +
+ frontend/src/shared/api/queryClient.ts             |   11 +
+ frontend/src/shared/assets/logo.png                |  Bin 0 -> 1484386 bytes
+ frontend/src/shared/assets/react.svg               |    1 +
+ frontend/src/shared/i18n/index.test.ts             |   57 +
+ frontend/src/shared/i18n/index.ts                  |   77 +
+ frontend/src/shared/i18n/locales/de.ts             | 1060 +++
+ frontend/src/shared/i18n/locales/en.ts             | 1059 +++
+ frontend/src/shared/i18n/locales/es.ts             | 1060 +++
+ frontend/src/shared/i18n/locales/ru.ts             | 1059 +++
+ frontend/src/shared/i18n/types.ts                  | 1064 +++
+ frontend/src/shared/lib/clients.ts                 |   24 +
+ frontend/src/shared/lib/displayNames.ts            |   80 +
+ frontend/src/shared/lib/hooks/useMediaQuery.ts     |   19 +
+ frontend/src/shared/lib/index.ts                   |    1 +
+ frontend/src/shared/lib/logger.ts                  |  175 +
+ .../shared/lib/notification/useNotifications.ts    |   55 +
+ frontend/src/shared/lib/threadMessages.ts          |   49 +
+ frontend/src/shared/lib/uiLabels.ts                |   67 +
+ frontend/src/shared/lib/visitorStorage.ts          |   19 +
+ frontend/src/shared/ui/Sidebar/Sidebar.tsx         |   77 +
+ frontend/src/shared/ui/button/Button.tsx           |   55 +
+ frontend/src/shared/ui/index.ts                    |    4 +
+ frontend/src/shared/ui/modal/BaseModal.tsx         |   42 +
+ .../src/shared/ui/modal/DeleteConfirmModal.tsx     |   43 +
+ frontend/src/shared/ui/theme/ThemeEffects.tsx      |   18 +
+ frontend/src/shared/ui/theme/ThemeProvider.tsx     |   70 +
+ frontend/src/shared/ui/theme/ThemeToggle.tsx       |   59 +
+ frontend/src/shared/ui/theme/index.ts              |    4 +
+ frontend/src/shared/ui/theme/themeContext.ts       |   21 +
+ frontend/src/shared/ui/theme/themeStorage.ts       |   60 +
+ frontend/src/shared/ui/toast/Notification.tsx      |   20 +
+ frontend/src/shared/ui/toast/Toast.tsx             |   19 +
+ frontend/src/widgets/chat-panel/ui/ChatCanvas.tsx  |  102 +
+ .../src/widgets/chat-window/ui/ChatInterface.tsx   |   27 +
+ frontend/src/widgets/header/index.ts               |    1 +
+ frontend/src/widgets/header/ui/HamburgerMenu.tsx   |   45 +
+ frontend/src/widgets/sidebar/AppSidebar.tsx        |  299 +
+ frontend/src/widgets/sidebar/index.ts              |    0
+ frontend/tailwind.config.js                        |   27 +
+ frontend/tsconfig.app.json                         |   54 +
+ frontend/tsconfig.json                             |   52 +
+ frontend/tsconfig.node.json                        |   22 +
+ frontend/vite-env.d.ts                             |    9 +
+ frontend/vite.config.ts                            |   28 +
+ migrations/002_add_execution_queue.sql             |   12 +
+ migrations/003_add_manager_chat.sql                |    6 +
+ migrations/004_add_context_summary.sql             |    2 +
+ migrations/005_add_created_at_to_threads.sql       |    2 +
+ migrations/006_add_project_managers.sql            |   14 +
+ migrations/007_add_webhook_secret.sql              |    2 +
+ migrations/008_create_events_table.sql             |   34 +
+ migrations/009_create_workflow_templates.sql       |   34 +
+ migrations/010_add_template_fields_to_projects.sql |   22 +
+ migrations/011_create_workflows.sql                |   33 +
+ migrations/012_improve_execution_queue.sql         |   33 +
+ migrations/013_add_users_tasks.sql                 |   62 +
+ migrations/014_add_state_json_to_threads.sql       |   11 +
+ migrations/015_add_manager_webhook_secret.sql      |   10 +
+ migrations/025_revert_to_384.sql                   |    4 +
+ migrations/026_add_fts_index.sql                   |   21 +
+ migrations/027_add_user_memory.sql                 |   20 +
+ migrations/028_add_analytics_columns.sql           |   15 +
+ .../029_add_identity_channels_features_metrics.sql |   53 +
+ migrations/030_add_user_id_to_projects.sql         |   18 +
+ migrations/031_fill_auth_identities_from_users.sql |   13 +
+ migrations/032_add_source_to_clients.sql           |    2 +
+ migrations/033_rename_user_metadata.sql            |    2 +
+ migrations/034_add_thread_interaction_mode.sql     |    3 +
+ migrations/035_create_knowledge_documents.sql      |   16 +
+ migrations/036_add_bot_usernames_to_projects.sql   |   11 +
+ migrations/036_knowledge_preprocessing_mvp.sql     |   26 +
+ ...037_add_auth_membership_and_personalization.sql |  183 +
+ .../038_make_project_owner_id_legacy_nullable.sql  |   11 +
+ migrations/039_drop_users_project_id.sql           |   10 +
+ ...ckfill_project_members_from_legacy_managers.sql |   20 +
+ .../041_drop_owner_id_and_project_managers.sql     |   11 +
+ migrations/042_drop_workflow_templates.sql         |   15 +
+ migrations/043_add_client_user_identity_bridge.sql |   17 +
+ migrations/044_add_crm_fields_to_clients.sql       |   12 +
+ migrations/045_drop_crm_fields_from_users.sql      |    8 +
+ .../046_add_thread_manager_user_assignment.sql     |   19 +
+ migrations/047_add_task_user_assignments.sql       |   26 +
+ migrations/048_add_platform_admin_flag.sql         |   11 +
+ .../049_restore_project_owner_membership.sql       |   24 +
+ migrations/050_optimize_knowledge_query_paths.sql  |   19 +
+ ...2_add_model_usage_events_and_queue_schedule.sql |   36 +
+ ...user_memory_project_client_key_unique_index.sql |    7 +
+ .../054_add_knowledge_chunk_embedding_text.sql     |    9 +
+ migrations/055_create_rag_eval.sql                 |  121 +
+ .../056_drop_empty_legacy_schema_residue.sql       |   18 +
+ ...eplace_knowledge_entry_type_with_entry_kind.sql |   80 +
+ migrations/057_create_project_invitations.sql      |   29 +
+ migrations/058_create_knowledge_source_chunks.sql  |   52 +
+ ...ate_knowledge_entries_and_retrieval_surface.sql |  166 +
+ migrations/060_create_knowledge_compiler_trace.sql |  171 +
+ ..._allow_multiple_source_ref_quotes_per_chunk.sql |   33 +
+ .../061_create_knowledge_compiler_batches.sql      |   62 +
+ ...rag_eval_entry_evidence_and_failure_actions.sql |  140 +
+ .../062_kcd_stage_h_knowledge_edit_actions.sql     |  114 +
+ migrations/063_rag_eval_review_console.sql         |   47 +
+ migrations/064_rag_eval_review_groups.sql          |   62 +
+ migrations/065_knowledge_curation_console.sql      |   90 +
+ .../066_create_commercial_price_knowledge.sql      |  338 +
+ migrations/nuke_db.py                              |   60 -
+ migrations/run_all.py                              |   58 +-
+ mypy.ini                                           |   10 +
+ package.json                                       |   14 +
+ pytest.ini                                         |   10 +
+ requirements-dev.txt                               |   13 +
+ requirements.txt                                   |   27 +-
+ scripts/generate_openapi.py                        |   45 +
+ scripts/populate_knowledge.py                      |   48 -
+ src/__init__.py                                    |    1 +
+ src/agent/graph.py                                 |  289 +-
+ src/agent/nodes/commercial_context_lookup.py       |  102 +
+ src/agent/nodes/escalate.py                        |  158 +
+ src/agent/nodes/intent_extractor.py                |  232 +
+ src/agent/nodes/kb_search.py                       |  127 +
+ src/agent/nodes/load_state.py                      |  150 +
+ src/agent/nodes/persist.py                         |  331 +
+ src/agent/nodes/policy_engine.py                   |  262 +
+ src/agent/nodes/responder.py                       |  140 +
+ src/agent/nodes/response_generator.py              |  339 +
+ src/agent/nodes/rules.py                           |  154 +
+ src/agent/nodes/template_response.py               |   82 +
+ src/agent/nodes/tool_executor.py                   |   95 +
+ src/agent/prompts/intent_prompt.txt                |   72 +
+ src/agent/prompts/interpretation_block.txt         |   28 +
+ .../prompts/knowledge_answer_compiler_faq.txt      |  143 +
+ src/agent/prompts/knowledge_answer_resolution.txt  |   59 +
+ src/agent/prompts/response_prompt.txt              |   54 +
+ src/agent/router/__init__.py                       |    1 +
+ src/agent/router/prompt_builder.py                 |  423 ++
+ src/agent/router/utils.py                          |   59 +
+ src/agent/state.py                                 |  120 +-
+ src/agent/tools.py                                 |   22 -
+ src/agent/utils.py                                 |   26 +
+ src/application/dto/__init__.py                    |   44 +
+ src/application/dto/auth_dto.py                    |  207 +
+ src/application/dto/control_plane_dto.py           |  155 +
+ src/application/dto/knowledge_dto.py               |  941 +++
+ src/application/dto/model_usage_dto.py             |  128 +
+ src/application/dto/project_dto.py                 |  391 +
+ src/application/dto/runtime_dto.py                 |  108 +
+ src/application/dto/thread_dto.py                  |  234 +
+ src/application/dto/webhook_dto.py                 |    9 +
+ src/application/errors.py                          |   82 +
+ src/application/orchestration/__init__.py          |    3 +
+ .../orchestration/client_message_service.py        |  646 ++
+ .../orchestration/conversation_orchestrator.py     |  260 +
+ src/application/orchestration/graph_factory.py     |  217 +
+ .../orchestration/manager_reply_service.py         |  497 ++
+ .../orchestration/project_runtime_loader.py        |   33 +
+ .../orchestration/transport_sender_port.py         |    7 +
+ src/application/ports/agent_runtime_port.py        |   73 +
+ src/application/ports/cache_port.py                |   69 +
+ src/application/ports/client_port.py               |   18 +
+ src/application/ports/commercial_price.py          |  157 +
+ .../ports/commercial_price_acquisition.py          |   55 +
+ src/application/ports/email_port.py                |   17 +
+ src/application/ports/event_port.py                |   21 +
+ src/application/ports/google_identity_port.py      |   15 +
+ src/application/ports/knowledge/__init__.py        |   33 +
+ .../ports/knowledge/answer_candidates.py           |   49 +
+ .../ports/knowledge/canonical_entries.py           |   33 +
+ .../ports/knowledge/compilation_trace.py           |   67 +
+ src/application/ports/knowledge/curation.py        |    7 +
+ src/application/ports/knowledge/documents.py       |   65 +
+ .../ports/knowledge/runtime_retrieval.py           |   38 +
+ src/application/ports/knowledge/source_material.py |   24 +
+ .../ports/knowledge_document_parser_port.py        |   17 +
+ src/application/ports/knowledge_port.py            |  165 +
+ src/application/ports/lock_port.py                 |   14 +
+ src/application/ports/logger_port.py               |   76 +
+ src/application/ports/manager_bot_port.py          |   31 +
+ src/application/ports/memory_port.py               |   25 +
+ src/application/ports/project_invitation_port.py   |   34 +
+ src/application/ports/project_port.py              |  186 +
+ src/application/ports/queue_port.py                |    9 +
+ src/application/ports/telegram_port.py             |   22 +
+ src/application/ports/thread_port.py               |  111 +
+ src/application/ports/user_port.py                 |  104 +
+ src/application/rag_eval/__init__.py               |    1 +
+ src/application/rag_eval/dataset_generator.py      | 1115 +++
+ src/application/rag_eval/failure_classification.py |  302 +
+ src/application/rag_eval/judge.py                  |  133 +
+ src/application/rag_eval/ports.py                  |  135 +
+ src/application/rag_eval/reporter.py               |  286 +
+ src/application/rag_eval/review_schemas.py         |   70 +
+ src/application/rag_eval/review_service.py         | 1001 +++
+ src/application/rag_eval/runner.py                 |  444 ++
+ src/application/rag_eval/schemas.py                |  324 +
+ src/application/rag_eval/service.py                |  725 ++
+ src/application/services/auth_service.py           |  512 ++
+ src/application/services/client_query_service.py   |  116 +
+ ...ercial_price_acquisition_preparation_service.py |  104 +
+ .../commercial_price_acquisition_service.py        |  112 +
+ .../services/commercial_price_ingestion_service.py |  428 ++
+ .../services/commercial_truth_review_service.py    |  398 +
+ .../services/knowledge_chunk_normalizer.py         |  112 +
+ .../services/knowledge_curation_service.py         |  910 +++
+ .../services/knowledge_edit_action_service.py      |  347 +
+ .../services/knowledge_ingestion_service.py        | 5136 +++++++++++++
+ .../services/knowledge_normalization_service.py    |   97 +
+ .../knowledge_processing_report_builder.py         |  382 +
+ src/application/services/knowledge_service.py      | 1060 +++
+ src/application/services/manager_bot_service.py    |  324 +
+ .../services/markdown_structure_extractor.py       |  235 +
+ src/application/services/platform_bot_service.py   |  119 +
+ .../services/project_command_service.py            |  296 +
+ .../services/project_invitation_service.py         |  220 +
+ src/application/services/project_query_service.py  |  153 +
+ src/application/services/project_runtime_guards.py |  120 +
+ src/application/services/project_service.py        |   33 +
+ src/application/services/thread_command_service.py |   46 +
+ src/application/services/thread_query_service.py   |  220 +
+ src/application/services/ticket_command_service.py |   70 +
+ src/application/services/webhook_dispatcher.py     |  178 +
+ src/database/models.py                             |  110 -
+ src/database/repositories/knowledge_repository.py  |   31 -
+ src/database/repositories/project_repository.py    |   34 -
+ src/database/repositories/thread_repository.py     |   58 -
+ src/domain/__init__.py                             |    1 +
+ src/domain/commercial/__init__.py                  |    1 +
+ src/domain/commercial/commercial_truth.py          |  479 ++
+ src/domain/commercial/price_acquisition.py         |  326 +
+ src/domain/commercial/price_knowledge.py           |  376 +
+ src/domain/commercial/price_query.py               |   71 +
+ src/domain/commercial/pricing.py                   |  146 +
+ src/domain/control_plane/__init__.py               |    1 +
+ src/domain/control_plane/memberships.py            |   16 +
+ src/domain/control_plane/project_configuration.py  |  244 +
+ src/domain/control_plane/project_views.py          |  279 +
+ src/domain/control_plane/roles.py                  |   30 +
+ src/domain/display_names.py                        |   55 +
+ src/domain/identity/__init__.py                    |    1 +
+ src/domain/identity/auth_providers.py              |   21 +
+ src/domain/identity/user_views.py                  |  124 +
+ src/domain/project_plane/__init__.py               |    1 +
+ src/domain/project_plane/client_views.py           |  116 +
+ src/domain/project_plane/embedding_text.py         |   95 +
+ src/domain/project_plane/event_views.py            |   60 +
+ src/domain/project_plane/json_types.py             |   34 +
+ src/domain/project_plane/knowledge_acquisition.py  |  153 +
+ .../knowledge_chunk_classification.py              |  103 +
+ src/domain/project_plane/knowledge_chunks.py       |  243 +
+ src/domain/project_plane/knowledge_compilation.py  |  467 ++
+ src/domain/project_plane/knowledge_curation.py     |  232 +
+ .../project_plane/knowledge_document_structure.py  |  147 +
+ .../project_plane/knowledge_import_quality.py      |  359 +
+ .../project_plane/knowledge_preprocessing.py       |  569 ++
+ .../project_plane/knowledge_retrieval_surface.py   |   81 +
+ .../project_plane/knowledge_semantic_builder.py    |  623 ++
+ .../project_plane/knowledge_semantic_markers.py    |  189 +
+ src/domain/project_plane/knowledge_views.py        |  151 +
+ src/domain/project_plane/manager_assignments.py    |  159 +
+ src/domain/project_plane/manager_notifications.py  |   57 +
+ src/domain/project_plane/manager_reply_history.py  |   73 +
+ src/domain/project_plane/memory_views.py           |   41 +
+ src/domain/project_plane/model_usage_views.py      |  110 +
+ src/domain/project_plane/queue_views.py            |   72 +
+ src/domain/project_plane/thread_runtime.py         |   79 +
+ src/domain/project_plane/thread_status.py          |    8 +
+ src/domain/project_plane/thread_views.py           |  301 +
+ src/domain/runtime/__init__.py                     |    1 +
+ src/domain/runtime/commercial_context.py           |  106 +
+ src/domain/runtime/delivery.py                     |   56 +
+ src/domain/runtime/dialog_state.py                 |   94 +
+ src/domain/runtime/escalation.py                   |   61 +
+ src/domain/runtime/evidence.py                     |  128 +
+ src/domain/runtime/evidence_plan.py                |  284 +
+ src/domain/runtime/graph_contract.py               |  334 +
+ src/domain/runtime/intent_extraction.py            |  386 +
+ src/domain/runtime/knowledge_search.py             |   85 +
+ src/domain/runtime/load_state.py                   |  118 +
+ src/domain/runtime/persistence.py                  |  485 ++
+ src/domain/runtime/policy/__init__.py              |    4 +
+ src/domain/runtime/policy/decision_engine.py       |  159 +
+ src/domain/runtime/policy/handoff_confirmation.py  |  119 +
+ src/domain/runtime/policy/intent_topic.py          |  109 +
+ src/domain/runtime/policy/lifecycle.py             |   19 +
+ src/domain/runtime/policy/repeat_detection.py      |  162 +
+ src/domain/runtime/policy/result.py                |   94 +
+ src/domain/runtime/policy/transitions.py           |   76 +
+ src/domain/runtime/policy_decision.py              |    3 +
+ src/domain/runtime/project_runtime_profile.py      |   74 +
+ src/domain/runtime/prompting.py                    |  143 +
+ src/domain/runtime/response_generation.py          |  120 +
+ src/domain/runtime/source_authority.py             |  141 +
+ src/domain/runtime/state_contracts.py              |  174 +
+ src/domain/runtime/tool_execution.py               |   49 +
+ src/domain/runtime/value_parsing.py                |   42 +
+ src/infrastructure/__init__.py                     |    1 +
+ src/infrastructure/app/__init__.py                 |    1 +
+ src/infrastructure/app/resources.py                |  105 +
+ src/infrastructure/commercial_price/__init__.py    |    1 +
+ .../markdown_acquisition_adapter.py                |  643 ++
+ src/infrastructure/config/__init__.py              |    1 +
+ src/infrastructure/config/settings.py              |  389 +
+ src/infrastructure/db/__init__.py                  |    1 +
+ src/infrastructure/db/repositories/__init__.py     |   40 +
+ .../db/repositories/client_repository.py           |  220 +
+ .../db/repositories/commercial_price_mappers.py    |  253 +
+ .../db/repositories/commercial_price_repository.py |  729 ++
+ .../db/repositories/event_repository.py            |  269 +
+ .../knowledge_answer_candidate_persistence.py      |  223 +
+ .../knowledge_answer_candidate_queries.py          |  108 +
+ .../db/repositories/knowledge_compiler_payloads.py |   48 +
+ .../knowledge_compiler_run_persistence.py          |  374 +
+ .../knowledge_curation_action_persistence.py       |  380 +
+ .../knowledge_curation_entry_operations.py         |  968 +++
+ .../db/repositories/knowledge_curation_mappers.py  |  143 +
+ .../db/repositories/knowledge_db_codecs.py         |  169 +
+ .../repositories/knowledge_document_persistence.py |  132 +
+ .../db/repositories/knowledge_document_queries.py  |  230 +
+ .../db/repositories/knowledge_entry_persistence.py |  474 ++
+ .../db/repositories/knowledge_repository.py        | 1975 +++++
+ .../db/repositories/knowledge_search_queries.py    |  262 +
+ .../db/repositories/knowledge_search_ranking.py    |  559 ++
+ .../knowledge_source_chunk_persistence.py          |  143 +
+ .../db/repositories/memory_repository.py           |  332 +
+ .../db/repositories/metrics_repository.py          |  221 +
+ .../db/repositories/model_usage_repository.py      |  234 +
+ .../db/repositories/project/__init__.py            |   38 +
+ src/infrastructure/db/repositories/project/base.py |  201 +
+ .../db/repositories/project/project_channels.py    |   42 +
+ .../db/repositories/project/project_commands.py    |   91 +
+ .../repositories/project/project_configuration.py  |  186 +
+ .../repositories/project/project_integrations.py   |   41 +
+ .../db/repositories/project/project_members.py     |  417 ++
+ .../db/repositories/project/project_queries.py     |  205 +
+ .../db/repositories/project/project_tokens.py      |  194 +
+ .../db/repositories/queue_repository.py            |  281 +
+ .../db/repositories/rag_eval_repository.py         | 1633 +++++
+ .../db/repositories/thread/__init__.py             |   15 +
+ .../db/repositories/thread/lifecycle.py            |  201 +
+ .../db/repositories/thread/messages.py             |  124 +
+ src/infrastructure/db/repositories/thread/read.py  |  308 +
+ .../db/repositories/thread/runtime_state.py        |  148 +
+ .../db/repositories/user_repository.py             |  923 +++
+ src/infrastructure/email/__init__.py               |    1 +
+ src/infrastructure/email/sender.py                 |  109 +
+ src/infrastructure/identity/google_verifier.py     |   49 +
+ src/infrastructure/llm/__init__.py                 |    1 +
+ src/infrastructure/llm/chunker.py                  |  312 +
+ src/infrastructure/llm/embedding_service.py        | 1168 +++
+ src/infrastructure/llm/groq_keyring.py             |  336 +
+ src/infrastructure/llm/knowledge_preprocessor.py   |  522 ++
+ src/infrastructure/llm/model_registry.py           |  174 +
+ src/infrastructure/llm/model_selector.py           |   69 +
+ src/infrastructure/llm/query_expander.py           |   98 +
+ src/infrastructure/llm/rag_contract.py             |  183 +
+ src/infrastructure/llm/rag_service.py              |  267 +
+ src/infrastructure/llm/rate_limit_tracker.py       |  113 +
+ src/infrastructure/logging/__init__.py             |    1 +
+ src/infrastructure/logging/logger.py               |  236 +
+ src/infrastructure/queue/__init__.py               |    1 +
+ src/infrastructure/queue/handlers/__init__.py      |    1 +
+ .../queue/handlers/knowledge_failed_batches.py     |   87 +
+ .../queue/handlers/knowledge_publish_ready.py      |   70 +
+ .../queue/handlers/knowledge_retighten.py          |   87 +
+ .../queue/handlers/knowledge_upload.py             |  121 +
+ src/infrastructure/queue/handlers/metrics.py       |   88 +
+ .../queue/handlers/notify_manager.py               |  339 +
+ src/infrastructure/queue/handlers/rag_eval.py      |  982 +++
+ src/infrastructure/queue/job_dispatcher.py         |  120 +
+ src/infrastructure/queue/job_exceptions.py         |   22 +
+ src/infrastructure/queue/job_types.py              |   21 +
+ src/infrastructure/queue/retry_policy.py           |   77 +
+ src/infrastructure/queue/runtime.py                |  171 +
+ src/infrastructure/queue/stale_recovery.py         |   36 +
+ src/infrastructure/queue/telegram_sender.py        |   68 +
+ src/infrastructure/queue/worker.py                 |   11 +
+ src/infrastructure/queue/worker_loop.py            |  131 +
+ src/infrastructure/rag_eval/__init__.py            |    0
+ src/infrastructure/rag_eval/adapters.py            |  489 ++
+ src/infrastructure/redis/__init__.py               |    1 +
+ src/infrastructure/redis/cache_adapter.py          |   56 +
+ src/infrastructure/redis/client.py                 |   28 +
+ src/infrastructure/redis/lock.py                   |   65 +
+ src/infrastructure/telegram/__init__.py            |    1 +
+ src/infrastructure/telegram/http_client.py         |   50 +
+ src/interfaces/__init__.py                         |    1 +
+ src/interfaces/composition/__init__.py             |    6 +
+ .../composition/commercial_price_acquisition.py    |   25 +
+ src/interfaces/composition/fastapi_lifespan.py     |  185 +
+ src/interfaces/composition/knowledge_upload.py     |  137 +
+ src/interfaces/composition/project_repositories.py |   24 +
+ src/interfaces/composition/rag_eval_answerer.py    |   58 +
+ src/interfaces/http/__init__.py                    |    1 +
+ src/interfaces/http/app.py                         |  194 +
+ src/interfaces/http/auth.py                        |  322 +
+ src/interfaces/http/bot.py                         |   42 +
+ src/interfaces/http/chat.py                        |   60 +
+ src/interfaces/http/clients.py                     |   51 +
+ src/interfaces/http/dependencies.py                |  472 ++
+ src/interfaces/http/knowledge.py                   |  785 ++
+ src/interfaces/http/knowledge_curation.py          |  420 ++
+ src/interfaces/http/limits.py                      |   26 +
+ src/interfaces/http/logs.py                        |   94 +
+ src/interfaces/http/metrics.py                     |   59 +
+ src/interfaces/http/projects.py                    |  575 ++
+ src/interfaces/http/rag_eval.py                    | 1165 +++
+ src/interfaces/http/threads.py                     |  217 +
+ src/interfaces/http/webhooks.py                    |  162 +
+ src/interfaces/telegram/__init__.py                |    1 +
+ src/interfaces/telegram/client_bot.py              |  164 +
+ src/interfaces/telegram/manager_bot.py             |   87 +
+ src/interfaces/telegram/platform_admin/__init__.py |    1 +
+ src/interfaces/telegram/platform_admin/handlers.py |  769 ++
+ .../telegram/platform_admin/keyboards.py           |  172 +
+ .../telegram/platform_admin/knowledge_upload.py    |  258 +
+ src/interfaces/telegram/platform_admin/state.py    |   86 +
+ src/interfaces/telegram/platform_bot.py            |  256 +
+ src/main.py                                        |  107 -
+ src/services/embedding_service.py                  |   25 -
+ src/services/orchestrator.py                       |   37 -
+ src/tools/__init__.py                              |  100 +
+ src/tools/builtins.py                              | 1055 +++
+ src/tools/http_tool.py                             |  366 +
+ src/tools/registry.py                              |  341 +
+ src/utils/encryption.py                            |   54 +
+ src/utils/uuid_utils.py                            |   16 +
+ supervisord.conf                                   |   19 +-
+ tests/__init__.py                                  |    0
+ .../agent/nodes/test_commercial_context_lookup.py  |  122 +
+ tests/agent/nodes/test_escalate.py                 |   59 +
+ tests/agent/nodes/test_intent_extractor.py         |   84 +
+ tests/agent/nodes/test_kb_search.py                |   52 +
+ tests/agent/nodes/test_load_state.py               |  164 +
+ tests/agent/nodes/test_persist.py                  |  198 +
+ tests/agent/nodes/test_policy_engine.py            |  141 +
+ tests/agent/nodes/test_responder.py                |  126 +
+ tests/agent/nodes/test_response_generator.py       |  207 +
+ tests/agent/nodes/test_rules.py                    |   91 +
+ tests/agent/nodes/test_tool_executor.py            |   48 +
+ .../test_prompt_builder_commercial_context.py      |   69 +
+ .../test_commercial_context_graph_execution.py     |  176 +
+ tests/agent/test_graph_runtime_contract.py         |  226 +
+ tests/api/test_auth.py                             |  682 ++
+ tests/api/test_bot.py                              |  148 +
+ tests/api/test_chat.py                             |   78 +
+ tests/api/test_clients.py                          |  255 +
+ tests/api/test_dependencies.py                     |  298 +
+ tests/api/test_knowledge.py                        |  640 ++
+ tests/api/test_limits.py                           |  110 +
+ tests/api/test_logs.py                             |  117 +
+ tests/api/test_metrics.py                          |  134 +
+ tests/api/test_projects.py                         | 1713 +++++
+ .../api/test_rag_eval_action_execution_contract.py |  337 +
+ tests/api/test_rag_eval_full_enqueue_contract.py   |  101 +
+ tests/api/test_threads.py                          | 1288 ++++
+ tests/api/test_webhooks.py                         |  427 ++
+ tests/application/dto/test_auth_dto.py             |   97 +
+ tests/application/dto/test_control_plane_dto.py    |   42 +
+ tests/application/dto/test_knowledge_dto.py        |   38 +
+ .../application/dto/test_knowledge_preview_dto.py  |   56 +
+ .../dto/test_knowledge_price_facts_dto.py          |   98 +
+ tests/application/dto/test_project_dto.py          |   57 +
+ tests/application/dto/test_runtime_dto.py          |   56 +
+ tests/application/dto/test_thread_dto.py           |   72 +
+ tests/application/dto/test_webhook_dto.py          |    5 +
+ .../rag_eval/test_dataset_generator_eval_units.py  |  211 +
+ .../test_question_quality_and_isolation.py         |  431 ++
+ .../rag_eval/test_rag_eval_vertical_slice.py       |  429 ++
+ .../rag_eval/test_retrieval_eval_streaming.py      |  354 +
+ tests/application/rag_eval/test_review_service.py  |  895 +++
+ .../test_streaming_retrieval_eval_contract.py      |  356 +
+ .../services/test_client_message_service.py        |  299 +
+ ...ercial_price_acquisition_preparation_service.py |  172 +
+ .../test_commercial_price_acquisition_service.py   |  144 +
+ .../test_commercial_price_ingestion_service.py     |  246 +
+ .../test_commercial_truth_review_service.py        |  523 ++
+ .../services/test_conversation_orchestrator.py     |   85 +
+ tests/application/services/test_graph_factory.py   |  161 +
+ .../services/test_knowledge_chunk_normalizer.py    |   73 +
+ .../services/test_knowledge_edit_action_service.py |  109 +
+ .../services/test_knowledge_ingestion_service.py   | 1107 +++
+ .../test_knowledge_normalization_service.py        |  118 +
+ .../services/test_knowledge_preview_service.py     |  240 +
+ .../test_knowledge_processing_report_builder.py    |   91 +
+ .../test_knowledge_semantic_ingestion_builder.py   |   54 +
+ ...edge_service_project_commercial_truth_review.py |  344 +
+ .../services/test_knowledge_service_runtime.py     |  250 +
+ .../test_knowledge_source_chunk_ingestion.py       |   83 +
+ .../services/test_manager_bot_service.py           |  247 +
+ .../services/test_manager_reply_service.py         |   33 +
+ .../services/test_platform_bot_service.py          |  294 +
+ .../services/test_project_invitation_service.py    |  234 +
+ .../services/test_question_first_compilation.py    |   48 +
+ .../services/test_thread_repo_wiring.py            |   95 +
+ .../services/test_ticket_command_service.py        |   94 +
+ tests/architecture/test_agent_router_boundary.py   |  114 +
+ tests/architecture/test_agent_tools_boundary.py    |   49 +
+ ...est_answer_resolution_progress_observability.py |   46 +
+ .../test_commercial_context_lookup_graph_guard.py  |   43 +
+ ...mmercial_price_acquisition_application_guard.py |  100 +
+ ...mmercial_price_acquisition_composition_guard.py |   38 +
+ ...test_commercial_price_ingestion_wiring_guard.py |   68 +
+ .../test_commercial_price_ports_guard.py           |   72 +
+ .../test_commercial_price_runtime_tool_guard.py    |   44 +
+ ...test_commercial_truth_review_read_side_guard.py |  213 +
+ .../test_commercial_truth_review_service_guard.py  |   59 +
+ .../test_crm_bot_domain_map_v1_contract.py         |   63 +
+ tests/architecture/test_groq_rotation_boundary.py  |   37 +
+ tests/architecture/test_import_boundaries.py       |  200 +
+ ...source_chunk_section_title_persistence_guard.py |   35 +
+ .../test_kcd_stage_cd_runtime_surface_guard.py     |  107 +
+ .../test_kcd_stage_e_compiler_trace_guard.py       |  165 +
+ .../test_kcd_stage_f_embedding_text_guard.py       |   43 +
+ .../test_kcd_stage_g_eval_entry_contract_guard.py  |   91 +
+ .../test_kcd_stage_g_h_actionable_report_guard.py  |   50 +
+ ...kcd_stage_h4_user_facing_rag_eval_copy_guard.py |   60 +
+ .../test_kcd_stage_h_api_wiring_guard.py           |   44 +
+ ...est_kcd_stage_h_knowledge_edit_actions_guard.py |  152 +
+ .../test_kcd_stage_k5_cancel_processing_guard.py   |   46 +
+ .../test_kcd_stage_k7_deterministic_merge_guard.py |  154 +
+ .../test_kcd_stage_k8_3_retighten_payload_guard.py |   97 +
+ ...st_kcd_stage_k8_no_hardcoded_semantic_groups.py |   20 +
+ .../test_kcd_stage_k_answer_compiler_guard.py      |  145 +
+ .../test_knowledge_bounded_ports_guard.py          |   42 +
+ .../architecture/test_new_only_knowledge_ports.py  |   48 +
+ .../test_no_hardcoded_meta_question_dictionary.py  |   27 +
+ .../architecture/test_orchestration_boundaries.py  |   64 +
+ .../test_price_facts_review_actions_guard.py       |   42 +
+ .../test_price_facts_review_read_side_guard.py     |   81 +
+ .../test_project_app_layer_no_dict_fallbacks.py    |   33 +
+ ...ject_commercial_truth_review_read_side_guard.py |   90 +
+ .../test_project_legacy_repo_facades.py            |   63 +
+ tests/architecture/test_project_typed_contracts.py |   76 +
+ .../architecture/test_rag_eval_resume_boundary.py  |   30 +
+ .../test_rag_eval_review_console_boundary.py       |   38 +
+ tests/architecture/test_rag_pipeline_boundary.py   |   33 +
+ ..._response_generator_commercial_context_guard.py |   45 +
+ tests/architecture/test_text_encoding_guards.py    |   39 +
+ .../test_worker_decomposition_boundary.py          |   70 +
+ tests/clients/test_router.py                       |   46 +
+ tests/conftest.py                                  |   62 +
+ .../project/test_bot_token_overwrite.py            |  180 +
+ .../repositories/test_client_repository.py         |  188 +
+ .../database/repositories/test_event_repository.py |  336 +
+ .../test_knowledge_answer_candidate_persistence.py |   31 +
+ .../test_knowledge_answer_candidate_queries.py     |   30 +
+ .../test_knowledge_compiler_payloads.py            |   82 +
+ .../test_knowledge_compiler_run_persistence.py     |   35 +
+ .../test_knowledge_curation_action_persistence.py  |   75 +
+ .../test_knowledge_curation_entry_operations.py    |  155 +
+ .../test_knowledge_curation_mappers.py             |   96 +
+ .../test_knowledge_curation_repository_contract.py |  146 +
+ .../repositories/test_knowledge_db_codecs.py       |  133 +
+ .../test_knowledge_document_persistence.py         |   86 +
+ .../test_knowledge_document_queries.py             |   66 +
+ .../test_knowledge_entry_persistence.py            |   92 +
+ .../repositories/test_knowledge_repository.py      |  818 +++
+ .../test_knowledge_retrieval_surface_contract.py   |  106 +
+ .../repositories/test_knowledge_search_queries.py  |   32 +
+ .../repositories/test_knowledge_search_ranking.py  |   86 +
+ .../test_knowledge_source_chunk_persistence.py     |   32 +
+ .../repositories/test_memory_repository.py         |  467 ++
+ .../repositories/test_metrics_repository.py        |  412 ++
+ .../repositories/test_model_usage_repository.py    |  110 +
+ .../repositories/test_project_repository.py        | 1067 +++
+ .../database/repositories/test_queue_repository.py |  404 ++
+ .../repositories/test_rag_eval_repository.py       |  418 ++
+ .../database/repositories/test_user_repository.py  |  483 ++
+ .../thread/test_lifecycle_repository.py            |   79 +
+ .../thread/test_messages_repository.py             |   93 +
+ .../repositories/thread/test_read_repository.py    |   71 +
+ .../commercial/test_commercial_truth_conflicts.py  |  397 +
+ .../commercial/test_price_acquisition_contract.py  |  292 +
+ .../commercial/test_price_knowledge_domain.py      |  203 +
+ .../project_plane/test_embedding_text_builder.py   |   73 +
+ .../test_knowledge_compilation_contracts.py        |  133 +
+ .../test_knowledge_retrieval_surface.py            |  141 +
+ tests/domain/test_auth_providers.py                |   29 +
+ tests/domain/test_commercial_pricing_contract.py   |   77 +
+ tests/domain/test_delivery.py                      |   25 +
+ tests/domain/test_dialog_state.py                  |   58 +
+ tests/domain/test_display_names.py                 |   75 +
+ tests/domain/test_escalation.py                    |   30 +
+ tests/domain/test_evidence_plan_contract.py        |  260 +
+ tests/domain/test_intent_extraction.py             |  142 +
+ .../domain/test_knowledge_chunk_classification.py  |  137 +
+ tests/domain/test_knowledge_chunks.py              |  108 +
+ tests/domain/test_knowledge_document_structure.py  |   73 +
+ tests/domain/test_knowledge_import_quality.py      |  132 +
+ tests/domain/test_knowledge_preprocessing.py       |  213 +
+ tests/domain/test_knowledge_search.py              |   34 +
+ tests/domain/test_knowledge_semantic_builder.py    |  223 +
+ tests/domain/test_knowledge_semantic_markers.py    |   38 +
+ tests/domain/test_load_state_contracts.py          |   22 +
+ tests/domain/test_manager_assignments.py           |   78 +
+ tests/domain/test_manager_notifications.py         |   44 +
+ tests/domain/test_manager_reply_history.py         |   56 +
+ tests/domain/test_memberships.py                   |   22 +
+ tests/domain/test_persistence.py                   |  142 +
+ tests/domain/test_policy_decision.py               |   84 +
+ tests/domain/test_project_runtime_profile.py       |   47 +
+ tests/domain/test_prompting.py                     |   35 +
+ tests/domain/test_response_generation.py           |   45 +
+ tests/domain/test_runtime_evidence_contract.py     |   55 +
+ tests/domain/test_source_authority_contract.py     |   76 +
+ tests/domain/test_thread_runtime.py                |   47 +
+ tests/domain/test_thread_views.py                  |  203 +
+ tests/domain/test_tool_execution.py                |   30 +
+ .../test_markdown_acquisition_adapter.py           |  160 +
+ .../repositories/test_commercial_price_mappers.py  |  215 +
+ ...est_commercial_price_acquisition_composition.py |   39 +
+ .../test_fastapi_lifespan_composition.py           |   34 +
+ .../platform_admin/test_exception_handling.py      |  180 +
+ .../platform_admin/test_knowledge_upload_mode.py   |  101 +
+ tests/services/test_project_runtime_guards.py      |  109 +
+ tests/test_kad_v1_markdown_acquisition_slice.py    |  192 +
+ tests/test_kcd_answer_only_resolver_contract.py    |  351 +
+ tests/test_kcd_deterministic_first_merge.py        |  124 +
+ tests/test_knowledge_curation_domain.py            |  176 +
+ tests/test_knowledge_curation_service.py           |  495 ++
+ tests/tools/test_builtins.py                       |  183 +
+ tests/tools/test_commercial_price_lookup_tool.py   |  158 +
+ 739 files changed, 137104 insertions(+), 624 deletions(-)
+
+=== knowledge components files ===
+frontend/src/pages/knowledge/components/CommercialTruthReviewSummary.tsx
+frontend/src/pages/knowledge/components/DocumentActionsBlock.tsx
+frontend/src/pages/knowledge/components/DocumentProcessingBlock.tsx
+frontend/src/pages/knowledge/components/DocumentStatusBlock.tsx
+frontend/src/pages/knowledge/components/DraftsModal.tsx
+frontend/src/pages/knowledge/components/DraftsSummary.tsx
+frontend/src/pages/knowledge/components/ImportQualitySummary.tsx
+frontend/src/pages/knowledge/components/KnowledgeDocumentCard.tsx
+frontend/src/pages/knowledge/components/KnowledgeDocumentDetailsPanel.tsx
+frontend/src/pages/knowledge/components/PriceFactsSummary.tsx
+frontend/src/pages/knowledge/components/SourceUnitsModal.tsx
+frontend/src/pages/knowledge/components/SourceUnitsSummary.tsx
+
+=== api-call patterns in components ===
