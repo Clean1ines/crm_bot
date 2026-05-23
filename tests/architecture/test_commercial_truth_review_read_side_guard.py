@@ -144,7 +144,7 @@ def test_commercial_truth_review_read_side_accepts_policy_preview_without_mutati
     assert "list_published_price_facts_for_lookup(" not in review_method
 
 
-def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_route() -> (
+def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_routes() -> (
     None
 ):
     source = HTTP.read_text(encoding="utf-8")
@@ -153,35 +153,33 @@ def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_route
         "CommercialTruthResolutionPolicy.MANUAL_REVIEW"
     )
 
-    assert source.count(policy_param) == 1
-
-    route_start = source.index("async def knowledge_commercial_truth_review(")
-    route_end = source.index("@router.post", route_start)
-    commercial_truth_route = source[route_start:route_end]
-
-    assert policy_param in commercial_truth_route
-    assert "policy=policy" in commercial_truth_route
-
-    forbidden_route_names = (
-        "async def preview_knowledge(",
-        "async def knowledge_usage(",
-        "async def list_project_knowledge(",
-        "async def upload_project_knowledge(",
-        "async def get_knowledge_processing_report(",
-        "async def knowledge_processing_progress(",
-        "async def knowledge_price_facts(",
+    allowed_route_names = (
+        "async def project_commercial_truth_review(",
+        "async def knowledge_commercial_truth_review(",
     )
 
-    for route_name in forbidden_route_names:
-        if route_name not in source:
+    # There are two legitimate read-only preview scopes:
+    # - project-wide commercial truth review
+    # - document-scoped commercial truth review
+    assert source.count(policy_param) == len(allowed_route_names)
+    assert source.count("policy=policy") == len(allowed_route_names)
+
+    for route_name in allowed_route_names:
+        route_start = source.index(route_name)
+        next_route = source.find("\n@router.", route_start)
+        route = (
+            source[route_start:] if next_route == -1 else source[route_start:next_route]
+        )
+
+        assert policy_param in route
+        assert "policy=policy" in route
+
+    route_blocks = source.split("\n@router.")
+    for block in route_blocks:
+        if policy_param not in block and "policy=policy" not in block:
             continue
 
-        start = source.index(route_name)
-        next_route = source.find("\n@router.", start)
-        route = source[start:] if next_route == -1 else source[start:next_route]
-
-        assert policy_param not in route
-        assert "policy=policy" not in route
+        assert any(route_name in block for route_name in allowed_route_names)
 
 
 def test_commercial_truth_review_policy_preview_is_document_scoped_today() -> None:
