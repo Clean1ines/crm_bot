@@ -1,14 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
   Upload,
-  FileText,
-  StopCircle,
-  RefreshCw,
   Search,
   TestTube2,
   Loader2,
-  ChevronDown,
 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -26,9 +22,7 @@ import {
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
   type KnowledgeImportQualityReport,
-  type KnowledgeAnswerDraft,
   type KnowledgeAnswerDraftsResponse,
-  type KnowledgeSourceUnit,
   type KnowledgeSourceUnitsResponse,
   type KnowledgePriceFact,
   type KnowledgePriceFactsResponse,
@@ -37,6 +31,19 @@ import {
 } from '@shared/api/modules/knowledge';
 import { BaseModal } from '@shared/ui';
 import { t } from '@shared/i18n';
+import { CommercialTruthReviewSummary } from './components/CommercialTruthReviewSummary';
+import { DraftsSummary } from './components/DraftsSummary';
+import { DraftsModal } from './components/DraftsModal';
+import { SourceUnitsSummary } from './components/SourceUnitsSummary';
+import { SourceUnitsModal } from './components/SourceUnitsModal';
+import { DocumentStatusBlock } from './components/DocumentStatusBlock';
+import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
+import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
+import { DocumentActionsBlock } from './components/DocumentActionsBlock';
+import { KnowledgeReviewInbox } from './components/KnowledgeReviewInbox';
+import { KnowledgeWorkspaceSummary } from './components/KnowledgeWorkspaceSummary';
+import { buildKnowledgeReviewInbox, type KnowledgeReviewTask } from './viewModel/reviewInbox';
+import { buildKnowledgeWorkspaceSummary, type KnowledgeWorkspacePrimaryActionKind } from './viewModel/workspaceSummary';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -47,11 +54,6 @@ type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsRespons
 type KnowledgePriceFactsByDocument = Record<string, KnowledgePriceFactsResponse>;
 type KnowledgeCommercialTruthReviewsByDocument = Record<string, KnowledgeCommercialTruthReviewResponse>;
 
-const COMMERCIAL_TRUTH_REVIEW_POLICIES: KnowledgeCommercialTruthReviewPolicy[] = [
-  'manual_review',
-  'higher_authority_wins',
-  'newer_source_wins',
-];
 type PriceFactActionVariables = {
   documentId: string;
   factId: string;
@@ -126,77 +128,9 @@ const formatPreviewScore = (value: number): string => (
 const DRAFT_FETCH_LIMIT = 1000;
 const SOURCE_UNIT_FETCH_LIMIT = 1000;
 
-const draftTitle = (draft: KnowledgeAnswerDraft): string => (
-  draft.canonical_question.trim() || draft.title.trim() || t('knowledge.drafts.untitled')
-);
 
-const draftSearchText = (draft: KnowledgeAnswerDraft): string => [
-  draft.title,
-  draft.canonical_question,
-  draft.answer,
-  ...draft.question_variants,
-  ...draft.synonyms,
-  ...draft.tags,
-  ...draft.source_refs.map((ref) => ref.quote),
-].join(' ').toLowerCase();
 
-const draftSourceChunkIndexes = (draft: KnowledgeAnswerDraft): number[] => {
-  const indexes = new Set<number>();
-  for (const index of draft.source_chunk_indexes) {
-    indexes.add(index);
-  }
-  for (const ref of draft.source_refs) {
-    if (typeof ref.source_index === 'number' && Number.isFinite(ref.source_index)) {
-      indexes.add(ref.source_index);
-    }
-  }
-  return [...indexes].sort((left, right) => left - right);
-};
 
-const sourceUnitTitle = (sourceUnit: KnowledgeSourceUnit): string => (
-  sourceUnit.title.trim() || t('knowledge.sourceUnits.fallbackTitle', { index: String(sourceUnit.source_index) })
-);
-
-const sourceUnitSearchText = (sourceUnit: KnowledgeSourceUnit): string => [
-  sourceUnit.title,
-  sourceUnit.content,
-  ...sourceUnit.draft_titles,
-  JSON.stringify(sourceUnit.metadata || {}),
-].join(' ').toLowerCase();
-
-const importQualityStatusLabel = (status: string): string => {
-  if (status === 'good') return t('knowledge.importQuality.status.good');
-  if (status === 'needs_review') return t('knowledge.importQuality.status.needsReview');
-  if (status === 'unsafe') return t('knowledge.importQuality.status.unsafe');
-  return status || t('knowledge.common.unspecified');
-};
-
-const importQualityStatusClassName = (status: string): string => {
-  if (status === 'good') return 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]';
-  if (status === 'unsafe') return 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]';
-  return 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]';
-};
-
-const importQualityActionLabel = (action: string): string => {
-  if (action === 'continue_to_knowledge_compilation') return t('knowledge.importQuality.action.continue');
-  if (action === 'review_source_units') return t('knowledge.importQuality.action.reviewSourceUnits');
-  if (action === 'wait_for_processing') return t('knowledge.importQuality.action.waitForProcessing');
-  if (action === 'replace_or_review_document') return t('knowledge.importQuality.action.replaceOrReview');
-  return action || t('knowledge.common.unspecified');
-};
-
-const importQualityWarningLabel = (code: string): string => {
-  if (code === 'processing_failed') return t('knowledge.importQuality.warning.processingFailed');
-  if (code === 'processing_cancelled') return t('knowledge.importQuality.warning.processingCancelled');
-  if (code === 'processing_not_finished') return t('knowledge.importQuality.warning.processingNotFinished');
-  if (code === 'no_source_units') return t('knowledge.importQuality.warning.noSourceUnits');
-  if (code === 'very_little_text') return t('knowledge.importQuality.warning.veryLittleText');
-  if (code === 'many_empty_units') return t('knowledge.importQuality.warning.manyEmptyUnits');
-  if (code === 'many_short_units') return t('knowledge.importQuality.warning.manyShortUnits');
-  if (code === 'table_like_content') return t('knowledge.importQuality.warning.tableLikeContent');
-  if (code === 'duplicated_headings') return t('knowledge.importQuality.warning.duplicatedHeadings');
-  return t('knowledge.importQuality.warning.unknown');
-};
 
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
@@ -258,35 +192,7 @@ const usageModelRows = (breakdown: KnowledgeUsageBreakdown[]): string[] => {
 
 
 
-const priceFactStatusLabel = (status: string): string => {
-  if (status === 'needs_review') return t('knowledge.priceFacts.status.needsReview');
-  if (status === 'published') return t('knowledge.priceFacts.status.published');
-  if (status === 'rejected') return t('knowledge.priceFacts.status.rejected');
-  if (status === 'draft') return t('knowledge.priceFacts.status.draft');
-  if (status === 'superseded') return t('knowledge.priceFacts.status.superseded');
-  return status;
-};
 
-const priceFactValueKindLabel = (valueKind: string): string => {
-  if (valueKind === 'exact') return t('knowledge.priceFacts.value.exact');
-  if (valueKind === 'starting_from') return t('knowledge.priceFacts.value.startingFrom');
-  if (valueKind === 'range') return t('knowledge.priceFacts.value.range');
-  if (valueKind === 'on_request') return t('knowledge.priceFacts.value.onRequest');
-  return valueKind;
-};
-
-const priceMoneyText = (amount: { amount: string; currency: string }): string => (
-  `${amount.amount} ${amount.currency}`
-);
-
-const priceFactValueText = (fact: KnowledgePriceFact): string => {
-  if (fact.amount) return priceMoneyText(fact.amount);
-  if (fact.price_range) {
-    return `${priceMoneyText(fact.price_range.min_amount)} – ${priceMoneyText(fact.price_range.max_amount)}`;
-  }
-  if (fact.price_text.trim()) return fact.price_text;
-  return priceFactValueKindLabel(fact.value_kind);
-};
 
 const shouldFetchPriceFactsForDocument = (
   doc: Document,
@@ -662,7 +568,8 @@ const PreviewResultCard: React.FC<{
   title: string;
   result: KnowledgePreviewResult;
   compact?: boolean;
-}> = ({ title, result, compact = false }) => (
+  isDebugMode?: boolean;
+}> = ({ title, result, compact = false, isDebugMode = false }) => (
   <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
@@ -677,8 +584,8 @@ const PreviewResultCard: React.FC<{
       <span>{t('knowledge.preview.matchFound')}</span>
       {result.source && <span>{t('knowledge.preview.sourcePrefix')} {result.source}</span>}
       {result.document_status && <span>{t('knowledge.preview.documentPrefix')} {knowledgeDocumentStatusLabel(result.document_status)}</span>}
-      {result.entry_kind && <span>entry: {result.entry_kind}</span>}
-      {result.trace && (
+      {isDebugMode && result.entry_kind && <span>entry: {result.entry_kind}</span>}
+      {isDebugMode && result.trace && (
         <span>
           {t('knowledge.preview.trace.summary', {
             fields: result.trace.matched_fields.map(previewTraceLabel).join(', ') || t('knowledge.preview.trace.none'),
@@ -737,740 +644,15 @@ const UsageScenarioCard: React.FC<{
 
 
 
-const commercialTruthPolicyLabel = (
-  policy: KnowledgeCommercialTruthReviewPolicy,
-): string => {
-  if (policy === 'manual_review') return t('knowledge.commercialTruth.policy.manualReview');
-  if (policy === 'higher_authority_wins') return t('knowledge.commercialTruth.policy.higherAuthorityWins');
-  if (policy === 'newer_source_wins') return t('knowledge.commercialTruth.policy.newerSourceWins');
-  return policy;
-};
-
-const commercialTruthResolutionStatusLabel = (status: string): string => {
-  if (status === 'resolved_by_policy') return t('knowledge.commercialTruth.status.resolved');
-  if (status === 'unresolved') return t('knowledge.commercialTruth.status.unresolved');
-  return status;
-};
-
-const commercialTruthRuntimeEligibleText = (value: boolean): string => (
-  value ? 'true' : 'false'
-);
-
-const CommercialTruthReviewSummary: React.FC<{
-  response: KnowledgeCommercialTruthReviewResponse | undefined;
-  isLoading: boolean;
-  policy: KnowledgeCommercialTruthReviewPolicy;
-  onPolicyChange: (policy: KnowledgeCommercialTruthReviewPolicy) => void;
-}> = ({ response, isLoading, policy, onPolicyChange }) => {
-  if (isLoading && !response) {
-    return (
-      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>{t('knowledge.commercialTruth.loading')}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!response) return null;
-
-  const previewConflicts = response.conflicts.slice(0, 2);
-  const surfacePreviewCount = response.surface_fact_ids.length;
-  const surfacePreviewFacts = response.surface_facts.slice(0, 3);
-
-  return (
-    <div className="mb-4 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--surface-secondary)] p-3 text-xs">
-      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="font-semibold text-[var(--text-primary)]">
-            {t('knowledge.commercialTruth.title')}
-          </div>
-          <div className="mt-0.5 leading-relaxed text-[var(--text-muted)]">
-            {t('knowledge.commercialTruth.subtitle')}
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-            {t('knowledge.commercialTruth.policy.label')}
-          </span>
-          <div className="flex flex-wrap gap-1">
-            {COMMERCIAL_TRUTH_REVIEW_POLICIES.map((candidate) => (
-              <button
-                key={candidate}
-                type="button"
-                onClick={() => onPolicyChange(candidate)}
-                className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition ${
-                  candidate === policy
-                    ? 'bg-[var(--accent-primary)] text-white'
-                    : 'bg-[var(--surface-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                {commercialTruthPolicyLabel(candidate)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <span className="w-fit rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 font-medium text-[var(--text-primary)]">
-            {t('knowledge.commercialTruth.conflicts')}: {formatNumber(response.conflict_count)}
-          </span>
-          <span className="w-fit rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 font-medium text-[var(--text-primary)]">
-            {t('knowledge.commercialTruth.unresolvedConflicts')}: {formatNumber(response.unresolved_conflict_count)}
-          </span>
-          <span className="w-fit rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 font-medium text-[var(--text-primary)]">
-            {t('knowledge.commercialTruth.surfacePreview')}: {formatNumber(surfacePreviewCount)}
-          </span>
-        </div>
-      </div>
-
-      {surfacePreviewFacts.length > 0 && (
-        <div className="mb-2 rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
-          <div className="font-medium text-[var(--text-primary)]">
-            {t('knowledge.commercialTruth.surfacePreview')}
-          </div>
-          <div className="mt-1 space-y-1">
-            {surfacePreviewFacts.map((fact) => (
-              <div
-                key={fact.fact_id}
-                className="rounded-md bg-[var(--control-bg)] px-2 py-1 text-[10px] text-[var(--text-muted)]"
-              >
-                <span className="font-medium text-[var(--text-primary)]">{fact.item_name}</span>
-                {' · '}
-                <span className="font-semibold text-[var(--text-primary)]">
-                  {fact.value_text || priceFactValueKindLabel(fact.value_kind)}
-                </span>
-                {' · '}
-                {fact.source_title && (
-                  <>
-                    {' · '}
-                    <span title={fact.source_title}>{fact.source_title}</span>
-                  </>
-                )}
-                {fact.source_observed_at && (
-                  <>
-                    {' · '}
-                    <span>{fact.source_observed_at.slice(0, 10)}</span>
-                  </>
-                )}
-                {' · '}
-                {t('knowledge.commercialTruth.fields.sourceKind')}: {fact.source_kind}
-                {fact.source_quote && (
-                  <>
-                    {' · '}
-                    <span title={fact.source_quote}>{fact.source_quote}</span>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {response.fact_count === 0 ? (
-        <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2 text-[var(--text-muted)]">
-          {t('knowledge.commercialTruth.empty')}
-        </div>
-      ) : previewConflicts.length === 0 ? (
-        <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2 text-[var(--text-muted)]">
-          {t('knowledge.commercialTruth.noConflicts')}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {previewConflicts.map((conflict) => (
-            <div
-              key={conflict.identity_key}
-              className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2"
-            >
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-[var(--text-primary)]" title={conflict.identity_key}>
-                    {t('knowledge.commercialTruth.fields.identity')}: {conflict.identity_key}
-                  </div>
-                  <div className="mt-0.5 text-[var(--text-muted)]">
-                    {t('knowledge.commercialTruth.fields.reason')}: {conflict.reason}
-                  </div>
-                </div>
-                <span className="w-fit rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
-                  {commercialTruthResolutionStatusLabel(conflict.resolution_status)}
-                </span>
-              </div>
-
-              <div className="mt-2 space-y-1">
-                {conflict.options.slice(0, 3).map((option) => (
-                  <div
-                    key={option.fact_id}
-                    className="rounded-md bg-[var(--control-bg)] px-2 py-1 text-[10px] text-[var(--text-muted)]"
-                  >
-                    <span className="font-medium text-[var(--text-primary)]">{option.item_name}</span>
-                    {' · '}
-                    <span className="font-semibold text-[var(--text-primary)]">
-                      {option.value_text || priceFactValueKindLabel(option.value_kind)}
-                    </span>
-                    {' · '}
-                    {option.source_title && (
-                      <>
-                        {' · '}
-                        <span title={option.source_title}>{option.source_title}</span>
-                      </>
-                    )}
-                    {option.source_observed_at && (
-                      <>
-                        {' · '}
-                        <span>{option.source_observed_at.slice(0, 10)}</span>
-                      </>
-                    )}
-                    {' · '}
-                    {t('knowledge.commercialTruth.fields.sourceKind')}: {option.source_kind}
-                    {' · '}
-                    {t('knowledge.commercialTruth.fields.sourceAuthority')}: {option.source_authority}
-                    {' · '}
-                    {t('knowledge.commercialTruth.fields.runtimeEligible')}: {commercialTruthRuntimeEligibleText(option.is_runtime_eligible)}
-                    {option.source_quote && (
-                      <>
-                        {' · '}
-                        <span title={option.source_quote}>{option.source_quote}</span>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
 
 
-const PriceFactsSummary: React.FC<{
-  response: KnowledgePriceFactsResponse | undefined;
-  isLoading: boolean;
-  onPublishFact: (fact: KnowledgePriceFact) => void;
-  onRejectFact: (fact: KnowledgePriceFact) => void;
-  mutatingFactId: string | null;
-}> = ({ response, isLoading, onPublishFact, onRejectFact, mutatingFactId }) => {
-  if (isLoading && !response) {
-    return (
-      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>{t('knowledge.priceFacts.loading')}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!response || response.facts.length === 0) return null;
-
-  const previewFacts = response.facts.slice(0, 3);
-  const needsReviewCount = response.facts.filter((fact) => fact.status === 'needs_review').length;
-
-  return (
-    <div className="mb-4 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--accent-primary)]/5 p-3 text-xs">
-      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="font-semibold text-[var(--text-primary)]">
-            {t('knowledge.priceFacts.title')}
-          </div>
-          <div className="mt-0.5 leading-relaxed text-[var(--text-muted)]">
-            {t('knowledge.priceFacts.subtitle')}
-          </div>
-        </div>
-        {needsReviewCount > 0 && (
-          <span className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2 py-0.5 font-medium text-[var(--accent-primary)]">
-            {t('knowledge.priceFacts.status.needsReview')}: {formatNumber(needsReviewCount)}
-          </span>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        {previewFacts.map((fact) => {
-          const firstSourceRef = fact.source_refs[0];
-          const isReviewFact = fact.status === 'needs_review';
-          const isMutatingFact = mutatingFactId === fact.id;
-          return (
-            <div
-              key={fact.id}
-              className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2"
-            >
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-[var(--text-primary)]" title={fact.item_name}>
-                    {fact.item_name}
-                  </div>
-                  <div className="mt-0.5 text-[var(--text-muted)]">
-                    {priceFactValueKindLabel(fact.value_kind)} · {t('knowledge.priceFacts.fields.unit')}: {fact.unit || '—'}
-                  </div>
-                </div>
-                <div className="font-semibold text-[var(--text-primary)]">
-                  {priceFactValueText(fact)}
-                </div>
-              </div>
-
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                  {priceFactStatusLabel(fact.status)}
-                </span>
-                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                  {t('knowledge.priceFacts.fields.confidence')}: {fact.confidence}
-                </span>
-                {Object.keys(fact.variant).length > 0 && (
-                  <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                    {t('knowledge.priceFacts.fields.variant')}: {Object.entries(fact.variant).map(([key, value]) => `${key}=${value}`).join(', ')}
-                  </span>
-                )}
-                {firstSourceRef?.quote && (
-                  <span className="max-w-full truncate rounded-full bg-[var(--control-bg)] px-2 py-0.5" title={firstSourceRef.quote}>
-                    {t('knowledge.priceFacts.fields.source')}: {firstSourceRef.quote}
-                  </span>
-                )}
-              </div>
-
-              {isReviewFact && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onPublishFact(fact)}
-                    disabled={isMutatingFact}
-                    className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
-                  >
-                    {isMutatingFact ? t('common.states.loading') : t('knowledge.priceFacts.actions.publish')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onRejectFact(fact)}
-                    disabled={isMutatingFact}
-                    className="rounded-full bg-[var(--accent-danger-bg)] px-2 py-1 text-[10px] font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80 disabled:cursor-wait disabled:opacity-60"
-                  >
-                    {isMutatingFact ? t('common.states.loading') : t('knowledge.priceFacts.actions.reject')}
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-const DraftsSummary: React.FC<{
-  response: KnowledgeAnswerDraftsResponse | undefined;
-  isLoading: boolean;
-  onOpen: () => void;
-}> = ({ response, isLoading, onOpen }) => {
-  if (isLoading && !response) {
-    return (
-      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>{t('knowledge.drafts.loading')}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (!response) return null;
-
-  const previewDrafts = response.drafts.slice(-3).reverse();
-  const shownCount = response.drafts.length;
-  const totalCount = response.total_count;
-
-  return (
-    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
-      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="font-medium text-[var(--text-primary)]">
-            {t('knowledge.drafts.title', { count: formatNumber(totalCount) })}
-          </div>
-          <div className="mt-0.5 text-[var(--text-muted)]">
-            {t('knowledge.drafts.shownAvailable', {
-              shown: formatNumber(shownCount),
-              total: formatNumber(totalCount),
-            })}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onOpen}
-          className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-        >
-          {t('knowledge.drafts.openAll')}
-        </button>
-      </div>
-
-      {previewDrafts.length > 0 ? (
-        <div className="space-y-1">
-          {previewDrafts.map((draft) => (
-            <div key={draft.id} className="truncate rounded-lg bg-[var(--control-bg)] px-2 py-1.5 font-medium text-[var(--text-primary)]" title={draftTitle(draft)}>
-              {draftTitle(draft)}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-lg bg-[var(--control-bg)] px-2 py-2 text-[var(--text-muted)]">
-          {t('knowledge.drafts.empty')}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const DraftDetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div>
-    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
-    <div className="text-sm leading-relaxed text-[var(--text-primary)]">{children}</div>
-  </div>
-);
-
-const DraftsModal: React.FC<{
-  documentName: string;
-  response: KnowledgeAnswerDraftsResponse | undefined;
-  isLoading: boolean;
-  filter: string;
-  expandedDraftIds: string[];
-  onFilterChange: (value: string) => void;
-  onToggleDraft: (draftId: string) => void;
-  onClose: () => void;
-}> = ({
-  documentName,
-  response,
-  isLoading,
-  filter,
-  expandedDraftIds,
-  onFilterChange,
-  onToggleDraft,
-  onClose,
-}) => {
-  const normalizedFilter = filter.trim().toLowerCase();
-  const expandedSet = useMemo(() => new Set(expandedDraftIds), [expandedDraftIds]);
-  const filteredDrafts = useMemo(() => {
-    const drafts = response?.drafts ?? [];
-    if (!normalizedFilter) return drafts;
-    return drafts.filter((draft) => draftSearchText(draft).includes(normalizedFilter));
-  }, [normalizedFilter, response?.drafts]);
-
-  return (
-    <BaseModal
-      isOpen
-      onClose={onClose}
-      title={t('knowledge.drafts.modalTitle')}
-      cancelLabel={t('common.actions.close')}
-      maxWidthClassName="max-w-4xl"
-    >
-      <div className="-mt-2 max-h-[72vh] overflow-hidden text-sm text-[var(--text-primary)]">
-        <div className="mb-3 text-xs text-[var(--text-muted)]">{documentName}</div>
-        <div className="relative mb-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            value={filter}
-            onChange={(event) => onFilterChange(event.target.value)}
-            placeholder={t('knowledge.drafts.searchPlaceholder')}
-            className="min-h-10 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/15"
-          />
-        </div>
-
-        <div className="max-h-[56vh] overflow-y-auto pr-1">
-          {isLoading && !response && (
-            <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t('knowledge.drafts.loading')}</span>
-            </div>
-          )}
-
-          {response && response.drafts.length === 0 && (
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              {t('knowledge.drafts.empty')}
-            </div>
-          )}
-
-          {response && response.drafts.length > 0 && filteredDrafts.length === 0 && (
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              {t('knowledge.drafts.noFilterResults')}
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {filteredDrafts.map((draft) => {
-              const isExpanded = expandedSet.has(draft.id);
-              const sourceChunkIndexes = draftSourceChunkIndexes(draft);
-
-              return (
-                <div key={draft.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
-                  <button
-                    type="button"
-                    onClick={() => onToggleDraft(draft.id)}
-                    aria-expanded={isExpanded}
-                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--control-bg)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-primary)]/25"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-[var(--text-primary)]" title={draftTitle(draft)}>{draftTitle(draft)}</div>
-                      <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-                        {draft.status && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{draft.status}</span>}
-                        {draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">batch {draft.batch_index}</span>}
-                        {sourceChunkIndexes.length > 0 && (
-                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                            chunks {sourceChunkIndexes.join(', ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isExpanded && (
-                    <div className="space-y-4 border-t border-[var(--border-subtle)] px-3 py-3">
-                      <DraftDetailRow label={t('knowledge.drafts.fields.answer')}>
-                        <div className="whitespace-pre-wrap">{draft.answer || '—'}</div>
-                      </DraftDetailRow>
-
-                      {draft.question_variants.length > 0 && (
-                        <DraftDetailRow label={t('knowledge.drafts.fields.questions')}>
-                          <ul className="list-disc space-y-1 pl-5">
-                            {draft.question_variants.map((question) => <li key={question}>{question}</li>)}
-                          </ul>
-                        </DraftDetailRow>
-                      )}
-
-                      {(draft.synonyms.length > 0 || draft.tags.length > 0) && (
-                        <DraftDetailRow label={t('knowledge.drafts.fields.synonymsTags')}>
-                          <div className="flex flex-wrap gap-1.5">
-                            {[...draft.synonyms, ...draft.tags].map((item) => (
-                              <span key={item} className="rounded-full bg-[var(--control-bg)] px-2 py-1 text-xs text-[var(--text-muted)]">{item}</span>
-                            ))}
-                          </div>
-                        </DraftDetailRow>
-                      )}
-
-                      {draft.source_refs.length > 0 && (
-                        <DraftDetailRow label={t('knowledge.drafts.fields.sources')}>
-                          <div className="space-y-2">
-                            {draft.source_refs.map((ref, index) => (
-                              <div key={`${draft.id}-${index}-${ref.source_chunk_id || ref.source_index || 'source'}`} className="rounded-lg bg-[var(--control-bg)] p-2">
-                                <div className="whitespace-pre-wrap">{ref.quote}</div>
-                                <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-                                  {typeof ref.source_index === 'number' && <span>chunk {ref.source_index}</span>}
-                                  {ref.source_chunk_id && <span>{ref.source_chunk_id}</span>}
-                                  {typeof ref.confidence === 'number' && <span>{formatPreviewScore(ref.confidence)}</span>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </DraftDetailRow>
-                      )}
-
-                      {(draft.status || draft.rejection_reason || draft.batch_index !== null || draft.fragment_index !== null || sourceChunkIndexes.length > 0) && (
-                        <DraftDetailRow label={t('knowledge.drafts.fields.metadata')}>
-                          <div className="flex flex-wrap gap-1.5 text-xs text-[var(--text-muted)]">
-                            {draft.status && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">status: {draft.status}</span>}
-                            {draft.rejection_reason && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">reason: {draft.rejection_reason}</span>}
-                            {draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">batch_index: {draft.batch_index}</span>}
-                            {draft.fragment_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">fragment_index: {draft.fragment_index}</span>}
-                            {sourceChunkIndexes.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_chunk_indexes: {sourceChunkIndexes.join(', ')}</span>}
-                          </div>
-                        </DraftDetailRow>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </BaseModal>
-  );
-};
 
 
-const SourceUnitsSummary: React.FC<{
-  response: KnowledgeSourceUnitsResponse | undefined;
-  isLoading: boolean;
-  onOpen: () => void;
-}> = ({ response, isLoading, onOpen }) => {
-  if (isLoading && !response) {
-    return (
-      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs text-[var(--text-muted)]">
-        <div className="flex items-center gap-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          <span>{t('knowledge.sourceUnits.loading')}</span>
-        </div>
-      </div>
-    );
-  }
 
-  if (!response) return null;
 
-  const previewUnits = response.source_units.slice(0, 3);
-  return (
-    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
-      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="font-medium text-[var(--text-primary)]">
-            {t('knowledge.sourceUnits.total', { total: formatNumber(response.total_count) })}
-          </div>
-          <div className="mt-0.5 text-[var(--text-muted)]">
-            {t('knowledge.sourceUnits.description')}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onOpen}
-          className="w-fit rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-        >
-          {t('knowledge.sourceUnits.open')}
-        </button>
-      </div>
 
-      {previewUnits.length > 0 ? (
-        <div className="space-y-1">
-          {previewUnits.map((sourceUnit) => (
-            <div
-              key={sourceUnit.id}
-              className="truncate rounded-lg bg-[var(--control-bg)] px-2 py-1.5 font-medium text-[var(--text-primary)]"
-              title={sourceUnitTitle(sourceUnit)}
-            >
-              #{sourceUnit.source_index} · {sourceUnitTitle(sourceUnit)}
-              {sourceUnit.draft_count > 0 ? ` · ${t('knowledge.sourceUnits.badge.drafts', { count: formatNumber(sourceUnit.draft_count) })}` : ''}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="rounded-lg bg-[var(--control-bg)] px-2 py-2 text-[var(--text-muted)]">
-          {t('knowledge.sourceUnits.empty')}
-        </div>
-      )}
-    </div>
-  );
-};
 
-const SourceUnitsModal: React.FC<{
-  documentName: string;
-  response: KnowledgeSourceUnitsResponse | undefined;
-  isLoading: boolean;
-  filter: string;
-  expandedSourceUnitIds: string[];
-  onFilterChange: (value: string) => void;
-  onToggleSourceUnit: (sourceUnitId: string) => void;
-  onClose: () => void;
-}> = ({
-  documentName,
-  response,
-  isLoading,
-  filter,
-  expandedSourceUnitIds,
-  onFilterChange,
-  onToggleSourceUnit,
-  onClose,
-}) => {
-  const normalizedFilter = filter.trim().toLowerCase();
-  const expandedSet = useMemo(() => new Set(expandedSourceUnitIds), [expandedSourceUnitIds]);
-  const filteredSourceUnits = useMemo(() => {
-    const sourceUnits = response?.source_units ?? [];
-    if (!normalizedFilter) return sourceUnits;
-    return sourceUnits.filter((sourceUnit) => sourceUnitSearchText(sourceUnit).includes(normalizedFilter));
-  }, [normalizedFilter, response?.source_units]);
 
-  return (
-    <BaseModal
-      isOpen
-      onClose={onClose}
-      title={t('knowledge.sourceUnits.title')}
-      cancelLabel={t('common.actions.close')}
-      maxWidthClassName="max-w-4xl"
-    >
-      <div className="-mt-2 max-h-[72vh] overflow-hidden text-sm text-[var(--text-primary)]">
-        <div className="mb-3 text-xs text-[var(--text-muted)]">{documentName}</div>
-        <div className="relative mb-4">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            value={filter}
-            onChange={(event) => onFilterChange(event.target.value)}
-            placeholder={t('knowledge.sourceUnits.searchPlaceholder')}
-            className="min-h-10 w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)]/15"
-          />
-        </div>
-
-        <div className="max-h-[56vh] overflow-y-auto pr-1">
-          {isLoading && !response && (
-            <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t('knowledge.sourceUnits.loading')}</span>
-            </div>
-          )}
-
-          {response && response.source_units.length === 0 && (
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              {t('knowledge.sourceUnits.empty')}
-            </div>
-          )}
-
-          {response && response.source_units.length > 0 && filteredSourceUnits.length === 0 && (
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-[var(--text-muted)]">
-              {t('knowledge.sourceUnits.noFilterResults')}
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {filteredSourceUnits.map((sourceUnit) => {
-              const isExpanded = expandedSet.has(sourceUnit.id);
-              return (
-                <div key={sourceUnit.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)]">
-                  <button
-                    type="button"
-                    onClick={() => onToggleSourceUnit(sourceUnit.id)}
-                    aria-expanded={isExpanded}
-                    className="flex w-full items-start justify-between gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--control-bg)] focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-primary)]/25"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-[var(--text-primary)]" title={sourceUnitTitle(sourceUnit)}>
-                        #{sourceUnit.source_index} · {sourceUnitTitle(sourceUnit)}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-                        {sourceUnit.draft_count > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{t('knowledge.sourceUnits.badge.drafts', { count: formatNumber(sourceUnit.draft_count) })}</span>}
-                        {typeof sourceUnit.start_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{t('knowledge.sourceUnits.badge.offset', { value: formatNumber(sourceUnit.start_offset) })}</span>}
-                        {typeof sourceUnit.end_offset === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{t('knowledge.sourceUnits.badge.end', { value: formatNumber(sourceUnit.end_offset) })}</span>}
-                      </div>
-                    </div>
-                    <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                  </button>
-
-                  {isExpanded && (
-                    <div className="space-y-4 border-t border-[var(--border-subtle)] px-3 py-3">
-                      <DraftDetailRow label={t('knowledge.sourceUnits.fields.sourceText')}>
-                        <div className="whitespace-pre-wrap">{sourceUnit.content || '—'}</div>
-                      </DraftDetailRow>
-
-                      {sourceUnit.draft_titles.length > 0 && (
-                        <DraftDetailRow label={t('knowledge.sourceUnits.fields.extractedDrafts')}>
-                          <ul className="list-disc space-y-1 pl-5">
-                            {sourceUnit.draft_titles.map((title) => <li key={title}>{title}</li>)}
-                          </ul>
-                        </DraftDetailRow>
-                      )}
-
-                      <DraftDetailRow label={t('knowledge.sourceUnits.fields.metadata')}>
-                        <div className="flex flex-wrap gap-1.5 text-xs text-[var(--text-muted)]">
-                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">{t('knowledge.sourceUnits.badge.id', { value: sourceUnit.id })}</span>
-                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">{t('knowledge.sourceUnits.badge.sourceIndex', { value: formatNumber(sourceUnit.source_index) })}</span>
-                          {typeof sourceUnit.page === 'number' && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">{t('knowledge.sourceUnits.badge.page', { value: formatNumber(sourceUnit.page) })}</span>}
-                        </div>
-                      </DraftDetailRow>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </BaseModal>
-  );
-};
 
 const answerResolutionTraceRows = (
   report: KnowledgeProcessingReport | undefined,
@@ -1481,7 +663,8 @@ const answerResolutionTraceRows = (
 
 const AnswerResolutionTracePanel: React.FC<{
   report: KnowledgeProcessingReport;
-}> = ({ report }) => {
+  isDebugMode?: boolean;
+}> = ({ report, isDebugMode = false }) => {
   const traceRows = answerResolutionTraceRows(report);
   if (traceRows.length === 0) return null;
 
@@ -1508,7 +691,7 @@ const AnswerResolutionTracePanel: React.FC<{
                 {action} · {questionIntent}
               </summary>
               <div className="mt-2 space-y-2 text-[var(--text-muted)]">
-                <div>case_id: {caseId}</div>
+                {isDebugMode && <div>case_id: {caseId}</div>}
                 {canonicalAnswerPreview && (
                   <div className="whitespace-pre-wrap">
                     {t('knowledge.answerResolutionTrace.finalAnswer', { answer: canonicalAnswerPreview })}
@@ -1535,77 +718,6 @@ const AnswerResolutionTracePanel: React.FC<{
             </details>
           );
         })}
-      </div>
-    </div>
-  );
-};
-
-
-interface ImportQualitySummaryProps {
-  report?: KnowledgeImportQualityReport;
-  isLoading: boolean;
-}
-
-const ImportQualitySummary: React.FC<ImportQualitySummaryProps> = ({ report, isLoading }) => {
-  if (isLoading && !report) {
-    return (
-      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-        {t('knowledge.importQuality.loading')}
-      </div>
-    );
-  }
-
-  if (!report) {
-    return null;
-  }
-
-  const visibleWarnings = report.warnings.slice(0, 2);
-
-  return (
-    <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="font-semibold text-[var(--text-primary)]">
-          {t('knowledge.importQuality.title')}
-        </div>
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${importQualityStatusClassName(report.status)}`}>
-          {importQualityStatusLabel(report.status)}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.sourceUnits')}</span>
-          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.source_units_count)}</div>
-        </div>
-        <div>
-          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.extractedText')}</span>
-          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.extracted_text_chars)}</div>
-        </div>
-        <div>
-          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.shortUnits')}</span>
-          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.short_units_count)}</div>
-        </div>
-        <div>
-          <span className="text-[var(--text-muted)]">{t('knowledge.importQuality.tableLikeUnits')}</span>
-          <div className="font-medium text-[var(--text-primary)]">{formatNumber(report.table_like_units_count)}</div>
-        </div>
-      </div>
-
-      {visibleWarnings.length > 0 && (
-        <ul className="mt-3 space-y-1">
-          {visibleWarnings.map((warning) => (
-            <li key={`${warning.code}-${warning.severity}`} className="leading-relaxed">
-              {importQualityWarningLabel(warning.code)}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
-        <span className="font-medium text-[var(--text-primary)]">
-          {t('knowledge.importQuality.recommendedAction')}
-        </span>{' '}
-        <span>{importQualityActionLabel(report.recommended_action)}</span>
       </div>
     </div>
   );
@@ -1679,6 +791,7 @@ export const KnowledgePage: React.FC = () => {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
+  const [isDebugMode, setIsDebugMode] = useState(false);
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
   const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
   const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
@@ -1932,6 +1045,68 @@ export const KnowledgePage: React.FC = () => {
     ? documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null
     : null;
   const sourceUnitsModalResponse = sourceUnitsDocumentId ? sourceUnits[sourceUnitsDocumentId] : undefined;
+
+  const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
+  const documentsGridRef = useRef<HTMLDivElement | null>(null);
+
+
+  const totalDrafts = documents.reduce((acc, doc) => acc + (answerDrafts[doc.id]?.total_count || 0), 0);
+  const firstDraftDocumentId = documents.find((doc) => (answerDrafts[doc.id]?.total_count || 0) > 0)?.id ?? null;
+  const workspaceSummary = buildKnowledgeWorkspaceSummary({
+    documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
+    hasProcessingDocuments,
+    totalDrafts,
+    projectCommercialTruth: projectCommercialTruthReviewQuery.data,
+  });
+  const reviewInboxTasks = buildKnowledgeReviewInbox({
+    documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
+    hasProcessingDocuments,
+    totalDrafts,
+    firstDraftDocumentId,
+    projectCommercialTruth: projectCommercialTruthReviewQuery.data ?? undefined,
+  });
+
+  const handleWorkspacePrimaryAction = (kind: KnowledgeWorkspacePrimaryActionKind): void => {
+    if (kind === 'upload_document') {
+      triggerUpload();
+      return;
+    }
+    if (kind === 'open_drafts') {
+      const target = documents.find((doc) => (answerDrafts[doc.id]?.total_count || 0) > 0);
+      if (target) openDraftsModal(target.id);
+      return;
+    }
+    if (kind === 'review_commercial_truth') {
+      projectCommercialTruthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (kind === 'review_documents') {
+      documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+  const handleReviewTaskAction = (task: KnowledgeReviewTask): void => {
+    if (task.action.kind === 'upload_document') {
+      triggerUpload();
+      return;
+    }
+
+    if (task.action.kind === 'open_drafts') {
+      if (task.action.documentId) {
+        setDraftsDocumentId(task.action.documentId);
+      }
+      return;
+    }
+
+    if (task.action.kind === 'open_commerce') {
+      projectCommercialTruthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
+    if (task.action.kind === 'open_documents') {
+      documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
   const sourceUnitsModalExpandedIds = sourceUnitsDocumentId ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || [] : [];
   const openDraftsModal = (documentId: string): void => {
@@ -2296,6 +1471,15 @@ export const KnowledgePage: React.FC = () => {
           </div>
           <button
             type="button"
+            onClick={() => setIsDebugMode((current) => !current)}
+            aria-pressed={isDebugMode}
+            title={t('knowledge.debugMode.toggleTitle')}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg)]"
+          >
+            {isDebugMode ? t('knowledge.debugMode.on') : t('knowledge.debugMode.off')}
+          </button>
+          <button
+            type="button"
             onClick={() => setIsClearModalOpen(true)}
             className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--accent-danger-bg)] px-4 py-2 text-sm font-medium text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--accent-danger-bg)]/80"
           >
@@ -2303,6 +1487,16 @@ export const KnowledgePage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <KnowledgeWorkspaceSummary
+        summary={workspaceSummary}
+        onPrimaryAction={handleWorkspacePrimaryAction}
+      />
+
+      <KnowledgeReviewInbox
+        tasks={reviewInboxTasks}
+        onTaskAction={handleReviewTaskAction}
+      />
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -2419,7 +1613,7 @@ export const KnowledgePage: React.FC = () => {
               </div>
             ) : (
               <>
-                <PreviewResultCard title={t('knowledge.preview.bestAnswer')} result={previewResult.best_result} />
+                <PreviewResultCard title={t('knowledge.preview.bestAnswer')} result={previewResult.best_result} isDebugMode={isDebugMode} />
                 {previewResult.top_results.length > 1 && (
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold text-[var(--text-primary)]">
@@ -2431,6 +1625,7 @@ export const KnowledgePage: React.FC = () => {
                         title={t('knowledge.preview.additionalMatch')}
                         result={result}
                         compact
+                        isDebugMode={isDebugMode}
                       />
                     ))}
                   </div>
@@ -2453,6 +1648,8 @@ export const KnowledgePage: React.FC = () => {
         </div>
       ) : (
         <>
+
+          <div ref={projectCommercialTruthRef} id="knowledge-project-commercial-truth">
           <CommercialTruthReviewSummary
             response={projectCommercialTruthReviewQuery.data}
             isLoading={
@@ -2463,7 +1660,9 @@ export const KnowledgePage: React.FC = () => {
             onPolicyChange={setCommercialTruthReviewPolicy}
           />
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
+          </div>
+
+          <div ref={documentsGridRef} id="knowledge-documents-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
           {filteredDocuments.map((doc) => {
             const statusBadge = getStatusBadge(doc);
             const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
@@ -2481,211 +1680,66 @@ export const KnowledgePage: React.FC = () => {
               : null;
 
             return (
-              <div
+              <KnowledgeDocumentCard
                 key={doc.id}
-                className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
-              >
-                <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  {(isDocumentRetightenable(doc) || isDocumentProcessing(doc)) && (
-                    <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                      {isDocumentRetightenable(doc) && (
-                        <button
-                          type="button"
-                          onClick={() => retightenMutation.mutate(doc.id)}
-                          disabled={retightenMutation.isPending}
-                          title={isRetighteningThisDoc ? t('knowledge.actions.retightening') : t('knowledge.actions.retightenDuplicates')}
-                          className="rounded-lg p-2 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/10 disabled:cursor-wait disabled:opacity-50"
-                        >
-                          <RefreshCw className={`h-4 w-4 ${isRetighteningThisDoc ? 'animate-spin' : ''}`} />
-                        </button>
-                      )}
-                      {isDocumentProcessing(doc) && (
-                        <button
-                          type="button"
-                          onClick={() => cancelProcessingMutation.mutate(doc.id)}
-                          disabled={cancelProcessingMutation.isPending}
-                          title={t('knowledge.actions.stopProcessing')}
-                          className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
-                        >
-                          <StopCircle className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
-                  {doc.file_name}
-                </h4>
-                <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-                  <span>{formatSize(doc.file_size)}</span>
-                  {doc.preprocessing_mode && (
-                    <>
-                      <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
-                      <span>{knowledgeProcessingModeLabel(doc.preprocessing_mode)}</span>
-                    </>
-                  )}
-                </div>
-
-                <ImportQualitySummary
-                  report={importQualityReport}
-                  isLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
-                />
-
-                <PriceFactsSummary
-                  response={priceFactsResponse}
-                  isLoading={isPriceFactsLoading}
-                  onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
-                  onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
-                  mutatingFactId={mutatingPriceFactId}
-                />
-                <CommercialTruthReviewSummary
-                  response={commercialTruthReviewResponse}
-                  isLoading={isCommercialTruthReviewLoading}
-                  policy={commercialTruthReviewPolicy}
-                  onPolicyChange={setCommercialTruthReviewPolicy}
-                />
-
-                {processingReport && (
-                  <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-                    <div className="mb-1 font-semibold text-[var(--text-primary)]">
-                      {processingReport.title}
-                    </div>
-                    <p className="leading-relaxed">{processingReport.message}</p>
-                    {processingReport.steps.length > 0 && (
-                      <div className="mt-3 space-y-1.5">
-                        {processingReport.steps.map((step) => (
-                          <div
-                            key={step.id}
-                            className={`flex items-start justify-between gap-3 ${step.id === ANSWER_RESOLUTION_STEP_ID ? 'rounded-lg bg-[var(--control-bg)] px-2 py-1' : ''}`}
-                          >
-                            <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
-                            <span className="text-right">
-                              {step.total > 0
-                                ? `${formatNumber(step.current)} / ${formatNumber(step.total)}`
-                                : step.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                doc={doc}
+                statusBadge={statusBadge}
+                isRetighteningThisDoc={isRetighteningThisDoc}
+                processingReport={processingReport}
+                importQualityReport={importQualityReport}
+                priceFactsResponse={priceFactsResponse}
+                commercialTruthReviewResponse={commercialTruthReviewResponse}
+                isPriceFactsLoading={isPriceFactsLoading}
+                isCommercialTruthReviewLoading={isCommercialTruthReviewLoading}
+                mutatingPriceFactId={mutatingPriceFactId}
+                importQualityLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
+                commercialTruthReviewPolicy={commercialTruthReviewPolicy}
+                onPolicyChange={setCommercialTruthReviewPolicy}
+                onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
+                onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
+                actionsNode={(<DocumentActionsBlock showRetighten={isDocumentRetightenable(doc)} showStop={false} isRetighteningThisDoc={isRetighteningThisDoc} retightenPending={retightenMutation.isPending} cancelPending={cancelProcessingMutation.isPending} onRetighten={() => retightenMutation.mutate(doc.id)} onStop={() => cancelProcessingMutation.mutate(doc.id)} />)}
+                processingNode={(
+                  <DocumentProcessingBlock
+                    doc={doc}
+                    processingReport={processingReport}
+                    isDocumentProcessing={isDocumentProcessing(doc)}
+                    processingProgressLabel={processingProgressLabel(doc)}
+                    processingProgressPercent={processingProgressPercent(doc)}
+                    processingStatusMessage={processingStatusMessage(doc)}
+                    processingModelLabel={processingModelLabel(doc)}
+                    processingElapsedLabel={formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}
+                    processingDetailRows={processingDetailRows(doc)}
+                    sourceChunkCount={sourceChunkCount(doc)}
+                    incomingAnswerCandidateCount={incomingAnswerCandidateCount(doc)}
+                    answerResolutionCount={answerResolutionCount(doc)}
+                    documentLlmTokenText={documentLlmTokenText(doc)}
+                    documentLlmModels={documentLlmModels(doc)}
+                    answerDraftsResponse={answerDrafts[doc.id]}
+                    answerDraftsLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
+                    showDraftSummary={draftPreviewDocumentIds.includes(doc.id)}
+                    onOpenDrafts={() => openDraftsModal(doc.id)}
+                    sourceUnitsResponse={sourceUnits[doc.id]}
+                    sourceUnitsLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
+                    showSourceUnitsSummary={sourceUnitDocumentIds.includes(doc.id)}
+                    onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                    onRetryFailedBatches={() => retryFailedBatchesMutation.mutate(doc.id)}
+                    onPublishReady={() => publishReadyMutation.mutate(doc.id)}
+                    retryPending={retryFailedBatchesMutation.isPending}
+                    retryTarget={retryFailedBatchesMutation.variables}
+                    publishReadyPending={publishReadyMutation.isPending}
+                    publishReadyTarget={publishReadyMutation.variables}
+                    formatNumber={formatNumber}
+                    answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
+                    renderDraftsSummary={({ response, isLoading, onOpen }) => (
+                      <DraftsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
                     )}
-                    {draftPreviewDocumentIds.includes(doc.id) && (
-                      <DraftsSummary
-                        response={answerDrafts[doc.id]}
-                        isLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
-                        onOpen={() => openDraftsModal(doc.id)}
-                      />
+                    renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
+                      <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
                     )}
-
-                    {sourceUnitDocumentIds.includes(doc.id) && (
-                      <SourceUnitsSummary
-                        response={sourceUnits[doc.id]}
-                        isLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
-                        onOpen={() => openSourceUnitsModal(doc.id)}
-                      />
-                    )}
-
-                    <AnswerResolutionTracePanel report={processingReport} />
-
-                    {processingReport.actions.length > 0 && (
-                      <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">
-                        <div className="mb-1 font-medium text-[var(--text-primary)]">
-                          {t('knowledge.processReport.nextActions')}
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {processingReport.actions.map((action) => {
-                            const canRetry = action.id === 'retry_failed_batches' && action.enabled;
-                            const canPublishReady = action.id === 'publish_ready' && action.enabled;
-                            const isRetryingThisDoc = retryFailedBatchesMutation.isPending
-                              && retryFailedBatchesMutation.variables === doc.id;
-                            const isPublishingThisDoc = publishReadyMutation.isPending
-                              && publishReadyMutation.variables === doc.id;
-
-                            if (canRetry || canPublishReady) {
-                              const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
-                              const mutationPending = canRetry
-                                ? retryFailedBatchesMutation.isPending
-                                : publishReadyMutation.isPending;
-                              return (
-                                <button
-                                  key={action.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (canRetry) {
-                                      retryFailedBatchesMutation.mutate(doc.id);
-                                    } else {
-                                      publishReadyMutation.mutate(doc.id);
-                                    }
-                                  }}
-                                  disabled={mutationPending}
-                                  className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
-                                >
-                                  {isPending ? t('common.states.loading') : action.label}
-                                </button>
-                              );
-                            }
-
-                            return (
-                              <span
-                                key={action.id}
-                                className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-                              >
-                                {action.label}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} isDebugMode={isDebugMode} />}
+                  />
                 )}
-
-                {isDocumentProcessing(doc) && (
-                  <div className="mb-4 rounded-xl bg-[var(--accent-primary)]/10 p-3">
-                    <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--accent-primary)]">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>{processingProgressLabel(doc)}</span>
-                    </div>
-                    {processingProgressPercent(doc) !== null && (
-                      <div className="mb-2 h-2 overflow-hidden rounded-full bg-[var(--surface-secondary)]">
-                        <div
-                          className="h-full rounded-full bg-[var(--accent-primary)] transition-all"
-                          style={{ width: `${processingProgressPercent(doc)}%` }}
-                        />
-                      </div>
-                    )}
-                    <div className="space-y-1 text-xs text-[var(--text-muted)]">
-                      <div className="text-[var(--text-primary)]">{processingStatusMessage(doc)}</div>
-                      <div>{t('knowledge.document.processingModelPrefix')} {processingModelLabel(doc)}</div>
-                      <div>{t('knowledge.document.elapsedPrefix')} {formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}</div>
-                      {processingDetailRows(doc).map((row) => (
-                        <div key={row}>{row}</div>
-                      ))}
-                      {sourceChunkCount(doc) !== null && (
-                        <div>{t('knowledge.document.sourceChunksPrefix')} {formatNumber(sourceChunkCount(doc) ?? 0)}</div>
-                      )}
-                      {incomingAnswerCandidateCount(doc) !== null && (
-                        <div>{t('knowledge.document.incomingAnswersPrefix')} {formatNumber(incomingAnswerCandidateCount(doc) ?? 0)}</div>
-                      )}
-                      {answerResolutionCount(doc) !== null && (
-                        <div>
-                          Answer resolver calls: {formatNumber(answerResolutionCount(doc) ?? 0)}
-                        </div>
-                      )}
-                      {documentLlmTokenText(doc) !== null && (
-                        <div>{t('knowledge.document.llmTokensPrefix')} {documentLlmTokenText(doc)}</div>
-                      )}
-                      {documentLlmModels(doc) !== null && (
-                        <div>{t('knowledge.document.llmModelsPrefix')} {documentLlmModels(doc)}</div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {(() => {
+                retightenReportNode={(() => {
                   const reportRows = retightenReportRows(doc);
                   if (reportRows.length === 0) return null;
 
@@ -2702,28 +1756,27 @@ export const KnowledgePage: React.FC = () => {
                     </div>
                   );
                 })()}
-
-                {isDocumentCancelled(doc) && (
-                  <div className="mb-4 rounded-xl bg-[var(--accent-warning-bg)] p-3 text-xs leading-relaxed text-[var(--accent-warning)]">
-                    {t('knowledge.document.stoppedWarning')}
-                  </div>
+                hasDrafts={draftPreviewDocumentIds.includes(doc.id)}
+                draftCount={answerDrafts[doc.id]?.total_count}
+                hasSourceUnits={sourceUnitDocumentIds.includes(doc.id)}
+                isDocumentProcessing={isDocumentProcessing(doc)}
+                onOpenDrafts={() => openDraftsModal(doc.id)}
+                onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                onStopProcessing={() => cancelProcessingMutation.mutate(doc.id)}
+                statusNode={(
+                  <DocumentStatusBlock
+                    doc={doc}
+                    statusBadge={statusBadge}
+                    isCancelled={isDocumentCancelled(doc)}
+                    isFailed={isDocumentFailed(doc)}
+                    issueText={documentIssueText(doc)}
+                    processingFailedText={t('knowledge.document.processingFailed')}
+                    stoppedWarningText={t('knowledge.document.stoppedWarning')}
+                  />
                 )}
-
-                {isDocumentFailed(doc) && !isDocumentCancelled(doc) && (
-                  <div className="mb-4 rounded-xl bg-[var(--accent-danger-bg)] p-3 text-xs leading-relaxed text-[var(--accent-danger-text)]">
-                    {documentIssueText(doc) || t('knowledge.document.processingFailed')}
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <span className={`inline-flex min-h-6 items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${statusBadge.className}`}>
-                    {statusBadge.label}
-                  </span>
-                  <span className="text-[10px] text-[var(--text-muted)]">
-                    {new Date(doc.created_at).toLocaleDateString()}
-                  </span>
-                </div>
-              </div>
+                formatSize={formatSize}
+                knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}
+              />
             );
           })}
           </div>
@@ -2739,6 +1792,7 @@ export const KnowledgePage: React.FC = () => {
           expandedDraftIds={draftsModalExpandedIds}
           onFilterChange={(value) => setDraftFilter(draftsDocumentId, value)}
           onToggleDraft={(draftId) => toggleDraftExpanded(draftsDocumentId, draftId)}
+          isDebugMode={isDebugMode}
           onClose={() => setDraftsDocumentId(null)}
         />
       )}
