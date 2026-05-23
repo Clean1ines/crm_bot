@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   BookOpen,
   Upload,
-  FileText,
   Search,
   TestTube2,
   Loader2,
@@ -39,6 +38,7 @@ import { DraftsModal } from './components/DraftsModal';
 import { SourceUnitsSummary } from './components/SourceUnitsSummary';
 import { SourceUnitsModal } from './components/SourceUnitsModal';
 import { DocumentStatusBlock } from './components/DocumentStatusBlock';
+import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
 import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
 import { DocumentActionsBlock } from './components/DocumentActionsBlock';
 
@@ -1693,14 +1693,24 @@ export const KnowledgePage: React.FC = () => {
               : null;
 
             return (
-              <div
+              <KnowledgeDocumentCard
                 key={doc.id}
-                className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
-              >
-                <div className="mb-4 flex items-start justify-between">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
-                    <FileText className="h-5 w-5" />
-                  </div>
+                doc={doc}
+                statusBadge={statusBadge}
+                isRetighteningThisDoc={isRetighteningThisDoc}
+                processingReport={processingReport}
+                importQualityReport={importQualityReport}
+                priceFactsResponse={priceFactsResponse}
+                commercialTruthReviewResponse={commercialTruthReviewResponse}
+                isPriceFactsLoading={isPriceFactsLoading}
+                isCommercialTruthReviewLoading={isCommercialTruthReviewLoading}
+                mutatingPriceFactId={mutatingPriceFactId}
+                importQualityLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
+                commercialTruthReviewPolicy={commercialTruthReviewPolicy}
+                onPolicyChange={setCommercialTruthReviewPolicy}
+                onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
+                onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
+                actionsNode={(
                   <DocumentActionsBlock
                     showRetighten={isDocumentRetightenable(doc)}
                     showStop={isDocumentProcessing(doc)}
@@ -1710,80 +1720,49 @@ export const KnowledgePage: React.FC = () => {
                     onRetighten={() => retightenMutation.mutate(doc.id)}
                     onStop={() => cancelProcessingMutation.mutate(doc.id)}
                   />
-                </div>
-
-                <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
-                  {doc.file_name}
-                </h4>
-                <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
-                  <span>{formatSize(doc.file_size)}</span>
-                  {doc.preprocessing_mode && (
-                    <>
-                      <span className="h-1 w-1 rounded-full bg-[var(--border-subtle)]" />
-                      <span>{knowledgeProcessingModeLabel(doc.preprocessing_mode)}</span>
-                    </>
-                  )}
-                </div>
-
-                <ImportQualitySummary
-                  report={importQualityReport}
-                  isLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
-                />
-
-                <PriceFactsSummary
-                  response={priceFactsResponse}
-                  isLoading={isPriceFactsLoading}
-                  onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
-                  onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
-                  mutatingFactId={mutatingPriceFactId}
-                />
-                <CommercialTruthReviewSummary
-                  response={commercialTruthReviewResponse}
-                  isLoading={isCommercialTruthReviewLoading}
-                  policy={commercialTruthReviewPolicy}
-                  onPolicyChange={setCommercialTruthReviewPolicy}
-                />
-
-                <DocumentProcessingBlock
-                  doc={doc}
-                  processingReport={processingReport}
-                  isDocumentProcessing={isDocumentProcessing(doc)}
-                  processingProgressLabel={processingProgressLabel(doc)}
-                  processingProgressPercent={processingProgressPercent(doc)}
-                  processingStatusMessage={processingStatusMessage(doc)}
-                  processingModelLabel={processingModelLabel(doc)}
-                  processingElapsedLabel={formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}
-                  processingDetailRows={processingDetailRows(doc)}
-                  sourceChunkCount={sourceChunkCount(doc)}
-                  incomingAnswerCandidateCount={incomingAnswerCandidateCount(doc)}
-                  answerResolutionCount={answerResolutionCount(doc)}
-                  documentLlmTokenText={documentLlmTokenText(doc)}
-                  documentLlmModels={documentLlmModels(doc)}
-                  answerDraftsResponse={answerDrafts[doc.id]}
-                  answerDraftsLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
-                  showDraftSummary={draftPreviewDocumentIds.includes(doc.id)}
-                  onOpenDrafts={() => openDraftsModal(doc.id)}
-                  sourceUnitsResponse={sourceUnits[doc.id]}
-                  sourceUnitsLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
-                  showSourceUnitsSummary={sourceUnitDocumentIds.includes(doc.id)}
-                  onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
-                  onRetryFailedBatches={() => retryFailedBatchesMutation.mutate(doc.id)}
-                  onPublishReady={() => publishReadyMutation.mutate(doc.id)}
-                  retryPending={retryFailedBatchesMutation.isPending}
-                  retryTarget={retryFailedBatchesMutation.variables}
-                  publishReadyPending={publishReadyMutation.isPending}
-                  publishReadyTarget={publishReadyMutation.variables}
-                  formatNumber={formatNumber}
-                  answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
-                  renderDraftsSummary={({ response, isLoading, onOpen }) => (
-                    <DraftsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
-                  )}
-                  renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
-                    <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
-                  )}
-                  renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} />}
-                />
-                {(() => {
+                )}
+                processingNode={(
+                  <DocumentProcessingBlock
+                    doc={doc}
+                    processingReport={processingReport}
+                    isDocumentProcessing={isDocumentProcessing(doc)}
+                    processingProgressLabel={processingProgressLabel(doc)}
+                    processingProgressPercent={processingProgressPercent(doc)}
+                    processingStatusMessage={processingStatusMessage(doc)}
+                    processingModelLabel={processingModelLabel(doc)}
+                    processingElapsedLabel={formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}
+                    processingDetailRows={processingDetailRows(doc)}
+                    sourceChunkCount={sourceChunkCount(doc)}
+                    incomingAnswerCandidateCount={incomingAnswerCandidateCount(doc)}
+                    answerResolutionCount={answerResolutionCount(doc)}
+                    documentLlmTokenText={documentLlmTokenText(doc)}
+                    documentLlmModels={documentLlmModels(doc)}
+                    answerDraftsResponse={answerDrafts[doc.id]}
+                    answerDraftsLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
+                    showDraftSummary={draftPreviewDocumentIds.includes(doc.id)}
+                    onOpenDrafts={() => openDraftsModal(doc.id)}
+                    sourceUnitsResponse={sourceUnits[doc.id]}
+                    sourceUnitsLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
+                    showSourceUnitsSummary={sourceUnitDocumentIds.includes(doc.id)}
+                    onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                    onRetryFailedBatches={() => retryFailedBatchesMutation.mutate(doc.id)}
+                    onPublishReady={() => publishReadyMutation.mutate(doc.id)}
+                    retryPending={retryFailedBatchesMutation.isPending}
+                    retryTarget={retryFailedBatchesMutation.variables}
+                    publishReadyPending={publishReadyMutation.isPending}
+                    publishReadyTarget={publishReadyMutation.variables}
+                    formatNumber={formatNumber}
+                    answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
+                    renderDraftsSummary={({ response, isLoading, onOpen }) => (
+                      <DraftsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
+                    )}
+                    renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
+                      <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
+                    )}
+                    renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} />}
+                  />
+                )}
+                retightenReportNode={(() => {
                   const reportRows = retightenReportRows(doc);
                   if (reportRows.length === 0) return null;
 
@@ -1800,17 +1779,23 @@ export const KnowledgePage: React.FC = () => {
                     </div>
                   );
                 })()}
-
-                <DocumentStatusBlock
-                  doc={doc}
-                  statusBadge={statusBadge}
-                  isCancelled={isDocumentCancelled(doc)}
-                  isFailed={isDocumentFailed(doc)}
-                  issueText={documentIssueText(doc)}
-                  processingFailedText={t('knowledge.document.processingFailed')}
-                  stoppedWarningText={t('knowledge.document.stoppedWarning')}
-                />
-              </div>
+                statusNode={(
+                  <DocumentStatusBlock
+                    doc={doc}
+                    statusBadge={statusBadge}
+                    isCancelled={isDocumentCancelled(doc)}
+                    isFailed={isDocumentFailed(doc)}
+                    issueText={documentIssueText(doc)}
+                    processingFailedText={t('knowledge.document.processingFailed')}
+                    stoppedWarningText={t('knowledge.document.stoppedWarning')}
+                  />
+                )}
+                formatSize={formatSize}
+                knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}
+                ImportQualitySummary={ImportQualitySummary}
+                PriceFactsSummary={PriceFactsSummary}
+                CommercialTruthReviewSummary={CommercialTruthReviewSummary}
+              />
             );
           })}
           </div>
