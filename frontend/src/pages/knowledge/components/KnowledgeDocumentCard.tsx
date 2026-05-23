@@ -1,7 +1,7 @@
 import React from 'react';
 import { FileText } from 'lucide-react';
 
-import { KnowledgeDocumentActionsMenu } from './KnowledgeDocumentActionsMenu';
+import { KnowledgeDocumentDetailsPanel } from './KnowledgeDocumentDetailsPanel';
 
 import { t } from '@shared/i18n';
 import { type KnowledgeCommercialTruthReviewPolicy, type KnowledgeCommercialTruthReviewResponse, type KnowledgePriceFact, type KnowledgePriceFactsResponse, type KnowledgeImportQualityReport, type KnowledgeProcessingReport } from '@shared/api/modules/knowledge';
@@ -122,7 +122,7 @@ export const KnowledgeDocumentCard: React.FC<{
         ) : (
           <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-muted)]">{t('knowledge.documentCard.primaryAction.details')}</span>
         )}
-        <KnowledgeDocumentActionsMenu
+        <KnowledgeDocumentDetailsPanel
           actionsNode={actionsNode}
           technicalNode={(
             <>

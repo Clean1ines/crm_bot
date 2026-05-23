@@ -2,7 +2,7 @@ import React from 'react';
 
 import { t } from '@shared/i18n';
 
-export const KnowledgeDocumentActionsMenu: React.FC<{
+export const KnowledgeDocumentDetailsPanel: React.FC<{
   actionsNode: React.ReactNode;
   technicalNode: React.ReactNode;
 }> = ({ actionsNode, technicalNode }) => (
