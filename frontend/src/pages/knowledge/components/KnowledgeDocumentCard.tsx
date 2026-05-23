@@ -2,6 +2,7 @@ import React from 'react';
 import { FileText } from 'lucide-react';
 
 import { KnowledgeDocumentDetailsPanel } from './KnowledgeDocumentDetailsPanel';
+import { ImportQualitySummary } from './ImportQualitySummary';
 
 import { t } from '@shared/i18n';
 import { type KnowledgeCommercialTruthReviewPolicy, type KnowledgeCommercialTruthReviewResponse, type KnowledgePriceFact, type KnowledgePriceFactsResponse, type KnowledgeImportQualityReport, type KnowledgeProcessingReport } from '@shared/api/modules/knowledge';
@@ -44,7 +45,6 @@ export const KnowledgeDocumentCard: React.FC<{
   onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
-  ImportQualitySummary: React.ComponentType<{ report?: KnowledgeImportQualityReport; isLoading: boolean }>;
   PriceFactsSummary: React.ComponentType<{
     response: KnowledgePriceFactsResponse | undefined;
     isLoading: boolean;
@@ -83,7 +83,6 @@ export const KnowledgeDocumentCard: React.FC<{
   onStopProcessing,
   formatSize,
   knowledgeProcessingModeLabel,
-  ImportQualitySummary,
   PriceFactsSummary,
   CommercialTruthReviewSummary,
 }) => (
