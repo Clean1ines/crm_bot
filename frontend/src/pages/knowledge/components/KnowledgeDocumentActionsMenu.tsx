@@ -8,7 +8,7 @@ export const KnowledgeDocumentActionsMenu: React.FC<{
 }> = ({ actionsNode, technicalNode }) => (
   <details className="mb-3 rounded-xl bg-[var(--surface-secondary)] p-2 text-xs text-[var(--text-muted)]">
     <summary className="cursor-pointer list-none font-medium text-[var(--text-primary)]">
-      {t('knowledge.processReport.nextActions')}
+      {t('knowledge.documentCard.detailsSummary')}
     </summary>
     <div className="mt-2 space-y-2">
       {actionsNode}

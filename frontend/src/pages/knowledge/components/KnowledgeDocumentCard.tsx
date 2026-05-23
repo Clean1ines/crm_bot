@@ -3,6 +3,7 @@ import { FileText } from 'lucide-react';
 
 import { KnowledgeDocumentActionsMenu } from './KnowledgeDocumentActionsMenu';
 
+import { t } from '@shared/i18n';
 import { type KnowledgeCommercialTruthReviewPolicy, type KnowledgeCommercialTruthReviewResponse, type KnowledgePriceFact, type KnowledgePriceFactsResponse, type KnowledgeImportQualityReport, type KnowledgeProcessingReport } from '@shared/api/modules/knowledge';
 
 type DocCardDocument = {
@@ -100,7 +101,7 @@ export const KnowledgeDocumentCard: React.FC<{
             onClick={onStopProcessing}
             className="rounded-full bg-[var(--accent-danger-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80"
           >
-            {` ${'Stop'} `}
+            {t('knowledge.documentCard.primaryAction.stop')}
           </button>
         ) : hasDrafts ? (
           <button
@@ -108,7 +109,7 @@ export const KnowledgeDocumentCard: React.FC<{
             onClick={onOpenDrafts}
             className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
           >
-            {` ${'Drafts'} `}
+            {t('knowledge.documentCard.primaryAction.openDrafts')}
           </button>
         ) : hasSourceUnits ? (
           <button
@@ -116,10 +117,10 @@ export const KnowledgeDocumentCard: React.FC<{
             onClick={onOpenSourceUnits}
             className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
           >
-            {` ${'Sources'} `}
+            {t('knowledge.documentCard.primaryAction.openSources')}
           </button>
         ) : (
-          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-muted)]">Details</span>
+          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-muted)]">{t('knowledge.documentCard.primaryAction.details')}</span>
         )}
         <KnowledgeDocumentActionsMenu
           actionsNode={actionsNode}
