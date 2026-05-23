@@ -568,7 +568,8 @@ const PreviewResultCard: React.FC<{
   title: string;
   result: KnowledgePreviewResult;
   compact?: boolean;
-}> = ({ title, result, compact = false }) => (
+  isDebugMode?: boolean;
+}> = ({ title, result, compact = false, isDebugMode = false }) => (
   <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
@@ -583,8 +584,8 @@ const PreviewResultCard: React.FC<{
       <span>{t('knowledge.preview.matchFound')}</span>
       {result.source && <span>{t('knowledge.preview.sourcePrefix')} {result.source}</span>}
       {result.document_status && <span>{t('knowledge.preview.documentPrefix')} {knowledgeDocumentStatusLabel(result.document_status)}</span>}
-      {result.entry_kind && <span>entry: {result.entry_kind}</span>}
-      {result.trace && (
+      {isDebugMode && result.entry_kind && <span>entry: {result.entry_kind}</span>}
+      {isDebugMode && result.trace && (
         <span>
           {t('knowledge.preview.trace.summary', {
             fields: result.trace.matched_fields.map(previewTraceLabel).join(', ') || t('knowledge.preview.trace.none'),
@@ -662,7 +663,8 @@ const answerResolutionTraceRows = (
 
 const AnswerResolutionTracePanel: React.FC<{
   report: KnowledgeProcessingReport;
-}> = ({ report }) => {
+  isDebugMode?: boolean;
+}> = ({ report, isDebugMode = false }) => {
   const traceRows = answerResolutionTraceRows(report);
   if (traceRows.length === 0) return null;
 
@@ -689,7 +691,7 @@ const AnswerResolutionTracePanel: React.FC<{
                 {action} · {questionIntent}
               </summary>
               <div className="mt-2 space-y-2 text-[var(--text-muted)]">
-                <div>case_id: {caseId}</div>
+                {isDebugMode && <div>case_id: {caseId}</div>}
                 {canonicalAnswerPreview && (
                   <div className="whitespace-pre-wrap">
                     {t('knowledge.answerResolutionTrace.finalAnswer', { answer: canonicalAnswerPreview })}
@@ -789,6 +791,7 @@ export const KnowledgePage: React.FC = () => {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
+  const [isDebugMode, setIsDebugMode] = useState(false);
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
   const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
   const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
@@ -1468,6 +1471,15 @@ export const KnowledgePage: React.FC = () => {
           </div>
           <button
             type="button"
+            onClick={() => setIsDebugMode((current) => !current)}
+            aria-pressed={isDebugMode}
+            title={t('knowledge.debugMode.toggleTitle')}
+            className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg)]"
+          >
+            {isDebugMode ? t('knowledge.debugMode.on') : t('knowledge.debugMode.off')}
+          </button>
+          <button
+            type="button"
             onClick={() => setIsClearModalOpen(true)}
             className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--accent-danger-bg)] px-4 py-2 text-sm font-medium text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--accent-danger-bg)]/80"
           >
@@ -1601,7 +1613,7 @@ export const KnowledgePage: React.FC = () => {
               </div>
             ) : (
               <>
-                <PreviewResultCard title={t('knowledge.preview.bestAnswer')} result={previewResult.best_result} />
+                <PreviewResultCard title={t('knowledge.preview.bestAnswer')} result={previewResult.best_result} isDebugMode={isDebugMode} />
                 {previewResult.top_results.length > 1 && (
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold text-[var(--text-primary)]">
@@ -1613,6 +1625,7 @@ export const KnowledgePage: React.FC = () => {
                         title={t('knowledge.preview.additionalMatch')}
                         result={result}
                         compact
+                        isDebugMode={isDebugMode}
                       />
                     ))}
                   </div>
@@ -1723,7 +1736,7 @@ export const KnowledgePage: React.FC = () => {
                     renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
                       <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
                     )}
-                    renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} />}
+                    renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} isDebugMode={isDebugMode} />}
                   />
                 )}
                 retightenReportNode={(() => {
@@ -1779,6 +1792,7 @@ export const KnowledgePage: React.FC = () => {
           expandedDraftIds={draftsModalExpandedIds}
           onFilterChange={(value) => setDraftFilter(draftsDocumentId, value)}
           onToggleDraft={(draftId) => toggleDraftExpanded(draftsDocumentId, draftId)}
+          isDebugMode={isDebugMode}
           onClose={() => setDraftsDocumentId(null)}
         />
       )}
