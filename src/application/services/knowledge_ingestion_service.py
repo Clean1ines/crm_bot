@@ -1451,6 +1451,84 @@ def _answer_resolution_token_similarity(
     return len(left_set & right_set) / len(left_set | right_set)
 
 
+def _answer_resolution_token_overlap_coverage(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+) -> float:
+    left_set = set(left)
+    right_set = set(right)
+
+    if not left_set or not right_set:
+        return 0.0
+
+    return len(left_set & right_set) / min(len(left_set), len(right_set))
+
+
+def _answer_resolution_primary_intent_tokens(
+    entry: KnowledgePreprocessingEntry,
+) -> tuple[str, ...]:
+    primary_intent = _clean_optional_text(
+        entry.canonical_question or _question_intent_primary_question(entry)
+    )
+    if primary_intent:
+        return _answer_resolution_tokens_from_text(primary_intent)
+
+    return _answer_resolution_tokens_from_text(entry.title)
+
+
+def _answer_resolution_same_intent_summary_score(
+    left: KnowledgePreprocessingEntry,
+    right: KnowledgePreprocessingEntry,
+) -> float:
+    """Score generic same-intent summary/full-answer candidates.
+
+    This does not merge entries deterministically. It only decides whether the
+    pair is worth sending to the LLM answer resolver. The rule is topic-agnostic:
+    it uses question/intent overlap, answer token coverage and asymmetric answer
+    length, not domain keyword dictionaries.
+    """
+
+    left_answer = _clean_optional_text(left.answer)
+    right_answer = _clean_optional_text(right.answer)
+    if not left_answer or not right_answer:
+        return 0.0
+
+    left_answer_tokens = _answer_resolution_tokens_from_text(left_answer)
+    right_answer_tokens = _answer_resolution_tokens_from_text(right_answer)
+    if len(left_answer_tokens) < 4 or len(right_answer_tokens) < 4:
+        return 0.0
+
+    primary_intent_coverage = _answer_resolution_token_overlap_coverage(
+        _answer_resolution_primary_intent_tokens(left),
+        _answer_resolution_primary_intent_tokens(right),
+    )
+    broad_intent_coverage = _answer_resolution_token_overlap_coverage(
+        _answer_resolution_question_intent_tokens(left),
+        _answer_resolution_question_intent_tokens(right),
+    )
+    answer_coverage = _answer_resolution_token_overlap_coverage(
+        left_answer_tokens,
+        right_answer_tokens,
+    )
+
+    shortest_answer_length = max(1, min(len(left_answer), len(right_answer)))
+    longest_answer_length = max(len(left_answer), len(right_answer))
+    length_ratio = longest_answer_length / shortest_answer_length
+
+    intent_coverage = max(primary_intent_coverage, broad_intent_coverage)
+
+    if intent_coverage < 0.62:
+        return 0.0
+    if answer_coverage < 0.34:
+        return 0.0
+    if length_ratio < 1.35 and answer_coverage < 0.56:
+        return 0.0
+
+    length_bonus = min(length_ratio, 4.0) / 4.0
+    score = (intent_coverage * 0.48) + (answer_coverage * 0.42) + (length_bonus * 0.10)
+    return min(0.94, max(0.24, score))
+
+
 def _answer_resolution_question_intent_text(entry: KnowledgePreprocessingEntry) -> str:
     return " ".join(
         part
@@ -1578,9 +1656,14 @@ def _answer_resolution_suspect_pairs_from_entries(
 
     for left_index, left_entry in enumerate(entries):
         for right_index in range(left_index + 1, len(entries)):
-            score = _answer_resolution_entry_pair_score(
+            lexical_score = _answer_resolution_entry_pair_score(
                 left_entry, entries[right_index]
             )
+            semantic_score = _answer_resolution_same_intent_summary_score(
+                left_entry,
+                entries[right_index],
+            )
+            score = max(lexical_score, semantic_score)
             if score >= 0.24:
                 pairs.append(
                     _AnswerResolutionSuspectPair(
@@ -1598,17 +1681,74 @@ def _answer_resolution_suspect_pairs_from_entries(
     )
 
 
+def _answer_resolution_case_components_from_pairs(
+    *,
+    entry_count: int,
+    pairs: Sequence[_AnswerResolutionSuspectPair],
+) -> tuple[tuple[int, ...], ...]:
+    if entry_count < 2 or not pairs:
+        return ()
+
+    parent = list(range(entry_count))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root == right_root:
+            return
+        if left_root < right_root:
+            parent[right_root] = left_root
+        else:
+            parent[left_root] = right_root
+
+    for pair in pairs:
+        union(pair.left_index, pair.right_index)
+
+    component_by_root: dict[int, list[int]] = {}
+    for index in range(entry_count):
+        root = find(index)
+        component_by_root.setdefault(root, []).append(index)
+
+    best_score_by_component: dict[tuple[int, ...], float] = {}
+    for component_indexes in component_by_root.values():
+        component = tuple(sorted(component_indexes))
+        if len(component) < 2:
+            continue
+        best_score_by_component[component] = max(
+            pair.score
+            for pair in pairs
+            if pair.left_index in component and pair.right_index in component
+        )
+
+    return tuple(
+        component
+        for component, _score in sorted(
+            best_score_by_component.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    )
+
+
 def _answer_resolution_cases_from_entries(
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> tuple[KnowledgeAnswerResolutionCase, ...]:
     if len(entries) < 2:
         return ()
 
+    pairs = _answer_resolution_suspect_pairs_from_entries(entries)
+    components = _answer_resolution_case_components_from_pairs(
+        entry_count=len(entries),
+        pairs=pairs,
+    )
+
     cases: list[KnowledgeAnswerResolutionCase] = []
-    for pair in _answer_resolution_suspect_pairs_from_entries(entries)[
-        :KCD_STAGE_K8_ANSWER_RESOLUTION_MAX_GROUPS
-    ]:
-        component = (pair.left_index, pair.right_index)
+    for component in components[:KCD_STAGE_K8_ANSWER_RESOLUTION_MAX_GROUPS]:
         digest = hashlib.sha256(
             ",".join(
                 _answer_resolution_candidate_id(index) for index in component
