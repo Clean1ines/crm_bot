@@ -3,8 +3,6 @@ import {
   BookOpen,
   Upload,
   FileText,
-  StopCircle,
-  RefreshCw,
   Search,
   TestTube2,
   Loader2,
@@ -42,6 +40,7 @@ import { SourceUnitsSummary } from './components/SourceUnitsSummary';
 import { SourceUnitsModal } from './components/SourceUnitsModal';
 import { DocumentStatusBlock } from './components/DocumentStatusBlock';
 import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
+import { DocumentActionsBlock } from './components/DocumentActionsBlock';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -1702,32 +1701,15 @@ export const KnowledgePage: React.FC = () => {
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
                     <FileText className="h-5 w-5" />
                   </div>
-                  {(isDocumentRetightenable(doc) || isDocumentProcessing(doc)) && (
-                    <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
-                      {isDocumentRetightenable(doc) && (
-                        <button
-                          type="button"
-                          onClick={() => retightenMutation.mutate(doc.id)}
-                          disabled={retightenMutation.isPending}
-                          title={isRetighteningThisDoc ? t('knowledge.actions.retightening') : t('knowledge.actions.retightenDuplicates')}
-                          className="rounded-lg p-2 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/10 disabled:cursor-wait disabled:opacity-50"
-                        >
-                          <RefreshCw className={`h-4 w-4 ${isRetighteningThisDoc ? 'animate-spin' : ''}`} />
-                        </button>
-                      )}
-                      {isDocumentProcessing(doc) && (
-                        <button
-                          type="button"
-                          onClick={() => cancelProcessingMutation.mutate(doc.id)}
-                          disabled={cancelProcessingMutation.isPending}
-                          title={t('knowledge.actions.stopProcessing')}
-                          className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
-                        >
-                          <StopCircle className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <DocumentActionsBlock
+                    showRetighten={isDocumentRetightenable(doc)}
+                    showStop={isDocumentProcessing(doc)}
+                    isRetighteningThisDoc={isRetighteningThisDoc}
+                    retightenPending={retightenMutation.isPending}
+                    cancelPending={cancelProcessingMutation.isPending}
+                    onRetighten={() => retightenMutation.mutate(doc.id)}
+                    onStop={() => cancelProcessingMutation.mutate(doc.id)}
+                  />
                 </div>
 
                 <h4 className="mb-1 truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
