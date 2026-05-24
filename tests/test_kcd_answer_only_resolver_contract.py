@@ -7,6 +7,7 @@ import pytest
 
 from src.application.services.knowledge_ingestion_service import (
     _apply_answer_resolution_decisions,
+    _answer_resolution_decision_is_publishable,
     _mechanically_cleanup_compiled_entries,
     _answer_resolution_decisions_with_case_candidate_ids,
     _answer_resolution_cases_from_entries,
@@ -196,6 +197,54 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
         "Возврат зависит от ситуации; решение принимает менеджер."
     )
     assert "LLM" not in entry.embedding_text
+
+
+def test_validator_rejects_naive_concatenation() -> None:
+    entries = (
+        _entry(title="A", question="Q", answer="Условие A."),
+        _entry(title="B", question="Q", answer="Условие B."),
+    )
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="case-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_answer="Условие A. Условие B.",
+    )
+    validation = _answer_resolution_decision_is_publishable(
+        decision=decision, entries=entries
+    )
+    assert validation.publishable is False
+    assert validation.fallback_action == "keep_separate"
+
+
+def test_manual_merge_answer_drops_lifecycle_tail() -> None:
+    entries = (
+        _entry(
+            title="Merge",
+            question="Как вручную объединить дубли?",
+            answer="Откройте карточку и вручную объедините дубли, затем проверьте ответ.",
+            source_excerpt="Открыть карточку и объединить дубли.",
+        ),
+        _entry(
+            title="Merge 2",
+            question="Как вручную объединить дубли?",
+            answer="После объединения проверьте итог и сохраните.",
+            source_excerpt="Проверить итог перед сохранением.",
+        ),
+    )
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="case-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_answer=(
+            "Откройте карточку и вручную объедините дубли, затем проверьте итог и сохраните. "
+            "компиляция знаний, курация, merge, hide, reject, проверка качества"
+        ),
+    )
+    validation = _answer_resolution_decision_is_publishable(
+        decision=decision, entries=entries
+    )
+    assert validation.publishable is False
 
 
 def test_answer_resolution_parser_rejects_forbidden_output_fields() -> None:
