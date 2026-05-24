@@ -17,6 +17,7 @@ import { useParams } from 'react-router-dom';
 import { getErrorMessage } from '@shared/api/core/errors';
 
 import { knowledgeApi } from '@shared/api/modules/knowledge';
+import { knowledgeCurationApi, type KnowledgeCurationAction } from '@shared/api/modules/knowledgeCuration';
 import {
   isRagEvalProposedActionType,
   ragEvalApi,
@@ -30,6 +31,8 @@ import {
   type RagEvalProgressPayload,
   type RagEvalProposedActionType,
   type RagEvalResultSummary,
+  type RagEvalLatestReviewResponse,
+  type RagEvalQuestionReviewState,
   type RagEvalReviewGroup,
   type RagEvalReviewPayload,
   type RagEvalReviewQuestion,
@@ -42,6 +45,8 @@ interface Document {
   file_size: number;
   status: 'pending' | 'processing' | 'processed' | 'error';
   chunk_count: number;
+  structured_entries?: number;
+  structured_chunk_count?: number;
   created_at: string;
 }
 
@@ -300,6 +305,47 @@ const readinessLabel = (value: unknown): string => {
   if (readiness === 'not_ready') return t('ragEval.readiness.notReady');
   return readiness || t('ragEval.readiness.noStatus');
 };
+
+const documentRuntimeEntryCount = (doc: Document | null | undefined): number => {
+  if (!doc) return 0;
+  if (typeof doc.structured_entries === 'number') return Math.max(0, doc.structured_entries);
+  if (typeof doc.structured_chunk_count === 'number') return Math.max(0, doc.structured_chunk_count);
+  return 0;
+};
+
+const latestAppliedCurationActionTimeMs = (actions: KnowledgeCurationAction[]): number | null => {
+  let latest: number | null = null;
+  const appliedStatuses = new Set(['applied', 'applied_with_warning']);
+  for (const action of actions) {
+    if (!appliedStatuses.has(action.status)) continue;
+    const timestamp = timestampMs(action.applied_at || action.updated_at || action.created_at);
+    if (timestamp === null) continue;
+    latest = latest === null ? timestamp : Math.max(latest, timestamp);
+  }
+  return latest;
+};
+
+const reviewRunTimeMs = (review: RagEvalReviewPayload | null): number | null => {
+  if (!review) return null;
+  const run = getRecord(review.run);
+  return timestampMs(run.updated_at) ?? timestampMs(run.created_at);
+};
+
+const applyQuestionReviewState = (
+  review: RagEvalReviewPayload,
+  questionId: string,
+  reviewState: RagEvalQuestionReviewState,
+): RagEvalReviewPayload => ({
+  ...review,
+  groups: review.groups.map((group) => ({
+    ...group,
+    questions: group.questions.map((question) => (
+      question.question_id === questionId
+        ? { ...question, review: reviewState }
+        : question
+    )),
+  })),
+});
 
 const MetricPill: React.FC<{ label: string; value: string | number }> = ({ label, value }) => (
   <div className="rounded-xl bg-[var(--surface-elevated)] px-3 py-2 shadow-[var(--shadow-card)]">
@@ -692,7 +738,23 @@ const questionStatusIcon = (statusValue: RagEvalReviewQuestion['retrieval_status
   return '❌';
 };
 
-const DocumentEvalOverviewCard: React.FC<{ review: RagEvalReviewPayload; documentName: string; onShowProblems: () => void }> = ({ review, documentName, onShowProblems }) => {
+const DocumentEvalOverviewCard: React.FC<{
+  review: RagEvalReviewPayload;
+  documentName: string;
+  activeRuntimeEntryCount: number;
+  isStaleAfterCuration: boolean;
+  onShowProblems: () => void;
+  onShowGoodCandidates: () => void;
+  onShowConfusedFragments: () => void;
+}> = ({
+  review,
+  documentName,
+  activeRuntimeEntryCount,
+  isStaleAfterCuration,
+  onShowProblems,
+  onShowGoodCandidates,
+  onShowConfusedFragments,
+}) => {
   const summary = review.summary;
   return (
     <section className="overflow-hidden rounded-3xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-7">
@@ -713,7 +775,10 @@ const DocumentEvalOverviewCard: React.FC<{ review: RagEvalReviewPayload; documen
         </div>
       </div>
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-        <StatPill label={t('ragEval.review.overview.fragments')} value={formatNumber(summary.fragments_total)} />
+        <StatPill
+          label={t('ragEval.review.overview.publishedRuntime')}
+          value={formatNumber(activeRuntimeEntryCount || summary.fragments_total)}
+        />
         <StatPill label={t('ragEval.review.overview.questions')} value={formatNumber(summary.questions_total)} />
         <StatPill label={t('ragEval.review.overview.searchProblems')} value={formatNumber(summary.problem_questions)} />
         <StatPill label={t('ragEval.review.overview.reliable')} value={formatNumber(summary.reliable_questions)} />
@@ -722,8 +787,13 @@ const DocumentEvalOverviewCard: React.FC<{ review: RagEvalReviewPayload; documen
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
         <button type="button" onClick={onShowProblems} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white">{t('ragEval.review.overview.reviewProblems', { count: formatNumber(summary.problem_questions) })}</button>
-        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.showGoodQuestions')}</button>
-        <button type="button" className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.showConfusedFragments')}</button>
+        <button type="button" onClick={onShowGoodCandidates} className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.showGoodQuestions')}</button>
+        <button type="button" onClick={onShowConfusedFragments} className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.overview.showConfusedFragments')}</button>
+        {isStaleAfterCuration && (
+          <span className="rounded-xl bg-amber-500/10 px-4 py-2 text-sm font-semibold text-amber-600">
+            {t('ragEval.review.stale.badge')}
+          </span>
+        )}
       </div>
     </section>
   );
@@ -881,7 +951,11 @@ const FragmentReviewCard: React.FC<{
     </div>
     <div className="mt-4 flex flex-wrap gap-2">
       <button type="button" onClick={() => firstQuestion && onOpenQuestion(firstQuestion, group)} className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.reviewQuestions')}</button>
-      <button type="button" onClick={() => onAcceptGroup(group)} className="rounded-xl bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white">{t('ragEval.review.fragment.acceptGood')}</button>
+      {group.problem_count > 0 ? (
+        <button type="button" onClick={() => onAcceptGroup(group)} className="rounded-xl bg-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white">{t('ragEval.review.fragment.acceptProblemQuestion')}</button>
+      ) : (
+        <span className="rounded-xl bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-600">{t('ragEval.review.fragment.noActionNeeded')}</span>
+      )}
       <button type="button" className="rounded-xl border border-[var(--border-primary)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.fragment.rebuild')}</button>
     </div>
   </article>
@@ -900,6 +974,9 @@ const QuestionReviewDrawer: React.FC<{
   const [editValue, setEditValue] = useState('');
   if (!question || !group) return null;
   const currentEditValue = editValue || question.effective_question;
+  const isAlreadyAccepted = question.review.status === 'accepted'
+    || question.review.status === 'edited'
+    || question.review.status === 'applied';
   const retrievedEntries = asRetrievedEntries(question.retrieved_entries);
   const proposedImprovements = asStringList(question.proposed_improvements);
 
@@ -926,7 +1003,7 @@ const QuestionReviewDrawer: React.FC<{
           <section>
             <h4 className="text-sm font-semibold text-[var(--text-primary)]">{t('ragEval.review.questionDrawer.retrievedBySearch')}</h4>
             <ol className="mt-2 space-y-2 text-sm text-[var(--text-secondary)]">
-              {retrievedEntries.map((entry, index) => <li key={`${entry.id}-${index}`} className="rounded-xl bg-[var(--control-bg)] p-3">{index + 1}. {entry.title || entry.id}<p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{entry.content}</p></li>)}
+              {retrievedEntries.map((entry, index) => <li key={`${entry.id}-${index}`} className="rounded-xl bg-[var(--control-bg)] p-3">{index + 1}. {entry.title || t('ragEval.review.questionDrawer.untitledEntry')}<p className="mt-1 line-clamp-2 text-xs text-[var(--text-muted)]">{entry.content}</p></li>)}
               {!retrievedEntries.length && <li className="rounded-xl bg-[var(--control-bg)] p-3">{t('ragEval.review.questionDrawer.noRetrievedFragments')}</li>}
             </ol>
           </section>
@@ -946,7 +1023,7 @@ const QuestionReviewDrawer: React.FC<{
             <textarea value={currentEditValue} onChange={(event) => setEditValue(event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-3 text-sm text-[var(--text-primary)] outline-none" />
           </section>
           <div className="flex flex-wrap gap-2">
-            <button type="button" disabled={mutating} onClick={() => onAccept(question.question_id)} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{t('ragEval.review.questionDrawer.accept')}</button>
+            <button type="button" disabled={mutating || isAlreadyAccepted} onClick={() => onAccept(question.question_id)} className="rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{isAlreadyAccepted ? t('ragEval.review.questionDrawer.alreadyAccepted') : t('ragEval.review.questionDrawer.accept')}</button>
             <button type="button" disabled={mutating} onClick={() => onEdit(question.question_id, currentEditValue)} className="rounded-xl border border-[var(--border-primary)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] disabled:opacity-50">{t('ragEval.review.questionDrawer.saveEdit')}</button>
             <button type="button" disabled={mutating} onClick={() => onReject(question.question_id)} className="rounded-xl border border-red-500/30 px-4 py-2 text-sm font-semibold text-red-500 disabled:opacity-50">{t('ragEval.review.questionDrawer.reject')}</button>
           </div>
@@ -1184,7 +1261,7 @@ export const RagEvalPage: React.FC = () => {
   );
 
   const processedDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === 'processed' && doc.chunk_count > 0),
+    () => documents.filter((doc) => doc.status === 'processed' && documentRuntimeEntryCount(doc) > 0),
     [documents],
   );
 
@@ -1215,6 +1292,17 @@ export const RagEvalPage: React.FC = () => {
       const status = String(reviewRun?.status || statusRun?.status || '');
       return ACTIVE_RUN_STATUSES.has(status) ? 3000 : false;
     },
+  });
+
+  const curationActionsQuery = useQuery({
+    queryKey: ['knowledge-curation-actions', projectId, activeDocumentId],
+    queryFn: async () => {
+      if (!projectId || !activeDocumentId) return [];
+      const { data } = await knowledgeCurationApi.listActions(projectId, activeDocumentId);
+      return data.actions;
+    },
+    enabled: !!projectId && !!activeDocumentId,
+    retry: false,
   });
 
   const jobsQuery = useQuery({
@@ -1351,12 +1439,31 @@ export const RagEvalPage: React.FC = () => {
     },
   });
 
+  const updateReviewQuestionState = (
+    questionId: string,
+    reviewState: RagEvalQuestionReviewState,
+  ): void => {
+    queryClient.setQueryData<RagEvalLatestReviewResponse>(
+      ['rag-eval-latest-review', activeDocumentId],
+      (current) => {
+        if (!current?.review) return current;
+        return {
+          ...current,
+          review: applyQuestionReviewState(current.review, questionId, reviewState),
+        };
+      },
+    );
+
+    setSelectedReviewQuestion((current) => (
+      current?.question_id === questionId ? { ...current, review: reviewState } : current
+    ));
+  };
+
   const reviewQuestionMutation = useMutation({
     mutationFn: async ({ questionId, status: nextStatus }: { questionId: string; status: 'accepted' | 'rejected' }) => ragEvalApi.reviewQuestion(questionId, nextStatus),
-    onSuccess: async () => {
+    onSuccess: async (result, variables) => {
+      updateReviewQuestionState(variables.questionId, result.review);
       toast.success(t('ragEval.review.toast.questionDecisionSaved'));
-      setSelectedReviewQuestion(null);
-      setSelectedReviewGroup(null);
       await invalidateEvalQueries();
     },
     onError: (error) => {
@@ -1366,10 +1473,9 @@ export const RagEvalPage: React.FC = () => {
 
   const editQuestionMutation = useMutation({
     mutationFn: async ({ questionId, question }: { questionId: string; question: string }) => ragEvalApi.editQuestion(questionId, question),
-    onSuccess: async () => {
+    onSuccess: async (result, variables) => {
+      updateReviewQuestionState(variables.questionId, result.review);
       toast.success(t('ragEval.review.toast.questionEditSaved'));
-      setSelectedReviewQuestion(null);
-      setSelectedReviewGroup(null);
       await invalidateEvalQueries();
     },
     onError: (error) => {
@@ -1403,6 +1509,17 @@ export const RagEvalPage: React.FC = () => {
       : null
   );
   const review = reviewQuery.data?.review ?? null;
+  const latestCurationActionMs = useMemo(
+    () => latestAppliedCurationActionTimeMs(curationActionsQuery.data ?? []),
+    [curationActionsQuery.data],
+  );
+  const reviewMs = reviewRunTimeMs(review);
+  const isReviewStaleAfterCuration = Boolean(
+    review
+    && latestCurationActionMs !== null
+    && (reviewMs === null || latestCurationActionMs > reviewMs),
+  );
+  const activeRuntimeEntryCount = documentRuntimeEntryCount(activeDocument);
   const reviewGroups = useMemo(() => {
     if (!review) return [];
     return sortReviewGroups(
@@ -1466,7 +1583,7 @@ export const RagEvalPage: React.FC = () => {
             >
               {processedDocuments.map((doc) => (
                 <option key={doc.id} value={doc.id}>
-                  {doc.file_name} · {doc.chunk_count} {t('ragEval.document.fragments')}
+                  {doc.file_name} · {documentRuntimeEntryCount(doc)} {t('ragEval.document.runtimeEntries')}
                 </option>
               ))}
             </select>
@@ -1490,7 +1607,7 @@ export const RagEvalPage: React.FC = () => {
             <FileText className="h-4 w-4" />
             <span>{activeDocument.file_name}</span>
             <span>·</span>
-            <span>{formatNumber(activeDocument.chunk_count)} {t('ragEval.document.fragments')}</span>
+            <span>{formatNumber(documentRuntimeEntryCount(activeDocument))} {t('ragEval.document.runtimeEntries')}</span>
           </div>
         )}
       </section>
@@ -1542,10 +1659,33 @@ export const RagEvalPage: React.FC = () => {
         </section>
       ) : review ? (
         <>
+          {isReviewStaleAfterCuration && (
+            <section className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 shadow-[var(--shadow-card)]">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-amber-700">{t('ragEval.review.stale.title')}</h3>
+                  <p className="mt-1 text-sm leading-6 text-amber-700/90">{t('ragEval.review.stale.description')}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => runMutation.mutate()}
+                  disabled={!activeDocumentId || runMutation.isPending}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                  {t('ragEval.review.stale.rerun')}
+                </button>
+              </div>
+            </section>
+          )}
           <DocumentEvalOverviewCard
             review={review}
             documentName={activeDocument?.file_name || String(review.run.document_id || '')}
+            activeRuntimeEntryCount={activeRuntimeEntryCount}
+            isStaleAfterCuration={isReviewStaleAfterCuration}
             onShowProblems={() => setReviewFilter('problematic')}
+            onShowGoodCandidates={() => setReviewFilter('good_candidates')}
+            onShowConfusedFragments={() => setReviewFilter('wrong_top1')}
           />
           <EvalProblemMap review={review} />
           <EvalFiltersBar

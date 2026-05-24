@@ -14,6 +14,8 @@ type DocCardDocument = {
   file_name: string;
   file_size: number;
   chunk_count: number;
+  structured_entries?: number;
+  structured_chunk_count?: number;
   preprocessing_mode?: string | null;
   created_at: string;
   status: string;
@@ -149,9 +151,9 @@ export const KnowledgeDocumentCard: React.FC<{
     </div>
 
     <div className="mb-4 flex flex-wrap gap-1.5 text-[10px]">
-      {doc.chunk_count > 0 && (
+      {typeof doc.structured_entries === 'number' && (
         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
-          {t('knowledge.documentCard.counters.chunks')}: {doc.chunk_count}
+          {t('knowledge.documentCard.counters.runtimeEntries')}: {doc.structured_entries}
         </span>
       )}
       {typeof draftCount === 'number' && draftCount > 0 && (
