@@ -71,6 +71,13 @@ git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 git_status="$(git status --short 2>/dev/null || true)"
 virtual_env_value="${VIRTUAL_ENV:-}"
 
+bash dev_scripts/ensure_test_env.sh
+
+set -a
+# shellcheck disable=SC1091
+source .env.test
+set +a
+
 run_check "REQUIRED" "python executable" \
   "${PYTHON_BIN} -c 'import sys; print(sys.executable); print(sys.version); print(\"prefix=\", sys.prefix); print(\"base_prefix=\", sys.base_prefix)'"
 

@@ -42,3 +42,4 @@ htmlcov/
 # Generated API snapshots / local build artifacts
 frontend/openapi.json
 *.tsbuildinfo
+.env.local
