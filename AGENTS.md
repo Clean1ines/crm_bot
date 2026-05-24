@@ -80,6 +80,50 @@ Use these repo-local skills from `.agents/skills` when relevant:
 - `workspace-surface-audit`
 - `skill-stocktake`
 
+## Codex project agents
+
+Project-local Codex subagents live in `.codex/agents/`.
+
+Most project agents are thin Codex wrappers around exact upstream ECC agent prompts downloaded into `.codex/upstream/ecc-agents/`.
+Do not edit `.codex/upstream/ecc-agents/*.md` manually; resync from ECC instead.
+
+Use project agents for all serious work, not only architecture.
+
+### Core planning and architecture
+
+- `planner`: wrapper for ECC `agents/planner.md`.
+- `architect`: wrapper for ECC `agents/architect.md`.
+- `backend_mapper`: local crm_bot backend path mapper.
+- `frontend_mapper`: local crm_bot frontend path mapper.
+
+### Implementation and debugging
+
+- `implementer`: local crm_bot targeted patch agent.
+- `build_error_resolver`: wrapper for ECC `agents/build-error-resolver.md`.
+- `refactor_cleaner`: wrapper for ECC `agents/refactor-cleaner.md`.
+
+### Stack reviewers
+
+- `typescript_reviewer`: wrapper for ECC `agents/typescript-reviewer.md`.
+- `python_reviewer`: wrapper for ECC `agents/python-reviewer.md`.
+- `database_reviewer`: wrapper for ECC `agents/database-reviewer.md`.
+
+### Quality, tests, security, docs
+
+- `tdd_guide`: wrapper for ECC `agents/tdd-guide.md`.
+- `e2e_runner`: wrapper for ECC `agents/e2e-runner.md`.
+- `security_reviewer`: wrapper for ECC `agents/security-reviewer.md`.
+- `reviewer`: wrapper for ECC `agents/code-reviewer.md`.
+- `doc_updater`: wrapper for ECC `agents/doc-updater.md`.
+- `docs_lookup`: wrapper for ECC `agents/docs-lookup.md`.
+
+### Workflows
+
+Use `.codex/workflows/audit.md` for audit-only work.
+Use `.codex/workflows/implementation.md` for non-trivial implementation work.
+Use `.codex/workflows/build-fix.md` when lint/type/build/tests fail.
+Use `.codex/workflows/docs-adr.md` for ADR/docs work.
+
 ## Required task flow
 
 For every non-trivial code task:

@@ -1,0 +1,4 @@
+source=https://github.com/affaan-m/ECC.git
+ref=main
+commit=1e8c7e7994223e0ff337d1626cd08e04a1ae67ed
+note=Exact copies from ECC/agents/*.md. Do not edit manually; resync from ECC instead.
