@@ -124,6 +124,27 @@ Use `.codex/workflows/implementation.md` for non-trivial implementation work.
 Use `.codex/workflows/build-fix.md` when lint/type/build/tests fail.
 Use `.codex/workflows/docs-adr.md` for ADR/docs work.
 
+## Intent router
+
+For common user requests, choose the workflow automatically. Do not require the user to manually list skills or agents.
+
+- If the user says “проведи аудит”, “audit project”, “architecture review”, “pre-PR review”, or asks to find project risks:
+  use `.codex/workflows/audit.md`.
+
+- If the user says “исправь ошибку”, “fix failing check”, “type-check fails”, “build fails”, “lint fails”, “tests fail”, or provides failing command output:
+  use `.codex/workflows/build-fix.md`.
+
+- If the user says “реализуй”, “добавь фичу”, “почини баг”, “refactor”, or asks for a non-trivial code change:
+  use `.codex/workflows/implementation.md`.
+
+- If the user says “оформи ADR”, “задокументируй решение”, “обнови docs”, or the task changes architecture/public contracts/deployment/RAG/eval:
+  use `.codex/workflows/docs-adr.md` together with `architecture-decision-records`.
+
+Default rule:
+For non-trivial work, select relevant repo skills and project agents automatically from `AGENTS.md`, `.agents/skills`, and `.codex/agents`.
+Do not ask the user to manually enumerate skills or agents.
+Always report which workflow, skills, and agents you selected.
+
 ## Required task flow
 
 For every non-trivial code task:

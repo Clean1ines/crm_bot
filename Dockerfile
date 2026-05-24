@@ -20,9 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Установка зависимостей Python
-COPY requirements.txt ./
+COPY requirements-prod.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r requirements-prod.txt && \
     rm -rf /root/.cache/pip
 
 # Копируем исходники бэкенда (соблюдая новую структуру src)

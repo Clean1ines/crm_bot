@@ -79,16 +79,3 @@ jsonschema>=4.20.0
 python-telegram-bot>=20.0
 aiohttp
 PyJWT==2.12.1
-pytest
-pytest-asyncio
-pytest-cov
-pytest-env
-pytest-timeout
-httpx
-testcontainers
-ruff
-mypy
-bandit
-pip-audit
-radon
-pyinstrument
