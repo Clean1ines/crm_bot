@@ -61,6 +61,7 @@ export const ru: TranslationDictionary = {
   'sidebar.nav.statistics': 'Статистика',
   'sidebar.actions.open': 'Открыть боковую панель',
   'sidebar.actions.goToProjects': 'Перейти к проектам',
+  'sidebar.actions.close': 'Закрыть боковую панель',
   'sidebar.brand.logoAlt': 'Логотип Omnica',
   'sidebar.profile.badge': 'Профиль',
   'sidebar.profile.adminName': 'Администратор',
