@@ -15,6 +15,7 @@ Input schema:
     {
       "case_id": "...",
       "question_intent": "...",
+      "expected_answer_language": "ru | en | unknown",
       "answers": [
         {"id": "entry-0", "answer": "...", "source_excerpt": "..."}
       ]
@@ -40,6 +41,9 @@ Rules for action=merge:
 - canonical_answer must be one concise replacement answer, not concatenation.
 - Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.
 - Do not invent facts beyond answer/source_excerpt evidence.
+- canonical_answer language must match the dominant natural language of answers/source_excerpt in the case.
+- JSON keys and enum values stay English; only user-facing natural-language values preserve the case language.
+- If expected_answer_language is unknown or candidates are mixed without a clear dominant language, return needs_review (not merge).
 
 Rules for non-merge actions:
 - keep_separate when answers are related but not the same specific answer intent.

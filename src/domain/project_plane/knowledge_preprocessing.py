@@ -130,6 +130,7 @@ class KnowledgeAnswerResolutionCase:
     case_id: str
     candidates: tuple[KnowledgeAnswerResolutionCandidate, ...]
     question_intent: str = ""
+    expected_answer_language: str = ""
 
     @property
     def group_id(self) -> str:
@@ -139,6 +140,7 @@ class KnowledgeAnswerResolutionCase:
         return {
             "case_id": self.case_id,
             "question_intent": self.question_intent,
+            "expected_answer_language": self.expected_answer_language,
             "answers": [
                 candidate.to_answer_resolution_option().to_payload()
                 for candidate in self.candidates
