@@ -55,7 +55,7 @@ const ERROR_VISIBLE_JOB_STATUSES = new Set(['failed', 'cancelled']);
 const PAUSED_STATUSES = new Set(['paused', 'manual_pause', 'manual-pause']);
 const TERMINAL_JOB_STATUSES = new Set(['completed', 'done', 'succeeded', 'success', 'failed', 'cancelled']);
 
-const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
+const formatNumber = (value: number): string => new Intl.NumberFormat().format(value);
 
 const formatDurationMs = (durationMs: number): string => {
   const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));

@@ -71,6 +71,13 @@ git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 git_status="$(git status --short 2>/dev/null || true)"
 virtual_env_value="${VIRTUAL_ENV:-}"
 
+bash dev_scripts/ensure_test_env.sh
+
+set -a
+# shellcheck disable=SC1091
+source .env.test
+set +a
+
 run_check "REQUIRED" "python executable" \
   "${PYTHON_BIN} -c 'import sys; print(sys.executable); print(sys.version); print(\"prefix=\", sys.prefix); print(\"base_prefix=\", sys.base_prefix)'"
 
@@ -97,6 +104,9 @@ run_check "REVIEW" "pyinstrument version" \
 
 run_check "REVIEW" "radon version" \
   "${PYTHON_BIN} -m radon --version"
+
+run_check "REQUIRED" "openapi contract drift" \
+  "npm run generate:openapi && git diff --exit-code -- openapi.json frontend/openapi.json frontend/src/shared/api/generated/schema.ts"
 
 run_check "REQUIRED" "git diff check" \
   "git diff --check"

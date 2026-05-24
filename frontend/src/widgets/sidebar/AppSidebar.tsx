@@ -147,7 +147,7 @@ export const AppSidebar: React.FC = () => {
                     className="flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-muted)] opacity-50"
                   >
                     {item.icon}
-                    <span className="text-[10px] font-medium">{item.label}</span>
+                    <span className="text-[11px] font-medium">{item.label}</span>
                   </div>
                 );
               }
@@ -165,7 +165,7 @@ export const AppSidebar: React.FC = () => {
                   }
                 >
                   {item.icon}
-                  <span className="text-[10px] font-medium">{item.label}</span>
+                  <span className="text-[11px] font-medium">{item.label}</span>
                 </NavLink>
               );
             })}
@@ -176,7 +176,7 @@ export const AppSidebar: React.FC = () => {
               className="flex min-w-[72px] shrink-0 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-secondary)] hover:text-[var(--text-primary)]"
             >
               <User className="h-4 w-4" />
-              <span className="text-[10px] font-medium">{t('sidebar.profile.badge')}</span>
+              <span className="text-[11px] font-medium">{t('sidebar.profile.badge')}</span>
             </button>
 
             <div className="flex min-w-[72px] items-center justify-center px-2 py-1.5">
@@ -215,7 +215,7 @@ export const AppSidebar: React.FC = () => {
         <span className="w-6 h-6 overflow-hidden rounded-full shadow-sm shrink-0">
           <img
             src={logoSrc}
-            alt="Omnica logo"
+            alt={t('sidebar.brand.logoAlt')}
             className="h-full w-full object-cover"
           />
         </span>
