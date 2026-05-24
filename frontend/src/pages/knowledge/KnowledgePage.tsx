@@ -40,11 +40,7 @@ import { DocumentStatusBlock } from './components/DocumentStatusBlock';
 import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
 import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
 import { DocumentActionsBlock } from './components/DocumentActionsBlock';
-import { KnowledgeReviewInbox } from './components/KnowledgeReviewInbox';
 import { KnowledgeDocumentCurationModal } from './components/KnowledgeDocumentCurationModal';
-import { KnowledgeWorkspaceSummary } from './components/KnowledgeWorkspaceSummary';
-import { buildKnowledgeReviewInbox, type KnowledgeReviewTask } from './viewModel/reviewInbox';
-import { buildKnowledgeWorkspaceSummary, type KnowledgeWorkspacePrimaryActionKind } from './viewModel/workspaceSummary';
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -60,6 +56,8 @@ type PriceFactActionVariables = {
   factId: string;
   reason?: string;
 };
+
+type KnowledgePageTab = 'knowledge' | 'statistics';
 
 
 interface Document {
@@ -794,6 +792,7 @@ export const KnowledgePage: React.FC = () => {
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
   const [curationDocumentId, setCurationDocumentId] = useState<string | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
+  const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<KnowledgePageTab>('knowledge');
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
   const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
   const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
@@ -1054,63 +1053,6 @@ export const KnowledgePage: React.FC = () => {
   const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
 
-
-  const totalDrafts = documents.reduce((acc, doc) => acc + (answerDrafts[doc.id]?.total_count || 0), 0);
-  const firstDraftDocumentId = documents.find((doc) => (answerDrafts[doc.id]?.total_count || 0) > 0)?.id ?? null;
-  const workspaceSummary = buildKnowledgeWorkspaceSummary({
-    documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
-    hasProcessingDocuments,
-    totalDrafts,
-    projectCommercialTruth: projectCommercialTruthReviewQuery.data,
-  });
-  const reviewInboxTasks = buildKnowledgeReviewInbox({
-    documents: documents.map((doc) => ({ id: doc.id, status: doc.status, error: doc.error })),
-    hasProcessingDocuments,
-    totalDrafts,
-    firstDraftDocumentId,
-    projectCommercialTruth: projectCommercialTruthReviewQuery.data ?? undefined,
-  });
-
-  const handleWorkspacePrimaryAction = (kind: KnowledgeWorkspacePrimaryActionKind): void => {
-    if (kind === 'upload_document') {
-      triggerUpload();
-      return;
-    }
-    if (kind === 'open_drafts') {
-      const target = documents.find((doc) => (answerDrafts[doc.id]?.total_count || 0) > 0);
-      if (target) openDraftsModal(target.id);
-      return;
-    }
-    if (kind === 'review_commercial_truth') {
-      projectCommercialTruthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-    if (kind === 'review_documents') {
-      documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-  const handleReviewTaskAction = (task: KnowledgeReviewTask): void => {
-    if (task.action.kind === 'upload_document') {
-      triggerUpload();
-      return;
-    }
-
-    if (task.action.kind === 'open_drafts') {
-      if (task.action.documentId) {
-        setDraftsDocumentId(task.action.documentId);
-      }
-      return;
-    }
-
-    if (task.action.kind === 'open_commerce') {
-      projectCommercialTruthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-
-    if (task.action.kind === 'open_documents') {
-      documentsGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
 
   const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
   const sourceUnitsModalExpandedIds = sourceUnitsDocumentId ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || [] : [];
@@ -1493,16 +1435,36 @@ export const KnowledgePage: React.FC = () => {
         </div>
       </div>
 
-      <KnowledgeWorkspaceSummary
-        summary={workspaceSummary}
-        onPrimaryAction={handleWorkspacePrimaryAction}
-      />
 
-      <KnowledgeReviewInbox
-        tasks={reviewInboxTasks}
-        onTaskAction={handleReviewTaskAction}
-      />
+      <section className="rounded-2xl bg-[var(--surface-elevated)] p-2 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveKnowledgeTab('knowledge')}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeKnowledgeTab === 'knowledge' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          >
+            {t('knowledge.tabs.knowledge')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveKnowledgeTab('statistics')}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeKnowledgeTab === 'statistics' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
+          >
+            {t('knowledge.tabs.statistics')}
+          </button>
+        </div>
+      </section>
 
+      {activeKnowledgeTab === 'statistics' ? (
+        usage && usage.counter_enabled ? (
+          <UsageSummaryCard usage={usage} />
+        ) : (
+          <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-sm">
+            {usageQuery.isLoading ? t('knowledge.statistics.loading') : t('knowledge.statistics.empty')}
+          </section>
+        )
+      ) : (
+        <>
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -1575,8 +1537,6 @@ export const KnowledgePage: React.FC = () => {
           </p>
         </div>
       </section>
-
-      {usage && usage.counter_enabled && <UsageSummaryCard usage={usage} />}
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex items-start gap-3">
@@ -1786,6 +1746,9 @@ export const KnowledgePage: React.FC = () => {
             );
           })}
           </div>
+        </>
+      )}
+
         </>
       )}
 
