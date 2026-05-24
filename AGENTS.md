@@ -4,6 +4,27 @@ You are working on `crm_bot`, a production-oriented FastAPI + PostgreSQL/pgvecto
 
 Always answer in Russian unless explicitly asked otherwise.
 
+
+## Codex Cloud validation rules
+
+Codex Cloud auto setup installs Python dependencies from `requirements.txt`.
+
+For Codex Cloud:
+- Do not create a nested virtualenv.
+- Do not use `venv/bin/...`.
+- Do not run extra dependency bootstrap scripts before validation.
+- Run backend validation through the current Python interpreter:
+  - `python -m ruff format --check src tests`
+  - `python -m ruff check src tests`
+  - `python -m mypy src`
+  - `python -m pytest -q`
+  - `bash dev_scripts/codex_extended_quality_gate.sh`, if the gate itself uses `python` by default.
+
+Dependency file contract:
+- `requirements-prod.txt` is for Docker/production runtime.
+- `requirements-dev.txt` is for local/dev/test tool lists.
+- `requirements.txt` is the Codex/test aggregate file and may include both prod and dev requirements.
+
 ## Non-negotiable workflow
 
 Before changing code:
@@ -228,10 +249,10 @@ Run focused validation when possible.
 
 Backend examples:
 
-- `venv/bin/ruff format --check src tests`
-- `venv/bin/ruff check src tests`
-- `venv/bin/mypy src`
-- focused `venv/bin/pytest ...`
+- `python -m ruff format --check src tests`
+- `python -m ruff check src tests`
+- `python -m mypy src`
+- focused `python -m pytest ...`
 
 Frontend examples:
 

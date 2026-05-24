@@ -4,7 +4,7 @@ set -u
 ROOT="${ROOT:-$(pwd)}"
 cd "$ROOT"
 
-PYTHON_BIN="${PYTHON_BIN:-venv/bin/python}"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 TS="$(date -u +%Y%m%d_%H%M%S)"
 ISO_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RAW="reports/codex-extended-quality-gate-raw-${TS}.txt"
