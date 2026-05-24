@@ -41,7 +41,7 @@ export const DocumentProcessingBlock: React.FC<{
   answerResolutionStepId: string;
   renderDraftsSummary: (params: { response: KnowledgeAnswerDraftsResponse | undefined; isLoading: boolean; onOpen: () => void; }) => React.ReactNode;
   renderSourceUnitsSummary: (params: { response: KnowledgeSourceUnitsResponse | undefined; isLoading: boolean; onOpen: () => void; }) => React.ReactNode;
-  renderAnswerResolutionTracePanel: (report: KnowledgeProcessingReport) => React.ReactNode;
+  renderAnswerResolutionTracePanel?: (report: KnowledgeProcessingReport) => React.ReactNode;
 }> = ({
   doc,
   processingReport,
@@ -113,7 +113,7 @@ export const DocumentProcessingBlock: React.FC<{
           onOpen: onOpenSourceUnits,
         })}
 
-        {renderAnswerResolutionTracePanel(processingReport)}
+        {renderAnswerResolutionTracePanel?.(processingReport)}
 
         {processingReport.actions.length > 0 && (
           <div className="mt-3 border-t border-[var(--border-subtle)] pt-2">

@@ -12,6 +12,7 @@ import { DialogsPage } from '@pages/dialogs/DialogsPage';
 import { ComingSoon } from '@pages/ComingSoon';
 import { ChannelSettingsPage } from '@pages/channels/ChannelSettingsPage';
 import { KnowledgePage } from '@pages/knowledge/KnowledgePage';
+import { KnowledgeStatsPage } from '@pages/knowledge/KnowledgeStatsPage';
 import { RagEvalPage } from '@pages/rag-eval/RagEvalPage';
 import { ManagersPage } from '@pages/managers/ManagersPage';
 import { ClientsPage } from '@pages/clients/ClientsPage';
@@ -205,6 +206,10 @@ function App() {
               <Route
                 path="/projects/:projectId/knowledge"
                 element={<ProjectAdminRoute><ErrorBoundary><KnowledgePage /></ErrorBoundary></ProjectAdminRoute>}
+              />
+              <Route
+                path="/projects/:projectId/knowledge/statistics"
+                element={<ProjectAdminRoute><ErrorBoundary><KnowledgeStatsPage /></ErrorBoundary></ProjectAdminRoute>}
               />
               <Route
                 path="/projects/:projectId/rag-eval"
