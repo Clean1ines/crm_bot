@@ -58,7 +58,7 @@ body {
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "ss02", "cv02", "cv05";
   line-height: 1.5;
-  overflow: hidden;
+  overflow-x: hidden;
 }
 
 @media (max-width: 768px) {
@@ -311,4 +311,3 @@ body.auth-scroll-page #root {
     min-height: 100dvh;
   }
 }
-
