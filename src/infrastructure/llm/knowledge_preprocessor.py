@@ -50,6 +50,7 @@ KCD_LLM_RESPONSE_LOG_CHUNK_CHARS = 3500
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
 FAQ_COMPILER_PROMPT_FILE = "knowledge_answer_compiler_faq.txt"
 ANSWER_RESOLUTION_PROMPT_FILE = "knowledge_answer_resolution.txt"
+SUPPORTED_PROMPT_LANGUAGES = {"ru", "en", "de", "es"}
 
 GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
 GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -82,6 +83,27 @@ def _usage_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     return None
+
+
+def _dominant_case_language(cases: Sequence[KnowledgeAnswerResolutionCase]) -> str:
+    counts: dict[str, int] = {}
+    for case in cases:
+        lang = case.expected_answer_language.strip().lower()
+        if lang in SUPPORTED_PROMPT_LANGUAGES:
+            counts[lang] = counts.get(lang, 0) + 1
+    if not counts:
+        return "unknown"
+    sorted_counts = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    if len(sorted_counts) > 1 and sorted_counts[0][1] == sorted_counts[1][1]:
+        return "unknown"
+    return sorted_counts[0][0]
+
+
+def _answer_resolution_prompt_file(language: str) -> str:
+    normalized = language.strip().lower()
+    if normalized in SUPPORTED_PROMPT_LANGUAGES:
+        return f"knowledge_answer_resolution.{normalized}.txt"
+    return ANSWER_RESOLUTION_PROMPT_FILE
 
 
 class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
@@ -230,11 +252,13 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 usage=None,
             )
 
+        prompt_language = _dominant_case_language(cases)
         prompt = self._build_answer_resolution_prompt(
             mode=mode,
             file_name=file_name,
             cases=cases,
             existing_project_titles=existing_project_titles,
+            language=prompt_language,
         )
 
         max_tokens = 3000

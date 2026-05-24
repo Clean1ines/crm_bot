@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -261,3 +261,51 @@ async def test_response_generator_language_guard_allows_en_input_en_output():
         )
 
     assert result["response_text"] == "The Pro plan starts at 2490 RUB monthly."
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_guard_uses_project_target_language_es():
+    llm = AsyncMock()
+    llm.ainvoke.return_value = MagicMock(content="Hello, this is in English")
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        side_effect=passthrough,
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Necesito ayuda con mi pedido",
+                "project_configuration": {"settings": {"target_language": "es"}},
+            }
+        )
+
+    assert result["response_text"].startswith("Quiero responder correctamente")
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_guard_uses_project_target_language_de():
+    llm = AsyncMock()
+    llm.ainvoke.return_value = MagicMock(content="Привет, отвечаю по-русски")
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        side_effect=passthrough,
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Bitte helfen Sie mir",
+                "project_configuration": {"settings": {"target_language": "de"}},
+            }
+        )
+
+    assert result["response_text"].startswith("Ich möchte korrekt")

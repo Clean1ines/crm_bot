@@ -77,6 +77,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+from src.domain.runtime.language_policy import detect_language_hint, dominant_language
 from src.domain.project_plane.knowledge_compilation import (
     CompilerRunStatus,
     CompilerRun,
@@ -2239,29 +2240,13 @@ def _answer_resolution_decision_is_publishable(
 
 
 def _answer_resolution_text_language_hint(value: str) -> str:
-    text = _clean_optional_text(value)
-    if not text:
-        return "unknown"
-
-    cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", text))
-    latin_count = len(re.findall(r"[A-Za-z]", text))
-    total = cyrillic_count + latin_count
-    if total == 0:
-        return "unknown"
-
-    cyr_ratio = cyrillic_count / total
-    lat_ratio = latin_count / total
-    if cyr_ratio >= 0.65:
-        return "ru"
-    if lat_ratio >= 0.65:
-        return "en"
-    return "unknown"
+    return detect_language_hint(_clean_optional_text(value))
 
 
 def _answer_resolution_component_language_hint(
     *entries: KnowledgePreprocessingEntry,
 ) -> str:
-    counts: dict[str, int] = {"ru": 0, "en": 0, "unknown": 0}
+    samples: list[str] = []
     for entry in entries:
         combined = " ".join(
             part
@@ -2271,18 +2256,9 @@ def _answer_resolution_component_language_hint(
             )
             if part
         )
-        counts[_answer_resolution_text_language_hint(combined)] += 1
-
-    known_total = counts["ru"] + counts["en"]
-    if known_total == 0:
-        return "unknown"
-    if counts["ru"] == counts["en"]:
-        return "unknown"
-    dominant = "ru" if counts["ru"] > counts["en"] else "en"
-    dominant_count = counts[dominant]
-    if dominant_count / known_total < 0.66:
-        return "unknown"
-    return dominant
+        if combined:
+            samples.append(combined)
+    return dominant_language(samples)
 
 
 def _apply_answer_resolution_decisions(
