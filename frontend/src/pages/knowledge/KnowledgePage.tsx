@@ -16,8 +16,6 @@ import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
   knowledgeApi,
   type KnowledgePreprocessingMode,
-  type KnowledgeUsageBreakdown,
-  type KnowledgeUsageResponse,
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
@@ -57,7 +55,6 @@ type PriceFactActionVariables = {
   reason?: string;
 };
 
-type KnowledgePageTab = 'knowledge' | 'statistics';
 
 
 interface Document {
@@ -84,9 +81,6 @@ interface Document {
   llm_models?: string | null;
 }
 
-interface UsageSummaryCardProps {
-  usage: KnowledgeUsageResponse;
-}
 
 const formatSize = (bytes: number) => {
   if (bytes === 0) return '0 Bytes';
@@ -134,64 +128,6 @@ const SOURCE_UNIT_FETCH_LIMIT = 1000;
 const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
-
-const formatUsd = (value: number): string => new Intl.NumberFormat('ru-RU', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-}).format(value);
-
-const LLM_USAGE_TYPE = 'llm';
-
-const USER_ANSWER_USAGE_SOURCES = new Set([
-  'client_response',
-  'user_response',
-  'agent_response',
-  'conversation_answer',
-]);
-
-const KNOWLEDGE_UPLOAD_USAGE_SOURCES = new Set([
-  'knowledge_preprocessing',
-  'knowledge_upload',
-]);
-
-const RAG_EVAL_USAGE_SOURCES = new Set([
-  'rag_eval',
-  'rag_eval_dataset',
-  'rag_eval_judge',
-  'rag_search',
-]);
-
-const llmUsageBreakdown = (
-  breakdown: KnowledgeUsageBreakdown[],
-): KnowledgeUsageBreakdown[] => (
-  breakdown.filter((item) => item.usage_type === LLM_USAGE_TYPE)
-);
-
-const usageBySources = (
-  breakdown: KnowledgeUsageBreakdown[],
-  sources: Set<string>,
-): KnowledgeUsageBreakdown[] => (
-  breakdown.filter((item) => sources.has(item.source))
-);
-
-const sumUsageTokens = (breakdown: KnowledgeUsageBreakdown[]): number => (
-  breakdown.reduce((acc, item) => acc + item.tokens_total, 0)
-);
-
-const sumUsageCost = (breakdown: KnowledgeUsageBreakdown[]): number => (
-  breakdown.reduce((acc, item) => acc + item.estimated_cost_usd, 0)
-);
-
-const usageModelRows = (breakdown: KnowledgeUsageBreakdown[]): string[] => {
-  const events = breakdown.reduce((acc, item) => acc + item.events_count, 0);
-  return events > 0 ? [t('knowledge.metrics.operations', { count: formatNumber(events) })] : [];
-};
-
-
-
-
 
 const shouldFetchPriceFactsForDocument = (
   doc: Document,
@@ -361,17 +297,6 @@ const retightenStatusText = (metrics: KnowledgeProcessingMetrics): string | null
   if (!status && !reason) return null;
   if (status && reason) return `${status}: ${reason}`;
   return status || reason;
-};
-
-const metricObjectArray = (
-  metrics: KnowledgeProcessingMetrics | null | undefined,
-  key: string,
-): KnowledgeProcessingMetrics[] => {
-  const value = metrics?.[key];
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is KnowledgeProcessingMetrics => (
-    item !== null && typeof item === 'object' && !Array.isArray(item)
-  ));
 };
 
 
@@ -607,180 +532,6 @@ const PreviewResultCard: React.FC<{
   </div>
 );
 
-const UsageScenarioCard: React.FC<{
-  title: string;
-  description: string;
-  breakdown: KnowledgeUsageBreakdown[];
-  emptyText: string;
-}> = ({ title, description, breakdown, emptyText }) => {
-  const tokens = sumUsageTokens(breakdown);
-  const modelRows = usageModelRows(breakdown);
-
-  return (
-    <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-        {title}
-      </div>
-      <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">
-        {formatNumber(tokens)}
-      </div>
-      <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-        {description}
-      </p>
-      <div className="mt-3 space-y-1 text-xs text-[var(--text-muted)]">
-        {modelRows.length > 0 ? (
-          modelRows.map((row) => (
-            <div key={row}>{row}</div>
-          ))
-        ) : (
-          <div>{emptyText}</div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-const answerResolutionTraceRows = (
-  report: KnowledgeProcessingReport | undefined,
-): KnowledgeProcessingMetrics[] => {
-  const answerResolutionMetrics = metricObject(report?.metrics, 'answer_resolution');
-  return metricObjectArray(answerResolutionMetrics, 'decision_trace');
-};
-
-const AnswerResolutionTracePanel: React.FC<{
-  report: KnowledgeProcessingReport;
-  isDebugMode?: boolean;
-}> = ({ report, isDebugMode = false }) => {
-  const traceRows = answerResolutionTraceRows(report);
-  if (traceRows.length === 0) return null;
-
-  return (
-    <div className="mt-3 border-t border-[var(--border-subtle)] pt-2 text-xs">
-      <div className="mb-2 font-medium text-[var(--text-primary)]">
-        {t('knowledge.answerResolutionTrace.title', { count: formatNumber(traceRows.length) })}
-      </div>
-      <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
-        {traceRows.map((row, index) => {
-          const caseId = metricText(row, 'case_id') || `case-${index + 1}`;
-          const action = metricText(row, 'action') || 'unknown';
-          const questionIntent = metricText(row, 'question_intent') || caseId;
-          const canonicalAnswerPreview = metricText(row, 'canonical_answer_preview');
-          const candidates = Array.isArray(row.candidates)
-            ? row.candidates.filter((item): item is KnowledgeProcessingMetrics => (
-              item !== null && typeof item === 'object' && !Array.isArray(item)
-            ))
-            : [];
-
-          return (
-            <details key={`${caseId}-${index}`} className="rounded-lg bg-[var(--control-bg)] p-2">
-              <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                {action} · {questionIntent}
-              </summary>
-              <div className="mt-2 space-y-2 text-[var(--text-muted)]">
-                {isDebugMode && <div>case_id: {caseId}</div>}
-                {canonicalAnswerPreview && (
-                  <div className="whitespace-pre-wrap">
-                    {t('knowledge.answerResolutionTrace.finalAnswer', { answer: canonicalAnswerPreview })}
-                  </div>
-                )}
-                {candidates.length > 0 && (
-                  <div>
-                    <div className="mb-1 font-medium text-[var(--text-primary)]">{t('knowledge.answerResolutionTrace.compressed')}</div>
-                    <ul className="list-disc space-y-1 pl-5">
-                      {candidates.map((candidate, candidateIndex) => {
-                        const title = metricText(candidate, 'title') || metricText(candidate, 'candidate_id') || `candidate-${candidateIndex + 1}`;
-                        const preview = metricText(candidate, 'answer_preview');
-                        return (
-                          <li key={`${caseId}-${candidateIndex}`}>
-                            <span className="text-[var(--text-primary)]">{title}</span>
-                            {preview ? <span> — {preview}</span> : null}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </details>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-
-const UsageSummaryCard: React.FC<UsageSummaryCardProps> = ({ usage }) => {
-  const llmBreakdown = llmUsageBreakdown(usage.breakdown);
-  const answerBreakdown = usageBySources(llmBreakdown, USER_ANSWER_USAGE_SOURCES);
-  const uploadBreakdown = usageBySources(llmBreakdown, KNOWLEDGE_UPLOAD_USAGE_SOURCES);
-  const ragEvalBreakdown = usageBySources(llmBreakdown, RAG_EVAL_USAGE_SOURCES);
-  const totalTokens = sumUsageTokens(llmBreakdown);
-  const totalCost = sumUsageCost(llmBreakdown);
-
-  return (
-    <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
-      <div className="mb-4 flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
-          <BookOpen className="h-5 w-5" />
-        </div>
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            {t('knowledge.usage.title')}
-          </h2>
-          <p className="mt-1 text-sm text-[var(--text-muted)]">
-            {t('knowledge.usage.description')}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <UsageScenarioCard
-          title={t('knowledge.usage.totalTitle')}
-          description={t('knowledge.usage.totalDescription', { cost: formatUsd(totalCost) })}
-          breakdown={llmBreakdown}
-          emptyText={t('knowledge.usage.totalEmpty')}
-        />
-        <UsageScenarioCard
-          title={t('knowledge.usage.clientAnswersTitle')}
-          description={t('knowledge.usage.clientAnswersDescription')}
-          breakdown={answerBreakdown}
-          emptyText={t('knowledge.usage.clientAnswersEmpty')}
-        />
-        <UsageScenarioCard
-          title={t('knowledge.usage.knowledgeProcessingTitle')}
-          description={t('knowledge.usage.knowledgeProcessingDescription')}
-          breakdown={uploadBreakdown}
-          emptyText={t('knowledge.usage.knowledgeProcessingEmpty')}
-        />
-        <UsageScenarioCard
-          title={t('knowledge.usage.qualityChecksTitle')}
-          description={t('knowledge.usage.qualityChecksDescription')}
-          breakdown={ragEvalBreakdown}
-          emptyText={t('knowledge.usage.qualityChecksEmpty')}
-        />
-      </div>
-
-      <div className="mt-4 text-sm text-[var(--text-muted)]">
-        {t('knowledge.usage.monthlyVolume', { total: formatNumber(totalTokens) })}
-      </div>
-    </section>
-  );
-};
-
 export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
@@ -792,7 +543,6 @@ export const KnowledgePage: React.FC = () => {
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
   const [curationDocumentId, setCurationDocumentId] = useState<string | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
-  const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<KnowledgePageTab>('knowledge');
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
   const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
   const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
@@ -1099,18 +849,6 @@ export const KnowledgePage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [hasProcessingDocuments]);
 
-  const usageQuery = useQuery({
-    queryKey: ['knowledge-usage', projectId],
-    queryFn: async () => {
-      if (!projectId) return null;
-      const { data } = await knowledgeApi.usage(projectId);
-      return data;
-    },
-    enabled: !!projectId,
-    retry: false,
-    refetchInterval: hasProcessingDocuments ? 5000 : false,
-  });
-
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
       if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
@@ -1351,7 +1089,6 @@ export const KnowledgePage: React.FC = () => {
   ));
 
   const previewResult = previewMutation.data;
-  const usage = usageQuery.data;
 
   const getStatusBadge = (doc: Document) => {
     const status = doc.status;
@@ -1436,35 +1173,6 @@ export const KnowledgePage: React.FC = () => {
       </div>
 
 
-      <section className="rounded-2xl bg-[var(--surface-elevated)] p-2 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveKnowledgeTab('knowledge')}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeKnowledgeTab === 'knowledge' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-          >
-            {t('knowledge.tabs.knowledge')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveKnowledgeTab('statistics')}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${activeKnowledgeTab === 'statistics' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
-          >
-            {t('knowledge.tabs.statistics')}
-          </button>
-        </div>
-      </section>
-
-      {activeKnowledgeTab === 'statistics' ? (
-        usage && usage.counter_enabled ? (
-          <UsageSummaryCard usage={usage} />
-        ) : (
-          <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-sm">
-            {usageQuery.isLoading ? t('knowledge.statistics.loading') : t('knowledge.statistics.empty')}
-          </section>
-        )
-      ) : (
-        <>
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -1701,7 +1409,6 @@ export const KnowledgePage: React.FC = () => {
                     renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
                       <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
                     )}
-                    renderAnswerResolutionTracePanel={(report) => <AnswerResolutionTracePanel report={report} isDebugMode={isDebugMode} />}
                   />
                 )}
                 retightenReportNode={(() => {
@@ -1746,9 +1453,6 @@ export const KnowledgePage: React.FC = () => {
             );
           })}
           </div>
-        </>
-      )}
-
         </>
       )}
 

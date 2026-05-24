@@ -1,7 +1,6 @@
 import React from 'react';
 import { FileText } from 'lucide-react';
 
-import { KnowledgeDocumentDetailsPanel } from './KnowledgeDocumentDetailsPanel';
 import { ImportQualitySummary } from './ImportQualitySummary';
 import { PriceFactsSummary } from './PriceFactsSummary';
 import { CommercialTruthReviewSummary } from './CommercialTruthReviewSummary';
@@ -122,18 +121,6 @@ export const KnowledgeDocumentCard: React.FC<{
         >
           {t('knowledge.documentCard.primaryAction.curation')}
         </button>
-        <KnowledgeDocumentDetailsPanel
-          actionsNode={actionsNode}
-          technicalNode={(
-            <>
-              <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
-              <PriceFactsSummary response={priceFactsResponse} isLoading={isPriceFactsLoading} onPublishFact={onPublishFact} onRejectFact={onRejectFact} mutatingFactId={mutatingPriceFactId} />
-              <CommercialTruthReviewSummary response={commercialTruthReviewResponse} isLoading={isCommercialTruthReviewLoading} policy={commercialTruthReviewPolicy} onPolicyChange={onPolicyChange} />
-              {processingNode}
-              {retightenReportNode}
-            </>
-          )}
-        />
       </div>
     </div>
 
@@ -174,5 +161,14 @@ export const KnowledgeDocumentCard: React.FC<{
     </div>
 
     {statusNode}
+
+    <div className="mt-4 space-y-3">
+      {actionsNode}
+      <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
+      <PriceFactsSummary response={priceFactsResponse} isLoading={isPriceFactsLoading} onPublishFact={onPublishFact} onRejectFact={onRejectFact} mutatingFactId={mutatingPriceFactId} />
+      <CommercialTruthReviewSummary response={commercialTruthReviewResponse} isLoading={isCommercialTruthReviewLoading} policy={commercialTruthReviewPolicy} onPolicyChange={onPolicyChange} />
+      {processingNode}
+      {retightenReportNode}
+    </div>
   </div>
 );
