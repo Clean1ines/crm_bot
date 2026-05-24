@@ -122,8 +122,17 @@ run_check "REQUIRED" "mypy version" \
 run_check "REQUIRED" "pytest version" \
   "${PYTHON_BIN} -m pytest --version"
 
-run_check "REQUIRED" "pytest-cov availability" \
-  "${PYTHON_BIN} -c 'import pytest_cov; print(pytest_cov.__version__)'"
+pytest_cov_available=0
+if ${PYTHON_BIN} -c 'import pytest_cov' >/dev/null 2>&1; then
+  pytest_cov_available=1
+fi
+
+if [[ "$pytest_cov_available" -eq 1 ]]; then
+  run_check "REVIEW" "pytest-cov version" \
+    "${PYTHON_BIN} -c 'import pytest_cov; print(pytest_cov.__version__)'"
+else
+  append_result "REVIEW" "pytest-cov version" "REVIEW" "1"
+fi
 
 run_check "REVIEW" "bandit version" \
   "${PYTHON_BIN} -m bandit --version"
@@ -154,6 +163,13 @@ run_check "REQUIRED" "mypy src" \
 
 run_check "REQUIRED" "pytest full" \
   "${PYTHON_BIN} -m pytest -q"
+
+if [[ "$pytest_cov_available" -eq 1 ]]; then
+  run_check "REVIEW" "pytest with coverage" \
+    "${PYTHON_BIN} -m pytest -q --cov=src --cov-report=term-missing --cov-report=html"
+else
+  append_result "REVIEW" "pytest with coverage" "REVIEW" "1"
+fi
 
 run_check "REVIEW" "pip-audit" \
   "${PYTHON_BIN} -m pip_audit"

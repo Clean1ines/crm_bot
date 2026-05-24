@@ -34,6 +34,9 @@ The quality gate auto-loads environment values in this order:
 
 and prints only masked presence status (`SET`/`NOT SET`) for required keys.
 
+`pytest` now runs without hard dependency on `pytest-cov`.
+If `pytest-cov` is installed, coverage run is executed as an additional review check.
+
 ## 4) Secrets policy
 
 - Keep only dummy/local values in `.env.test` for CI/local checks.
