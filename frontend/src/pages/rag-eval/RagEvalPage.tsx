@@ -37,7 +37,6 @@ import {
   type RagEvalReviewPayload,
   type RagEvalReviewQuestion,
 } from '@shared/api/modules/ragEval';
-import { KnowledgeCurationConsole } from './components/KnowledgeCurationConsole';
 
 interface Document {
   id: string;
@@ -1235,7 +1234,6 @@ export const RagEvalPage: React.FC = () => {
   const [reviewSort, setReviewSort] = useState<EvalReviewSort>('most_problematic');
   const [selectedReviewQuestion, setSelectedReviewQuestion] = useState<RagEvalReviewQuestion | null>(null);
   const [selectedReviewGroup, setSelectedReviewGroup] = useState<RagEvalReviewGroup | null>(null);
-  const [activeReviewTab, setActiveReviewTab] = useState<'curation' | 'retrieval'>('curation');
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -1627,33 +1625,7 @@ export const RagEvalPage: React.FC = () => {
         }}
       />
 
-      <section className="rounded-2xl bg-[var(--surface-elevated)] p-2 shadow-[var(--shadow-card)]">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveReviewTab('curation')}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold ${activeReviewTab === 'curation' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-          >
-            {t('ragEval.tabs.knowledgeCuration')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveReviewTab('retrieval')}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold ${activeReviewTab === 'retrieval' ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-          >
-            {t('ragEval.tabs.searchReview')}
-          </button>
-        </div>
-      </section>
-
-      {activeReviewTab === 'curation' ? (
-        <KnowledgeCurationConsole
-          projectId={String(projectId || '')}
-          documentId={activeDocumentId}
-          documentName={activeDocument?.file_name}
-          onInvalidateRagEval={invalidateEvalQueries}
-        />
-      ) : reviewQuery.isLoading && !review ? (
+      {reviewQuery.isLoading && !review ? (
         <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
           <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> {t('ragEval.review.loadingConsole')}
         </section>

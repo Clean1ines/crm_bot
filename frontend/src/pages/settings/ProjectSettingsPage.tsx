@@ -6,7 +6,7 @@ import { useParams } from 'react-router-dom';
 
 import { useProjectConfiguration } from '@entities/project/api/useCrmData';
 import { getErrorMessage } from '@shared/api/core/errors';
-import { channelKindLabel, channelProviderLabel, channelStatusLabel, integrationProviderLabel } from '@shared/lib/uiLabels';
+import { channelKindLabel, channelProviderLabel, channelStatusLabel } from '@shared/lib/uiLabels';
 import { projectsApi } from '@shared/api/modules/projects';
 
 type SettingsDraft = {
@@ -14,10 +14,6 @@ type SettingsDraft = {
   toneOfVoice?: string;
   defaultLanguage?: string;
   defaultTimezone?: string;
-  requestsPerMinute?: string;
-  fallbackModel?: string;
-  integrationProvider?: string;
-  integrationUrl?: string;
   widgetOrigin?: string;
 };
 
@@ -35,7 +31,6 @@ export const ProjectSettingsPage: React.FC = () => {
   const [draft, setDraft] = useState<SettingsDraft>({});
 
   const settings = getConfigObject(configuration?.settings);
-  const limits = getConfigObject(configuration?.limit_profile);
   const channels = Array.isArray(configuration?.channels) ? configuration.channels : [];
   const widgetChannel = channels.find((channel) => (
     channel.kind === 'widget' && channel.provider === 'web'
@@ -46,11 +41,6 @@ export const ProjectSettingsPage: React.FC = () => {
   const toneOfVoice = draft.toneOfVoice ?? String(settings.tone_of_voice ?? '');
   const defaultLanguage = draft.defaultLanguage ?? String(settings.default_language ?? '');
   const defaultTimezone = draft.defaultTimezone ?? String(settings.default_timezone ?? '');
-  const requestsPerMinute = draft.requestsPerMinute
-    ?? (limits.requests_per_minute == null ? '' : String(limits.requests_per_minute));
-  const fallbackModel = draft.fallbackModel ?? String(limits.fallback_model ?? '');
-  const integrationProvider = draft.integrationProvider ?? 'custom_webhook';
-  const integrationUrl = draft.integrationUrl ?? '';
   const widgetOrigin = draft.widgetOrigin ?? String(widgetConfig.allowed_origin ?? '');
 
   const updateDraft = (patch: SettingsDraft) => {
@@ -60,46 +50,6 @@ export const ProjectSettingsPage: React.FC = () => {
   const invalidateConfiguration = async () => {
     await queryClient.invalidateQueries({ queryKey: ['project-configuration', projectId] });
   };
-
-  const saveSettingsMutation = useMutation({
-    mutationFn: async () => {
-      if (!projectId) throw new Error(t('projectSettings.error.selectProject'));
-      await projectsApi.updateSettings(projectId, {
-        brand_name: brandName || undefined,
-        tone_of_voice: toneOfVoice || undefined,
-        default_language: defaultLanguage || undefined,
-        default_timezone: defaultTimezone || undefined,
-      });
-      await projectsApi.updateLimits(projectId, {
-        requests_per_minute: requestsPerMinute ? Number(requestsPerMinute) : undefined,
-        fallback_model: fallbackModel || undefined,
-      });
-    },
-    onSuccess: async () => {
-      await invalidateConfiguration();
-      setDraft({});
-      toast.success(t('projectSettings.feedback.settingsSaved'));
-    },
-    onError: (error) => toast.error(getErrorMessage(error)),
-  });
-
-  const saveIntegrationMutation = useMutation({
-    mutationFn: async () => {
-      if (!projectId) throw new Error(t('projectSettings.error.selectProject'));
-      if (!integrationProvider.trim()) throw new Error(t('projectSettings.error.integrationProviderRequired'));
-      await projectsApi.upsertIntegration(projectId, {
-        provider: integrationProvider.trim(),
-        status: integrationUrl.trim() ? 'enabled' : 'disabled',
-        config_json: integrationUrl.trim() ? { url: integrationUrl.trim() } : {},
-      });
-    },
-    onSuccess: async () => {
-      await invalidateConfiguration();
-      setDraft((current) => ({ ...current, integrationUrl: '' }));
-      toast.success(t('projectSettings.feedback.integrationSaved'));
-    },
-    onError: (error) => toast.error(getErrorMessage(error)),
-  });
 
   const saveWidgetChannelMutation = useMutation({
     mutationFn: async () => {
@@ -179,65 +129,6 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
         </div>
-      </section>
-
-      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('projectSettings.limits.title')}</h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">{t('projectSettings.limits.requestsPerMinute')}</span>
-            <input
-              type="number"
-              value={requestsPerMinute}
-              onChange={(event) => updateDraft({ requestsPerMinute: event.target.value })}
-              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-            />
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">{t('projectSettings.limits.assistantModel')}</span>
-            <input
-              value={fallbackModel}
-              onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
-              placeholder={t('projectSettings.limits.modelPlaceholder')}
-              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-            />
-          </label>
-        </div>
-        <button
-          onClick={() => saveSettingsMutation.mutate()}
-          disabled={saveSettingsMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {saveSettingsMutation.isPending ? t('common.states.saving') : t('projectSettings.actions.saveSettings')}
-        </button>
-      </section>
-
-      <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
-        <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('projectSettings.integrations.title')}</h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">{t('projectSettings.integrations.provider')}</span>
-            <div className="flex min-h-10 items-center rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
-              {integrationProviderLabel(integrationProvider)}
-            </div>
-          </div>
-          <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">{t('projectSettings.integrations.webhookUrl')}</span>
-            <input
-              value={integrationUrl}
-              onChange={(event) => updateDraft({ integrationUrl: event.target.value })}
-              placeholder="https://example.com/webhook"
-              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-            />
-          </label>
-        </div>
-        <button
-          onClick={() => saveIntegrationMutation.mutate()}
-          disabled={saveIntegrationMutation.isPending}
-          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {saveIntegrationMutation.isPending ? t('common.states.saving') : t('projectSettings.actions.saveIntegration')}
-        </button>
       </section>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
