@@ -6,6 +6,7 @@ knowledge, memory, and project runtime configuration.
 """
 
 from collections.abc import Mapping
+import re
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_response_prompt
@@ -30,6 +31,15 @@ TECHNICAL_FAILURE_FIRST_TEXT = (
 TECHNICAL_FAILURE_REPEAT_TEXT = (
     "Похоже, техническая ошибка повторилась. Я уже передал технический инцидент "
     "владельцу проекта. Можете позвать менеджера, чтобы не ждать восстановления ассистента."
+)
+
+LANGUAGE_MISMATCH_FALLBACK_RU = (
+    "Хочу ответить на вашем языке корректно. "
+    "Уточните, пожалуйста, вопрос ещё раз, и я помогу."
+)
+LANGUAGE_MISMATCH_FALLBACK_EN = (
+    "I want to respond correctly in your language. "
+    "Please rephrase your question, and I will help."
 )
 
 
@@ -176,6 +186,30 @@ def _coerce_int(value: object, default: int = 0) -> int:
     return default
 
 
+def _text_language_hint(value: str) -> str:
+    text = " ".join(value.strip().split())
+    if not text:
+        return "unknown"
+    cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    total = cyrillic_count + latin_count
+    if total < 6:
+        return "unknown"
+    if cyrillic_count / total >= 0.65:
+        return "ru"
+    if latin_count / total >= 0.65:
+        return "en"
+    return "unknown"
+
+
+def _language_mismatch_fallback(user_input: str) -> str:
+    return (
+        LANGUAGE_MISMATCH_FALLBACK_EN
+        if _text_language_hint(user_input) == "en"
+        else LANGUAGE_MISMATCH_FALLBACK_RU
+    )
+
+
 def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
     previous_count = _coerce_int(state.get("technical_failure_count"), 0)
     next_count = previous_count + 1
@@ -282,6 +316,23 @@ def create_response_generator_node(
                     operation_name="response_generator.ainvoke",
                 )
             response_text = (response.content or "").strip()
+            input_lang = _text_language_hint(context.user_input)
+            output_lang = _text_language_hint(response_text)
+            if (
+                response_text
+                and input_lang in {"ru", "en"}
+                and output_lang in {"ru", "en"}
+                and input_lang != output_lang
+            ):
+                logger.warning(
+                    "Response language mismatch detected; using safe fallback",
+                    extra={
+                        "input_lang": input_lang,
+                        "output_lang": output_lang,
+                        "decision": context.decision,
+                    },
+                )
+                response_text = _language_mismatch_fallback(context.user_input)
 
             metadata: dict[str, object] = {}
 
