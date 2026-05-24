@@ -27,6 +27,13 @@ If `venv/bin/python` is unavailable in your environment, run:
 PYTHON_BIN=python bash dev_scripts/codex_extended_quality_gate.sh
 ```
 
+The quality gate auto-loads environment values in this order:
+
+1. `.env.test`
+2. `.env.test.example`
+
+and prints only masked presence status (`SET`/`NOT SET`) for required keys.
+
 ## 4) Secrets policy
 
 - Keep only dummy/local values in `.env.test` for CI/local checks.

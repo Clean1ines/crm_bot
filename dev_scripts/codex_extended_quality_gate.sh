@@ -5,6 +5,8 @@ ROOT="${ROOT:-$(pwd)}"
 cd "$ROOT"
 
 PYTHON_BIN="${PYTHON_BIN:-venv/bin/python}"
+TEST_ENV_FILE="${TEST_ENV_FILE:-.env.test}"
+TEST_ENV_FALLBACK_FILE="${TEST_ENV_FALLBACK_FILE:-.env.test.example}"
 TS="$(date -u +%Y%m%d_%H%M%S)"
 ISO_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RAW="reports/codex-extended-quality-gate-raw-${TS}.txt"
@@ -66,10 +68,44 @@ run_check() {
   append_result "$group" "$name" "$result" "$rc"
 }
 
+load_test_env_file() {
+  local file_path="$1"
+  if [[ -f "$file_path" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file_path"
+    set +a
+    return 0
+  fi
+  return 1
+}
+
+mask_presence() {
+  local value="$1"
+  if [[ -n "$value" ]]; then
+    echo "SET"
+  else
+    echo "NOT SET"
+  fi
+}
+
 git_branch="$(git branch --show-current 2>/dev/null || true)"
 git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 git_status="$(git status --short 2>/dev/null || true)"
 virtual_env_value="${VIRTUAL_ENV:-}"
+
+loaded_env_source="none"
+if load_test_env_file "$TEST_ENV_FILE"; then
+  loaded_env_source="$TEST_ENV_FILE"
+elif load_test_env_file "$TEST_ENV_FALLBACK_FILE"; then
+  loaded_env_source="$TEST_ENV_FALLBACK_FILE"
+fi
+
+database_url_status="$(mask_presence "${DATABASE_URL:-}")"
+admin_chat_id_status="$(mask_presence "${ADMIN_CHAT_ID:-}")"
+groq_api_key_status="$(mask_presence "${GROQ_API_KEY:-}")"
+token_encryption_key_status="$(mask_presence "${TOKEN_ENCRYPTION_KEY:-}")"
+jwt_secret_key_status="$(mask_presence "${JWT_SECRET_KEY:-}")"
 
 run_check "REQUIRED" "python executable" \
   "${PYTHON_BIN} -c 'import sys; print(sys.executable); print(sys.version); print(\"prefix=\", sys.prefix); print(\"base_prefix=\", sys.base_prefix)'"
@@ -85,6 +121,9 @@ run_check "REQUIRED" "mypy version" \
 
 run_check "REQUIRED" "pytest version" \
   "${PYTHON_BIN} -m pytest --version"
+
+run_check "REQUIRED" "pytest-cov availability" \
+  "${PYTHON_BIN} -c 'import pytest_cov; print(pytest_cov.__version__)'"
 
 run_check "REVIEW" "bandit version" \
   "${PYTHON_BIN} -m bandit --version"
@@ -173,6 +212,15 @@ fi
   echo "- commit: ${git_commit}"
   echo "- python_bin: \`${PYTHON_BIN}\`"
   echo "- VIRTUAL_ENV: \`${virtual_env_value}\`"
+  echo "- test_env_source: \`${loaded_env_source}\`"
+  echo
+  echo "## Required env presence (masked)"
+  echo
+  echo "- DATABASE_URL: ${database_url_status}"
+  echo "- ADMIN_CHAT_ID: ${admin_chat_id_status}"
+  echo "- GROQ_API_KEY: ${groq_api_key_status}"
+  echo "- TOKEN_ENCRYPTION_KEY: ${token_encryption_key_status}"
+  echo "- JWT_SECRET_KEY: ${jwt_secret_key_status}"
   echo
   echo "## Git status"
   echo '```text'
