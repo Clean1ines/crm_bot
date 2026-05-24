@@ -7,6 +7,8 @@ cd "$ROOT"
 PYTHON_BIN="${PYTHON_BIN:-venv/bin/python}"
 TEST_ENV_FILE="${TEST_ENV_FILE:-.env.test}"
 TEST_ENV_FALLBACK_FILE="${TEST_ENV_FALLBACK_FILE:-.env.test.example}"
+AUTO_BOOTSTRAP_ENV="${AUTO_BOOTSTRAP_ENV:-1}"
+BOOTSTRAP_VENV_DIR="${BOOTSTRAP_VENV_DIR:-.codex_venv}"
 TS="$(date -u +%Y%m%d_%H%M%S)"
 ISO_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RAW="reports/codex-extended-quality-gate-raw-${TS}.txt"
@@ -89,10 +91,42 @@ mask_presence() {
   fi
 }
 
+ensure_python_bin() {
+  if [[ -x "$PYTHON_BIN" ]]; then
+    return 0
+  fi
+  if [[ "$AUTO_BOOTSTRAP_ENV" != "1" ]]; then
+    echo "ERROR: PYTHON_BIN '$PYTHON_BIN' not found and AUTO_BOOTSTRAP_ENV=0" >&2
+    return 1
+  fi
+  python -m venv "$BOOTSTRAP_VENV_DIR"
+  PYTHON_BIN="$BOOTSTRAP_VENV_DIR/bin/python"
+  "$PYTHON_BIN" -m pip install --upgrade pip
+  "$PYTHON_BIN" -m pip install -r requirements.txt -r requirements-dev.txt
+  return 0
+}
+
+ensure_python_stack() {
+  local required_modules=(pytest pytest_cov ruff mypy)
+  local missing=0
+  for module in "${required_modules[@]}"; do
+    if ! "$PYTHON_BIN" -c "import ${module}" >/dev/null 2>&1; then
+      missing=1
+      break
+    fi
+  done
+  if [[ "$missing" -eq 1 && "$AUTO_BOOTSTRAP_ENV" == "1" ]]; then
+    "$PYTHON_BIN" -m pip install -r requirements.txt -r requirements-dev.txt
+  fi
+}
+
 git_branch="$(git branch --show-current 2>/dev/null || true)"
 git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 git_status="$(git status --short 2>/dev/null || true)"
 virtual_env_value="${VIRTUAL_ENV:-}"
+
+ensure_python_bin || exit 1
+ensure_python_stack
 
 loaded_env_source="none"
 if load_test_env_file "$TEST_ENV_FILE"; then

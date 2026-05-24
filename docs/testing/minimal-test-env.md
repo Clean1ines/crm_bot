@@ -27,6 +27,16 @@ If `venv/bin/python` is unavailable in your environment, run:
 PYTHON_BIN=python bash dev_scripts/codex_extended_quality_gate.sh
 ```
 
+By default, the quality gate auto-bootstraps a local isolated environment
+(`.codex_venv`) and installs `requirements.txt` + `requirements-dev.txt` when
+required tooling is missing. This reduces "works locally but fails in Codex" drift.
+
+Disable bootstrap only if you fully manage the interpreter yourself:
+
+```bash
+AUTO_BOOTSTRAP_ENV=0 PYTHON_BIN=venv/bin/python bash dev_scripts/codex_extended_quality_gate.sh
+```
+
 The quality gate auto-loads environment values in this order:
 
 1. `.env.test`
