@@ -208,11 +208,13 @@ def _project_target_language(state: AgentState) -> str:
     target = normalize_project_language(
         str(settings_block.get("target_language") or "")
     )
-    if target != "unknown":
-        return target
 
     profile = ProjectRuntimeProfile.from_configuration(configuration)
-    return normalize_project_language(profile.default_language)
+    if target == "unknown":
+        target = normalize_project_language(profile.target_language)
+    if target == "unknown":
+        target = normalize_project_language(profile.default_language)
+    return target
 
 
 def _language_mismatch_fallback(target_language: str) -> str:
