@@ -94,7 +94,13 @@ def test_answer_only_group_payload_excludes_entry_enrichment_and_retrieval_field
 
     assert len(groups) == 1
     payload = groups[0].to_payload()
-    assert set(payload) == {"case_id", "question_intent", "answers"}
+    assert set(payload) == {
+        "case_id",
+        "question_intent",
+        "expected_answer_language",
+        "answers",
+    }
+    assert payload["expected_answer_language"] == "ru"
     answer_payload = payload["answers"]
     assert isinstance(answer_payload, list)
     assert answer_payload
@@ -196,6 +202,102 @@ def test_answer_resolution_output_cannot_override_enrichment_or_evidence() -> No
         "Возврат зависит от ситуации; решение принимает менеджер."
     )
     assert "LLM" not in entry.embedding_text
+
+
+def test_wrong_language_merge_for_russian_candidates_is_rejected() -> None:
+    entries = (
+        _entry(
+            title="Возврат",
+            question="Как оформить возврат?",
+            answer="Возврат зависит от ситуации.",
+            source_excerpt="Источник A.",
+        ),
+        _entry(
+            title="Возврат оплаты",
+            question="Как оформить возврат?",
+            answer="Решение принимает менеджер.",
+            source_excerpt="Источник B.",
+        ),
+    )
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_answer="Refund depends on the case and manager review.",
+    )
+
+    tightened, source_excerpts = _apply_answer_resolution_decisions(
+        entries=entries,
+        decisions=(decision,),
+        source_excerpts_by_entry=(("Источник A.",), ("Источник B.",)),
+    )
+
+    assert len(tightened) == 2
+    assert tightened[0].answer == "Возврат зависит от ситуации."
+    assert tightened[1].answer == "Решение принимает менеджер."
+    assert source_excerpts == (("Источник A.",), ("Источник B.",))
+
+
+def test_english_candidates_allow_english_merge_answer() -> None:
+    entries = (
+        _entry(
+            title="Refund policy",
+            question="Can I get a refund?",
+            answer="Refund depends on the project stage.",
+            source_excerpt="Source A.",
+        ),
+        _entry(
+            title="Refund details",
+            question="Can I get a refund?",
+            answer="Manager reviews each refund request.",
+            source_excerpt="Source B.",
+        ),
+    )
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_answer=(
+            "Refund depends on the project stage and each request is reviewed by a manager."
+        ),
+    )
+
+    tightened, _ = _apply_answer_resolution_decisions(
+        entries=entries,
+        decisions=(decision,),
+    )
+
+    assert len(tightened) == 1
+    assert "reviewed by a manager" in tightened[0].answer
+
+
+def test_ambiguous_mixed_language_candidates_do_not_merge() -> None:
+    entries = (
+        _entry(
+            title="Возврат",
+            question="Как оформить возврат?",
+            answer="Возврат зависит от этапа проекта.",
+            source_excerpt="Источник A.",
+        ),
+        _entry(
+            title="Refund policy",
+            question="How can I get a refund?",
+            answer="Manager reviews refund requests.",
+            source_excerpt="Source B.",
+        ),
+    )
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="group-1",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_answer="Refund depends on project stage and manager review.",
+    )
+
+    tightened, _ = _apply_answer_resolution_decisions(
+        entries=entries,
+        decisions=(decision,),
+    )
+    assert len(tightened) == 2
 
 
 def test_answer_resolution_parser_rejects_forbidden_output_fields() -> None:
