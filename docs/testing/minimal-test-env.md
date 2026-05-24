@@ -31,6 +31,15 @@ By default, the quality gate auto-bootstraps a local isolated environment
 (`.codex_venv`) and installs `requirements.txt` + `requirements-dev.txt` when
 required tooling is missing. This reduces "works locally but fails in Codex" drift.
 
+Environment invariant for Codex/cloud runs:
+
+- Python 3.12.x only
+- `pytest_asyncio` present
+- `pytest_env` present
+
+When this invariant is broken, the expected status is `ENV_FAIL` (environment issue),
+not product test regression.
+
 Disable bootstrap only if you fully manage the interpreter yourself:
 
 ```bash

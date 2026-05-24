@@ -120,6 +120,11 @@ ensure_python_stack() {
   fi
 }
 
+fail_env() {
+  echo "ENV_FAIL: $1" >&2
+  exit 20
+}
+
 git_branch="$(git branch --show-current 2>/dev/null || true)"
 git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 git_status="$(git status --short 2>/dev/null || true)"
@@ -127,6 +132,21 @@ virtual_env_value="${VIRTUAL_ENV:-}"
 
 ensure_python_bin || exit 1
 ensure_python_stack
+
+python_minor="$($PYTHON_BIN - << 'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+if [[ "$python_minor" != "3.12" ]]; then
+  fail_env "expected Python 3.12.x, got ${python_minor}"
+fi
+
+for module in pytest_asyncio pytest_env; do
+  if ! "$PYTHON_BIN" -c "import ${module}" >/dev/null 2>&1; then
+    fail_env "required pytest plugin/module is missing: ${module}"
+  fi
+done
 
 loaded_env_source="none"
 if load_test_env_file "$TEST_ENV_FILE"; then
@@ -155,6 +175,15 @@ run_check "REQUIRED" "mypy version" \
 
 run_check "REQUIRED" "pytest version" \
   "${PYTHON_BIN} -m pytest --version"
+
+run_check "REQUIRED" "python version is 3.12" \
+  "${PYTHON_BIN} -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'"
+
+run_check "REQUIRED" "pytest async plugin availability" \
+  "${PYTHON_BIN} -c 'import pytest_asyncio; print(pytest_asyncio.__version__)'"
+
+run_check "REQUIRED" "pytest env plugin availability" \
+  "${PYTHON_BIN} -c 'import pytest_env; print(pytest_env.__version__)'"
 
 pytest_cov_available=0
 if ${PYTHON_BIN} -c 'import pytest_cov' >/dev/null 2>&1; then
