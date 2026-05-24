@@ -552,6 +552,7 @@ export type TranslationKey =
   | 'sidebar.nav.statistics'
   | 'sidebar.actions.open'
   | 'sidebar.actions.goToProjects'
+  | 'sidebar.actions.close'
   | 'sidebar.brand.logoAlt'
   | 'sidebar.profile.badge'
   | 'sidebar.profile.adminName'

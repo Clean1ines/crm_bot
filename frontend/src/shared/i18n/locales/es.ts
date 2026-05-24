@@ -62,6 +62,7 @@ export const es: TranslationDictionary = {
   'sidebar.nav.statistics': 'Estadísticas',
   'sidebar.actions.open': 'Abrir barra lateral',
   'sidebar.actions.goToProjects': 'Ir a proyectos',
+  'sidebar.actions.close': 'Cerrar barra lateral',
   'sidebar.brand.logoAlt': 'Logotipo de Omnica',
   'sidebar.profile.badge': 'Perfil',
   'sidebar.profile.adminName': 'Administrador',

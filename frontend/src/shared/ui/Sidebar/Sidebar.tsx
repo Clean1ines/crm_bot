@@ -1,4 +1,5 @@
 import React from 'react';
+import { t } from '@shared/i18n';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -51,7 +52,7 @@ export const Sidebar = React.forwardRef<HTMLElement, SidebarProps>(
           <button
             onClick={onClose}
             className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            aria-label="Close sidebar"
+            aria-label={t('sidebar.actions.close')}
             data-testid="close-sidebar"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
