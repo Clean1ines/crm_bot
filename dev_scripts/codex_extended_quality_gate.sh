@@ -105,6 +105,9 @@ run_check "REVIEW" "pyinstrument version" \
 run_check "REVIEW" "radon version" \
   "${PYTHON_BIN} -m radon --version"
 
+run_check "REQUIRED" "openapi contract drift" \
+  "npm run generate:openapi && git diff --exit-code -- openapi.json frontend/openapi.json frontend/src/shared/api/generated/schema.ts"
+
 run_check "REQUIRED" "git diff check" \
   "git diff --check"
 
