@@ -33,6 +33,8 @@ TECHNICAL_FAILURE_REPEAT_TEXT = (
     "владельцу проекта. Можете позвать менеджера, чтобы не ждать восстановления ассистента."
 )
 
+SUPPORTED_RESPONSE_LANGUAGES = {"ru", "en", "de", "es"}
+
 LANGUAGE_MISMATCH_FALLBACK_RU = (
     "Хочу ответить на вашем языке корректно. "
     "Уточните, пожалуйста, вопрос ещё раз, и я помогу."
@@ -40,6 +42,14 @@ LANGUAGE_MISMATCH_FALLBACK_RU = (
 LANGUAGE_MISMATCH_FALLBACK_EN = (
     "I want to respond correctly in your language. "
     "Please rephrase your question, and I will help."
+)
+LANGUAGE_MISMATCH_FALLBACK_DE = (
+    "Ich möchte korrekt in Ihrer Sprache antworten. "
+    "Bitte formulieren Sie Ihre Frage noch einmal, dann helfe ich Ihnen."
+)
+LANGUAGE_MISMATCH_FALLBACK_ES = (
+    "Quiero responder correctamente en su idioma. "
+    "Por favor, reformule su pregunta y le ayudaré."
 )
 
 
@@ -191,7 +201,7 @@ def _text_language_hint(value: str) -> str:
     if not text:
         return "unknown"
     cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", text))
-    latin_count = len(re.findall(r"[A-Za-z]", text))
+    latin_count = len(re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñÄÖÜäöüß]", text))
     total = cyrillic_count + latin_count
     if total < 6:
         return "unknown"
@@ -202,12 +212,20 @@ def _text_language_hint(value: str) -> str:
     return "unknown"
 
 
-def _language_mismatch_fallback(user_input: str) -> str:
-    return (
-        LANGUAGE_MISMATCH_FALLBACK_EN
-        if _text_language_hint(user_input) == "en"
-        else LANGUAGE_MISMATCH_FALLBACK_RU
-    )
+def _project_target_language(state: AgentState) -> str:
+    profile = ProjectRuntimeProfile.from_configuration(state.get("project_configuration"))
+    lang = (profile.default_language or "").strip().lower()
+    return lang if lang in SUPPORTED_RESPONSE_LANGUAGES else "unknown"
+
+
+def _language_mismatch_fallback(target_language: str) -> str:
+    if target_language == "en":
+        return LANGUAGE_MISMATCH_FALLBACK_EN
+    if target_language == "de":
+        return LANGUAGE_MISMATCH_FALLBACK_DE
+    if target_language == "es":
+        return LANGUAGE_MISMATCH_FALLBACK_ES
+    return LANGUAGE_MISMATCH_FALLBACK_RU
 
 
 def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
@@ -317,22 +335,26 @@ def create_response_generator_node(
                 )
             response_text = (response.content or "").strip()
             input_lang = _text_language_hint(context.user_input)
+            target_lang = _project_target_language(state)
+            if target_lang == "unknown":
+                target_lang = input_lang
             output_lang = _text_language_hint(response_text)
             if (
                 response_text
-                and input_lang in {"ru", "en"}
+                and target_lang in {"ru", "en"}
                 and output_lang in {"ru", "en"}
-                and input_lang != output_lang
+                and target_lang != output_lang
             ):
                 logger.warning(
                     "Response language mismatch detected; using safe fallback",
                     extra={
                         "input_lang": input_lang,
+                        "target_lang": target_lang,
                         "output_lang": output_lang,
                         "decision": context.decision,
                     },
                 )
-                response_text = _language_mismatch_fallback(context.user_input)
+                response_text = _language_mismatch_fallback(target_lang)
 
             metadata: dict[str, object] = {}
 

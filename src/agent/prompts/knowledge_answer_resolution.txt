@@ -15,7 +15,7 @@ Input schema:
     {
       "case_id": "...",
       "question_intent": "...",
-      "expected_answer_language": "ru | en | unknown",
+      "expected_answer_language": "ru | en | de | es | unknown",
       "answers": [
         {"id": "entry-0", "answer": "...", "source_excerpt": "..."}
       ]
