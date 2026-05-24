@@ -146,7 +146,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
       },
       absorbed_status: 'merged' as const,
       rebuild_embedding: true,
-      rerun_eval: false,
+      rerun_eval: true,
       idempotency_key: mergeRequestId(),
     };
   };
@@ -170,13 +170,26 @@ export const KnowledgeDocumentCurationModal: React.FC<{
       const { data } = await knowledgeCurationApi.applyMerge(projectId, documentId, buildMergePayload());
       return data;
     },
-    onSuccess: async () => {
-      toast.success(t('knowledge.curation.feedback.mergeApplied'));
+    onSuccess: async (data) => {
+      toast.success(
+        data.rerun_eval_enqueued
+          ? t('knowledge.curation.feedback.mergeAppliedAndEvalQueued')
+          : t('knowledge.curation.feedback.mergeApplied'),
+      );
       setPreview(null);
       setSelectedIds([]);
       setParentId(null);
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-document-curation', projectId, documentId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['knowledge-document-curation', projectId, documentId] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-curation-actions', projectId, documentId] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-answer-drafts'] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-source-units'] }),
+        queryClient.invalidateQueries({ queryKey: ['rag-eval-status', documentId] }),
+        queryClient.invalidateQueries({ queryKey: ['rag-eval-jobs', documentId] }),
+        queryClient.invalidateQueries({ queryKey: ['rag-eval-job-progress'] }),
+        queryClient.invalidateQueries({ queryKey: ['rag-eval-latest-review', documentId] }),
+      ]);
     },
     onError: (error) => {
       toast.error(getErrorMessage(error, t('knowledge.curation.feedback.mergeFailed')));
@@ -212,9 +225,12 @@ export const KnowledgeDocumentCurationModal: React.FC<{
       <div className="space-y-4">
         <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
           <div className="text-sm font-semibold text-[var(--text-primary)]">{documentName}</div>
+          <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+            {t('knowledge.curation.runtimeDescription')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-            <span>{t('knowledge.curation.summary.entries')}: {curationQuery.data?.summary.total_entries ?? 0}</span>
-            <span>{t('knowledge.curation.summary.runtime')}: {curationQuery.data?.summary.published_runtime_entries ?? 0}</span>
+            <span>{t('knowledge.curation.summary.allEntries')}: {curationQuery.data?.summary.total_entries ?? 0}</span>
+            <span>{t('knowledge.curation.summary.publishedRuntime')}: {curationQuery.data?.summary.published_runtime_entries ?? 0}</span>
             <span>{t('knowledge.curation.summary.duplicates')}: {duplicateGroups.length}</span>
             <span>{t('knowledge.curation.summary.merged')}: {curationQuery.data?.summary.merged_entries ?? 0}</span>
           </div>
