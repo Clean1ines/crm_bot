@@ -13,6 +13,7 @@ For Codex Cloud:
 - Do not create a nested virtualenv.
 - Do not use `venv/bin/...`.
 - Do not run extra dependency bootstrap scripts before validation.
+- Direct `python -m pytest -q` must work from a fresh Codex workspace; `tests/conftest.py` bootstraps `.env.test` from `.env.test.example` before importing Settings.
 - Run backend validation through the current Python interpreter:
   - `python -m ruff format --check src tests`
   - `python -m ruff check src tests`
@@ -324,7 +325,6 @@ Before backend tests, ruff, mypy, or the full quality gate, always run:
 
 ```bash
 bash dev_scripts/ensure_test_env.sh
-bash dev_scripts/ensure_test_deps.sh
 ```
 
 The canonical test/Codex env surface is `.env.test.example`.
