@@ -6,11 +6,14 @@ knowledge, memory, and project runtime configuration.
 """
 
 from collections.abc import Mapping
-import re
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_response_prompt
 from src.agent.state import AgentState
+from src.domain.runtime.language_policy import (
+    detect_language_hint,
+    normalize_project_language,
+)
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.response_generation import (
     ResponseGenerationContext,
@@ -32,8 +35,6 @@ TECHNICAL_FAILURE_REPEAT_TEXT = (
     "Похоже, техническая ошибка повторилась. Я уже передал технический инцидент "
     "владельцу проекта. Можете позвать менеджера, чтобы не ждать восстановления ассистента."
 )
-
-SUPPORTED_RESPONSE_LANGUAGES = {"ru", "en", "de", "es"}
 
 LANGUAGE_MISMATCH_FALLBACK_RU = (
     "Хочу ответить на вашем языке корректно. "
@@ -196,26 +197,22 @@ def _coerce_int(value: object, default: int = 0) -> int:
     return default
 
 
-def _text_language_hint(value: str) -> str:
-    text = " ".join(value.strip().split())
-    if not text:
-        return "unknown"
-    cyrillic_count = len(re.findall(r"[А-Яа-яЁё]", text))
-    latin_count = len(re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñÄÖÜäöüß]", text))
-    total = cyrillic_count + latin_count
-    if total < 6:
-        return "unknown"
-    if cyrillic_count / total >= 0.65:
-        return "ru"
-    if latin_count / total >= 0.65:
-        return "en"
-    return "unknown"
-
-
 def _project_target_language(state: AgentState) -> str:
-    profile = ProjectRuntimeProfile.from_configuration(state.get("project_configuration"))
-    lang = (profile.default_language or "").strip().lower()
-    return lang if lang in SUPPORTED_RESPONSE_LANGUAGES else "unknown"
+    configuration = state.get("project_configuration")
+    settings_block: Mapping[str, object] = {}
+    if isinstance(configuration, Mapping):
+        raw_settings = configuration.get("settings")
+        if isinstance(raw_settings, Mapping):
+            settings_block = raw_settings
+
+    target = normalize_project_language(
+        str(settings_block.get("target_language") or "")
+    )
+    if target != "unknown":
+        return target
+
+    profile = ProjectRuntimeProfile.from_configuration(configuration)
+    return normalize_project_language(profile.default_language)
 
 
 def _language_mismatch_fallback(target_language: str) -> str:
@@ -310,6 +307,7 @@ def create_response_generator_node(
             user_memory=merged_memory,
             features=_prompt_features(context.features),
             project_configuration=context.project_configuration,
+            target_language=_project_target_language(state),
         )
 
         try:
@@ -334,15 +332,15 @@ def create_response_generator_node(
                     operation_name="response_generator.ainvoke",
                 )
             response_text = (response.content or "").strip()
-            input_lang = _text_language_hint(context.user_input)
+            input_lang = detect_language_hint(context.user_input)
             target_lang = _project_target_language(state)
             if target_lang == "unknown":
                 target_lang = input_lang
-            output_lang = _text_language_hint(response_text)
+            output_lang = detect_language_hint(response_text)
             if (
                 response_text
-                and target_lang in {"ru", "en"}
-                and output_lang in {"ru", "en"}
+                and target_lang != "unknown"
+                and output_lang != "unknown"
                 and target_lang != output_lang
             ):
                 logger.warning(

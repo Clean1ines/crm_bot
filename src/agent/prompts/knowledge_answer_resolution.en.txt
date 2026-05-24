@@ -1,0 +1,63 @@
+ANSWER-ONLY SEMANTIC RESOLUTION TASK:
+Return exactly one JSON object and nothing else.
+
+Purpose:
+- You are not a full-entry merge engine.
+- You only resolve ambiguous answer fragments after deterministic merge rules failed.
+- Each case contains one unresolved pair/group for the same suspected user intent.
+- Decide whether the answers can become one authoritative answer, or must remain separate / conflict / needs_review.
+- Use source_excerpt only as evidence for the answer decision.
+- Do not create, edit, or return retrieval enrichment, source refs, metadata, or derived retrieval fields.
+
+Input schema:
+{
+  "cases": [
+    {
+      "case_id": "...",
+      "question_intent": "...",
+      "expected_answer_language": "ru | en | de | es | unknown",
+      "answers": [
+        {"id": "entry-0", "answer": "...", "source_excerpt": "..."}
+      ]
+    }
+  ]
+}
+
+Output schema:
+{
+  "decisions": [
+    {
+      "case_id": "...",
+      "action": "merge | keep_separate | conflict | needs_review",
+      "canonical_answer": "...",
+      "reason": "...",
+      "confidence": 0.0
+    }
+  ]
+}
+
+Rules for action=merge:
+- Use merge only when all answers address the same specific user information need.
+- canonical_answer must be one concise replacement answer, not concatenation.
+- Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.
+- Do not invent facts beyond answer/source_excerpt evidence.
+- canonical_answer language must match the dominant natural language of answers/source_excerpt in the case.
+- JSON keys and enum values stay English; only user-facing natural-language values preserve the case language.
+- If expected_answer_language is unknown or candidates are mixed without a clear dominant language, return needs_review (not merge).
+
+Rules for non-merge actions:
+- keep_separate when answers are related but not the same specific answer intent.
+- conflict when answers contradict each other and a safe canonical answer cannot be produced.
+- needs_review when evidence is insufficient or ambiguous.
+- canonical_answer must be empty for keep_separate, conflict, and needs_review.
+
+Forbidden output fields:
+- Do not return retrieval enrichment, evidence lists, source indexes, metadata, cards, entries, or retrieval text.
+- Do not return candidate_ids; the application maps case_id back to answers deterministically.
+
+STRICT OUTPUT CONTRACT:
+- Return exactly one JSON object.
+- The first non-whitespace character must be { and the last non-whitespace character must be }.
+- Do not return markdown, explanation, or free-form text outside schema.
+
+NOW PROCESS THIS JSON. Return ONLY the JSON result:

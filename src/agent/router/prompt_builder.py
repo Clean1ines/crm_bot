@@ -33,7 +33,7 @@ DEFAULT_KB_LIMIT = int(getattr(settings, "ROUTER_KB_LIMIT", 5))
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 _intent_prompt_template: str | None = None
-_response_prompt_template: str | None = None
+_response_prompt_templates: dict[str, str] = {}
 _interpretation_block: str | None = None
 
 
@@ -385,10 +385,22 @@ def build_response_prompt(
     knowledge_chunks: Sequence[object] | None = None,
     commercial_context: Mapping[str, object] | None = None,
     project_configuration: ProjectRuntimeConfigurationState | None = None,
+    target_language: str | None = None,
 ) -> str:
-    global _response_prompt_template, _interpretation_block
-    if _response_prompt_template is None:
-        _response_prompt_template = _load_prompt_template("response_prompt.txt")
+    global _response_prompt_templates, _interpretation_block
+    lang = (target_language or "").strip().lower()
+    template_key = lang if lang in {"ru", "en", "de", "es"} else "default"
+    if template_key not in _response_prompt_templates:
+        localized_name = (
+            f"response_prompt.{template_key}.txt"
+            if template_key != "default"
+            else "response_prompt.txt"
+        )
+        template = _load_prompt_template(localized_name)
+        if not template:
+            template = _load_prompt_template("response_prompt.txt")
+        _response_prompt_templates[template_key] = template
+    response_prompt_template = _response_prompt_templates[template_key]
     if _interpretation_block is None:
         _interpretation_block = _load_prompt_template("interpretation_block.txt")
 
@@ -410,7 +422,7 @@ def build_response_prompt(
         else kb_block
     )
 
-    return _response_prompt_template.format(
+    return response_prompt_template.format(
         decision=decision,
         features=feat_str,
         user_input=user_input,
