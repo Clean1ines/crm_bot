@@ -2132,6 +2132,15 @@ def _cleanup_answer_resolution_text(value: str) -> str:
 
 
 KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
+KCD_STAGE_K8_KEYWORD_TAIL_MAX_UNITS = 2
+KCD_STAGE_K8_CLEANUP_REMOVAL_RATIO_MAX = 0.45
+
+
+@dataclass(frozen=True, slots=True)
+class _AnswerResolutionMergeValidationResult:
+    publishable: bool
+    fallback_action: str
+    reason: str | None = None
 
 
 def _answer_resolution_decision_is_too_noisy(
@@ -2208,9 +2217,126 @@ def _entry_with_answer_resolution_decision(
 
 
 def _answer_resolution_decision_is_publishable(
+    *,
     decision: KnowledgeAnswerResolutionDecision,
-) -> bool:
-    return True
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> _AnswerResolutionMergeValidationResult:
+    if not decision.is_merge:
+        return _AnswerResolutionMergeValidationResult(
+            publishable=True,
+            fallback_action=decision.action,
+        )
+
+    canonical_answer = _clean_optional_text(decision.canonical_answer)
+    if not canonical_answer:
+        return _AnswerResolutionMergeValidationResult(
+            publishable=False,
+            fallback_action="keep_separate",
+            reason="empty_canonical_answer",
+        )
+
+    candidate_indexes: list[int] = []
+    for candidate_id in decision.candidate_ids:
+        index = _answer_resolution_candidate_index(candidate_id)
+        if index is None or index < 0 or index >= len(entries):
+            continue
+        if index in candidate_indexes:
+            continue
+        candidate_indexes.append(index)
+
+    candidate_answers = tuple(
+        _clean_optional_text(entries[index].answer) for index in candidate_indexes
+    )
+    candidate_units = {
+        _answer_resolution_text_fingerprint(unit)
+        for answer in candidate_answers
+        for unit in _answer_resolution_text_units(answer)
+        if _answer_resolution_text_fingerprint(unit)
+    }
+    canonical_units = tuple(_answer_resolution_text_units(canonical_answer))
+    canonical_unit_fingerprints = {
+        _answer_resolution_text_fingerprint(unit)
+        for unit in canonical_units
+        if _answer_resolution_text_fingerprint(unit)
+    }
+
+    naive_concat = _clean_optional_text(" ".join(answer for answer in candidate_answers if answer))
+    if len(candidate_answers) >= 2 and canonical_answer == naive_concat:
+        return _AnswerResolutionMergeValidationResult(
+            publishable=False,
+            fallback_action="keep_separate",
+            reason="non_synthetic_answer",
+        )
+
+    unsupported_units = canonical_unit_fingerprints - candidate_units
+    if unsupported_units:
+        return _AnswerResolutionMergeValidationResult(
+            publishable=False,
+            fallback_action="needs_review",
+            reason="unsupported_unit",
+        )
+
+    cleanup = _cleanup_answer_resolution_text_with_metrics(canonical_answer)
+    if cleanup.original_unit_count > 0 and (
+        cleanup.removed_unit_count / cleanup.original_unit_count
+    ) > KCD_STAGE_K8_CLEANUP_REMOVAL_RATIO_MAX:
+        return _AnswerResolutionMergeValidationResult(
+            publishable=False,
+            fallback_action="keep_separate",
+            reason="cleanup_removed_too_much",
+        )
+
+    tail_units = _answer_resolution_text_units(canonical_answer)[-KCD_STAGE_K8_KEYWORD_TAIL_MAX_UNITS:]
+    if tail_units:
+        short_tail_tokens = sum(len(_answer_resolution_text_fingerprint(unit).split()) for unit in tail_units)
+        if short_tail_tokens <= 8 and any("," in unit for unit in tail_units):
+            return _AnswerResolutionMergeValidationResult(
+                publishable=False,
+                fallback_action="keep_separate",
+                reason="keyword_tail",
+            )
+
+    return _AnswerResolutionMergeValidationResult(
+        publishable=True,
+        fallback_action=decision.action,
+    )
+
+
+def _validated_answer_resolution_decisions(
+    decisions: Sequence[KnowledgeAnswerResolutionDecision],
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> tuple[tuple[KnowledgeAnswerResolutionDecision, ...], dict[str, int]]:
+    metrics = {
+        "rejected_non_synthetic_answer_count": 0,
+        "rejected_keyword_tail_count": 0,
+        "rejected_unsupported_unit_count": 0,
+        "answer_compiler_validated_merge_count": 0,
+    }
+    validated: list[KnowledgeAnswerResolutionDecision] = []
+    for decision in decisions:
+        result = _answer_resolution_decision_is_publishable(decision=decision, entries=entries)
+        if result.publishable:
+            if decision.is_merge:
+                metrics["answer_compiler_validated_merge_count"] += 1
+            validated.append(decision)
+            continue
+
+        if result.reason == "non_synthetic_answer":
+            metrics["rejected_non_synthetic_answer_count"] += 1
+        elif result.reason == "keyword_tail":
+            metrics["rejected_keyword_tail_count"] += 1
+        elif result.reason == "unsupported_unit":
+            metrics["rejected_unsupported_unit_count"] += 1
+
+        validated.append(
+            KnowledgeAnswerResolutionDecision(
+                case_id=decision.group_id,
+                action=result.fallback_action,
+                candidate_ids=decision.candidate_ids,
+                canonical_answer="",
+            )
+        )
+    return tuple(validated), metrics
 
 
 def _apply_answer_resolution_decisions(
@@ -2240,9 +2366,7 @@ def _apply_answer_resolution_decisions(
     removed_indexes: set[int] = set()
 
     for decision in decisions:
-        if not decision.is_merge and _answer_resolution_decision_is_publishable(
-            decision
-        ):
+        if not decision.is_merge:
             continue
 
         candidate_indexes: list[int] = []
@@ -2457,11 +2581,13 @@ async def _resolve_compiled_answer_cases(
             metrics["kept_separate_count"] = sum(
                 1 for decision in decisions if not decision.is_merge
             )
-            metrics["rejected_decision_count"] = sum(
-                1
-                for decision in decisions
-                if not _answer_resolution_decision_is_publishable(decision)
+            validated_decisions, validation_metrics = _validated_answer_resolution_decisions(
+                decisions, entries
             )
+            metrics["rejected_decision_count"] = sum(
+                1 for decision in validated_decisions if not decision.is_merge
+            ) - sum(1 for decision in decisions if not decision.is_merge)
+            metrics.update(validation_metrics)
             await publish_progress()
     except Exception as exc:
         metrics["status"] = "failed"
@@ -2473,6 +2599,7 @@ async def _resolve_compiled_answer_cases(
         await publish_progress()
         return tuple(entries), source_excerpts, metrics
 
+    decisions, validation_metrics = _validated_answer_resolution_decisions(decisions, entries)
     tightened_entries, tightened_source_excerpts = _apply_answer_resolution_decisions(
         entries=entries,
         decisions=decisions,
@@ -2488,11 +2615,10 @@ async def _resolve_compiled_answer_cases(
     metrics["kept_separate_count"] = sum(
         1 for decision in decisions if not decision.is_merge
     )
-    metrics["rejected_decision_count"] = sum(
-        1
-        for decision in decisions
-        if not _answer_resolution_decision_is_publishable(decision)
+    metrics["rejected_decision_count"] = (
+        len(groups) - metrics["resolved_answer_count"] - metrics["kept_separate_count"]
     )
+    metrics.update(validation_metrics)
     metrics["invalid_resolution_output_count"] = 0
     metrics["entry_count_after"] = len(tightened_entries)
     metrics["final_entry_count"] = len(tightened_entries)
@@ -4036,6 +4162,9 @@ class KnowledgeIngestionService:
             if _answer_resolution_decision_is_too_noisy(decision)
         )[:5]
         decisions = _reject_noisy_answer_resolution_decisions(decisions)
+        decisions, validation_metrics = _validated_answer_resolution_decisions(
+            decisions, preprocessing_entries
+        )
 
         llm_plan = _retighten_existing_document_plan(
             entries=preprocessing_entries,
@@ -4060,6 +4189,7 @@ class KnowledgeIngestionService:
         metrics["rejected_noisy_resolved_answer_count"] = (
             rejected_noisy_resolved_answer_count
         )
+        metrics.update(validation_metrics)
         if rejected_noisy_resolution_examples:
             metrics["rejected_noisy_resolution_examples"] = list(
                 rejected_noisy_resolution_examples

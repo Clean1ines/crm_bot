@@ -37,14 +37,23 @@ Output schema:
 
 Rules for action=merge:
 - Use merge only when all answers address the same specific user information need.
-- canonical_answer must be one concise replacement answer, not concatenation.
+- Internally execute this micro-agent workflow before writing canonical_answer:
+  1) infer one shared user intent for the case;
+  2) extract atomic answer facts from each candidate answer;
+  3) deduplicate repeated facts;
+  4) preserve all grounded conditions, limitations, caveats, and negative commitments;
+  5) synthesize one clean client-facing answer;
+  6) verify every sentence in final answer directly serves that shared intent.
+- canonical_answer must be one concise replacement answer, not concatenation or stitched fragments.
 - Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.
 - Do not invent facts beyond answer/source_excerpt evidence.
+- Do not add lifecycle summaries, process overviews, or keyword tails unless they are directly required by the specific intent.
 
 Rules for non-merge actions:
 - keep_separate when answers are related but not the same specific answer intent.
 - conflict when answers contradict each other and a safe canonical answer cannot be produced.
 - needs_review when evidence is insufficient or ambiguous.
+- If safe semantic synthesis is impossible without adding unsupported/general text, do not merge.
 - canonical_answer must be empty for keep_separate, conflict, and needs_review.
 
 Forbidden output fields:
