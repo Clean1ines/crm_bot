@@ -1,270 +1,233 @@
-# Agent Operating Contract
+# crm_bot Codex Agent Rules
 
-This repository is a production codebase. Any AI coding agent working here must preserve or improve code quality, architecture, security, performance, maintainability, and testability.
+You are working on `crm_bot`, a production-oriented FastAPI + PostgreSQL/pgvector + Redis/queue + React/Vite/TypeScript project.
 
-The primary goal is not to make a quick patch. The primary goal is to produce clean, production-ready code that fits the existing system.
+Always answer in Russian unless explicitly asked otherwise.
 
-## Mandatory behavior
+## Non-negotiable workflow
 
-Before changing code, inspect the current implementation deeply.
+Before changing code:
 
-You must:
-- read the relevant files directly;
-- inspect nearby patterns before inventing new ones;
-- identify call sites;
-- identify existing tests;
-- identify architecture boundaries;
-- understand runtime side effects;
-- understand data contracts;
-- understand security implications;
-- choose the smallest safe change that solves the task;
-- avoid expanding scope without a clear reason.
+1. Run read-only reconnaissance.
+2. Inspect current files, errors, tests, and existing architecture first.
+3. Do not patch blindly.
+4. Do not use nano/vim or interactive editors.
+5. Use `cat << 'EOF' > file` style commands when giving shell instructions.
+6. Do not print secrets. Mask env values as SET/NOT SET or partially masked.
+7. Do not commit or push unless explicitly asked.
+8. Do not remove existing Telegram `chat_id` manager flows when adding email/link invite flows.
 
-Do not patch from grep results alone.
+## Project architecture constraints
 
-Do not make broad edits when a targeted change is enough.
+- `src/domain`: pure domain only. No FastAPI, asyncpg, Redis, Telegram, HTTP frameworks, LLM clients, or infrastructure imports.
+- `src/application`: use cases, ports, DTOs, orchestration.
+- `src/infrastructure`: DB repositories, queue handlers, external adapters, LLM/embedding implementations.
+- `src/interfaces`: FastAPI routes, Telegram entrypoints, auth and DTO boundaries.
+- `src/agent`: runtime graphs, prompts, tools, typed agent contracts.
+- `frontend`: React/Vite/TypeScript. API contracts must align with backend/OpenAPI.
 
-Do not hide uncertainty. If part of the system is unclear, inspect more code before editing.
+Frontend/backend contract drift is a bug.
 
-## Quality bar
+## Knowledge Compilation Domain target
 
-Generated code must look like it was written by a careful senior engineer maintaining this repository.
+For knowledge/RAG/eval/refactor work, use this target vocabulary:
 
-Code must be:
-- production-ready;
-- typed;
-- readable;
-- cohesive;
-- low-complexity;
-- deterministic where possible;
-- safe under failure;
-- easy to review;
-- consistent with nearby code;
-- covered by relevant tests;
-- compatible with existing architecture.
+SourceDocument → SourceChunk → SourceRef → CompilerRun → AnswerCandidate → CandidateCluster → CanonicalKnowledgeEntry → KnowledgeEnrichment → EmbeddingText → EmbeddingVector → RetrievalSurface → EvalCase/RagEval → KnowledgeEditAction.
 
-A passing test suite is required, but it is not enough. A patch is unacceptable if it passes tests while degrading architecture, typing, readability, performance, security, or maintainability.
+Non-negotiables:
 
-## Forbidden shortcuts
+- `chunk` is not a sufficient production concept.
+- `preprocessing_mode` is a compiler selector, not a production entry kind.
+- Every published CanonicalKnowledgeEntry must be grounded in source evidence.
+- EvalCase is not knowledge.
+- RetrievalGuideline is not production knowledge.
+- KnowledgeEnrichment is non-authoritative.
+- EmbeddingText is not the user-facing answer.
+- RetrievalSurface is the production retrieval contract, not just a persistence table.
+- RAG eval must test the production RetrievalSurface.
 
-Do not:
-- add `Any` unless there is a strong local justification and no better type is practical;
-- use `cast(Any, ...)`;
-- add broad `# type: ignore` comments to silence problems;
-- replace precise types with vague `object` mechanically;
-- create god-functions;
-- create generic abstraction layers without a real need;
-- duplicate DTOs or contracts unnecessarily;
-- add temporary comments, TODO-driven code, or scaffolding leftovers;
-- swallow errors silently;
-- leak secrets into logs, reports, exceptions, test output, or generated files;
-- move infrastructure concerns into domain code;
-- import heavy runtime dependencies at module import when lazy import is already the project pattern;
-- simplify nuanced existing frontend design into generic UI;
-- break generated API contracts;
-- modify unrelated files;
-- commit or push unless explicitly instructed.
+## Installed repo skills
 
-## Recon expectation
+Use these repo-local skills from `.agents/skills` when relevant:
 
-Recon is mandatory, but reports are not mandatory.
+### Local crm_bot skill
 
-Use the repository tools directly. Read files. Inspect tests. Run targeted commands.
+- `crm-bot-architecture-governance`
 
-Create temporary notes only when the task is large or risky. Do not generate verbose reports by default.
+### ECC skills
 
-The required outcome of recon is that your patch reflects actual understanding of the existing code.
+- `architecture-decision-records`
+- `search-first`
+- `iterative-retrieval`
+- `tdd-workflow`
+- `security-review`
+- `security-scan`
+- `verification-loop`
+- `eval-harness`
+- `api-design`
+- `backend-patterns`
+- `frontend-patterns`
+- `postgres-patterns`
+- `database-migrations`
+- `deployment-patterns`
+- `docker-patterns`
+- `e2e-testing`
+- `python-patterns`
+- `python-testing`
+- `cost-aware-llm-pipeline`
+- `regex-vs-llm-structured-text`
+- `content-hash-cache-pattern`
+- `workspace-surface-audit`
+- `skill-stocktake`
 
-## Patch discipline
+## Required task flow
 
-Before editing:
-- identify the minimal files to touch;
-- check existing style in those files;
-- check relevant tests;
-- check architecture boundaries;
-- check failure modes.
+For every non-trivial code task:
 
-While editing:
-- keep changes small and local;
-- preserve public contracts unless the task explicitly requires changing them;
-- preserve backwards compatibility where practical;
-- prefer pure domain logic for policy decisions;
-- keep side effects at infrastructure, interface, or composition boundaries;
-- avoid increasing cyclomatic complexity;
-- split logic into clear small functions when needed;
-- keep names precise and boring.
+### 1. Recon
 
-After editing:
-- run focused tests first;
-- run type and lint checks relevant to changed areas;
-- run broader checks when the change is cross-cutting;
-- inspect the final diff before declaring done;
-- verify no secrets were introduced;
-- verify no architecture boundary was violated;
-- verify complexity did not regress.
+Run or request targeted read-only recon:
 
-## Architecture boundaries
+- `pwd`
+- `git status --short`
+- `git diff --stat`
+- targeted `rg`
+- targeted `nl -ba ... | sed -n`
+- inspect existing tests before adding new ones
 
-Respect the repository layering.
+Do not dump huge files. Use focused ranges.
 
-Domain code:
-- pure business/runtime contracts;
-- no FastAPI;
-- no DB clients;
-- no Redis;
-- no Telegram clients;
-- no LLM SDKs;
-- no filesystem side effects unless explicitly part of a pure parser contract.
+### 2. Skill selection
 
-Application code:
-- coordinates use cases;
-- depends on ports, DTOs, and domain contracts;
-- does not import interface adapters;
-- does not own external SDK details.
+Before planning, name the skills you are applying.
 
-Infrastructure code:
-- implements repositories, Redis, queues, LLM, embeddings, storage, external adapters;
-- may depend on domain/application contracts;
-- must not leak infrastructure concerns into domain.
+Default sequence for architectural/codebase tasks:
 
-Interfaces code:
-- owns HTTP, Telegram, request/response handling;
-- delegates business decisions to application/domain/runtime services.
+1. `search-first`
+2. `iterative-retrieval`
+3. `crm-bot-architecture-governance`
+4. `architecture-decision-records`, only if ADR conditions are met
+5. `tdd-workflow` or `verification-loop`
+6. `security-review`, when auth, tenant isolation, secrets, external inputs, LLM/tooling, shell, or deployment are touched
+7. stack-specific skills: `api-design`, `backend-patterns`, `frontend-patterns`, `postgres-patterns`, `database-migrations`, `deployment-patterns`, etc.
 
-Agent code:
-- wires graph nodes and runtime adapter behavior;
-- must keep contracts typed;
-- must avoid importing heavy LLM/langgraph packages at plain app import unless explicitly required by composition.
+### 3. Architecture check
 
-Tools code:
-- exposes controlled tool behavior;
-- validates inputs;
-- handles failure safely.
+Before patching, identify:
 
-Frontend code:
-- preserves the existing visual system;
-- uses existing tokens, components, spacing, typography, and layout patterns;
-- does not introduce random colors or one-off UI conventions;
-- preserves API contracts and behavior.
+- existing behavior
+- affected files/symbols
+- affected architectural boundaries
+- relevant docs/ADRs
+- whether ADR/RFC is required
+- validation gates
 
-## Typing rules
+Use `architecture-decision-records` when a decision changes or introduces:
 
-Prefer:
-- `Protocol`;
-- `TypedDict`;
-- `Mapping[str, object]`;
-- dataclasses;
-- concrete DTO/view-model types;
-- narrow helper functions;
-- explicit return types.
+- domain model
+- persistence model
+- retrieval/RAG/eval architecture
+- public API contract
+- auth/tenant model
+- queue/runtime behavior
+- deployment architecture
+- testing/evaluation strategy
 
-Avoid:
-- `Any`;
-- untyped dict soup;
-- unvalidated dynamic payloads;
-- broad casts;
-- type ignores.
+ADRs live in `docs/adr/`.
 
-If dynamic JSON is unavoidable, keep it at boundaries and validate it into typed structures before using it deeper in the system.
+Do not write ADRs for trivial local implementation details.
 
-## Complexity rules
+### 4. Plan
 
-Do not increase cyclomatic complexity unnecessarily.
+Produce a short implementation plan:
 
-Prefer:
-- simple linear control flow;
-- small focused helpers;
-- declarative mappings;
-- typed result objects;
-- pure functions for decision logic.
+- exact files to change
+- exact order of changes
+- expected tests/gates
+- risks
+- rollback
 
-Avoid:
-- nested condition pyramids;
-- giant functions;
-- mixed IO and policy logic;
-- hidden mutable global state;
-- implicit behavior spread across unrelated files.
+### 5. Patch
 
-## Security rules
+Patch minimally:
 
-Secrets must never be printed or stored in generated artifacts.
+- no broad rewrites unless explicitly requested
+- no duplicate helpers/constants
+- no new `Any` or `ignore` without reason
+- no architecture boundary drift
+- no unrelated formatting churn
 
-Treat these as secrets:
-- database URLs;
-- bot tokens;
-- API keys;
-- webhook secrets;
-- encryption keys;
-- JWT secrets;
-- OAuth secrets;
-- service credentials.
+### 6. Validate
 
-When logging:
-- log structured context;
-- mask sensitive values;
-- avoid raw request bodies if they may contain secrets or personal data;
-- never log full tokens.
+Run focused validation when possible.
 
-When handling external services:
-- assume Telegram, LLM providers, Redis, DB, HTTP APIs, embeddings, and file parsers can fail;
-- provide deterministic fallback or safe degradation;
-- do not turn failures into silent success;
-- preserve observability without leaking secrets.
+Backend examples:
 
-## Performance rules
+- `venv/bin/ruff format --check src tests`
+- `venv/bin/ruff check src tests`
+- `venv/bin/mypy src`
+- focused `venv/bin/pytest ...`
 
-Do not add avoidable expensive work to hot paths.
+Frontend examples:
 
-Avoid:
-- heavy module-level imports;
-- unnecessary full-table scans;
-- unbounded loops;
-- repeated LLM calls;
-- repeated DB calls where one query is enough;
-- loading large files fully without need;
-- blocking IO in async paths.
+- `npm run lint`
+- `npm run type-check`
+- `npm run build`
 
-Prefer:
-- lazy imports for heavy optional dependencies;
-- bounded limits;
-- indexed queries;
-- async-safe operations;
-- caching only when correctness is clear.
+For full commit readiness, run the project quality gate if available:
 
-## Testing rules
+- `bash dev_scripts/codex_extended_quality_gate.sh`
 
-Choose tests based on the change.
+### 7. Review
 
-For domain logic:
-- run focused domain tests;
-- add or update unit tests.
+Before final answer, review for:
 
-For agent/runtime changes:
-- run relevant agent node, runtime contract, policy, prompt builder, and architecture tests.
+- correctness
+- architecture boundary drift
+- missing ADR/RFC
+- security/auth/tenant risks
+- OpenAPI/frontend contract drift
+- test coverage gaps
+- rollback clarity
 
-For repository changes:
-- run repository tests and migration checks where relevant.
+## Audit mode
 
-For HTTP/Telegram changes:
-- run API tests and interface tests.
+When asked to audit the project, do not patch by default.
 
-For frontend changes:
-- run lint, type-check, and build from the frontend package.
+Use this audit sequence:
 
-For cross-cutting changes:
-- run the full backend quality gate.
+1. `search-first`
+2. `iterative-retrieval`
+3. `crm-bot-architecture-governance`
+4. `architecture-decision-records`
+5. `security-review`
+6. `verification-loop`
+7. stack-specific skills as needed
 
-Do not repeatedly run the same checks without changing anything.
+Audit output must include:
 
-## Done definition
+- executive summary
+- architecture map
+- boundary violations or risks
+- missing/obsolete ADRs
+- product-critical risks
+- security risks
+- test/validation gaps
+- prioritized remediation plan
+- suggested first 3 patches
+- what was not verified
 
-A task is done only when:
-- the change solves the requested problem;
-- code quality is preserved or improved;
-- relevant tests pass;
-- typing passes for touched areas;
-- lint/format checks pass for touched areas;
-- architecture boundaries remain intact;
-- no secrets are exposed;
-- complexity is not increased without justification;
-- final diff is coherent and reviewable.
+## Completion rule
+
+Do not mark a task complete until validation evidence is shown.
+
+Final response must include:
+
+- what changed
+- why it changed
+- files changed
+- validation commands and results
+- remaining risks
+- rollback plan
+
+If validation cannot be run, state exactly why and what remains unverified.
