@@ -296,3 +296,20 @@ Final response must include:
 - rollback plan
 
 If validation cannot be run, state exactly why and what remains unverified.
+
+## Environment workflow
+
+Before backend tests, ruff, mypy, or the full quality gate, always run:
+
+```bash
+bash dev_scripts/ensure_test_env.sh
+bash dev_scripts/ensure_test_deps.sh
+```
+
+The canonical test/Codex env surface is `.env.test.example`.
+
+If `.env.test` is missing, create it from `.env.test.example`.
+
+Do not ask for production environment values to run local/Codex checks. Use the placeholder values from `.env.test.example`.
+
+Do not add real deployment values to `.env.example`, `.env.test.example`, docs, reports, or commits.
