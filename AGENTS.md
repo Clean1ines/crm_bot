@@ -4,6 +4,24 @@ You are working on `crm_bot`, a production-oriented FastAPI + PostgreSQL/pgvecto
 
 Always answer in Russian unless explicitly asked otherwise.
 
+## Mandatory Codex environment invariant
+
+Codex must never classify backend test failures as product failures until environment invariant is satisfied.
+
+Required invariant:
+
+- Python must be 3.12.x.
+- Backend checks must run through `venv/bin/python` locally or `.codex_venv/bin/python` in Codex/cloud.
+- `pytest_asyncio` and `pytest_env` must be importable before any pytest run.
+- If invariant is broken, classify as `ENV_FAIL`, not as failed product tests.
+
+Canonical commands:
+
+```bash
+bash dev_scripts/bootstrap_codex_env.sh
+PYTHON_BIN=.codex_venv/bin/python AUTO_BOOTSTRAP_ENV=0 bash dev_scripts/codex_extended_quality_gate.sh
+```
+
 ## Non-negotiable workflow
 
 Before changing code:

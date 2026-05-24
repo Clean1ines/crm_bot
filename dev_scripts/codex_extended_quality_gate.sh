@@ -5,6 +5,10 @@ ROOT="${ROOT:-$(pwd)}"
 cd "$ROOT"
 
 PYTHON_BIN="${PYTHON_BIN:-venv/bin/python}"
+TEST_ENV_FILE="${TEST_ENV_FILE:-.env.test}"
+TEST_ENV_FALLBACK_FILE="${TEST_ENV_FALLBACK_FILE:-.env.test.example}"
+AUTO_BOOTSTRAP_ENV="${AUTO_BOOTSTRAP_ENV:-1}"
+BOOTSTRAP_VENV_DIR="${BOOTSTRAP_VENV_DIR:-.codex_venv}"
 TS="$(date -u +%Y%m%d_%H%M%S)"
 ISO_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 RAW="reports/codex-extended-quality-gate-raw-${TS}.txt"
@@ -66,10 +70,98 @@ run_check() {
   append_result "$group" "$name" "$result" "$rc"
 }
 
+load_test_env_file() {
+  local file_path="$1"
+  if [[ -f "$file_path" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$file_path"
+    set +a
+    return 0
+  fi
+  return 1
+}
+
+mask_presence() {
+  local value="$1"
+  if [[ -n "$value" ]]; then
+    echo "SET"
+  else
+    echo "NOT SET"
+  fi
+}
+
+ensure_python_bin() {
+  if [[ -x "$PYTHON_BIN" ]]; then
+    return 0
+  fi
+  if [[ "$AUTO_BOOTSTRAP_ENV" != "1" ]]; then
+    fail_env "PYTHON_BIN '$PYTHON_BIN' not found and AUTO_BOOTSTRAP_ENV=0"
+  fi
+  if ! PYTHON_BIN=python3 VENV_DIR="$BOOTSTRAP_VENV_DIR" bash dev_scripts/bootstrap_codex_env.sh; then
+    fail_env "unable to bootstrap environment via dev_scripts/bootstrap_codex_env.sh"
+  fi
+  PYTHON_BIN="$BOOTSTRAP_VENV_DIR/bin/python"
+  return 0
+}
+
+ensure_python_stack() {
+  local required_modules=(pytest pytest_cov pytest_asyncio pytest_env ruff mypy)
+  local missing=0
+  for module in "${required_modules[@]}"; do
+    if ! "$PYTHON_BIN" -c "import ${module}" >/dev/null 2>&1; then
+      missing=1
+      break
+    fi
+  done
+  if [[ "$missing" -eq 1 && "$AUTO_BOOTSTRAP_ENV" == "1" ]]; then
+    if ! PYTHON_BIN=python3 VENV_DIR="$BOOTSTRAP_VENV_DIR" bash dev_scripts/bootstrap_codex_env.sh; then
+      fail_env "unable to bootstrap missing python stack via dev_scripts/bootstrap_codex_env.sh"
+    fi
+    PYTHON_BIN="$BOOTSTRAP_VENV_DIR/bin/python"
+  fi
+}
+
+fail_env() {
+  echo "ENV_FAIL: $1" >&2
+  exit 20
+}
+
 git_branch="$(git branch --show-current 2>/dev/null || true)"
 git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 git_status="$(git status --short 2>/dev/null || true)"
 virtual_env_value="${VIRTUAL_ENV:-}"
+
+ensure_python_bin || exit 1
+ensure_python_stack
+
+python_minor="$($PYTHON_BIN - << 'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)"
+if [[ "$python_minor" != "3.12" ]]; then
+  fail_env "expected Python 3.12.x, got ${python_minor}"
+fi
+
+for module in pytest_asyncio pytest_env; do
+  if ! "$PYTHON_BIN" -c "import ${module}" >/dev/null 2>&1; then
+    fail_env "required pytest plugin/module is missing: ${module}"
+  fi
+done
+
+loaded_env_source="none"
+if load_test_env_file "$TEST_ENV_FILE"; then
+  loaded_env_source="$TEST_ENV_FILE"
+elif load_test_env_file "$TEST_ENV_FALLBACK_FILE"; then
+  loaded_env_source="$TEST_ENV_FALLBACK_FILE"
+fi
+
+database_url_status="$(mask_presence "${DATABASE_URL:-}")"
+admin_chat_id_status="$(mask_presence "${ADMIN_CHAT_ID:-}")"
+groq_api_key_status="$(mask_presence "${GROQ_API_KEY:-}")"
+token_encryption_key_status="$(mask_presence "${TOKEN_ENCRYPTION_KEY:-}")"
+jwt_secret_key_status="$(mask_presence "${JWT_SECRET_KEY:-}")"
 
 run_check "REQUIRED" "python executable" \
   "${PYTHON_BIN} -c 'import sys; print(sys.executable); print(sys.version); print(\"prefix=\", sys.prefix); print(\"base_prefix=\", sys.base_prefix)'"
@@ -85,6 +177,27 @@ run_check "REQUIRED" "mypy version" \
 
 run_check "REQUIRED" "pytest version" \
   "${PYTHON_BIN} -m pytest --version"
+
+run_check "REQUIRED" "python version is 3.12" \
+  "${PYTHON_BIN} -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 12) else 1)'"
+
+run_check "REQUIRED" "pytest async plugin availability" \
+  "${PYTHON_BIN} -c 'import pytest_asyncio; print(pytest_asyncio.__version__)'"
+
+run_check "REQUIRED" "pytest env plugin availability" \
+  "${PYTHON_BIN} -c 'import pytest_env; print(pytest_env.__version__)'"
+
+pytest_cov_available=0
+if ${PYTHON_BIN} -c 'import pytest_cov' >/dev/null 2>&1; then
+  pytest_cov_available=1
+fi
+
+if [[ "$pytest_cov_available" -eq 1 ]]; then
+  run_check "REVIEW" "pytest-cov version" \
+    "${PYTHON_BIN} -c 'import pytest_cov; print(pytest_cov.__version__)'"
+else
+  append_result "REVIEW" "pytest-cov version" "REVIEW" "1"
+fi
 
 run_check "REVIEW" "bandit version" \
   "${PYTHON_BIN} -m bandit --version"
@@ -115,6 +228,13 @@ run_check "REQUIRED" "mypy src" \
 
 run_check "REQUIRED" "pytest full" \
   "${PYTHON_BIN} -m pytest -q"
+
+if [[ "$pytest_cov_available" -eq 1 ]]; then
+  run_check "REVIEW" "pytest with coverage" \
+    "${PYTHON_BIN} -m pytest -q --cov=src --cov-report=term-missing --cov-report=html"
+else
+  append_result "REVIEW" "pytest with coverage" "REVIEW" "1"
+fi
 
 run_check "REVIEW" "pip-audit" \
   "${PYTHON_BIN} -m pip_audit"
@@ -173,6 +293,15 @@ fi
   echo "- commit: ${git_commit}"
   echo "- python_bin: \`${PYTHON_BIN}\`"
   echo "- VIRTUAL_ENV: \`${virtual_env_value}\`"
+  echo "- test_env_source: \`${loaded_env_source}\`"
+  echo
+  echo "## Required env presence (masked)"
+  echo
+  echo "- DATABASE_URL: ${database_url_status}"
+  echo "- ADMIN_CHAT_ID: ${admin_chat_id_status}"
+  echo "- GROQ_API_KEY: ${groq_api_key_status}"
+  echo "- TOKEN_ENCRYPTION_KEY: ${token_encryption_key_status}"
+  echo "- JWT_SECRET_KEY: ${jwt_secret_key_status}"
   echo
   echo "## Git status"
   echo '```text'
