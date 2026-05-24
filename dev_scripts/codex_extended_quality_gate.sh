@@ -96,18 +96,17 @@ ensure_python_bin() {
     return 0
   fi
   if [[ "$AUTO_BOOTSTRAP_ENV" != "1" ]]; then
-    echo "ERROR: PYTHON_BIN '$PYTHON_BIN' not found and AUTO_BOOTSTRAP_ENV=0" >&2
-    return 1
+    fail_env "PYTHON_BIN '$PYTHON_BIN' not found and AUTO_BOOTSTRAP_ENV=0"
   fi
-  python -m venv "$BOOTSTRAP_VENV_DIR"
+  if ! PYTHON_BIN=python3 VENV_DIR="$BOOTSTRAP_VENV_DIR" bash dev_scripts/bootstrap_codex_env.sh; then
+    fail_env "unable to bootstrap environment via dev_scripts/bootstrap_codex_env.sh"
+  fi
   PYTHON_BIN="$BOOTSTRAP_VENV_DIR/bin/python"
-  "$PYTHON_BIN" -m pip install --upgrade pip
-  "$PYTHON_BIN" -m pip install -r requirements.txt -r requirements-dev.txt
   return 0
 }
 
 ensure_python_stack() {
-  local required_modules=(pytest pytest_cov ruff mypy)
+  local required_modules=(pytest pytest_cov pytest_asyncio pytest_env ruff mypy)
   local missing=0
   for module in "${required_modules[@]}"; do
     if ! "$PYTHON_BIN" -c "import ${module}" >/dev/null 2>&1; then
@@ -116,7 +115,10 @@ ensure_python_stack() {
     fi
   done
   if [[ "$missing" -eq 1 && "$AUTO_BOOTSTRAP_ENV" == "1" ]]; then
-    "$PYTHON_BIN" -m pip install -r requirements.txt -r requirements-dev.txt
+    if ! PYTHON_BIN=python3 VENV_DIR="$BOOTSTRAP_VENV_DIR" bash dev_scripts/bootstrap_codex_env.sh; then
+      fail_env "unable to bootstrap missing python stack via dev_scripts/bootstrap_codex_env.sh"
+    fi
+    PYTHON_BIN="$BOOTSTRAP_VENV_DIR/bin/python"
   fi
 }
 

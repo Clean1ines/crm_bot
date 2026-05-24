@@ -21,10 +21,17 @@ Required by `Settings` validation:
 
 ## 3) Run quality gate with explicit Python executable
 
-If `venv/bin/python` is unavailable in your environment, run:
+Primary local path:
 
 ```bash
-PYTHON_BIN=python bash dev_scripts/codex_extended_quality_gate.sh
+PYTHON_BIN=venv/bin/python AUTO_BOOTSTRAP_ENV=0 bash dev_scripts/codex_extended_quality_gate.sh
+```
+
+Primary Codex/cloud path:
+
+```bash
+bash dev_scripts/bootstrap_codex_env.sh
+PYTHON_BIN=.codex_venv/bin/python AUTO_BOOTSTRAP_ENV=0 bash dev_scripts/codex_extended_quality_gate.sh
 ```
 
 By default, the quality gate auto-bootstraps a local isolated environment
