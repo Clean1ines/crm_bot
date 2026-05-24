@@ -13,6 +13,7 @@ type SettingsDraft = {
   brandName?: string;
   toneOfVoice?: string;
   defaultLanguage?: string;
+  targetLanguage?: string;
   defaultTimezone?: string;
   widgetOrigin?: string;
 };
@@ -40,6 +41,7 @@ export const ProjectSettingsPage: React.FC = () => {
   const brandName = draft.brandName ?? String(settings.brand_name ?? '');
   const toneOfVoice = draft.toneOfVoice ?? String(settings.tone_of_voice ?? '');
   const defaultLanguage = draft.defaultLanguage ?? String(settings.default_language ?? '');
+  const targetLanguage = draft.targetLanguage ?? String(settings.target_language ?? defaultLanguage);
   const defaultTimezone = draft.defaultTimezone ?? String(settings.default_timezone ?? '');
   const widgetOrigin = draft.widgetOrigin ?? String(widgetConfig.allowed_origin ?? '');
 
@@ -115,6 +117,15 @@ export const ProjectSettingsPage: React.FC = () => {
             <input
               value={defaultLanguage}
               onChange={(event) => updateDraft({ defaultLanguage: event.target.value })}
+              placeholder="ru"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+            />
+          </label>
+          <label className="space-y-1 text-sm">
+            <span className="text-[var(--text-muted)]">Target language (ru/en/de/es)</span>
+            <input
+              value={targetLanguage}
+              onChange={(event) => updateDraft({ targetLanguage: event.target.value })}
               placeholder="ru"
               className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
