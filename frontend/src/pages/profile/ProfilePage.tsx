@@ -231,7 +231,7 @@ export const ProfilePage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">{t('profile.email.newPasswordLabel')}</span>
+            <span className="text-[var(--text-muted)]">Пароль для входа по email</span>
             <input
               type="password"
               value={password}
