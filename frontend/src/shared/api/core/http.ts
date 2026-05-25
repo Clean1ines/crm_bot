@@ -44,6 +44,25 @@ export async function authedJsonRequest<TResponse = unknown, TBody = unknown>(
   return { data, response };
 }
 
+export async function publicJsonRequest<TResponse = unknown, TBody = unknown>(
+  path: string,
+  options: { method: string; body?: TBody },
+): Promise<ApiJsonResult<TResponse>> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: options.method,
+    headers: new Headers({ 'Content-Type': 'application/json' }),
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+
+  const data = await response.json().catch(() => null) as TResponse;
+
+  if (!response.ok) {
+    throw data;
+  }
+
+  return { data, response };
+}
+
 export async function authedDeleteRequest(
   path: string,
 ): Promise<ApiJsonResult<null>> {
