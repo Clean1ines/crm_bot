@@ -1,5 +1,6 @@
 import { t } from '../../shared/i18n';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects } from '@entities/project';
 import { getProjectHomePath, isProjectAdminRole } from '@entities/project/model/access';
@@ -22,6 +23,7 @@ import {
 import frontendLogger from '@shared/lib/logger';
 import { ThemeToggle } from '@shared/ui/theme';
 import logoSrc from '@shared/assets/logo.png';
+import { authApi } from '@shared/api/modules/auth';
 
 interface NavItem {
   path: string;
@@ -83,6 +85,24 @@ export const AppSidebar: React.FC = () => {
   const visibleNavItems = navItems.filter((item) => !item.adminOnly || canManageProject);
   const canCreateProject = projects.length === 0
     || projects.some((project) => isProjectAdminRole(project.access_role));
+  const meQuery = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: async () => (await authApi.me()).data as { username?: string | null; email?: string | null },
+  });
+  const methodsQuery = useQuery({
+    queryKey: ['auth-methods-sidebar'],
+    queryFn: async () => (await authApi.methods()).data as { methods?: Array<{ provider: string; provider_id: string; verified?: boolean }> },
+  });
+  const profileDisplayName = useMemo(() => {
+    const savedLogin = window.localStorage.getItem('crm_profile_login')?.trim();
+    if (savedLogin) return savedLogin;
+    const verifiedEmail = methodsQuery.data?.methods?.find((item) => item.provider === 'email' && item.verified)?.provider_id?.trim();
+    if (verifiedEmail) return verifiedEmail;
+    const telegramUsername = methodsQuery.data?.methods?.find((item) => item.provider === 'telegram')?.provider_id?.trim()
+      || meQuery.data?.username?.trim();
+    if (telegramUsername) return telegramUsername;
+    return t('sidebar.profile.adminName');
+  }, [meQuery.data?.username, methodsQuery.data?.methods]);
 
   const handleProjectSelect = (projectId: string) => {
     const project = projects.find((item) => item.id === projectId);
@@ -259,7 +279,7 @@ export const AppSidebar: React.FC = () => {
             <User className="w-4 h-4" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-medium text-[var(--text-primary)]">{t('sidebar.profile.adminName')}</div>
+            <div className="text-sm font-medium text-[var(--text-primary)]">{profileDisplayName}</div>
             <div className="text-xs text-[var(--text-muted)]">{t('sidebar.profile.description')}</div>
           </div>
         </button>
