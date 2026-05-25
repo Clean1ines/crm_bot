@@ -10,6 +10,68 @@ LanguageHint = Literal["ru", "en", "de", "es", "unknown"]
 SUPPORTED_LANGUAGES: tuple[SupportedLanguage, ...] = ("ru", "en", "de", "es")
 _NEUTRAL_TOKENS = {"ai", "api", "crm", "saas", "rag", "llm", "telegram"}
 
+_DE_STOPWORDS = {
+    "und",
+    "oder",
+    "nicht",
+    "ist",
+    "sind",
+    "mit",
+    "für",
+    "bitte",
+    "ich",
+    "wir",
+    "sie",
+    "dass",
+    "kein",
+    "eine",
+    "einen",
+    "dem",
+    "den",
+    "der",
+    "die",
+    "das",
+}
+_ES_STOPWORDS = {
+    "que",
+    "para",
+    "con",
+    "por",
+    "como",
+    "hola",
+    "gracias",
+    "necesito",
+    "quiero",
+    "puede",
+    "pueden",
+    "tiene",
+    "tienen",
+    "usted",
+    "ustedes",
+    "el",
+    "la",
+    "los",
+    "las",
+    "de",
+}
+_EN_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "please",
+    "hello",
+    "thanks",
+    "need",
+    "want",
+    "your",
+    "you",
+    "can",
+    "does",
+    "this",
+    "that",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class LanguagePolicyDecision:
@@ -24,19 +86,28 @@ def normalize_project_language(value: str | None) -> LanguageHint:
     return normalized if normalized in SUPPORTED_LANGUAGES else "unknown"
 
 
+def _token_signal_counts(tokens: list[str]) -> tuple[int, int, int]:
+    de_hits = sum(1 for token in tokens if token in _DE_STOPWORDS)
+    es_hits = sum(1 for token in tokens if token in _ES_STOPWORDS)
+    en_hits = sum(1 for token in tokens if token in _EN_STOPWORDS)
+    return de_hits, es_hits, en_hits
+
+
 def detect_language_hint(text: str) -> LanguageHint:
     compact = " ".join(text.strip().split())
     if not compact:
         return "unknown"
 
-    tokenized = re.findall(r"[A-Za-zÀ-ÿА-Яа-яЁё]+", compact)
-    tokens = [token for token in tokenized if token.lower() not in _NEUTRAL_TOKENS]
+    tokenized = [
+        token.lower() for token in re.findall(r"[A-Za-zÀ-ÿА-Яа-яЁё]+", compact)
+    ]
+    tokens = [token for token in tokenized if token not in _NEUTRAL_TOKENS]
     signal_text = " ".join(tokens)
 
     cyr = len(re.findall(r"[А-Яа-яЁё]", signal_text))
-    deu = len(re.findall(r"[ÄÖÜäöüß]", signal_text))
-    esp = len(re.findall(r"[ÁÉÍÓÚÜÑáéíóúüñ]", signal_text))
-    lat = len(re.findall(r"[A-Za-z]", signal_text)) + deu + esp
+    deu_diacritics = len(re.findall(r"[ÄÖÜäöüß]", signal_text))
+    esp_diacritics = len(re.findall(r"[ÁÉÍÓÚÜÑáéíóúüñ]", signal_text))
+    lat = len(re.findall(r"[A-Za-z]", signal_text)) + deu_diacritics + esp_diacritics
 
     total = cyr + lat
     if total < 6:
@@ -46,15 +117,29 @@ def detect_language_hint(text: str) -> LanguageHint:
     if lat / total < 0.65:
         return "unknown"
 
-    if deu >= 2 and deu >= esp + 1:
+    de_hits, es_hits, en_hits = _token_signal_counts(tokens)
+
+    if deu_diacritics >= 2 and deu_diacritics >= esp_diacritics + 1:
         return "de"
-    if esp >= 2 and esp >= deu + 1:
+    if esp_diacritics >= 2 and esp_diacritics >= deu_diacritics + 1:
         return "es"
+
+    if de_hits >= 2 and de_hits > es_hits and de_hits > en_hits:
+        return "de"
+    if es_hits >= 2 and es_hits > de_hits and es_hits > en_hits:
+        return "es"
+
     return "en"
 
 
 def dominant_language(values: list[str]) -> LanguageHint:
-    counts: dict[LanguageHint, int] = {"ru": 0, "en": 0, "de": 0, "es": 0, "unknown": 0}
+    counts: dict[LanguageHint, int] = {
+        "ru": 0,
+        "en": 0,
+        "de": 0,
+        "es": 0,
+        "unknown": 0,
+    }
     for value in values:
         counts[detect_language_hint(value)] += 1
 
