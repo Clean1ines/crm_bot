@@ -57,7 +57,7 @@ def test_parse_preprocessing_payload_accepts_fragment_schema_and_derives_embeddi
 
     assert entry.title == "Refund policy"
     assert len(entry.questions) == 3
-    assert entry.synonyms == entry.questions
+    assert entry.synonyms == ()
     assert entry.tags == ()
     assert "Can I get a refund?" in entry.embedding_text
     assert "Refund requests are reviewed" in entry.embedding_text
