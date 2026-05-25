@@ -145,14 +145,7 @@ export const DocumentProcessingBlock: React.FC<{
                   );
                 }
 
-                return (
-                  <span
-                    key={action.id}
-                    className={`rounded-full px-2 py-1 ${action.enabled ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-muted)]'}`}
-                  >
-                    {action.label}
-                  </span>
-                );
+                return null;
               })}
             </div>
           </div>
