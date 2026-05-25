@@ -412,13 +412,13 @@ def _parse_entry(
     source_excerpt = _required_text(payload, "source_excerpt", index=index)
 
     questions = _dedupe_texts((canonical_question, *variants))
-    synonyms = questions
+    synonyms = _dedupe_texts(payload.get("synonyms") or ())
     tags: tuple[str, ...] = ()
     source_chunk_indexes = tuple(
         _non_negative_ints(payload.get("source_chunk_indexes"))
     )
     if mode == MODE_PRICE_LIST:
-        _reject_price_list_noisy_synonyms(synonyms, index=index)
+        _reject_price_list_noisy_synonyms(synonyms or questions, index=index)
 
     entry = KnowledgePreprocessingEntry(
         title=title,
