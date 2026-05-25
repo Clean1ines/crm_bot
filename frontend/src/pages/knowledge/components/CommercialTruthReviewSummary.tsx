@@ -29,7 +29,7 @@ const commercialTruthResolutionStatusLabel = (status: string): string => {
 };
 
 const commercialTruthRuntimeEligibleText = (value: boolean): string => (
-  value ? 'true' : 'false'
+  value ? 'Да' : 'Нет'
 );
 
 const priceFactValueKindLabel = (valueKind: string): string => {
@@ -70,7 +70,7 @@ export const CommercialTruthReviewSummary: React.FC<{
 
   return (
     <div className="mb-4 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--surface-secondary)] p-3 text-xs">
-      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+      <div className="mb-2 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto]">
         <div>
           <div className="font-semibold text-[var(--text-primary)]">
             {t('knowledge.commercialTruth.title')}
@@ -79,7 +79,7 @@ export const CommercialTruthReviewSummary: React.FC<{
             {t('knowledge.commercialTruth.subtitle')}
           </div>
         </div>
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 rounded-lg bg-[var(--surface-elevated)] p-2">
           <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
             {t('knowledge.commercialTruth.policy.label')}
           </span>
