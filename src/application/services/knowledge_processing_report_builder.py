@@ -188,14 +188,6 @@ def _knowledge_processing_actions(
                 enabled=not is_processing,
             )
         )
-    if published_answer_count > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="review_published",
-                label="Проверить опубликованные ответы",
-                kind="secondary",
-            )
-        )
     return tuple(actions)
 
 
