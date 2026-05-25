@@ -510,7 +510,7 @@ def _technical_chunk_batches_for_answer_compiler(
             continue
 
         is_markdown_semantic = bool(chunk.get("section_title") or chunk.get("children"))
-        if is_markdown_semantic and len(content.strip()) <= KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET:
+        if is_markdown_semantic:
             parts = (content.strip(),)
         else:
             parts = _split_technical_source_text(
@@ -801,6 +801,33 @@ KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
 
+def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
+    answer_tokens = set(_answer_resolution_tokens_from_text(answer))
+    source_tokens = set(_answer_resolution_tokens_from_text(source_excerpt))
+    if not source_tokens:
+        return 1.0
+    if not answer_tokens:
+        return 0.0
+    overlap = len(answer_tokens & source_tokens)
+    return overlap / max(1, min(len(source_tokens), 36))
+
+
+def _regenerate_entry_from_source_excerpt(entry: KnowledgePreprocessingEntry, source_excerpt: str) -> KnowledgePreprocessingEntry:
+    rebuilt_answer = _answer_digest(source_excerpt, max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS)
+    rebuilt = KnowledgePreprocessingEntry(
+        title=entry.title,
+        answer=rebuilt_answer,
+        source_excerpt=source_excerpt or entry.source_excerpt,
+        questions=entry.questions,
+        synonyms=entry.synonyms,
+        tags=entry.tags,
+        embedding_text=entry.embedding_text,
+        canonical_question=entry.canonical_question,
+        source_chunk_indexes=entry.source_chunk_indexes,
+    )
+    return rebuilt
+
+
 def _entry_has_markdown_heading(answer: str) -> bool:
     return any(line.lstrip().startswith("#") for line in answer.splitlines())
 
@@ -819,8 +846,15 @@ def _validate_generated_entry(
         raise ValidationError("Canonical answer must be declarative, not chat reply")
     if re.search(r"[一-鿿가-힯]", entry.answer) and not re.search(r"[一-鿿가-힯]", source_excerpt):
         raise ValidationError("Generated answer contains CJK/Korean artifacts absent in source")
-    if re.search(r"[Ѐ-ӿ]", source_excerpt) and not re.search(r"[Ѐ-ӿ]", entry.answer):
+    source_ru = len(re.findall(r"[Ѐ-ӿ]", source_excerpt))
+    source_latin = len(re.findall(r"[A-Za-z]", source_excerpt))
+    answer_ru = len(re.findall(r"[Ѐ-ӿ]", entry.answer))
+    answer_latin = len(re.findall(r"[A-Za-z]", entry.answer))
+    if source_ru > source_latin and answer_ru < answer_latin:
         raise ValidationError("Answer language does not match dominant source language")
+    coverage = _source_answer_coverage_ratio(entry.answer, source_excerpt)
+    if coverage < 0.45:
+        raise ValidationError("Generated answer misses important source terms")
     for field in (entry.title, entry.canonical_question, *entry.questions, *entry.synonyms, *entry.tags, entry.answer, entry.embedding_text):
         if re.search(r"[一-鿿가-힯]", field) and not re.search(r"[一-鿿가-힯]", source_excerpt):
             raise ValidationError("Generated enrichment contains forbidden unicode script")
@@ -883,7 +917,7 @@ def _preprocessing_entry_from_technical_chunk(
     return KnowledgePreprocessingEntry(
         title=title or "technical source chunk",
         answer=_answer_digest(content),
-        source_excerpt=content[:KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET],
+        source_excerpt=content,
         questions=_text_tuple(chunk.get("questions")),
         synonyms=(),
         tags=(),
@@ -5143,13 +5177,25 @@ class KnowledgeIngestionService:
                 existing_project_titles=existing_project_titles,
                 on_progress=persist_answer_resolution_progress,
             )
+            regenerated_entries: list[KnowledgePreprocessingEntry] = []
             for idx, generated_entry in enumerate(tightened_entries):
                 source_excerpt = (
                     tightened_source_excerpts[idx]
                     if idx < len(tightened_source_excerpts)
                     else generated_entry.source_excerpt
                 )
-                _validate_generated_entry(generated_entry, source_excerpt=source_excerpt)
+                try:
+                    _validate_generated_entry(generated_entry, source_excerpt=source_excerpt)
+                    regenerated_entries.append(generated_entry)
+                except ValidationError:
+                    source_text = "\n\n".join(source_excerpt)
+                    regenerated = _regenerate_entry_from_source_excerpt(
+                        generated_entry,
+                        source_text,
+                    )
+                    _validate_generated_entry(regenerated, source_excerpt=source_text)
+                    regenerated_entries.append(regenerated)
+            tightened_entries = tuple(regenerated_entries)
             answer_resolution_fallback_published = (
                 answer_resolution_metrics.get("fallback_published") is True
             )
