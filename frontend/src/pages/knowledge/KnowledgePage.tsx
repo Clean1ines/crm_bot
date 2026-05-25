@@ -1084,8 +1084,9 @@ export const KnowledgePage: React.FC = () => {
     );
   }
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredDocuments = documents.filter((doc) => (
-    doc.file_name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
   ));
 
   const previewResult = previewMutation.data;
@@ -1150,7 +1151,7 @@ export const KnowledgePage: React.FC = () => {
               placeholder={t('knowledge.search.placeholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
+              className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
             />
           </div>
           <button
@@ -1192,9 +1193,9 @@ export const KnowledgePage: React.FC = () => {
               value={preprocessingMode}
               onChange={(event) => setPreprocessingMode(event.target.value as KnowledgePreprocessingMode)}
               disabled={uploadMutation.isPending}
-              className="min-h-11 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 disabled:cursor-wait disabled:opacity-60"
+              className="min-h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 disabled:cursor-wait disabled:opacity-60"
             >
-              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.map((option) => (
+              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.filter((option) => option.value === 'faq' || option.value === 'price_list').map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
