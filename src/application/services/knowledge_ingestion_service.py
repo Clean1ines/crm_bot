@@ -848,32 +848,109 @@ def _entry_has_markdown_heading(answer: str) -> bool:
     return any(line.lstrip().startswith("#") for line in answer.splitlines())
 
 
-def _validate_generated_entry(
+def _strip_markdown_heading_markers(answer: str) -> str:
+    lines: list[str] = []
+    for line in answer.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            repaired = re.sub(r"^\s*#{1,6}\s*", "", line).strip()
+            if repaired:
+                lines.append(repaired)
+            continue
+        lines.append(line)
+    return _clean_optional_text("\n".join(lines))
+
+
+def _remove_forbidden_cjk_korean_chars(value: str) -> str:
+    return re.sub(r"[一-鿿가-힯]", "", value)
+
+
+def _strip_service_labels(value: str) -> str:
+    repaired = re.sub(
+        r"\b(?:expected[\s_-]*topic|test[\s_-]*label)\s*[:：-]*\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return _clean_optional_text(repaired)
+
+
+def _strip_conversational_prefix(answer: str) -> str:
+    repaired = re.sub(
+        r"^\s*(?:привет(?:ствую)?|здравствуйте|hello|hi)\s*[,!.\-:;–—]*\s*",
+        "",
+        answer,
+        flags=re.IGNORECASE,
+    )
+    return _clean_optional_text(repaired)
+
+
+def _repair_generated_entry(
     entry: KnowledgePreprocessingEntry,
     *,
     source_excerpt: str,
-) -> None:
-    answer_lower = entry.answer.lower()
-    if _entry_has_markdown_heading(entry.answer):
-        raise ValidationError("Generated answer contains markdown heading")
-    if any(token in answer_lower for token in ("expected topic", "test label")):
-        raise ValidationError("Generated answer leaks expected-topic/test label")
-    if answer_lower.startswith(("привет", "здравствуйте", "hello", "hi")):
-        raise ValidationError("Canonical answer must be declarative, not chat reply")
-    if re.search(r"[一-鿿가-힯]", entry.answer) and not re.search(r"[一-鿿가-힯]", source_excerpt):
-        raise ValidationError("Generated answer contains CJK/Korean artifacts absent in source")
+) -> tuple[KnowledgePreprocessingEntry, tuple[str, ...]]:
+    warnings: list[str] = []
+    source_has_cjk = re.search(r"[一-鿿가-힯]", source_excerpt) is not None
+
+    repaired = entry
+    repaired_answer = repaired.answer
+    if _entry_has_markdown_heading(repaired_answer):
+        repaired_answer = _strip_markdown_heading_markers(repaired_answer)
+        warnings.append("generated_answer_markdown_heading_repaired")
+    answer_without_labels = _strip_service_labels(repaired_answer)
+    if answer_without_labels != repaired_answer:
+        repaired_answer = answer_without_labels
+        warnings.append("generated_answer_service_label_repaired")
+    answer_without_prefix = _strip_conversational_prefix(repaired_answer)
+    if answer_without_prefix != repaired_answer:
+        repaired_answer = answer_without_prefix
+        warnings.append("generated_answer_conversational_prefix_repaired")
+    if not source_has_cjk:
+        answer_without_cjk = _remove_forbidden_cjk_korean_chars(repaired_answer)
+        if answer_without_cjk != repaired_answer:
+            repaired_answer = _clean_optional_text(answer_without_cjk)
+            warnings.append("generated_answer_forbidden_script_repaired")
+    repaired = replace(repaired, answer=repaired_answer)
+
     source_ru = len(re.findall(r"[Ѐ-ӿ]", source_excerpt))
     source_latin = len(re.findall(r"[A-Za-z]", source_excerpt))
-    answer_ru = len(re.findall(r"[Ѐ-ӿ]", entry.answer))
-    answer_latin = len(re.findall(r"[A-Za-z]", entry.answer))
+    answer_ru = len(re.findall(r"[Ѐ-ӿ]", repaired.answer))
+    answer_latin = len(re.findall(r"[A-Za-z]", repaired.answer))
     if source_ru > source_latin and answer_ru < answer_latin:
         raise ValidationError("Answer language does not match dominant source language")
-    coverage = _source_answer_coverage_ratio(entry.answer, source_excerpt)
+    coverage = _source_answer_coverage_ratio(repaired.answer, source_excerpt)
     if coverage < 0.45:
-        raise ValidationError("Generated answer misses important source terms")
-    for field in (entry.title, entry.canonical_question, *entry.questions, *entry.synonyms, *entry.tags, entry.answer, entry.embedding_text):
-        if re.search(r"[一-鿿가-힯]", field) and not re.search(r"[一-鿿가-힯]", source_excerpt):
-            raise ValidationError("Generated enrichment contains forbidden unicode script")
+        warnings.append("generated_answer_low_coverage_warning")
+
+    if not source_has_cjk:
+        sanitized_fields: dict[str, str | tuple[str, ...]] = {}
+        for name, value in (
+            ("title", repaired.title),
+            ("canonical_question", repaired.canonical_question),
+            ("source_excerpt", repaired.source_excerpt),
+        ):
+            updated = _remove_forbidden_cjk_korean_chars(value)
+            if updated != value:
+                sanitized_fields[name] = _clean_optional_text(updated)
+        for name, values in (("questions", repaired.questions), ("synonyms", repaired.synonyms), ("tags", repaired.tags)):
+            updated_values = tuple(
+                cleaned
+                for item in values
+                if (cleaned := _clean_optional_text(_remove_forbidden_cjk_korean_chars(item)))
+            )
+            if updated_values != values:
+                sanitized_fields[name] = updated_values
+        if sanitized_fields:
+            warnings.append("generated_enrichment_forbidden_script_repaired")
+            repaired = replace(repaired, **sanitized_fields)
+
+    repaired = replace(repaired, embedding_text=build_embedding_text(repaired))
+    if not _clean_optional_text(repaired.answer):
+        raise ValidationError("Generated answer became empty after repair")
+    if not _clean_optional_text(repaired.source_excerpt):
+        raise ValidationError("Generated source excerpt became empty after repair")
+    return repaired, tuple(warnings)
 
 
 def _preprocessing_failure_status_message(exc: Exception) -> str:
@@ -5194,6 +5271,7 @@ class KnowledgeIngestionService:
                 on_progress=persist_answer_resolution_progress,
             )
             regenerated_entries: list[KnowledgePreprocessingEntry] = []
+            generated_entry_repair_warnings: list[tuple[str, ...]] = []
             for idx, generated_entry in enumerate(tightened_entries):
                 raw_source_excerpt = (
                     tightened_source_excerpts[idx]
@@ -5201,20 +5279,12 @@ class KnowledgeIngestionService:
                     else (generated_entry.source_excerpt,)
                 )
                 source_text = _source_excerpt_to_text(raw_source_excerpt)
-                try:
-                    _validate_generated_entry(generated_entry, source_excerpt=source_text)
-                    regenerated_entries.append(generated_entry)
-                except ValidationError:
-                    regenerated = _regenerate_entry_from_source_excerpt(
-                        generated_entry,
-                        source_text,
-                    )
-                    regenerated = replace(
-                        regenerated,
-                        embedding_text=build_embedding_text(regenerated),
-                    )
-                    _validate_generated_entry(regenerated, source_excerpt=source_text)
-                    regenerated_entries.append(regenerated)
+                repaired_entry, repair_warnings = _repair_generated_entry(
+                    generated_entry,
+                    source_excerpt=source_text,
+                )
+                regenerated_entries.append(repaired_entry)
+                generated_entry_repair_warnings.append(repair_warnings)
             tightened_entries = tuple(regenerated_entries)
             answer_resolution_fallback_published = (
                 answer_resolution_metrics.get("fallback_published") is True
@@ -5259,6 +5329,9 @@ class KnowledgeIngestionService:
                     "answer_resolution_fallback_published": answer_resolution_fallback_published,
                     "answer_resolution_enabled": True,
                     "extraction_concurrency": extraction_concurrency,
+                    "generated_entry_repair_warnings": [
+                        list(item) for item in generated_entry_repair_warnings if item
+                    ],
                 },
             )
             canonical_entries = _canonical_entries_from_preprocessing_result(
