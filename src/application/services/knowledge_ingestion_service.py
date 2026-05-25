@@ -5209,6 +5209,10 @@ class KnowledgeIngestionService:
                         generated_entry,
                         source_text,
                     )
+                    regenerated = replace(
+                        regenerated,
+                        embedding_text=build_embedding_text(regenerated),
+                    )
                     _validate_generated_entry(regenerated, source_excerpt=source_text)
                     regenerated_entries.append(regenerated)
             tightened_entries = tuple(regenerated_entries)

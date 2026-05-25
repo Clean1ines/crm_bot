@@ -402,11 +402,16 @@ def _structured_source_chunk_payload(
     index: int,
     max_content_chars: int,
 ) -> JsonObject:
+    is_markdown_semantic = bool(chunk.get("section_body") or chunk.get("children"))
+    section_max_chars = max_content_chars if not is_markdown_semantic else max(
+        max_content_chars,
+        12000,
+    )
     payload: JsonObject = {
         "index": index,
         "content": _truncated_text(
             chunk.get("content"),
-            max_chars=max_content_chars,
+            max_chars=section_max_chars,
         ),
     }
     passthrough_keys = (
@@ -428,7 +433,7 @@ def _structured_source_chunk_payload(
 
         value = chunk[key]
         if key in {"section_body", "source_excerpt"}:
-            payload[key] = _truncated_text(value, max_chars=max_content_chars)
+            payload[key] = _truncated_text(value, max_chars=section_max_chars)
         else:
             payload[key] = json_value_from_unknown(value)
 
@@ -438,7 +443,7 @@ def _structured_source_chunk_payload(
         for child in children[:12]:
             child_payload = _structured_child_payload(
                 child,
-                max_chars=max(300, max_content_chars),
+                max_chars=max(600, section_max_chars),
             )
             if child_payload:
                 child_payloads.append(child_payload)
