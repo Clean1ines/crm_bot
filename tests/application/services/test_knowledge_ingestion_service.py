@@ -8,6 +8,7 @@ from src.application.errors import (
 )
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
+    _repair_generated_entry,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
@@ -1105,3 +1106,104 @@ def test_publication_guard_collapses_exact_duplicate_answers():
         "Что делает ассистент без данных?",
         "Как отвечает ассистент без данных?",
     )
+
+
+def test_repair_generated_entry_strips_markdown_heading_and_keeps_entry_publishable() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Возвраты",
+        answer="## Возврат средств\nОформите заявку через чат поддержки.",
+        source_excerpt="Возврат средств: оформите заявку через чат поддержки.",
+        questions=("Как вернуть деньги?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.answer.startswith("Возврат средств")
+    assert "generated_answer_markdown_heading_repaired" in warnings
+    assert repaired.embedding_text
+
+
+def test_repair_generated_entry_removes_cjk_artifact_in_question_variant() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Оплата",
+        answer="Оплата доступна картой.",
+        source_excerpt="Оплата доступна картой.",
+        questions=("Как оплатить 가 заказ?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.questions == ("Как оплатить заказ?",)
+    assert "generated_enrichment_forbidden_script_repaired" in warnings
+
+
+def test_repair_generated_entry_low_coverage_is_warning_only() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Тариф",
+        answer="Кратко: уточните у менеджера.",
+        source_excerpt="Тариф Pro включает SLA 99.9%, выделенного менеджера и приоритетную поддержку.",
+        questions=("Что в тарифе Pro?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.answer
+    assert "generated_answer_low_coverage_warning" in warnings
+
+
+def test_repair_generated_entry_language_mismatch_is_warning_only() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Доставка",
+        answer="Delivery by courier in 1-2 days.",
+        source_excerpt="Доставка курьером за 1-2 дня.",
+        questions=("Какие сроки доставки?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.answer
+    assert "answer_language_mismatch_warning" in warnings
+
+
+def test_repair_generated_entry_empty_answer_falls_back_to_source_digest() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Поддержка",
+        answer="##",
+        source_excerpt="Поддержка отвечает в рабочие часы по чату.",
+        questions=("Когда отвечает поддержка?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.answer == "Поддержка отвечает в рабочие часы по чату."
+    assert "generated_answer_empty_after_repair_warning" in warnings
+
+
+@pytest.mark.asyncio
+async def test_process_document_keeps_repairable_generated_entry_without_document_error() -> None:
+    repo = _knowledge_repo(canonical_count=1)
+    usage_repo = _usage_repo()
+    preprocessor = Mock()
+    preprocessor.model_name = "llama-test"
+    preprocessor.preprocess = AsyncMock(
+        return_value=KnowledgePreprocessingExecutionResult(
+            result=KnowledgePreprocessingResult(
+                mode="faq",
+                prompt_version="knowledge_answer_compiler_faq_v1",
+                model="llama-test",
+                entries=(
+                    KnowledgePreprocessingEntry(
+                        title="Возвраты",
+                        answer="## Возврат средств\nЗдравствуйте! expected topic: возврат через поддержку.",
+                        source_excerpt="Возврат средств оформляется через поддержку.",
+                        questions=("Как оформить возврат 가?",),
+                    ),
+                ),
+            ),
+        )
+    )
+    service = KnowledgeIngestionService(object())
+    await service.process_document(
+        project_id="project-1",
+        document_id="doc-repairable",
+        file_name="faq.txt",
+        chunks=[{"content": "Возврат средств оформляется через поддержку."}],
+        mode="faq",
+        knowledge_repo_factory=Mock(return_value=repo),
+        model_usage_repo_factory=Mock(return_value=usage_repo),
+        preprocessor_factory=Mock(return_value=preprocessor),
+        logger=Mock(),
+    )
+    repo.update_document_status.assert_any_await("doc-repairable", "processed")
+    published_entries = repo.add_canonical_entries.await_args.kwargs["entries"]
+    assert len(published_entries) == 1
