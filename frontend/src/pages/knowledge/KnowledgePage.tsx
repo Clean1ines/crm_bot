@@ -1087,7 +1087,7 @@ export const KnowledgePage: React.FC = () => {
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredDocuments = documents.filter((doc) => (
-    normalizedSearchQuery.length === 0 || doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
+    doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
   ));
   const searchSuggestions = normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
 
@@ -1155,8 +1155,6 @@ export const KnowledgePage: React.FC = () => {
               placeholder={t('knowledge.search.placeholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setIsSearchFocused(true)}
-              onBlur={() => window.setTimeout(() => setIsSearchFocused(false), 120)}
               className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
             />
             {isSearchFocused && searchSuggestions.length > 0 && (

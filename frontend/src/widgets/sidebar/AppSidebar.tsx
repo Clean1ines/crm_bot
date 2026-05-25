@@ -85,24 +85,7 @@ export const AppSidebar: React.FC = () => {
   const visibleNavItems = navItems.filter((item) => !item.adminOnly || canManageProject);
   const canCreateProject = projects.length === 0
     || projects.some((project) => isProjectAdminRole(project.access_role));
-  const meQuery = useQuery({
-    queryKey: ['auth-me'],
-    queryFn: async () => (await authApi.me()).data as { username?: string | null; email?: string | null },
-  });
-  const methodsQuery = useQuery({
-    queryKey: ['auth-methods-sidebar'],
-    queryFn: async () => (await authApi.methods()).data as { methods?: Array<{ provider: string; provider_id: string; verified?: boolean }> },
-  });
-  const profileDisplayName = useMemo(() => {
-    const savedLogin = window.localStorage.getItem('crm_profile_login')?.trim();
-    if (savedLogin) return savedLogin;
-    const verifiedEmail = methodsQuery.data?.methods?.find((item) => item.provider === 'email' && item.verified)?.provider_id?.trim();
-    if (verifiedEmail) return verifiedEmail;
-    const telegramUsername = methodsQuery.data?.methods?.find((item) => item.provider === 'telegram')?.provider_id?.trim()
-      || meQuery.data?.username?.trim();
-    if (telegramUsername) return telegramUsername;
-    return t('sidebar.profile.adminName');
-  }, [meQuery.data?.username, methodsQuery.data?.methods]);
+  const profileDisplayName = window.localStorage.getItem('crm_profile_login')?.trim() || t('sidebar.profile.adminName');
 
   const handleProjectSelect = (projectId: string) => {
     const project = projects.find((item) => item.id === projectId);
