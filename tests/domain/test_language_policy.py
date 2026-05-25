@@ -19,3 +19,8 @@ def test_detect_language_hint_detects_english_for_plain_latin_text() -> None:
 def test_detect_language_hint_keeps_russian_with_english_terms() -> None:
     text = "Это CRM продукт для продаж и поддержки через API"
     assert detect_language_hint(text) == "ru"
+
+
+def test_detect_language_hint_keeps_short_cyrillic_dominant_russian_with_english_terms() -> None:
+    text = "CRM и API для продаж в РФ: чат-бот помогает"
+    assert detect_language_hint(text) == "ru"
