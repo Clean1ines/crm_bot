@@ -1,6 +1,6 @@
 import type { components } from '../generated/schema';
 import { API_BASE_URL } from '../core/config';
-import { authedJsonRequest } from '../core/http';
+import { authedJsonRequest, publicJsonRequest } from '../core/http';
 import { handleUnauthorizedResponse, isUnauthorized } from '../core/session';
 import { getErrorMessage } from '../core/errors';
 
@@ -34,10 +34,10 @@ export const authApi = {
   },
 
   emailRegister: (body: { email: string; password: string; full_name?: string }) =>
-    authedJsonRequest('/api/auth/email/register', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/email/register', { method: 'POST', body }),
 
   emailLogin: (body: { email: string; password: string }) =>
-    authedJsonRequest('/api/auth/email/login', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/email/login', { method: 'POST', body }),
 
   linkEmail: (body: { email: string; password: string }) =>
     authedJsonRequest('/api/auth/link/email', { method: 'POST', body }),
@@ -46,13 +46,13 @@ export const authApi = {
     authedJsonRequest('/api/auth/email/verification/request', { method: 'POST' }),
 
   confirmEmailVerification: (body: { token: string }) =>
-    authedJsonRequest('/api/auth/email/verification/confirm', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/email/verification/confirm', { method: 'POST', body }),
 
   googleLogin: (body: { provider_subject: string; email?: string; full_name?: string }) =>
-    authedJsonRequest('/api/auth/google/login', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/google/login', { method: 'POST', body }),
 
   googleLoginWithIdToken: (body: { id_token: string }) =>
-    authedJsonRequest('/api/auth/google/login/id-token', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/google/login/id-token', { method: 'POST', body }),
 
   linkGoogle: (body: { provider_subject: string; email?: string }) =>
     authedJsonRequest('/api/auth/link/google', { method: 'POST', body }),
@@ -64,16 +64,19 @@ export const authApi = {
     authedJsonRequest('/api/auth/password/change', { method: 'POST', body }),
 
   requestPasswordReset: (body: { email: string }) =>
-    authedJsonRequest('/api/auth/password/reset/request', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/password/reset/request', { method: 'POST', body }),
 
   confirmPasswordReset: (body: { token: string; new_password: string }) =>
-    authedJsonRequest('/api/auth/password/reset/confirm', { method: 'POST', body }),
+    publicJsonRequest('/api/auth/password/reset/confirm', { method: 'POST', body }),
 
   unlinkMethod: (provider: 'telegram' | 'email' | 'google') =>
     authedJsonRequest(`/api/auth/methods/${provider}`, { method: 'DELETE' }),
 
   me: () =>
     authedJsonRequest('/api/auth/me', { method: 'GET' }),
+
+  updateMe: (body: { login?: string | null }) =>
+    authedJsonRequest('/api/auth/me', { method: 'PATCH', body }),
 
   methods: () =>
     authedJsonRequest('/api/auth/methods', { method: 'GET' }),

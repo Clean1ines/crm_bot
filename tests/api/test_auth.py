@@ -535,6 +535,28 @@ class TestAuthAPI:
 
         assert response.status_code == 200
 
+    def test_change_password_wrong_current_password_returns_400(
+        self, client, mock_user_repo
+    ):
+        user_id = str(uuid4())
+        app.dependency_overrides[get_current_user_id] = lambda: user_id
+        mock_user_repo.has_auth_method = AsyncMock(return_value=True)
+        mock_user_repo.has_password = AsyncMock(return_value=True)
+        mock_user_repo.verify_password = AsyncMock(return_value=False)
+
+        try:
+            response = client.post(
+                "/api/auth/password/change",
+                json={
+                    "current_password": "wrong-password",
+                    "new_password": "new-secret",
+                },
+            )
+        finally:
+            app.dependency_overrides.pop(get_current_user_id, None)
+
+        assert response.status_code == 400
+
     def test_unlink_auth_method_rejects_last_method(self, client, mock_user_repo):
         user_id = str(uuid4())
         app.dependency_overrides[get_current_user_id] = lambda: user_id

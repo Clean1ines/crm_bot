@@ -97,6 +97,10 @@ class GoogleIdTokenRequest(BaseModel):
     id_token: str
 
 
+class UpdateProfileRequest(BaseModel):
+    login: str | None = None
+
+
 def verify(data: dict, token: str | None):
     if not token:
         logger.error("ADMIN_BOT_TOKEN is missing in settings!")
@@ -265,6 +269,16 @@ async def get_me(
 ):
     auth_service = build_auth_service(user_repo)
     return (await auth_service.get_current_user(current_user_id)).to_dict()
+
+
+@router.patch("/me")
+async def update_me(
+    data: UpdateProfileRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    auth_service = build_auth_service(user_repo)
+    return (await auth_service.update_profile_login(current_user_id, data.login)).to_dict()
 
 
 @router.get("/methods", response_model=AuthMethodsResponse)

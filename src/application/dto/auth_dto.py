@@ -36,6 +36,19 @@ def _record_list(value: object) -> list[dict[str, object]]:
     return [dict(item) for item in value if isinstance(item, Mapping)]
 
 
+def _profile_login_from_record(record: dict[str, object]) -> str | None:
+    login = _optional_str(record.get("login"))
+    if login:
+        return login
+    metadata = record.get("user_metadata")
+    if isinstance(metadata, Mapping):
+        value = metadata.get("profile_login")
+        if value is not None:
+            text = str(value).strip()
+            return text or None
+    return None
+
+
 @dataclass(slots=True)
 class AuthMethodDto:
     provider: str
@@ -176,6 +189,7 @@ class UserProfileDto:
     id: str
     telegram_id: int | None = None
     username: str | None = None
+    login: str | None = None
     full_name: str | None = None
     email: str | None = None
     is_platform_admin: bool | None = None
@@ -186,6 +200,7 @@ class UserProfileDto:
             id=str(record["id"]),
             telegram_id=_optional_int(record.get("telegram_id")),
             username=_optional_str(record.get("username")),
+            login=_profile_login_from_record(record),
             full_name=_optional_str(record.get("full_name")),
             email=_optional_str(record.get("email")),
             is_platform_admin=_optional_bool(record.get("is_platform_admin")),
@@ -197,6 +212,7 @@ class UserProfileDto:
             id=str(view.id),
             telegram_id=view.telegram_id,
             username=view.username,
+            login=view.login,
             full_name=view.full_name,
             email=view.email,
             is_platform_admin=view.is_platform_admin,

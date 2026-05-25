@@ -92,7 +92,7 @@ export const KnowledgeDocumentCard: React.FC<{
           <button
             type="button"
             onClick={onStopProcessing}
-            className="rounded-full bg-[var(--accent-danger-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80"
+            className="rounded-full bg-[var(--accent-danger-bg)] px-2.5 py-1 text-xs font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80"
           >
             {t('knowledge.documentCard.primaryAction.stop')}
           </button>
@@ -100,7 +100,7 @@ export const KnowledgeDocumentCard: React.FC<{
           <button
             type="button"
             onClick={onOpenDrafts}
-            className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+            className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
           >
             {t('knowledge.documentCard.primaryAction.openDrafts')}
           </button>
@@ -108,17 +108,17 @@ export const KnowledgeDocumentCard: React.FC<{
           <button
             type="button"
             onClick={onOpenSourceUnits}
-            className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+            className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
           >
             {t('knowledge.documentCard.primaryAction.openSources')}
           </button>
         ) : (
-          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-muted)]">{t('knowledge.documentCard.primaryAction.details')}</span>
+          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">{t('knowledge.documentCard.primaryAction.details')}</span>
         )}
         <button
           type="button"
           onClick={onOpenCuration}
-          className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-[10px] font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+          className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
         >
           {t('knowledge.documentCard.primaryAction.curation')}
         </button>
@@ -138,24 +138,24 @@ export const KnowledgeDocumentCard: React.FC<{
       )}
     </div>
 
-    <div className="mb-4 flex flex-wrap gap-1.5 text-[10px]">
+    <div className="mb-4 flex flex-wrap gap-1.5 text-xs">
       {typeof doc.structured_entries === 'number' && (
-        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
           {t('knowledge.documentCard.counters.runtimeEntries')}: {doc.structured_entries}
         </span>
       )}
       {typeof draftCount === 'number' && draftCount > 0 && (
-        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
           {t('knowledge.documentCard.counters.drafts')}: {draftCount}
         </span>
       )}
       {priceFactsResponse && priceFactsResponse.facts.length > 0 && (
-        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
           {t('knowledge.documentCard.counters.priceFacts')}: {priceFactsResponse.facts.length}
         </span>
       )}
       {commercialTruthReviewResponse && commercialTruthReviewResponse.unresolved_conflict_count > 0 && (
-        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-muted)]">
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
           {t('knowledge.documentCard.counters.commercialConflicts')}: {commercialTruthReviewResponse.unresolved_conflict_count}
         </span>
       )}

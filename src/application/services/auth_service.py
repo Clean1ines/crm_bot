@@ -140,6 +140,10 @@ class AuthService:
             raise NotFoundError("User not found")
         return UserProfileDto.from_view(user)
 
+    async def update_profile_login(self, user_id: str, login: str | None) -> UserProfileDto:
+        await self.user_repo.set_profile_login(user_id, login)
+        return await self.get_current_user(user_id)
+
     async def verify_google_id_token(self, id_token: str) -> GoogleIdentityClaims:
         token = id_token.strip()
         if not token:
@@ -424,7 +428,7 @@ class AuthService:
             if not await self.user_repo.verify_password(
                 current_user_id, current_password
             ):
-                raise UnauthorizedError("Current password is incorrect")
+                raise ValidationError("Current password is incorrect")
 
         await self.user_repo.set_password(current_user_id, new_password)
         return await self.get_auth_methods(current_user_id)

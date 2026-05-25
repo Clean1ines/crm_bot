@@ -66,6 +66,7 @@ export const TelegramLoginPage: React.FC = () => {
   const [authError, setAuthError] = useState('');
   const [resetToken, setResetToken] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
+  const [showResetPanel, setShowResetPanel] = useState(false);
   const [verificationMessage, setVerificationMessage] = useState('');
   const [resetMessage, setResetMessage] = useState('');
   const [resetLink, setResetLink] = useState('');
@@ -146,6 +147,7 @@ export const TelegramLoginPage: React.FC = () => {
 
     if (incomingResetToken) {
       setResetToken(incomingResetToken);
+      setShowResetPanel(true);
     }
 
     if (!verificationToken) return;
@@ -234,6 +236,7 @@ export const TelegramLoginPage: React.FC = () => {
   };
 
   const handlePasswordResetRequest = async () => {
+    setShowResetPanel(true);
     setIsLoading(true);
     setAuthError('');
     setResetMessage('');
@@ -359,29 +362,31 @@ export const TelegramLoginPage: React.FC = () => {
                       className="mt-3 min-h-20 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
                     />
                   ) : null}
-                  <div className="mt-3 space-y-3 rounded-2xl bg-[var(--surface-secondary)] p-4 shadow-[var(--shadow-sm)]">
-                    <input
-                      value={resetToken}
-                      onChange={(event) => setResetToken(event.target.value)}
-                      placeholder={t('login.auth.resetTokenPlaceholder')}
-                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-                    />
-                    <input
-                      type="password"
-                      value={resetNewPassword}
-                      onChange={(event) => setResetNewPassword(event.target.value)}
-                      placeholder={t('login.auth.newPasswordPlaceholder')}
-                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
-                    />
-                    <button
-                      type="button"
-                      onClick={handlePasswordResetConfirm}
-                      disabled={isLoading}
-                      className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-60"
-                    >
-                      {t('login.auth.confirmReset')}
-                    </button>
-                  </div>
+                  {showResetPanel ? (
+                    <div className="mt-3 space-y-3 rounded-2xl bg-[var(--surface-secondary)] p-4 shadow-[var(--shadow-sm)]">
+                      <input
+                        value={resetToken}
+                        onChange={(event) => setResetToken(event.target.value)}
+                        placeholder={t('login.auth.resetTokenPlaceholder')}
+                        className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+                      />
+                      <input
+                        type="password"
+                        value={resetNewPassword}
+                        onChange={(event) => setResetNewPassword(event.target.value)}
+                        placeholder={t('login.auth.newPasswordPlaceholder')}
+                        className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+                      />
+                      <button
+                        type="button"
+                        onClick={handlePasswordResetConfirm}
+                        disabled={isLoading}
+                        className="min-h-11 w-full rounded-lg bg-[var(--control-bg)] px-4 py-3 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg-hover)] disabled:opacity-60"
+                      >
+                        {t('login.auth.confirmReset')}
+                      </button>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     onClick={handleTelegramLoginClick}

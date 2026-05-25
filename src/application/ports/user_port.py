@@ -78,6 +78,8 @@ class UserRepositoryPort(UserAuthPort, Protocol):
 
     async def update_user(self, user_id: str, data: dict[str, object]) -> bool: ...
 
+    async def set_profile_login(self, user_id: str, login: str | None) -> bool: ...
+
     async def create_email_verification_token(
         self,
         user_id: str,

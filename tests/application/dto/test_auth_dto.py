@@ -95,3 +95,17 @@ def test_user_profile_dto_normalizes_id_and_telegram_id():
         "full_name": "Jane Doe",
         "email": "jane@example.com",
     }
+
+
+def test_user_profile_dto_includes_login():
+    dto = UserProfileDto.from_record(
+        {
+            "id": "user-1",
+            "user_metadata": {"profile_login": "ops_lead"},
+        }
+    )
+
+    assert dto.to_dict() == {
+        "id": "user-1",
+        "login": "ops_lead",
+    }
