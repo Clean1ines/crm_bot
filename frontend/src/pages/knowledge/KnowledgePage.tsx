@@ -1400,6 +1400,7 @@ export const KnowledgePage: React.FC = () => {
                     doc={doc}
                     processingReport={processingReport}
                     isDocumentProcessing={isDocumentProcessing(doc)}
+                    showCompletedElapsed={!isDocumentProcessing(doc) && processingElapsedSeconds(doc, processingNowMs) > 0}
                     processingProgressLabel={processingProgressLabel(doc)}
                     processingProgressPercent={processingProgressPercent(doc)}
                     processingStatusMessage={processingStatusMessage(doc)}

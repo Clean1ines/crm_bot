@@ -190,3 +190,39 @@ def test_raw_candidates_are_built_before_merge_publication() -> None:
     assert candidates[0].metadata["canonical_question"] == "Что это за сервис?"
     assert candidates[0].source_refs
     assert candidates[0].source_refs[0].source_chunk_id == "doc:0"
+
+
+def test_answer_resolution_merges_russian_product_duplicates_with_short_answers() -> None:
+    entries = (
+        KnowledgePreprocessingEntry(
+            title="Что это за продукт",
+            canonical_question="Что это за продукт?",
+            answer="CRM бот для продаж.",
+            source_excerpt="CRM бот для продаж и поддержки.",
+            questions=("что это за продукт",),
+            synonyms=("о продукте",),
+        ),
+        KnowledgePreprocessingEntry(
+            title="О продукте",
+            canonical_question="О продукте",
+            answer="Продукт автоматизирует продажи.",
+            source_excerpt="Продукт автоматизирует продажи и заявки.",
+            questions=("о продукте", "как продукт помогает"),
+            synonyms=("что это за продукт",),
+        ),
+    )
+    decision = KnowledgeAnswerResolutionDecision(
+        case_id="product-duplicates-ru",
+        action="merge",
+        candidate_ids=("entry-0", "entry-1"),
+        canonical_answer="Это CRM-бот: он автоматизирует продажи и помогает поддержке.",
+    )
+
+    merged, _source_excerpts = _apply_answer_resolution_decisions(
+        entries=entries,
+        decisions=(decision,),
+    )
+
+    assert len(merged) == 1
+    assert merged[0].answer == "Это CRM-бот: он автоматизирует продажи и помогает поддержке."
+    assert "как продукт помогает" in merged[0].questions

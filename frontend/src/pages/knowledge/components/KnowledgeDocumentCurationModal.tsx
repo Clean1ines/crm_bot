@@ -85,6 +85,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
   const [parentId, setParentId] = useState<string | null>(null);
   const [mergeInstruction, setMergeInstruction] = useState('');
   const [preview, setPreview] = useState<KnowledgeEntryMergePreview | null>(null);
+  const [expandedEntryIds, setExpandedEntryIds] = useState<string[]>([]);
 
   const curationQuery = useQuery({
     queryKey: ['knowledge-document-curation', projectId, documentId],
@@ -207,6 +208,11 @@ export const KnowledgeDocumentCurationModal: React.FC<{
       return [...current, entry.id].slice(0, 12);
     });
   };
+  const toggleEntryExpanded = (entryId: string): void => {
+    setExpandedEntryIds((current) => (
+      current.includes(entryId) ? current.filter((id) => id !== entryId) : [...current, entryId]
+    ));
+  };
 
   const applyDuplicateGroup = (entryIds: string[]): void => {
     const knownIds = entryIds.filter((id) => mergeableEntries.some((entry) => entry.id === id)).slice(0, 12);
@@ -279,6 +285,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                 {filteredEntries.map((entry) => {
                   const selected = selectedIds.includes(entry.id);
                   const isParent = effectiveParentId === entry.id;
+                  const isExpanded = expandedEntryIds.includes(entry.id);
                   return (
                     <div
                       key={entry.id}
@@ -293,7 +300,19 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                           className="min-w-0 flex-1 text-left"
                         >
                           <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{entry.title}</div>
-                          <div className="mt-1 line-clamp-3 text-sm text-[var(--text-muted)]">{entry.answer}</div>
+                          <div className={`mt-1 text-sm text-[var(--text-muted)] ${isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-3'}`}>{entry.answer}</div>
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleEntryExpanded(entry.id);
+                              }}
+                              className="text-xs font-medium text-[var(--accent-primary)] hover:underline"
+                            >
+                              {isExpanded ? t('common.actions.hide') : t('common.actions.show')}
+                            </button>
+                          </div>
                           <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
                             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{entry.entry_kind}</span>
                             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">v{entry.version}</span>
