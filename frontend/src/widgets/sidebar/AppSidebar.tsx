@@ -85,7 +85,6 @@ export const AppSidebar: React.FC = () => {
   const visibleNavItems = navItems.filter((item) => !item.adminOnly || canManageProject);
   const canCreateProject = projects.length === 0
     || projects.some((project) => isProjectAdminRole(project.access_role));
-  const profileLogin = window.localStorage.getItem('crm_profile_login')?.trim() || '';
   const authMethodsQuery = useQuery({
     queryKey: ['auth-methods'],
     queryFn: async () => {
@@ -97,10 +96,11 @@ export const AppSidebar: React.FC = () => {
     queryKey: ['auth-me'],
     queryFn: async () => {
       const response = await authApi.me();
-      return response.data as { username?: string | null };
+      return response.data as { login?: string | null; username?: string | null };
     },
   });
   const profileDisplayName = useMemo(() => {
+    const profileLogin = meQuery.data?.login?.trim();
     if (profileLogin) return profileLogin;
     const methods = authMethodsQuery.data?.methods ?? [];
     const verifiedEmail = methods.find((method) => method.provider === 'email' && method.verified && method.provider_id)?.provider_id?.trim();
@@ -108,7 +108,7 @@ export const AppSidebar: React.FC = () => {
     const telegramUsername = meQuery.data?.username?.trim();
     if (telegramUsername) return telegramUsername.startsWith('@') ? telegramUsername : `@${telegramUsername}`;
     return t('sidebar.profile.adminName');
-  }, [authMethodsQuery.data?.methods, meQuery.data?.username, profileLogin]);
+  }, [authMethodsQuery.data?.methods, meQuery.data?.login, meQuery.data?.username]);
 
   const handleProjectSelect = (projectId: string) => {
     const project = projects.find((item) => item.id === projectId);
