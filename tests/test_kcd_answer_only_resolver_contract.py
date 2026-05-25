@@ -11,6 +11,8 @@ from src.application.services.knowledge_ingestion_service import (
     _answer_resolution_decisions_with_case_candidate_ids,
     _answer_resolution_cases_from_entries,
     _resolve_compiled_answer_cases,
+    _source_excerpt_to_text,
+    _regenerate_entry_from_source_excerpt,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
@@ -451,3 +453,20 @@ def test_deterministic_cleanup_collapses_exact_answers_before_llm_resolver() -> 
     assert len(cleanup.entries) == 1
     assert tightened == cleanup.entries
     assert metrics["llm_call_count"] == 0
+
+
+def test_source_excerpt_to_text_accepts_tuple_and_string() -> None:
+    assert _source_excerpt_to_text(("A", "B")) == "A\n\nB"
+    assert _source_excerpt_to_text("A") == "A"
+
+
+def test_regenerate_entry_strips_markdown_headings_from_fallback_answer() -> None:
+    entry = _entry(
+        title="T",
+        question="Q",
+        answer="bad",
+        source_excerpt="# H1\nУсловие merge/hide/reject",
+    )
+    regenerated = _regenerate_entry_from_source_excerpt(entry, entry.source_excerpt)
+    assert not regenerated.answer.lstrip().startswith("#")
+    assert "Условие" in regenerated.answer

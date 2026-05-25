@@ -46,3 +46,33 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
     assert "Не объединяй результат с предыдущими ответами" in prompt
     assert "Не возвращай match, kind, known_intent_id" in prompt
     assert "answer_fragment" in prompt
+
+
+def test_markdown_semantic_section_is_not_silently_truncated_to_900_chars() -> None:
+    long_section = "A" * 1300
+    long_excerpt = "B" * 1400
+    long_child_body = "C" * 1250
+    prompt = _preprocessor()._build_prompt(
+        mode="faq",
+        chunks=[
+            {
+                "content": long_section,
+                "section_title": "Long section",
+                "section_body": long_section,
+                "source_excerpt": long_excerpt,
+                "children": [
+                    {"title": "Child 1", "body": long_child_body, "source_excerpt": long_child_body}
+                ],
+            }
+        ],
+        file_name="faq.md",
+    )
+
+    payload = json.loads(
+        prompt.rsplit("ОБРАБОТАЙ SOURCE JSON НИЖЕ. ВЕРНИ ТОЛЬКО JSON:", 1)[1]
+    )
+    chunk = payload["chunks"][0]
+    assert len(chunk["content"]) == 1300
+    assert len(chunk["section_body"]) == 1300
+    assert len(chunk["source_excerpt"]) == 1400
+    assert len(chunk["children"][0]["body"]) == 1250

@@ -455,28 +455,27 @@ def _split_technical_source_text(
     if len(text) <= char_budget:
         return (text,)
 
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    if not paragraphs:
+        return (text,)
+
     parts: list[str] = []
-    remaining = text
+    current: list[str] = []
+    current_len = 0
 
-    while remaining:
-        if len(remaining) <= char_budget:
-            parts.append(remaining.strip())
-            break
+    for paragraph in paragraphs:
+        paragraph_len = len(paragraph)
+        additional = paragraph_len if not current else paragraph_len + 2
+        if current and current_len + additional > char_budget:
+            parts.append("\n\n".join(current))
+            current = [paragraph]
+            current_len = paragraph_len
+            continue
+        current.append(paragraph)
+        current_len += additional
 
-        window = remaining[:char_budget]
-        cut = char_budget
-        min_cut = max(120, char_budget // 3)
-
-        for separator in ("\n\n", "\n", ". ", "; ", ", ", " "):
-            position = window.rfind(separator)
-            if position >= min_cut:
-                cut = position + len(separator)
-                break
-
-        part = remaining[:cut].strip()
-        if part:
-            parts.append(part)
-        remaining = remaining[cut:].strip()
+    if current:
+        parts.append("\n\n".join(current))
 
     return tuple(part for part in parts if part)
 
@@ -510,10 +509,14 @@ def _technical_chunk_batches_for_answer_compiler(
         if not content:
             continue
 
-        parts = _split_technical_source_text(
-            content,
-            char_budget=KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
-        )
+        is_markdown_semantic = bool(chunk.get("section_title") or chunk.get("children"))
+        if is_markdown_semantic:
+            parts = (content.strip(),)
+        else:
+            parts = _split_technical_source_text(
+                content,
+                char_budget=KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
+            )
         part_count = len(parts)
 
         for part_index, part_content in enumerate(parts, start=1):
@@ -796,6 +799,83 @@ KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
+
+
+def _source_excerpt_to_text(value: object) -> str:
+    if isinstance(value, tuple):
+        return "\n\n".join(
+            _clean_optional_text(str(part))
+            for part in value
+            if _clean_optional_text(str(part))
+        )
+    return _clean_optional_text(str(value or ""))
+
+
+def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
+    answer_tokens = set(_answer_resolution_tokens_from_text(answer))
+    source_tokens = set(_answer_resolution_tokens_from_text(source_excerpt))
+    if not source_tokens:
+        return 1.0
+    if not answer_tokens:
+        return 0.0
+    overlap = len(answer_tokens & source_tokens)
+    return overlap / max(1, min(len(source_tokens), 36))
+
+
+def _regenerate_entry_from_source_excerpt(entry: KnowledgePreprocessingEntry, source_excerpt: str) -> KnowledgePreprocessingEntry:
+    sanitized_source = "\n".join(
+        line for line in source_excerpt.splitlines() if not line.lstrip().startswith("#")
+    ).strip()
+    rebuilt_answer = _answer_digest(
+        sanitized_source or source_excerpt,
+        max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
+    )
+    rebuilt = KnowledgePreprocessingEntry(
+        title=entry.title,
+        answer=rebuilt_answer,
+        source_excerpt=source_excerpt or entry.source_excerpt,
+        questions=entry.questions,
+        synonyms=entry.synonyms,
+        tags=entry.tags,
+        embedding_text=entry.embedding_text,
+        canonical_question=entry.canonical_question,
+        source_chunk_indexes=entry.source_chunk_indexes,
+    )
+    return rebuilt
+
+
+def _entry_has_markdown_heading(answer: str) -> bool:
+    return any(line.lstrip().startswith("#") for line in answer.splitlines())
+
+
+def _validate_generated_entry(
+    entry: KnowledgePreprocessingEntry,
+    *,
+    source_excerpt: str,
+) -> None:
+    answer_lower = entry.answer.lower()
+    if _entry_has_markdown_heading(entry.answer):
+        raise ValidationError("Generated answer contains markdown heading")
+    if any(token in answer_lower for token in ("expected topic", "test label")):
+        raise ValidationError("Generated answer leaks expected-topic/test label")
+    if answer_lower.startswith(("привет", "здравствуйте", "hello", "hi")):
+        raise ValidationError("Canonical answer must be declarative, not chat reply")
+    if re.search(r"[一-鿿가-힯]", entry.answer) and not re.search(r"[一-鿿가-힯]", source_excerpt):
+        raise ValidationError("Generated answer contains CJK/Korean artifacts absent in source")
+    source_ru = len(re.findall(r"[Ѐ-ӿ]", source_excerpt))
+    source_latin = len(re.findall(r"[A-Za-z]", source_excerpt))
+    answer_ru = len(re.findall(r"[Ѐ-ӿ]", entry.answer))
+    answer_latin = len(re.findall(r"[A-Za-z]", entry.answer))
+    if source_ru > source_latin and answer_ru < answer_latin:
+        raise ValidationError("Answer language does not match dominant source language")
+    coverage = _source_answer_coverage_ratio(entry.answer, source_excerpt)
+    if coverage < 0.45:
+        raise ValidationError("Generated answer misses important source terms")
+    for field in (entry.title, entry.canonical_question, *entry.questions, *entry.synonyms, *entry.tags, entry.answer, entry.embedding_text):
+        if re.search(r"[一-鿿가-힯]", field) and not re.search(r"[一-鿿가-힯]", source_excerpt):
+            raise ValidationError("Generated enrichment contains forbidden unicode script")
+
+
 def _preprocessing_failure_status_message(exc: Exception) -> str:
     if str(exc) == KCD_STAGE_K_CANCELLED_ERROR:
         return (
@@ -853,7 +933,7 @@ def _preprocessing_entry_from_technical_chunk(
     return KnowledgePreprocessingEntry(
         title=title or "technical source chunk",
         answer=_answer_digest(content),
-        source_excerpt=content[:KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET],
+        source_excerpt=content,
         questions=_text_tuple(chunk.get("questions")),
         synonyms=(),
         tags=(),
@@ -3346,13 +3426,33 @@ def _merge_source_ref_tuple_values(
     *groups: tuple[SourceRef, ...],
 ) -> tuple[SourceRef, ...]:
     result: list[SourceRef] = []
-    seen: set[tuple[object, ...]] = set()
     for group in groups:
         for source_ref in group:
-            fingerprint = _source_ref_fingerprint(source_ref)
-            if fingerprint in seen:
+            quote_fp = _publication_text_fingerprint(source_ref.quote)
+            if not quote_fp:
                 continue
-            seen.add(fingerprint)
+            duplicate_index = None
+            for idx, existing in enumerate(result):
+                same_origin = (
+                    (existing.source_chunk_id or "") == (source_ref.source_chunk_id or "")
+                    and existing.source_index == source_ref.source_index
+                )
+                if not same_origin:
+                    continue
+                existing_fp = _publication_text_fingerprint(existing.quote)
+                if existing_fp == quote_fp:
+                    duplicate_index = idx
+                    break
+                if quote_fp in existing_fp:
+                    duplicate_index = idx
+                    break
+                if existing_fp in quote_fp:
+                    if len(source_ref.quote) > len(existing.quote):
+                        result[idx] = source_ref
+                    duplicate_index = idx
+                    break
+            if duplicate_index is not None:
+                continue
             result.append(source_ref)
     return tuple(result)
 
@@ -5093,6 +5193,29 @@ class KnowledgeIngestionService:
                 existing_project_titles=existing_project_titles,
                 on_progress=persist_answer_resolution_progress,
             )
+            regenerated_entries: list[KnowledgePreprocessingEntry] = []
+            for idx, generated_entry in enumerate(tightened_entries):
+                raw_source_excerpt = (
+                    tightened_source_excerpts[idx]
+                    if idx < len(tightened_source_excerpts)
+                    else (generated_entry.source_excerpt,)
+                )
+                source_text = _source_excerpt_to_text(raw_source_excerpt)
+                try:
+                    _validate_generated_entry(generated_entry, source_excerpt=source_text)
+                    regenerated_entries.append(generated_entry)
+                except ValidationError:
+                    regenerated = _regenerate_entry_from_source_excerpt(
+                        generated_entry,
+                        source_text,
+                    )
+                    regenerated = replace(
+                        regenerated,
+                        embedding_text=build_embedding_text(regenerated),
+                    )
+                    _validate_generated_entry(regenerated, source_excerpt=source_text)
+                    regenerated_entries.append(regenerated)
+            tightened_entries = tuple(regenerated_entries)
             answer_resolution_fallback_published = (
                 answer_resolution_metrics.get("fallback_published") is True
             )
