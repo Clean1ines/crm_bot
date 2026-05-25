@@ -347,7 +347,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "cases": [case.to_payload() for case in cases],
         }
 
-        instruction = _load_answer_resolution_prompt(_answer_resolution_prompt_file(language))
+        instruction = _load_answer_resolution_prompt(
+            _answer_resolution_prompt_file(language)
+        )
         return f"{instruction}{json.dumps(merge_payload, ensure_ascii=False)}"
 
     def _build_prompt(
@@ -496,7 +498,9 @@ def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
 
 
-def _load_answer_resolution_prompt(file_name: str = ANSWER_RESOLUTION_PROMPT_FILE) -> str:
+def _load_answer_resolution_prompt(
+    file_name: str = ANSWER_RESOLUTION_PROMPT_FILE,
+) -> str:
     return (PROMPTS_DIR / file_name).read_text(encoding="utf-8")
 
 

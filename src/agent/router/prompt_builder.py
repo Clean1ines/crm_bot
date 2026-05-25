@@ -34,6 +34,7 @@ PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
 _intent_prompt_template: str | None = None
 _response_prompt_templates: dict[str, str] = {}
+_response_prompt_template: str | None = None
 _interpretation_block: str | None = None
 
 
@@ -387,7 +388,7 @@ def build_response_prompt(
     project_configuration: ProjectRuntimeConfigurationState | None = None,
     target_language: str | None = None,
 ) -> str:
-    global _response_prompt_templates, _interpretation_block
+    global _response_prompt_templates, _response_prompt_template, _interpretation_block
     lang = (target_language or "").strip().lower()
     template_key = lang if lang in {"ru", "en", "de", "es"} else "default"
     if template_key not in _response_prompt_templates:
@@ -401,6 +402,7 @@ def build_response_prompt(
             template = _load_prompt_template("response_prompt.txt")
         _response_prompt_templates[template_key] = template
     response_prompt_template = _response_prompt_templates[template_key]
+    _response_prompt_template = response_prompt_template
     if _interpretation_block is None:
         _interpretation_block = _load_prompt_template("interpretation_block.txt")
 
