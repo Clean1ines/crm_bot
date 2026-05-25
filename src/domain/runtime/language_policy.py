@@ -111,8 +111,12 @@ def detect_language_hint(text: str) -> LanguageHint:
 
     total = cyr + lat
     if total < 6:
+        if cyr >= 3 and cyr >= lat:
+            return "ru"
         return "unknown"
     if cyr / total >= 0.65:
+        return "ru"
+    if cyr >= 3 and cyr > lat:
         return "ru"
     if lat / total < 0.65:
         return "unknown"
