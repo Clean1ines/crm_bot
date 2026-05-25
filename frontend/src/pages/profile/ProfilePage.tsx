@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { t } from '@shared/i18n';
-const PROFILE_LOGIN_STORAGE_KEY = 'crm_profile_login';
 
 import { getErrorMessage } from '@shared/api/core/errors';
 import { authProviderLabel } from '@shared/lib/uiLabels';
@@ -38,7 +37,14 @@ export const ProfilePage: React.FC = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [emailVerificationUrl, setEmailVerificationUrl] = useState('');
-  const [login, setLogin] = useState(() => window.localStorage.getItem(PROFILE_LOGIN_STORAGE_KEY) ?? '');
+  const meQuery = useQuery<{ login?: string | null }>({
+    queryKey: ['auth-me'],
+    queryFn: async () => {
+      const result = await authApi.me();
+      return result.data as { login?: string | null };
+    },
+  });
+  const [login, setLogin] = useState('');
 
   const methodsQuery = useQuery<AuthMethodsResponse>({
     queryKey: ['auth-methods'],
@@ -51,6 +57,22 @@ export const ProfilePage: React.FC = () => {
   const emailMethod = methodsQuery.data?.methods.find((method) => method.provider === 'email');
   const emailInputValue = email || emailMethod?.provider_id || '';
   const showGoogleAuth = isGoogleAuthConfigured();
+  const loginValue = login || meQuery.data?.login || '';
+  const normalizedCurrentLogin = (meQuery.data?.login || '').trim();
+  const normalizedDraftLogin = loginValue.trim();
+  const isLoginChanged = normalizedDraftLogin !== normalizedCurrentLogin;
+
+  const updateLoginMutation = useMutation({
+    mutationFn: async () => {
+      await authApi.updateMe({ login: login.trim() || null });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['auth-me'] });
+      setLogin('');
+      toast.success('Логин сохранён');
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
 
   const linkEmailMutation = useMutation({
     mutationFn: async () => {
@@ -168,17 +190,28 @@ export const ProfilePage: React.FC = () => {
             <span className="text-[var(--text-muted)]">Логин</span>
             <input
               type="text"
-              value={login}
+              value={loginValue}
               onChange={(event) => {
-                const value = event.target.value;
-                setLogin(value);
-                window.localStorage.setItem(PROFILE_LOGIN_STORAGE_KEY, value.trim());
+                setLogin(event.target.value);
               }}
               placeholder="your_login"
               className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </label>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => updateLoginMutation.mutate()}
+              disabled={updateLoginMutation.isPending || !isLoginChanged}
+              className="rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {updateLoginMutation.isPending ? t('common.states.saving') : t('common.actions.save')}
+            </button>
+          </div>
         </div>
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
+          Имя в сайдбаре: сначала логин, затем подтверждённый email, затем username Telegram.
+        </p>
 
         <div className="mb-4 rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
           {t('profile.email.status')}
@@ -198,7 +231,7 @@ export const ProfilePage: React.FC = () => {
             />
           </label>
           <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">{t('profile.email.newPasswordLabel')}</span>
+            <span className="text-[var(--text-muted)]">Пароль для входа по email</span>
             <input
               type="password"
               value={password}

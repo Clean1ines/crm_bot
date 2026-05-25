@@ -557,6 +557,22 @@ export const KnowledgePage: React.FC = () => {
   const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
   const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
   const [expandedSourceUnitIdsByDocument, setExpandedSourceUnitIdsByDocument] = useState<Record<string, string[]>>({});
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!searchBoxRef.current?.contains(target)) {
+        setIsSearchFocused(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, []);
 
   const documentsQuery = useQuery({
     queryKey: ['knowledge-documents', projectId],
@@ -1095,9 +1111,18 @@ export const KnowledgePage: React.FC = () => {
   }
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const filteredDocuments = documents.filter((doc) => (
+  const startsWithMatches = documents.filter((doc) => (
     doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
   ));
+  const fallbackIncludesMatches = documents.filter((doc) => (
+    !doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
+    && doc.file_name.toLowerCase().includes(normalizedSearchQuery)
+  ));
+  const filteredDocuments = normalizedSearchQuery.length === 0
+    ? documents
+    : startsWithMatches.length > 0
+      ? startsWithMatches
+      : fallbackIncludesMatches;
   const searchSuggestions = normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
 
   const previewResult = previewMutation.data;
@@ -1155,7 +1180,7 @@ export const KnowledgePage: React.FC = () => {
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
-          <div className="relative">
+          <div ref={searchBoxRef} className="relative">
             <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
               <Search className="h-4 w-4 text-[var(--text-muted)]" />
             </div>
@@ -1164,7 +1189,8 @@ export const KnowledgePage: React.FC = () => {
               placeholder={t('knowledge.search.placeholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
+              onFocus={() => setIsSearchFocused(true)}
+              className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
             />
             {isSearchFocused && searchSuggestions.length > 0 && (
               <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-1 shadow-[var(--shadow-heavy)] lg:w-64">
