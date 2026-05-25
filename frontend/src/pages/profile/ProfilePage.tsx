@@ -58,6 +58,9 @@ export const ProfilePage: React.FC = () => {
   const emailInputValue = email || emailMethod?.provider_id || '';
   const showGoogleAuth = isGoogleAuthConfigured();
   const loginValue = login || meQuery.data?.login || '';
+  const normalizedCurrentLogin = (meQuery.data?.login || '').trim();
+  const normalizedDraftLogin = loginValue.trim();
+  const isLoginChanged = normalizedDraftLogin !== normalizedCurrentLogin;
 
   const updateLoginMutation = useMutation({
     mutationFn: async () => {
@@ -65,7 +68,8 @@ export const ProfilePage: React.FC = () => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['auth-me'] });
-      toast.success(t('common.actions.save'));
+      setLogin('');
+      toast.success('Логин сохранён');
     },
     onError: (error) => toast.error(getErrorMessage(error)),
   });
@@ -198,13 +202,16 @@ export const ProfilePage: React.FC = () => {
             <button
               type="button"
               onClick={() => updateLoginMutation.mutate()}
-              disabled={updateLoginMutation.isPending}
+              disabled={updateLoginMutation.isPending || !isLoginChanged}
               className="rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
               {updateLoginMutation.isPending ? t('common.states.saving') : t('common.actions.save')}
             </button>
           </div>
         </div>
+        <p className="mt-2 text-xs text-[var(--text-muted)]">
+          Имя в сайдбаре: сначала логин, затем подтверждённый email, затем username Telegram.
+        </p>
 
         <div className="mb-4 rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
           {t('profile.email.status')}
