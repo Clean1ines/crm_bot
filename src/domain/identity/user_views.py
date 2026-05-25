@@ -10,6 +10,16 @@ def _optional_int(value: object) -> int | None:
     if value is None:
         return None
 
+
+def _profile_login_from_metadata(metadata: object) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("profile_login")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
     if not isinstance(value, str | bytes | bytearray | SupportsInt):
         return None
 
@@ -24,6 +34,7 @@ class UserProfileView:
     id: str
     telegram_id: int | None = None
     username: str | None = None
+    login: str | None = None
     full_name: str | None = None
     email: str | None = None
     is_platform_admin: bool = False
@@ -36,6 +47,8 @@ class UserProfileView:
             id=str(record["id"]),
             telegram_id=_optional_int(record.get("telegram_id")),
             username=_optional_str(record.get("username")),
+            login=_optional_str(record.get("login"))
+            or _profile_login_from_metadata(record.get("user_metadata")),
             full_name=_optional_str(record.get("full_name")),
             email=_optional_str(record.get("email")),
             is_platform_admin=bool(record.get("is_platform_admin")),
@@ -46,6 +59,7 @@ class UserProfileView:
             "id": self.id,
             "telegram_id": self.telegram_id,
             "username": self.username,
+            "login": self.login,
             "full_name": self.full_name,
             "email": self.email,
             "is_platform_admin": self.is_platform_admin,

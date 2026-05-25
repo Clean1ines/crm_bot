@@ -75,6 +75,9 @@ export const authApi = {
   me: () =>
     authedJsonRequest('/api/auth/me', { method: 'GET' }),
 
+  updateMe: (body: { login?: string | null }) =>
+    authedJsonRequest('/api/auth/me', { method: 'PATCH', body }),
+
   methods: () =>
     authedJsonRequest('/api/auth/methods', { method: 'GET' }),
 };

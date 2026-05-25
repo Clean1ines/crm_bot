@@ -92,6 +92,13 @@ def _safe_metadata_dict(value) -> dict:
     return {}
 
 
+def _normalized_profile_login(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = normalize_display_text(value)
+    return normalized or None
+
+
 def _hash_password(
     password: str, salt: bytes | None = None, iterations: int = 210_000
 ) -> str:
@@ -761,6 +768,27 @@ class UserRepository:
 
         async with self.pool.acquire() as conn:
             result = await conn.execute(query, *params)
+            return result == "UPDATE 1"
+
+    async def set_profile_login(self, user_id: str, login: str | None) -> bool:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT user_metadata FROM users WHERE id = $1",
+                user_id,
+            )
+            if not row:
+                return False
+            metadata = _safe_metadata_dict(row["user_metadata"])
+            normalized_login = _normalized_profile_login(login)
+            if normalized_login is None:
+                metadata.pop("profile_login", None)
+            else:
+                metadata["profile_login"] = normalized_login
+            result = await conn.execute(
+                "UPDATE users SET user_metadata = $2, updated_at = NOW() WHERE id = $1",
+                user_id,
+                json.dumps(metadata, ensure_ascii=False),
+            )
             return result == "UPDATE 1"
 
     async def create_email_verification_token(
