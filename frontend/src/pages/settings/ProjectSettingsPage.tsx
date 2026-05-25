@@ -13,7 +13,6 @@ type SettingsDraft = {
   brandName?: string;
   toneOfVoice?: string;
   defaultLanguage?: string;
-  targetLanguage?: string;
   defaultTimezone?: string;
   widgetOrigin?: string;
 };
@@ -41,7 +40,6 @@ export const ProjectSettingsPage: React.FC = () => {
   const brandName = draft.brandName ?? String(settings.brand_name ?? '');
   const toneOfVoice = draft.toneOfVoice ?? String(settings.tone_of_voice ?? '');
   const defaultLanguage = draft.defaultLanguage ?? String(settings.default_language ?? '');
-  const targetLanguage = draft.targetLanguage ?? String(settings.target_language ?? defaultLanguage);
   const defaultTimezone = draft.defaultTimezone ?? String(settings.default_timezone ?? '');
   const widgetOrigin = draft.widgetOrigin ?? String(widgetConfig.allowed_origin ?? '');
 
@@ -52,6 +50,25 @@ export const ProjectSettingsPage: React.FC = () => {
   const invalidateConfiguration = async () => {
     await queryClient.invalidateQueries({ queryKey: ['project-configuration', projectId] });
   };
+
+
+  const savePersonalizationMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId) throw new Error(t('projectSettings.error.selectProject'));
+      await projectsApi.updateSettings(projectId, {
+        brand_name: brandName.trim() || undefined,
+        tone_of_voice: toneOfVoice.trim() || undefined,
+        default_language: defaultLanguage.trim() || undefined,
+        default_timezone: defaultTimezone.trim() || undefined,
+      });
+    },
+    onSuccess: async () => {
+      await invalidateConfiguration();
+      setDraft((current) => ({ ...current, brandName: undefined, toneOfVoice: undefined, defaultLanguage: undefined, defaultTimezone: undefined }));
+      toast.success(t('projectSettings.feedback.settingsSaved'));
+    },
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
 
   const saveWidgetChannelMutation = useMutation({
     mutationFn: async () => {
@@ -121,15 +138,7 @@ export const ProjectSettingsPage: React.FC = () => {
               className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </label>
-          <label className="space-y-1 text-sm">
-            <span className="text-[var(--text-muted)]">Target language (ru/en/de/es)</span>
-            <input
-              value={targetLanguage}
-              onChange={(event) => updateDraft({ targetLanguage: event.target.value })}
-              placeholder="ru"
-              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-            />
-          </label>
+          
           <label className="space-y-1 text-sm">
             <span className="text-[var(--text-muted)]">{t('projectSettings.personalization.timezone')}</span>
             <input
@@ -140,6 +149,13 @@ export const ProjectSettingsPage: React.FC = () => {
             />
           </label>
         </div>
+        <button
+          onClick={() => savePersonalizationMutation.mutate()}
+          disabled={savePersonalizationMutation.isPending}
+          className="mt-5 rounded-lg bg-[var(--accent-primary)] min-h-10 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {savePersonalizationMutation.isPending ? t('common.states.saving') : t('common.actions.save')}
+        </button>
       </section>
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">

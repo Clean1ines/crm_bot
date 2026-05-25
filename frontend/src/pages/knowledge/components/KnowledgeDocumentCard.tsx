@@ -80,6 +80,7 @@ export const KnowledgeDocumentCard: React.FC<{
   knowledgeProcessingModeLabel,
 }) => (
   <div
+    id={`knowledge-doc-card-${doc.id}`}
     className="rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5 group"
   >
     <div className="mb-4 flex items-start justify-between gap-2">

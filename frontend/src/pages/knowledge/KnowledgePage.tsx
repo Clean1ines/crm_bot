@@ -536,6 +536,7 @@ export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [previewQuestion, setPreviewQuestion] = useState('');
   const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
@@ -1084,9 +1085,11 @@ export const KnowledgePage: React.FC = () => {
     );
   }
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
   const filteredDocuments = documents.filter((doc) => (
-    doc.file_name.toLowerCase().includes(searchQuery.trim().toLowerCase())
+    normalizedSearchQuery.length === 0 || doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
   ));
+  const searchSuggestions = normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
 
   const previewResult = previewMutation.data;
 
@@ -1144,14 +1147,37 @@ export const KnowledgePage: React.FC = () => {
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+            <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+              <Search className="h-4 w-4 text-[var(--text-muted)]" />
+            </div>
             <input
               type="text"
               placeholder={t('knowledge.search.placeholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => window.setTimeout(() => setIsSearchFocused(false), 120)}
+              className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
             />
+            {isSearchFocused && searchSuggestions.length > 0 && (
+              <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-1 shadow-[var(--shadow-heavy)] lg:w-64">
+                {searchSuggestions.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery(doc.file_name);
+                      setIsSearchFocused(false);
+                      document.getElementById(`knowledge-doc-card-${doc.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      openDraftsModal(doc.id);
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]"
+                  >
+                    {doc.file_name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -1192,9 +1218,9 @@ export const KnowledgePage: React.FC = () => {
               value={preprocessingMode}
               onChange={(event) => setPreprocessingMode(event.target.value as KnowledgePreprocessingMode)}
               disabled={uploadMutation.isPending}
-              className="min-h-11 rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 disabled:cursor-wait disabled:opacity-60"
+              className="min-h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 disabled:cursor-wait disabled:opacity-60"
             >
-              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.map((option) => (
+              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.filter((option) => option.value === 'faq' || option.value === 'price_list').map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

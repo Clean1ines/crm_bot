@@ -24,8 +24,8 @@ export const BaseModal: React.FC<BaseModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/15 p-4 backdrop-blur-sm">
-      <div className={`w-full ${maxWidthClassName} rounded-2xl bg-[var(--surface-elevated)] p-4 text-[var(--text-primary)] shadow-[var(--shadow-heavy)] sm:p-6`}>
+    <div className="fixed inset-0 z-[1100] overflow-y-auto bg-black/15 p-3 backdrop-blur-sm sm:p-4">
+      <div className={`mx-auto my-4 w-full ${maxWidthClassName} max-h-[calc(100svh-2rem)] overflow-y-auto rounded-2xl bg-[var(--surface-elevated)] p-4 text-[var(--text-primary)] shadow-[var(--shadow-heavy)] sm:my-6 sm:p-6`}>
         <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{title}</h2>
         {children}
         <div className="flex justify-end gap-2 mt-6">
