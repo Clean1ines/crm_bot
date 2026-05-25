@@ -1145,6 +1145,30 @@ def test_repair_generated_entry_low_coverage_is_warning_only() -> None:
     assert "generated_answer_low_coverage_warning" in warnings
 
 
+def test_repair_generated_entry_language_mismatch_is_warning_only() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Доставка",
+        answer="Delivery by courier in 1-2 days.",
+        source_excerpt="Доставка курьером за 1-2 дня.",
+        questions=("Какие сроки доставки?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.answer
+    assert "answer_language_mismatch_warning" in warnings
+
+
+def test_repair_generated_entry_empty_answer_falls_back_to_source_digest() -> None:
+    entry = KnowledgePreprocessingEntry(
+        title="Поддержка",
+        answer="##",
+        source_excerpt="Поддержка отвечает в рабочие часы по чату.",
+        questions=("Когда отвечает поддержка?",),
+    )
+    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    assert repaired.answer == "Поддержка отвечает в рабочие часы по чату."
+    assert "generated_answer_empty_after_repair_warning" in warnings
+
+
 @pytest.mark.asyncio
 async def test_process_document_keeps_repairable_generated_entry_without_document_error() -> None:
     repo = _knowledge_repo(canonical_count=1)

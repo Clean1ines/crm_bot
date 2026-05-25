@@ -918,7 +918,7 @@ def _repair_generated_entry(
     answer_ru = len(re.findall(r"[Ѐ-ӿ]", repaired.answer))
     answer_latin = len(re.findall(r"[A-Za-z]", repaired.answer))
     if source_ru > source_latin and answer_ru < answer_latin:
-        raise ValidationError("Answer language does not match dominant source language")
+        warnings.append("answer_language_mismatch_warning")
     coverage = _source_answer_coverage_ratio(repaired.answer, source_excerpt)
     if coverage < 0.45:
         warnings.append("generated_answer_low_coverage_warning")
@@ -945,11 +945,21 @@ def _repair_generated_entry(
             warnings.append("generated_enrichment_forbidden_script_repaired")
             repaired = replace(repaired, **sanitized_fields)
 
+    repaired_source_excerpt = _clean_optional_text(repaired.source_excerpt)
+    repaired_answer = _clean_optional_text(repaired.answer)
+    if not repaired_source_excerpt:
+        repaired_source_excerpt = _clean_optional_text(source_excerpt)
+        warnings.append("generated_source_excerpt_empty_after_repair_warning")
+    if not repaired_answer:
+        fallback_answer = _answer_digest(repaired_source_excerpt or source_excerpt)
+        repaired_answer = fallback_answer
+        warnings.append("generated_answer_empty_after_repair_warning")
+    repaired = replace(
+        repaired,
+        answer=repaired_answer,
+        source_excerpt=repaired_source_excerpt,
+    )
     repaired = replace(repaired, embedding_text=build_embedding_text(repaired))
-    if not _clean_optional_text(repaired.answer):
-        raise ValidationError("Generated answer became empty after repair")
-    if not _clean_optional_text(repaired.source_excerpt):
-        raise ValidationError("Generated source excerpt became empty after repair")
     return repaired, tuple(warnings)
 
 
