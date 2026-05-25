@@ -801,6 +801,16 @@ KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
 
+def _source_excerpt_to_text(value: object) -> str:
+    if isinstance(value, tuple):
+        return "\n\n".join(
+            _clean_optional_text(str(part))
+            for part in value
+            if _clean_optional_text(str(part))
+        )
+    return _clean_optional_text(str(value or ""))
+
+
 def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
     answer_tokens = set(_answer_resolution_tokens_from_text(answer))
     source_tokens = set(_answer_resolution_tokens_from_text(source_excerpt))
@@ -813,7 +823,13 @@ def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
 
 
 def _regenerate_entry_from_source_excerpt(entry: KnowledgePreprocessingEntry, source_excerpt: str) -> KnowledgePreprocessingEntry:
-    rebuilt_answer = _answer_digest(source_excerpt, max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS)
+    sanitized_source = "\n".join(
+        line for line in source_excerpt.splitlines() if not line.lstrip().startswith("#")
+    ).strip()
+    rebuilt_answer = _answer_digest(
+        sanitized_source or source_excerpt,
+        max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
+    )
     rebuilt = KnowledgePreprocessingEntry(
         title=entry.title,
         answer=rebuilt_answer,
@@ -5179,16 +5195,16 @@ class KnowledgeIngestionService:
             )
             regenerated_entries: list[KnowledgePreprocessingEntry] = []
             for idx, generated_entry in enumerate(tightened_entries):
-                source_excerpt = (
+                raw_source_excerpt = (
                     tightened_source_excerpts[idx]
                     if idx < len(tightened_source_excerpts)
-                    else generated_entry.source_excerpt
+                    else (generated_entry.source_excerpt,)
                 )
+                source_text = _source_excerpt_to_text(raw_source_excerpt)
                 try:
-                    _validate_generated_entry(generated_entry, source_excerpt=source_excerpt)
+                    _validate_generated_entry(generated_entry, source_excerpt=source_text)
                     regenerated_entries.append(generated_entry)
                 except ValidationError:
-                    source_text = "\n\n".join(source_excerpt)
                     regenerated = _regenerate_entry_from_source_excerpt(
                         generated_entry,
                         source_text,
