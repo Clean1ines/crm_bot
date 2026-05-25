@@ -478,9 +478,18 @@ const formatDurationSeconds = (seconds: number): string => {
 
 const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
   const metricElapsed = metricNumber(doc.preprocessing_metrics, 'elapsed_seconds') ?? 0;
-  const startedAt = Date.parse(doc.created_at || doc.updated_at || '');
+  const startedAt = Date.parse(doc.created_at || '');
+  const updatedAt = Date.parse(doc.updated_at || '');
 
-  if (!Number.isFinite(startedAt) || !isDocumentProcessing(doc)) {
+  if (!Number.isFinite(startedAt)) {
+    return metricElapsed;
+  }
+
+  if (!isDocumentProcessing(doc)) {
+    if (metricElapsed > 0) return metricElapsed;
+    if (Number.isFinite(updatedAt) && updatedAt >= startedAt) {
+      return Math.max(0, (updatedAt - startedAt) / 1000);
+    }
     return metricElapsed;
   }
 
