@@ -12,6 +12,7 @@ export const DocumentProcessingBlock: React.FC<{
   doc: DocumentLite;
   processingReport: KnowledgeProcessingReport | undefined;
   isDocumentProcessing: boolean;
+  showCompletedElapsed: boolean;
   processingProgressLabel: string;
   processingProgressPercent: number | null;
   processingStatusMessage: string;
@@ -46,6 +47,7 @@ export const DocumentProcessingBlock: React.FC<{
   doc,
   processingReport,
   isDocumentProcessing,
+  showCompletedElapsed,
   processingProgressLabel,
   processingProgressPercent,
   processingStatusMessage,
@@ -158,13 +160,15 @@ export const DocumentProcessingBlock: React.FC<{
       </div>
     )}
 
-    {isDocumentProcessing && (
+    {(isDocumentProcessing || showCompletedElapsed) && (
       <div className="mb-4 rounded-xl bg-[var(--accent-primary)]/10 p-3">
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--accent-primary)]">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>{processingProgressLabel}</span>
-        </div>
-        {processingProgressPercent !== null && (
+        {isDocumentProcessing && (
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--accent-primary)]">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>{processingProgressLabel}</span>
+          </div>
+        )}
+        {isDocumentProcessing && processingProgressPercent !== null && (
           <div className="mb-2 h-2 overflow-hidden rounded-full bg-[var(--surface-secondary)]">
             <div
               className="h-full rounded-full bg-[var(--accent-primary)] transition-all"
@@ -173,7 +177,7 @@ export const DocumentProcessingBlock: React.FC<{
           </div>
         )}
         <div className="space-y-1 text-xs text-[var(--text-muted)]">
-          <div className="text-[var(--text-primary)]">{processingStatusMessage}</div>
+          {isDocumentProcessing && <div className="text-[var(--text-primary)]">{processingStatusMessage}</div>}
           <div>{t('knowledge.document.processingModelPrefix')} {processingModelLabel}</div>
           <div>{t('knowledge.document.elapsedPrefix')} {processingElapsedLabel}</div>
           {processingDetailRows.map((row) => (

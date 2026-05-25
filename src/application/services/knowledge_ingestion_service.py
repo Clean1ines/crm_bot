@@ -2258,7 +2258,23 @@ def _answer_resolution_component_language_hint(
         )
         if combined:
             samples.append(combined)
-    return dominant_language(samples)
+    detected = dominant_language(samples)
+    if detected != "unknown":
+        return detected
+
+    if not samples:
+        return "unknown"
+
+    combined_samples = " ".join(samples)
+    cyr = len(re.findall(r"[А-Яа-яЁё]", combined_samples))
+    lat = len(re.findall(r"[A-Za-zÀ-ÿ]", combined_samples))
+    if cyr == 0 and lat == 0:
+        return "unknown"
+    if cyr > 0 and lat == 0:
+        return "ru"
+    if lat > 0 and cyr == 0:
+        return "en"
+    return "unknown"
 
 
 def _apply_answer_resolution_decisions(
