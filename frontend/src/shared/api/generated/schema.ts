@@ -2334,6 +2334,8 @@ export interface components {
             tone_of_voice?: string | null;
             /** Default Language */
             default_language?: string | null;
+            /** Target Language */
+            target_language?: string | null;
             /** Default Timezone */
             default_timezone?: string | null;
             /** System Prompt Override */

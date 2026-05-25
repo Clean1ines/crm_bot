@@ -10,6 +10,10 @@ from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_response_prompt
 from src.agent.state import AgentState
+from src.domain.runtime.language_policy import (
+    detect_language_hint,
+    normalize_project_language,
+)
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.response_generation import (
     ResponseGenerationContext,
@@ -30,6 +34,23 @@ TECHNICAL_FAILURE_FIRST_TEXT = (
 TECHNICAL_FAILURE_REPEAT_TEXT = (
     "Похоже, техническая ошибка повторилась. Я уже передал технический инцидент "
     "владельцу проекта. Можете позвать менеджера, чтобы не ждать восстановления ассистента."
+)
+
+LANGUAGE_MISMATCH_FALLBACK_RU = (
+    "Хочу ответить на вашем языке корректно. "
+    "Уточните, пожалуйста, вопрос ещё раз, и я помогу."
+)
+LANGUAGE_MISMATCH_FALLBACK_EN = (
+    "I want to respond correctly in your language. "
+    "Please rephrase your question, and I will help."
+)
+LANGUAGE_MISMATCH_FALLBACK_DE = (
+    "Ich möchte korrekt in Ihrer Sprache antworten. "
+    "Bitte formulieren Sie Ihre Frage noch einmal, dann helfe ich Ihnen."
+)
+LANGUAGE_MISMATCH_FALLBACK_ES = (
+    "Quiero responder correctamente en su idioma. "
+    "Por favor, reformule su pregunta y le ayudaré."
 )
 
 
@@ -176,6 +197,36 @@ def _coerce_int(value: object, default: int = 0) -> int:
     return default
 
 
+def _project_target_language(state: AgentState) -> str:
+    configuration = state.get("project_configuration")
+    settings_block: Mapping[str, object] = {}
+    if isinstance(configuration, Mapping):
+        raw_settings = configuration.get("settings")
+        if isinstance(raw_settings, Mapping):
+            settings_block = raw_settings
+
+    target = normalize_project_language(
+        str(settings_block.get("target_language") or "")
+    )
+
+    profile = ProjectRuntimeProfile.from_configuration(configuration)
+    if target == "unknown":
+        target = normalize_project_language(profile.target_language)
+    if target == "unknown":
+        target = normalize_project_language(profile.default_language)
+    return target
+
+
+def _language_mismatch_fallback(target_language: str) -> str:
+    if target_language == "en":
+        return LANGUAGE_MISMATCH_FALLBACK_EN
+    if target_language == "de":
+        return LANGUAGE_MISMATCH_FALLBACK_DE
+    if target_language == "es":
+        return LANGUAGE_MISMATCH_FALLBACK_ES
+    return LANGUAGE_MISMATCH_FALLBACK_RU
+
+
 def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
     previous_count = _coerce_int(state.get("technical_failure_count"), 0)
     next_count = previous_count + 1
@@ -258,6 +309,7 @@ def create_response_generator_node(
             user_memory=merged_memory,
             features=_prompt_features(context.features),
             project_configuration=context.project_configuration,
+            target_language=_project_target_language(state),
         )
 
         try:
@@ -282,6 +334,27 @@ def create_response_generator_node(
                     operation_name="response_generator.ainvoke",
                 )
             response_text = (response.content or "").strip()
+            input_lang = detect_language_hint(context.user_input)
+            target_lang = _project_target_language(state)
+            if target_lang == "unknown":
+                target_lang = input_lang
+            output_lang = detect_language_hint(response_text)
+            if (
+                response_text
+                and target_lang != "unknown"
+                and output_lang != "unknown"
+                and target_lang != output_lang
+            ):
+                logger.warning(
+                    "Response language mismatch detected; using safe fallback",
+                    extra={
+                        "input_lang": input_lang,
+                        "target_lang": target_lang,
+                        "output_lang": output_lang,
+                        "decision": context.decision,
+                    },
+                )
+                response_text = _language_mismatch_fallback(target_lang)
 
             metadata: dict[str, object] = {}
 

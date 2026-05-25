@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -85,7 +85,7 @@ async def test_response_generator_builds_project_override_llm():
                 }
             )
 
-    assert result["response_text"] == "override"
+    assert "Хочу ответить на вашем языке корректно" in result["response_text"]
     assert created_models == ["llama-3.1-8b-instant"]
     base_llm.ainvoke.assert_not_called()
 
@@ -200,8 +200,112 @@ async def test_response_generator_passes_commercial_context_to_prompt_builder():
             }
         )
 
-    assert result["response_text"] == "price answer"
+    assert "Хочу ответить на вашем языке корректно" in result["response_text"]
     assert captured["commercial_context"] == {
         "decision": "answerable",
         "facts": [{"item_name": "Pro"}],
     }
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_guard_ru_input_en_output_uses_fallback():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="I can help you with pricing details.")
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Подскажи, сколько стоит тариф Pro?",
+                "project_configuration": {},
+            }
+        )
+
+    assert "Хочу ответить на вашем языке корректно" in result["response_text"]
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_guard_allows_en_input_en_output():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="The Pro plan starts at 2490 RUB monthly.")
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "How much does Pro plan cost?",
+                "project_configuration": {},
+            }
+        )
+
+    assert result["response_text"] == "The Pro plan starts at 2490 RUB monthly."
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_guard_uses_project_target_language_es():
+    llm = AsyncMock()
+    llm.ainvoke.return_value = MagicMock(content="Hello, this is in English")
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        side_effect=passthrough,
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Necesito ayuda con mi pedido",
+                "project_configuration": {"settings": {"target_language": "es"}},
+            }
+        )
+
+    assert result["response_text"].startswith("Quiero responder correctamente")
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_guard_uses_project_target_language_de():
+    llm = AsyncMock()
+    llm.ainvoke.return_value = MagicMock(content="Привет, отвечаю по-русски")
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        side_effect=passthrough,
+    ):
+        result = await node(
+            {
+                "decision": "LLM_GENERATE",
+                "user_input": "Bitte helfen Sie mir",
+                "project_configuration": {"settings": {"target_language": "de"}},
+            }
+        )
+
+    assert result["response_text"].startswith("Ich möchte korrekt")
