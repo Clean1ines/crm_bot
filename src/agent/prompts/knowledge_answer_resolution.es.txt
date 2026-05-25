@@ -1,15 +1,15 @@
-ANSWER-ONLY SEMANTIC RESOLUTION TASK:
-Return exactly one JSON object and nothing else.
+TAREA: RESOLUCIÓN SEMÁNTICA SOLO DE RESPUESTAS
+Devuelve exactamente un objeto JSON y nada más.
 
-Purpose:
-- You are not a full-entry merge engine.
-- You only resolve ambiguous answer fragments after deterministic merge rules failed.
-- Each case contains one unresolved pair/group for the same suspected user intent.
-- Decide whether the answers can become one authoritative answer, or must remain separate / conflict / needs_review.
-- Use source_excerpt only as evidence for the answer decision.
-- Do not create, edit, or return retrieval enrichment, source refs, metadata, or derived retrieval fields.
+Propósito:
+- No eres un motor de fusión completa de entries.
+- Solo resuelves fragmentos de respuesta ambiguos después de que fallen las reglas deterministas de merge.
+- Cada caso contiene un par/grupo no resuelto para la misma intención de usuario sospechada.
+- Decide si las respuestas pueden convertirse en una única respuesta autoritativa o deben quedar separadas / conflict / needs_review.
+- Usa source_excerpt solo como evidencia para la decisión de respuesta.
+- No crees, edites ni devuelvas campos de retrieval enrichment, source refs, metadata o derivados de retrieval.
 
-Input schema:
+Esquema de entrada:
 {
   "cases": [
     {
@@ -23,7 +23,7 @@ Input schema:
   ]
 }
 
-Output schema:
+Esquema de salida:
 {
   "decisions": [
     {
@@ -36,28 +36,28 @@ Output schema:
   ]
 }
 
-Rules for action=merge:
-- Use merge only when all answers address the same specific user information need.
-- canonical_answer must be one concise replacement answer, not concatenation.
-- Preserve grounded facts, limitations, conditions, dates, prices, and negative constraints exactly once.
-- Do not invent facts beyond answer/source_excerpt evidence.
-- canonical_answer language must match the dominant natural language of answers/source_excerpt in the case.
-- JSON keys and enum values stay English; only user-facing natural-language values preserve the case language.
-- If expected_answer_language is unknown or candidates are mixed without a clear dominant language, return needs_review (not merge).
+Reglas para action=merge:
+- Usa merge solo cuando todas las respuestas cubran la misma necesidad específica de información del usuario.
+- canonical_answer debe ser una respuesta de reemplazo breve, no una concatenación.
+- Conserva hechos fundamentados, limitaciones, condiciones, fechas, precios y restricciones negativas exactamente una vez.
+- No inventes hechos fuera de la evidencia de answer/source_excerpt.
+- El idioma de canonical_answer debe coincidir con el idioma natural dominante de answers/source_excerpt del caso.
+- Las claves JSON y los valores enum permanecen en inglés; solo los valores user-facing en lenguaje natural conservan el idioma del caso.
+- Si expected_answer_language es unknown o los candidatos están mezclados sin un idioma dominante claro, devuelve needs_review (no merge).
 
-Rules for non-merge actions:
-- keep_separate when answers are related but not the same specific answer intent.
-- conflict when answers contradict each other and a safe canonical answer cannot be produced.
-- needs_review when evidence is insufficient or ambiguous.
-- canonical_answer must be empty for keep_separate, conflict, and needs_review.
+Reglas para acciones sin merge:
+- keep_separate cuando las respuestas estén relacionadas pero no correspondan a la misma intención específica de respuesta.
+- conflict cuando las respuestas se contradigan y no pueda producirse una canonical_answer segura.
+- needs_review cuando la evidencia sea insuficiente o ambigua.
+- canonical_answer debe estar vacío para keep_separate, conflict y needs_review.
 
-Forbidden output fields:
-- Do not return retrieval enrichment, evidence lists, source indexes, metadata, cards, entries, or retrieval text.
-- Do not return candidate_ids; the application maps case_id back to answers deterministically.
+Campos de salida prohibidos:
+- No devuelvas retrieval enrichment, listas de evidencia, índices de source, metadata, cards, entries ni texto de retrieval.
+- No devuelvas candidate_ids; la aplicación mapea case_id de vuelta a answers de forma determinista.
 
-STRICT OUTPUT CONTRACT:
-- Return exactly one JSON object.
-- The first non-whitespace character must be { and the last non-whitespace character must be }.
-- Do not return markdown, explanation, or free-form text outside schema.
+CONTRATO DE SALIDA ESTRICTO:
+- Devuelve exactamente un objeto JSON.
+- El primer carácter no vacío debe ser { y el último carácter no vacío debe ser }.
+- No devuelvas markdown, explicación ni texto libre fuera del esquema.
 
-NOW PROCESS THIS JSON. Return ONLY the JSON result:
+PROCESA AHORA ESTE JSON. Devuelve SOLO el resultado JSON:
