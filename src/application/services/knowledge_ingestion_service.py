@@ -4195,11 +4195,16 @@ class KnowledgeIngestionService:
         if not source_chunks:
             raise ValidationError("Knowledge document has no saved source chunks")
 
+        runtime_entries = await repo.list_document_runtime_entries(
+            project_id=project_id,
+            document_id=document_id,
+        )
+
         raw_candidates = await repo.list_document_raw_answer_candidates(
             project_id=project_id,
             document_id=document_id,
         )
-        if not raw_candidates:
+        if not raw_candidates and not runtime_entries:
             raise ValidationError("Knowledge document has no ready answer drafts")
 
         batches = await repo.list_document_compiler_batches(
@@ -4211,14 +4216,22 @@ class KnowledgeIngestionService:
         all_batches_completed = bool(batches) and all(
             batch.status == "completed" for batch in batches
         )
-        compiler_run_id = raw_candidates[0].compiler_run_id
+        compiler_run_id = (
+            runtime_entries[0].compiler_run_id
+            if runtime_entries
+            else raw_candidates[0].compiler_run_id
+        )
 
-        canonical_entries = _canonical_entries_from_raw_answer_candidates(
-            project_id=project_id,
-            document_id=document_id,
-            compiler_run_id=compiler_run_id,
-            mode=mode,
-            candidates=raw_candidates,
+        canonical_entries = (
+            runtime_entries
+            if runtime_entries
+            else _canonical_entries_from_raw_answer_candidates(
+                project_id=project_id,
+                document_id=document_id,
+                compiler_run_id=compiler_run_id,
+                mode=mode,
+                candidates=raw_candidates,
+            )
         )
         if not canonical_entries:
             raise ValidationError("Knowledge document has no publishable answer drafts")
