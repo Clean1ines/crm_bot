@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 
@@ -72,6 +73,29 @@ const previewAnswer = (preview: KnowledgeEntryMergePreview | null): string => {
   const value = preview.proposed_entry_after.answer;
   return typeof value === 'string' ? value : '';
 };
+
+const EntryDetailRow: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div>
+    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{label}</div>
+    <div className="text-sm leading-relaxed text-[var(--text-primary)]">{children}</div>
+  </div>
+);
+
+const enrichmentValues = (value: unknown): string[] => (
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+);
+
+const sourceRefQuote = (value: unknown): string => (
+  typeof value === 'string' && value.trim().length > 0 ? value : '—'
+);
+
+const sourceRefKey = (value: unknown): string | null => (
+  typeof value === 'string' && value.trim().length > 0 ? value : null
+);
+
+const sourceRefIndex = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+);
 
 export const KnowledgeDocumentCurationModal: React.FC<{
   projectId: string;
@@ -301,24 +325,23 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                         >
                           <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{entry.title}</div>
                           <div className={`mt-1 text-sm text-[var(--text-muted)] ${isExpanded ? 'whitespace-pre-wrap' : 'line-clamp-3'}`}>{entry.answer}</div>
-                          <div className="mt-1">
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleEntryExpanded(entry.id);
-                              }}
-                              className="text-xs font-medium text-[var(--accent-primary)] hover:underline"
-                            >
-                              {isExpanded ? t('common.actions.hide') : t('common.actions.show')}
-                            </button>
-                          </div>
                           <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
                             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{entry.entry_kind}</span>
                             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">v{entry.version}</span>
                             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">questions: {entryQuestionCount(entry)}</span>
                             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">sources: {entry.source_refs.length}</span>
                           </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleEntryExpanded(entry.id);
+                          }}
+                          aria-expanded={isExpanded}
+                          className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--control-bg)] hover:text-[var(--text-primary)]"
+                        >
+                          <ChevronDown className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         </button>
                         {selected && (
                           <button
@@ -337,6 +360,39 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                           </button>
                         )}
                       </div>
+
+                      {isExpanded && (
+                        <div className="mt-3 space-y-4 border-t border-[var(--border-subtle)] pt-3">
+                          <EntryDetailRow label={t('knowledge.drafts.fields.answer')}>
+                            <div className="whitespace-pre-wrap">{entry.answer || '—'}</div>
+                          </EntryDetailRow>
+
+                          {enrichmentValues(entry.enrichment.questions).length > 0 && (
+                            <EntryDetailRow label={t('knowledge.drafts.fields.questions')}>
+                              <ul className="list-disc space-y-1 pl-5">
+                                {enrichmentValues(entry.enrichment.questions).map((question) => <li key={`${entry.id}-${question}`}>{question}</li>)}
+                              </ul>
+                            </EntryDetailRow>
+                          )}
+
+                          {(entry.source_refs.length > 0) && (
+                            <EntryDetailRow label={t('knowledge.drafts.fields.sources')}>
+                              <div className="space-y-2">
+                                {entry.source_refs.map((ref, index) => (
+                                  <div key={`${entry.id}-${index}-${ref.source_ref_key}`} className="rounded-lg bg-[var(--control-bg)] p-2">
+                                    <div className="whitespace-pre-wrap">{sourceRefQuote(ref.quote)}</div>
+                                    <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
+                                      {sourceRefKey(ref.source_ref_key) && <span>{sourceRefKey(ref.source_ref_key)}</span>}
+                                      {sourceRefIndex(ref.source_index) !== null && <span>chunk {sourceRefIndex(ref.source_index)}</span>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </EntryDetailRow>
+                          )}
+                        </div>
+                      )}
+
                     </div>
                   );
                 })}
