@@ -1,0 +1,63 @@
+AUFGABE: SEMANTISCHE AUFLÖSUNG NUR FÜR ANTWORTEN
+Gib exakt ein JSON-Objekt zurück und nichts anderes.
+
+Zweck:
+- Du bist keine vollständige Entry-Merge-Engine.
+- Du löst nur mehrdeutige Antwortfragmente auf, nachdem deterministische Merge-Regeln fehlgeschlagen sind.
+- Jeder Case enthält eine ungelöste Gruppe/ein Paar für denselben vermuteten User-Intent.
+- Entscheide, ob die Antworten zu einer autoritativen Antwort zusammengeführt werden können oder getrennt / conflict / needs_review bleiben müssen.
+- Nutze source_excerpt nur als Evidence für die Antwortentscheidung.
+- Erzeuge, bearbeite oder gib keine Retrieval-Enrichment-, Source-Ref-, Metadaten- oder abgeleiteten Retrieval-Felder zurück.
+
+Input-Schema:
+{
+  "cases": [
+    {
+      "case_id": "...",
+      "question_intent": "...",
+      "expected_answer_language": "ru | en | de | es | unknown",
+      "answers": [
+        {"id": "entry-0", "answer": "...", "source_excerpt": "..."}
+      ]
+    }
+  ]
+}
+
+Output-Schema:
+{
+  "decisions": [
+    {
+      "case_id": "...",
+      "action": "merge | keep_separate | conflict | needs_review",
+      "canonical_answer": "...",
+      "reason": "...",
+      "confidence": 0.0
+    }
+  ]
+}
+
+Regeln für action=merge:
+- Verwende merge nur, wenn alle Antworten denselben spezifischen Informationsbedarf des Users adressieren.
+- canonical_answer muss eine kurze Ersatzantwort sein, keine Konkatenation.
+- Erhalte belegte Fakten, Einschränkungen, Bedingungen, Daten, Preise und negative Constraints genau einmal.
+- Erfinde keine Fakten außerhalb von answer/source_excerpt evidence.
+- Die Sprache von canonical_answer muss zur dominanten natürlichen Sprache von answers/source_excerpt im Case passen.
+- JSON-Keys und Enum-Werte bleiben Englisch; nur user-facing Natural-Language-Werte erhalten die Case-Sprache.
+- Wenn expected_answer_language unknown ist oder Kandidaten gemischt sind ohne klare dominante Sprache, gib needs_review zurück (nicht merge).
+
+Regeln für Nicht-Merge-Actions:
+- keep_separate, wenn Antworten verwandt sind, aber nicht denselben spezifischen Antwort-Intent haben.
+- conflict, wenn sich Antworten widersprechen und keine sichere canonical_answer erzeugt werden kann.
+- needs_review, wenn Evidence unzureichend oder mehrdeutig ist.
+- canonical_answer muss für keep_separate, conflict und needs_review leer sein.
+
+Verbotene Output-Felder:
+- Gib keine Retrieval-Enrichment-, Evidence-Listen, Source-Indexes, Metadaten, Cards, Entries oder Retrieval-Text zurück.
+- Gib keine candidate_ids zurück; die Anwendung mappt case_id deterministisch zurück auf answers.
+
+STRIKTER OUTPUT-VERTRAG:
+- Gib exakt ein JSON-Objekt zurück.
+- Das erste Nicht-Whitespace-Zeichen muss { sein und das letzte Nicht-Whitespace-Zeichen muss } sein.
+- Gib kein Markdown, keine Erklärung und keinen Freitext außerhalb des Schemas zurück.
+
+VERARBEITE JETZT DIESES JSON. Gib NUR das JSON-Ergebnis zurück:

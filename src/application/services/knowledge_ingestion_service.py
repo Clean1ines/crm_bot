@@ -77,6 +77,7 @@ from src.domain.project_plane.knowledge_preprocessing import (
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+from src.domain.runtime.language_policy import detect_language_hint, dominant_language
 from src.domain.project_plane.knowledge_compilation import (
     CompilerRunStatus,
     CompilerRun,
@@ -1760,6 +1761,9 @@ def _answer_resolution_cases_from_entries(
                 question_intent=_answer_resolution_question_intent(
                     *(entries[index] for index in component)
                 ),
+                expected_answer_language=_answer_resolution_component_language_hint(
+                    *(entries[index] for index in component)
+                ),
                 candidates=tuple(
                     _answer_resolution_candidate_from_entry(
                         index=index,
@@ -2209,8 +2213,52 @@ def _entry_with_answer_resolution_decision(
 
 def _answer_resolution_decision_is_publishable(
     decision: KnowledgeAnswerResolutionDecision,
+    *,
+    entries: Sequence[KnowledgePreprocessingEntry],
 ) -> bool:
-    return True
+    if not decision.is_merge:
+        return True
+    if not decision.canonical_answer:
+        return False
+
+    candidate_entries: list[KnowledgePreprocessingEntry] = []
+    for candidate_id in decision.candidate_ids:
+        index = _answer_resolution_candidate_index(candidate_id)
+        if index is None or index < 0 or index >= len(entries):
+            continue
+        candidate_entries.append(entries[index])
+
+    if len(candidate_entries) < 2:
+        return False
+
+    expected_language = _answer_resolution_component_language_hint(*candidate_entries)
+    if expected_language == "unknown":
+        return False
+
+    actual_language = _answer_resolution_text_language_hint(decision.canonical_answer)
+    return actual_language == expected_language
+
+
+def _answer_resolution_text_language_hint(value: str) -> str:
+    return detect_language_hint(_clean_optional_text(value))
+
+
+def _answer_resolution_component_language_hint(
+    *entries: KnowledgePreprocessingEntry,
+) -> str:
+    samples: list[str] = []
+    for entry in entries:
+        combined = " ".join(
+            part
+            for part in (
+                _clean_optional_text(entry.answer),
+                _clean_optional_text(entry.source_excerpt),
+            )
+            if part
+        )
+        if combined:
+            samples.append(combined)
+    return dominant_language(samples)
 
 
 def _apply_answer_resolution_decisions(
@@ -2241,7 +2289,11 @@ def _apply_answer_resolution_decisions(
 
     for decision in decisions:
         if not decision.is_merge and _answer_resolution_decision_is_publishable(
-            decision
+            decision, entries=entries
+        ):
+            continue
+        if decision.is_merge and not _answer_resolution_decision_is_publishable(
+            decision, entries=entries
         ):
             continue
 
@@ -2460,7 +2512,9 @@ async def _resolve_compiled_answer_cases(
             metrics["rejected_decision_count"] = sum(
                 1
                 for decision in decisions
-                if not _answer_resolution_decision_is_publishable(decision)
+                if not _answer_resolution_decision_is_publishable(
+                    decision, entries=entries
+                )
             )
             await publish_progress()
     except Exception as exc:
@@ -2491,7 +2545,7 @@ async def _resolve_compiled_answer_cases(
     metrics["rejected_decision_count"] = sum(
         1
         for decision in decisions
-        if not _answer_resolution_decision_is_publishable(decision)
+        if not _answer_resolution_decision_is_publishable(decision, entries=entries)
     )
     metrics["invalid_resolution_output_count"] = 0
     metrics["entry_count_after"] = len(tightened_entries)

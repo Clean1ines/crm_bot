@@ -134,6 +134,7 @@ class ProjectSettingsUpdate(BaseModel):
     industry: str | None = None
     tone_of_voice: str | None = None
     default_language: str | None = None
+    target_language: str | None = None
     default_timezone: str | None = None
     system_prompt_override: str | None = None
 

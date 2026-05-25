@@ -15,6 +15,7 @@ export type ProjectSettingsUpdate = {
   industry?: string;
   tone_of_voice?: string;
   default_language?: string;
+  target_language?: string;
   default_timezone?: string;
   system_prompt_override?: string;
 };

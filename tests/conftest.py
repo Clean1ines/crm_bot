@@ -1,17 +1,64 @@
+# ruff: noqa: E402
+from pathlib import Path
+import os
+import uuid
+
+
+def _strip_env_quotes(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
+        return cleaned[1:-1]
+    return cleaned
+
+
+def _load_test_env_before_settings_import() -> None:
+    """Make direct `python -m pytest` work without a separate shell bootstrap.
+
+    `src.infrastructure.config.settings` creates a module-level Settings()
+    instance at import time. Therefore test env values must already be present
+    in os.environ before importing anything from that module.
+    """
+
+    repo_root = Path(__file__).resolve().parents[1]
+    env_file = repo_root / ".env.test"
+    env_example = repo_root / ".env.test.example"
+
+    if not env_file.exists() and env_example.exists():
+        env_file.write_text(env_example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    if not env_file.exists():
+        return
+
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, raw_value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+
+        os.environ.setdefault(key, _strip_env_quotes(raw_value))
+
+
+_load_test_env_before_settings_import()
+
 import asyncpg
 import pytest
+
 from src.infrastructure.config.settings import Settings
 from src.infrastructure.db.repositories import ProjectRepository
 from src.infrastructure.db.repositories.thread.lifecycle import (
     ThreadLifecycleRepository,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
-import uuid
-
-settings = Settings(_env_file=".env.test")
 
 
-# Function‑scoped pool – создаётся для каждого теста, использует тот же loop, что и тест
+settings = Settings()
+
+
+# Function-scoped pool – создаётся для каждого теста, использует тот же loop, что и тест
 @pytest.fixture(scope="function")
 async def db_pool():
     pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=10)

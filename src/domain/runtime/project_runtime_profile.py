@@ -19,6 +19,7 @@ class ProjectRuntimeProfile:
     max_concurrent_threads: int | None = None
     fallback_model: str | None = None
     default_language: str | None = None
+    target_language: str | None = None
     default_timezone: str | None = None
     tone_of_voice: str | None = None
     system_prompt_override: str | None = None
@@ -41,6 +42,9 @@ class ProjectRuntimeProfile:
             fallback_model=_optional_stripped_text(limit_block.get("fallback_model")),
             default_language=_optional_stripped_text(
                 settings_block.get("default_language")
+            ),
+            target_language=_optional_stripped_text(
+                settings_block.get("target_language")
             ),
             default_timezone=_optional_stripped_text(
                 settings_block.get("default_timezone")
