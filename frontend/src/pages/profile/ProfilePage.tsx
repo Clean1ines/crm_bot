@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { t } from '@shared/i18n';
+const PROFILE_LOGIN_STORAGE_KEY = 'crm_profile_login';
 
 import { getErrorMessage } from '@shared/api/core/errors';
 import { authProviderLabel } from '@shared/lib/uiLabels';
@@ -37,6 +38,7 @@ export const ProfilePage: React.FC = () => {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [emailVerificationUrl, setEmailVerificationUrl] = useState('');
+  const [login, setLogin] = useState(() => window.localStorage.getItem(PROFILE_LOGIN_STORAGE_KEY) ?? '');
 
   const methodsQuery = useQuery<AuthMethodsResponse>({
     queryKey: ['auth-methods'],
@@ -161,6 +163,23 @@ export const ProfilePage: React.FC = () => {
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)] sm:p-6">
         <h2 className="mb-4 text-lg font-semibold leading-tight text-[var(--text-primary)]">{t('profile.email.title')}</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="space-y-1 text-sm">
+            <span className="text-[var(--text-muted)]">Логин</span>
+            <input
+              type="text"
+              value={login}
+              onChange={(event) => {
+                const value = event.target.value;
+                setLogin(value);
+                window.localStorage.setItem(PROFILE_LOGIN_STORAGE_KEY, value.trim());
+              }}
+              placeholder="your_login"
+              className="w-full rounded-lg bg-[var(--control-bg)] min-h-10 px-3 py-2 text-sm shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+            />
+          </label>
+        </div>
+
         <div className="mb-4 rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)]">
           {t('profile.email.status')}
           {' '}

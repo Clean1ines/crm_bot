@@ -83,6 +83,7 @@ export const AppSidebar: React.FC = () => {
   const visibleNavItems = navItems.filter((item) => !item.adminOnly || canManageProject);
   const canCreateProject = projects.length === 0
     || projects.some((project) => isProjectAdminRole(project.access_role));
+  const profileDisplayName = window.localStorage.getItem('crm_profile_login')?.trim() || t('sidebar.profile.adminName');
 
   const handleProjectSelect = (projectId: string) => {
     const project = projects.find((item) => item.id === projectId);
@@ -259,7 +260,7 @@ export const AppSidebar: React.FC = () => {
             <User className="w-4 h-4" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-medium text-[var(--text-primary)]">{t('sidebar.profile.adminName')}</div>
+            <div className="text-sm font-medium text-[var(--text-primary)]">{profileDisplayName}</div>
             <div className="text-xs text-[var(--text-muted)]">{t('sidebar.profile.description')}</div>
           </div>
         </button>
