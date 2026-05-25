@@ -1,5 +1,6 @@
 import { t } from '../../shared/i18n';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { NavLink, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore, useProjects } from '@entities/project';
 import { getProjectHomePath, isProjectAdminRole } from '@entities/project/model/access';
@@ -22,6 +23,7 @@ import {
 import frontendLogger from '@shared/lib/logger';
 import { ThemeToggle } from '@shared/ui/theme';
 import logoSrc from '@shared/assets/logo.png';
+import { authApi } from '@shared/api/modules/auth';
 
 interface NavItem {
   path: string;
