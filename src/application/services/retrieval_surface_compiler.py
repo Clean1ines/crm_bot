@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 import re
 from typing import Literal, Sequence
 
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingEntry,
-    build_embedding_text,
+from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingEntry, build_embedding_text
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilationExecutionResult,
+    RetrievalSurfaceCompilationResult,
+    RetrievalSurfaceDraft,
+    RetrievalSurfaceGraph,
+    RetrievalSurfaceRelation,
+    RetrievalSurfaceSourceUnit,
+    SurfaceQuestionOwnership,
+    SurfaceQuestionReassignment,
 )
 
 SurfaceKind = Literal[
@@ -54,53 +61,6 @@ _SERVICE_LABELS = {
 _SHORT_ANSWER_RE = re.compile(r"^\s*короткий ответ(?:\s+клиенту)?\s*:\s*(.+)$", re.IGNORECASE)
 _EXPECTED_TOPIC_RE = re.compile(r"^\s*ожидаемая тема\s*:\s*(.+)$", re.IGNORECASE)
 _QUESTION_BULLET_RE = re.compile(r"^\s*[-•*]\s*(.+)$")
-
-
-@dataclass(frozen=True, slots=True)
-class RetrievalSurfaceSourceUnit:
-    source_unit_key: str
-    title: str
-    body: str
-    children: tuple[str, ...] = ()
-    raw_text: str = ""
-    section_path: tuple[str, ...] = ()
-    source_chunk_indexes: tuple[int, ...] = ()
-    source_refs: tuple[str, ...] = ()
-    preprocessing_mode: str = "faq"
-    metadata: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class RetrievalSurfaceDraft:
-    local_surface_key: str
-    title: str
-    canonical_question: str
-    surface_kind: SurfaceKind
-    answer_scope: str
-    question_scope: str
-    exclusion_scope: str
-    answer: str = ""
-    short_answer: str = ""
-    owned_questions: tuple[str, ...] = ()
-    rejected_or_reassigned_questions: tuple[str, ...] = ()
-    source_refs: tuple[str, ...] = ()
-    source_excerpt: str = ""
-    parent_candidate_keys: tuple[str, ...] = ()
-    child_candidate_keys: tuple[str, ...] = ()
-    relation_hints: tuple[str, ...] = ()
-    confidence: float = 0.7
-    warnings: tuple[str, ...] = ()
-    metadata: dict[str, object] = field(default_factory=dict)
-    source_chunk_indexes: tuple[int, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class RetrievalSurfaceRelation:
-    parent_key: str
-    child_key: str
-    relation_type: RelationType
-    reason: str
-    confidence: float
 
 
 def _normalize(value: str) -> str:
@@ -305,7 +265,7 @@ def assign_retrieval_surface_questions(
             replace(
                 surface,
                 owned_questions=tuple(dict.fromkeys(owned)),
-                rejected_or_reassigned_questions=tuple(dict.fromkeys(rejected)),
+                rejected_or_reassigned_questions=tuple(SurfaceQuestionReassignment(question=q, target_surface_key="", reason="reassigned") for q in dict.fromkeys(rejected)),
             )
         )
 
@@ -378,3 +338,29 @@ def project_surfaces_to_preprocessing_entries(
 def extract_questions_from_source_unit(unit: RetrievalSurfaceSourceUnit) -> tuple[str, ...]:
     lines = tuple(line.strip() for line in (unit.raw_text or unit.body).splitlines() if line.strip())
     return _extract_question_candidates(lines)
+
+
+class DeterministicKnowledgeSurfaceCompiler:
+    model_name = "deterministic-surface-compiler"
+
+    async def compile_surfaces(self, *, mode, source_units, file_name):
+        del file_name
+        all_surfaces=[]
+        all_relations=[]
+        ownership=[]
+        for unit in source_units:
+            discovered=discover_retrieval_surfaces_from_source_unit(unit)
+            relations=plan_retrieval_surface_relations(discovered)
+            synthesized=tuple(synthesize_retrieval_surface_answers(unit,s,relations) for s in discovered)
+            questions=extract_questions_from_source_unit(unit)
+            assigned=assign_retrieval_surface_questions(synthesized,questions)
+            for surf in assigned:
+                for q in surf.owned_questions:
+                    ownership.append(SurfaceQuestionOwnership(question=q,owner_surface_key=surf.local_surface_key,question_kind="user_like_question",confidence=0.6,reason="deterministic_score",rejected_from_surface_keys=tuple(r.target_surface_key for r in surf.rejected_or_reassigned_questions)))
+            merged=merge_same_surface_drafts(assigned,relations)
+            all_surfaces.extend(merged)
+            all_relations.extend(relations)
+        projected=project_surfaces_to_preprocessing_entries(tuple(all_surfaces))
+        graph=RetrievalSurfaceGraph(source_unit_keys=tuple(u.source_unit_key for u in source_units),surfaces=tuple(all_surfaces),relations=tuple(all_relations),question_ownership=tuple(ownership),metrics={"compiler":"deterministic"})
+        result=RetrievalSurfaceCompilationResult(mode=mode,prompt_version="retrieval_surface_compiler_v1",model=self.model_name,graph=graph,projected_entries=projected,metrics={"surface_count":len(all_surfaces)})
+        return RetrievalSurfaceCompilationExecutionResult(result=result,usage=None)
