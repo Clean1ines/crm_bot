@@ -2302,6 +2302,48 @@ def _cleanup_answer_resolution_text(value: str) -> str:
     return _clean_optional_text(" ".join(kept))
 
 
+
+
+_CHILD_SURFACE_MARKERS: tuple[str, ...] = (
+    "компиляц", "курац", "pdf", "widget", "виджет", "crm", "интеграц", "telegram", "телеграм", "сли", "дубл", "архив", "скры", "отклон"
+)
+
+_UMBRELLA_MARKERS: tuple[str, ...] = ("что это за продукт", "о продукте", "сервис", "платформа")
+
+
+def _surface_kind_for_entry(entry: KnowledgePreprocessingEntry) -> str:
+    text = " ".join((entry.title, entry.canonical_question, " ".join(_text_tuple(entry.questions)))).lower()
+    if any(m in text for m in _UMBRELLA_MARKERS):
+        return "umbrella"
+    if any(m in text for m in _CHILD_SURFACE_MARKERS):
+        return "child"
+    return "standalone"
+
+
+def _question_is_child_specific(question: str) -> bool:
+    normalized = _clean_optional_text(question).lower()
+    return any(m in normalized for m in _CHILD_SURFACE_MARKERS)
+
+
+def _reassign_umbrella_questions(entries: Sequence[KnowledgePreprocessingEntry]) -> tuple[KnowledgePreprocessingEntry, ...]:
+    result = list(entries)
+    child_indexes = [i for i,e in enumerate(entries) if _surface_kind_for_entry(e) == "child"]
+    if not child_indexes:
+        return tuple(entries)
+    for index, entry in enumerate(entries):
+        if _surface_kind_for_entry(entry) != "umbrella":
+            continue
+        keep: list[str] = []
+        moved: list[str] = []
+        for q in _text_tuple(entry.questions):
+            (moved if _question_is_child_specific(q) else keep).append(q)
+        if moved and child_indexes:
+            tgt = child_indexes[0]
+            child = result[tgt]
+            result[tgt] = replace(child, questions=_merge_text_tuple_values(child.questions, tuple(moved)))
+        result[index] = replace(entry, questions=tuple(keep))
+    return tuple(result)
+
 KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
 
 
@@ -2477,6 +2519,9 @@ def _apply_answer_resolution_decisions(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
+        kinds = {_surface_kind_for_entry(updated_entries[i]) for i in ordered_indexes}
+        if "umbrella" in kinds and "child" in kinds:
+            continue
         survivor_index = _answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
@@ -2505,12 +2550,12 @@ def _apply_answer_resolution_decisions(
             index for index in ordered_indexes if index != survivor_index
         )
 
+    projected_entries = tuple(
+        entry for index, entry in enumerate(updated_entries) if index not in removed_indexes
+    )
+    projected_entries = _reassign_umbrella_questions(projected_entries)
     return (
-        tuple(
-            entry
-            for index, entry in enumerate(updated_entries)
-            if index not in removed_indexes
-        ),
+        projected_entries,
         tuple(
             source_excerpts
             for index, source_excerpts in enumerate(updated_source_excerpts)
@@ -3255,6 +3300,9 @@ def _retighten_existing_document_plan(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
+        kinds = {_surface_kind_for_entry(updated_entries[i]) for i in ordered_indexes}
+        if "umbrella" in kinds and "child" in kinds:
+            continue
         survivor_index = _answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,

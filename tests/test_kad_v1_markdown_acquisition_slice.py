@@ -4,6 +4,8 @@ from src.application.services.knowledge_ingestion_service import (
     _apply_answer_resolution_decisions,
     _compiler_source_chunks_for_preprocessing,
     _raw_answer_candidates_from_preprocessing_entries,
+    _reassign_umbrella_questions,
+    _surface_kind_for_entry,
 )
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
@@ -226,3 +228,64 @@ def test_answer_resolution_merges_russian_product_duplicates_with_short_answers(
     assert len(merged) == 1
     assert merged[0].answer == "Это CRM-бот: он автоматизирует продажи и помогает поддержке."
     assert "как продукт помогает" in merged[0].questions
+
+
+def test_short_answer_service_label_is_not_standalone_and_absorbed() -> None:
+    umbrella = KnowledgePreprocessingEntry(
+        title="Поисковая поверхность",
+        canonical_question="Что такое поисковая поверхность?",
+        answer="Поисковая поверхность — это набор опубликованных знаний.",
+        source_excerpt="Короткий ответ клиенту: Ассистент ищет по подготовленной базе знаний.",
+        questions=("Что такое поисковая поверхность?",),
+    )
+    short = KnowledgePreprocessingEntry(
+        title="Короткий ответ клиенту",
+        canonical_question="Короткий ответ клиенту",
+        answer="Ассистент ищет по подготовленной базе знаний.",
+        source_excerpt="Ассистент ищет по подготовленной базе знаний.",
+        questions=("По чему ассистент ищет ответ?",),
+    )
+    decision = KnowledgeAnswerResolutionDecision(case_id="s1", action="merge", candidate_ids=("entry-0", "entry-1"), canonical_answer="Поисковая поверхность — опубликованная база знаний; ассистент ищет именно в ней.")
+    merged, _ = _apply_answer_resolution_decisions(entries=(umbrella, short), decisions=(decision,))
+    assert len(merged) == 1
+    assert merged[0].title == "Поисковая поверхность"
+
+
+def test_surface_kind_and_question_ownership_reassignment() -> None:
+    umbrella = KnowledgePreprocessingEntry(
+        title="Что это за продукт",
+        canonical_question="Что это за продукт?",
+        answer="Обзор платформы.",
+        source_excerpt="...",
+        questions=("Что это за сервис?", "Можно ли загрузить PDF?"),
+    )
+    child = KnowledgePreprocessingEntry(
+        title="Компиляция знаний",
+        canonical_question="Что такое компиляция знаний?",
+        answer="Процесс подготовки знаний.",
+        source_excerpt="...",
+        questions=("Что такое компиляция знаний?",),
+    )
+    assert _surface_kind_for_entry(umbrella) == "umbrella"
+    assert _surface_kind_for_entry(child) == "child"
+    reassigned = _reassign_umbrella_questions((umbrella, child))
+    assert "Можно ли загрузить PDF?" not in reassigned[0].questions
+    assert "Можно ли загрузить PDF?" in reassigned[1].questions
+
+
+def test_umbrella_child_relation_is_not_duplicate_merge() -> None:
+    entries = (
+        KnowledgePreprocessingEntry(title="Что это за продукт", canonical_question="Что это за продукт?", answer="Обзор", source_excerpt="...", questions=("Что это за сервис?",)),
+        KnowledgePreprocessingEntry(title="Клиентский web-widget", canonical_question="Есть ли web-widget?", answer="Да", source_excerpt="...", questions=("Есть ли web-widget?",)),
+    )
+    decision = KnowledgeAnswerResolutionDecision(case_id="s2", action="merge", candidate_ids=("entry-0", "entry-1"), canonical_answer="test")
+    merged, _ = _apply_answer_resolution_decisions(entries=entries, decisions=(decision,))
+    assert len(merged) == 2
+
+
+def test_web_widget_does_not_own_telegram_question_after_reassign() -> None:
+    umbrella = KnowledgePreprocessingEntry(title="О продукте", canonical_question="О продукте", answer="...", source_excerpt="...", questions=("Где клиенты пишут?",))
+    widget = KnowledgePreprocessingEntry(title="Клиентский web-widget", canonical_question="Есть ли web-widget?", answer="...", source_excerpt="...", questions=("Есть ли web-widget?",))
+    reassigned = _reassign_umbrella_questions((umbrella, widget))
+    assert "Где клиенты пишут?" in reassigned[0].questions
+    assert "Где клиенты пишут?" not in reassigned[1].questions
