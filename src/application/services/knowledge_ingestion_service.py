@@ -5172,11 +5172,17 @@ class KnowledgeIngestionService:
                     async with progress_lock:
                         completed_batch_count += 1
                         raw_candidate_count += len(raw_candidates)
-                        if execution.usage is not None:
+                        if execution is not None and execution.usage is not None:
                             usage_event_count += 1
-                        latest_result = execution.result
-                        preprocessing_results.append(execution.result)
-                        results_by_batch_index[batch_index] = execution.result
+                        batch_result = (
+                            execution.result
+                            if execution is not None
+                            else latest_result
+                        )
+                        if batch_result is not None:
+                            latest_result = batch_result
+                            preprocessing_results.append(batch_result)
+                            results_by_batch_index[batch_index] = batch_result
                         entries_by_batch_index[batch_index] = tuple(safe_entries)
                         compiled_count = sum(
                             len(entries) for entries in entries_by_batch_index.values()
@@ -5212,7 +5218,11 @@ class KnowledgeIngestionService:
                             "raw_draft_count": raw_candidate_count,
                             "compiled_entry_count": compiled_count,
                             "semantic_answer_count": compiled_count,
-                            "incoming_entry_count": len(execution.result.entries),
+                            "incoming_entry_count": (
+                                len(execution.result.entries)
+                                if execution is not None
+                                else len(safe_entries)
+                            ),
                             "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
                             "semantic_answer_resolution_count": llm_answer_resolution_call_count,
                             "answer_resolution_call_count": llm_answer_resolution_call_count,
@@ -5242,7 +5252,7 @@ class KnowledgeIngestionService:
                                 "raw_candidates_count": len(raw_candidates),
                                 "compiled_entry_count": compiled_count,
                                 "tokens": execution.usage.tokens_total
-                                if execution.usage is not None
+                                if execution is not None and execution.usage is not None
                                 else 0,
                                 "elapsed_seconds": progress_metrics["elapsed_seconds"],
                                 "model": active_model,
