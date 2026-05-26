@@ -58,6 +58,7 @@ from src.domain.project_plane.knowledge_semantic_builder import (
     canonicalize_knowledge_chunk_drafts,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
     MODE_PLAIN,
     MODE_PRICE_LIST,
     PREPROCESSING_STATUS_COMPLETED,
@@ -4366,6 +4367,11 @@ class KnowledgeIngestionService:
             raise ValidationError("Knowledge document not found")
 
         mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy knowledge ingestion preprocessor path is forbidden for mode=faq. "
+                "Use Retrieval Surface Compilation pipeline."
+            )
         if mode == MODE_PLAIN:
             raise ValidationError("Plain knowledge documents do not have answer drafts")
         if document.status in {"pending", "processing"} or (
@@ -4491,6 +4497,11 @@ class KnowledgeIngestionService:
             raise ValidationError("Knowledge document not found")
 
         mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy knowledge ingestion retry path is forbidden for mode=faq. "
+                "Use Retrieval Surface Compilation pipeline."
+            )
         if mode == MODE_PLAIN:
             raise ValidationError(
                 "Plain knowledge documents do not have compiler batches"
