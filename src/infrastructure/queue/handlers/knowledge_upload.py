@@ -8,6 +8,7 @@ import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
 from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
     KnowledgePreprocessingValidationError,
 )
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
@@ -72,6 +73,11 @@ async def handle_process_knowledge_upload(
         mode = dto.normalized_preprocessing_mode()
     except ValueError as exc:
         raise PermanentJobError(str(exc)) from exc
+    if mode == MODE_FAQ:
+        raise PermanentJobError(
+            "Legacy knowledge upload queue handler cannot process mode=faq. "
+            "Use Retrieval Surface Compilation pipeline."
+        )
 
     service = KnowledgeIngestionService(db_pool)
     try:
