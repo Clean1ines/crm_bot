@@ -213,6 +213,39 @@ class KnowledgeRepository:
                     reason,
                 )
 
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_surface_compiler_runs
+                    SET
+                        status = 'cancelled',
+                        error_type = 'processing_cancelled',
+                        error_message = $2,
+                        completed_at = now(),
+                        updated_at = now()
+                    WHERE document_id = $1
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    """,
+                    document_uuid,
+                    reason,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_surface_compiler_stages
+                    SET
+                        status = 'cancelled',
+                        error_type = 'processing_cancelled',
+                        error_message = $2,
+                        completed_at = now(),
+                        updated_at = now()
+                    WHERE document_id = $1
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    """,
+                    document_uuid,
+                    reason,
+                )
+
                 await conn.execute(
                     """
                     UPDATE knowledge_compiler_runs
