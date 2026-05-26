@@ -111,6 +111,11 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilerStage,
     RetrievalSurfaceSourceUnit,
     RetrievalSurfaceSourceChild,
+    RetrievalSurfaceDraft,
+    RetrievalSurfaceRelation,
+    SurfaceQuestionOwnership,
+    SurfaceQuestionReassignment,
+    RetrievalSurfaceMergeDecision,
 )
 
 
@@ -4805,6 +4810,86 @@ class KnowledgeIngestionService:
             document_id=document_id,
             source_units=source_units,
         )
+        surfaces: tuple[RetrievalSurfaceDraft, ...] = tuple(
+            RetrievalSurfaceDraft(
+                id=str(uuid.uuid4()),
+                run_id=run_id,
+                document_id=document_id,
+                local_surface_key=f"surface:{idx}",
+                title=unit.title or f"Поверхность {idx + 1}",
+                canonical_question=unit.title or f"О чем раздел {idx + 1}?",
+                surface_kind="standalone",
+                answer_scope="Локальный ответ по содержимому секции",
+                question_scope="Вопросы по конкретной секции документа",
+                exclusion_scope="Не включает другие разделы",
+                answer=(unit.body or unit.raw_text or "").strip()[:1500] or "Нет содержимого",
+                short_answer=(unit.body or unit.raw_text or "").strip()[:240] or "Нет содержимого",
+                status="draft",
+                publication_status="unpublished",
+                source_refs=unit.source_refs,
+                source_excerpt=(unit.raw_text or unit.body or "")[:500],
+                confidence=0.6,
+                source_chunk_indexes=unit.source_chunk_indexes,
+                metadata={"bootstrap": True},
+            )
+            for idx, unit in enumerate(source_units)
+        )
+        await repo.save_surfaces(
+            run_id=run_id,
+            document_id=document_id,
+            surfaces=surfaces,
+        )
+
+        relations: tuple[RetrievalSurfaceRelation, ...] = tuple(
+            RetrievalSurfaceRelation(
+                id=str(uuid.uuid4()),
+                run_id=run_id,
+                document_id=document_id,
+                parent_surface_key=surfaces[0].local_surface_key,
+                child_surface_key=surface.local_surface_key,
+                relation_type="sibling",
+                reason="Bootstrap: отдельные секции документа",
+                confidence=0.4,
+                source_refs=surface.source_refs,
+            )
+            for surface in surfaces[1:]
+        )
+        await repo.save_surface_relations(
+            run_id=run_id,
+            document_id=document_id,
+            relations=relations,
+        )
+
+        ownership: tuple[SurfaceQuestionOwnership, ...] = tuple(
+            SurfaceQuestionOwnership(
+                id=str(uuid.uuid4()),
+                run_id=run_id,
+                document_id=document_id,
+                question=surface.canonical_question,
+                owner_surface_key=surface.local_surface_key,
+                question_kind="faq_question",
+                confidence=0.6,
+                reason="Bootstrap ownership by section title",
+                rejected_from_surface_keys=(),
+            )
+            for surface in surfaces
+        )
+        await repo.save_surface_question_ownership(
+            run_id=run_id,
+            document_id=document_id,
+            ownership=ownership,
+        )
+
+        await repo.save_surface_question_reassignments(
+            run_id=run_id,
+            document_id=document_id,
+            reassignments=tuple[SurfaceQuestionReassignment, ...](),
+        )
+        await repo.save_surface_merge_decisions(
+            run_id=run_id,
+            document_id=document_id,
+            merge_decisions=tuple[RetrievalSurfaceMergeDecision, ...](),
+        )
 
         await repo.create_surface_compiler_stage(
             RetrievalSurfaceCompilerStage(
@@ -4819,7 +4904,7 @@ class KnowledgeIngestionService:
                 output_summary=f"source_units={len(source_units)}",
                 started_at=started_at,
                 completed_at=datetime.now(timezone.utc),
-                metrics={"source_unit_count": len(source_units)},
+                metrics={"source_unit_count": len(source_units), "surface_count": len(surfaces), "relation_count": len(relations), "ownership_count": len(ownership)},
             )
         )
         await repo.update_surface_compiler_run_status(run_id=run_id, status="completed")
@@ -4830,7 +4915,7 @@ class KnowledgeIngestionService:
             status=PREPROCESSING_STATUS_COMPLETED,
             model="bootstrap",
             prompt_version="faq_surface_compiler_bootstrap_v1",
-            metrics={"source_unit_count": len(source_units), "surface_compiler_run_id": run_id},
+            metrics={"source_unit_count": len(source_units), "surface_count": len(surfaces), "relation_count": len(relations), "ownership_count": len(ownership), "surface_compiler_run_id": run_id},
         )
         await repo.update_document_status(document_id, "processed")
         return KnowledgeDocumentProcessingResult(
