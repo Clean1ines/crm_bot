@@ -33,6 +33,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceQuestionOwnership,
     SurfaceQuestionReassignment,
     RetrievalSurfaceMergeDecision,
+    SurfacePublicationStatus,
     SurfaceCompilerRunStatus,
 )
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
@@ -1100,6 +1101,90 @@ class KnowledgeRepository:
                 )
             )
         return tuple(result)
+
+    async def get_surface_by_id(
+        self,
+        *,
+        surface_id: str,
+    ) -> RetrievalSurfaceDraft | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, run_id, document_id, local_surface_key, title,
+                       canonical_question, surface_kind, answer_scope,
+                       question_scope, exclusion_scope, answer, short_answer,
+                       status, publication_status, source_refs, source_excerpt,
+                       confidence, warnings, metadata, source_chunk_indexes,
+                       linked_candidate_id, linked_canonical_entry_id,
+                       linked_runtime_entry_id
+                FROM knowledge_surfaces
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(surface_id),
+            )
+        if row is None:
+            return None
+        return RetrievalSurfaceDraft(
+            id=str(row["id"]),
+            run_id=str(row["run_id"]),
+            document_id=str(row["document_id"]),
+            local_surface_key=str(row["local_surface_key"]),
+            title=str(row["title"]),
+            canonical_question=str(row["canonical_question"]),
+            surface_kind=str(row["surface_kind"]),
+            answer_scope=str(row["answer_scope"]),
+            question_scope=str(row["question_scope"]),
+            exclusion_scope=str(row["exclusion_scope"]),
+            answer=str(row["answer"]),
+            short_answer=str(row["short_answer"]),
+            status=str(row["status"]),
+            publication_status=str(row["publication_status"]),
+            source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+            source_excerpt=str(row["source_excerpt"]),
+            confidence=float(row["confidence"]),
+            warnings=tuple(str(item) for item in json_list_from_db(row["warnings"])),
+            metadata=json_object_from_db(row["metadata"]),
+            source_chunk_indexes=tuple(int(item) for item in (row["source_chunk_indexes"] or [])),
+            linked_candidate_id=str(row["linked_candidate_id"]) if row["linked_candidate_id"] is not None else None,
+            linked_canonical_entry_id=str(row["linked_canonical_entry_id"]) if row["linked_canonical_entry_id"] is not None else None,
+            linked_runtime_entry_id=str(row["linked_runtime_entry_id"]) if row["linked_runtime_entry_id"] is not None else None,
+        )
+
+    async def update_surface_publication_status(
+        self,
+        *,
+        surface_id: str,
+        publication_status: SurfacePublicationStatus,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_surfaces
+                SET publication_status = $2::text,
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(surface_id),
+                publication_status,
+            )
+
+    async def link_surface_to_runtime_entry(
+        self,
+        *,
+        surface_id: str,
+        runtime_entry_id: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_surfaces
+                SET linked_runtime_entry_id = $2::uuid,
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(surface_id),
+                ensure_uuid(runtime_entry_id),
+            )
 
 
     async def save_surface_relations(
