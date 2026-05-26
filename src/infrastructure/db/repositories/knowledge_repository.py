@@ -761,6 +761,86 @@ class KnowledgeRepository:
                 error_message,
             )
 
+
+    async def get_latest_surface_run_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> RetrievalSurfaceCompilerRun | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, project_id, document_id, mode, status, compiler_kind, model,
+                       prompt_version, started_at, completed_at, error_type,
+                       error_message, metrics
+                FROM knowledge_surface_compiler_runs
+                WHERE project_id = $1::uuid AND document_id = $2::uuid
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        if row is None:
+            return None
+        return RetrievalSurfaceCompilerRun(
+            id=str(row["id"]),
+            project_id=str(row["project_id"]),
+            document_id=str(row["document_id"]),
+            mode=str(row["mode"]),
+            status=str(row["status"]),
+            compiler_kind=str(row["compiler_kind"]),
+            model=str(row["model"]),
+            prompt_version=str(row["prompt_version"]),
+            started_at=normalize_timestamp(row.get("started_at")),
+            completed_at=normalize_timestamp(row.get("completed_at")),
+            error_type=str(row["error_type"]) if row["error_type"] is not None else None,
+            error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+            metrics=json_object_from_db(row["metrics"]),
+        )
+
+    async def list_surface_stages_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceCompilerStage, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, stage_kind, status, model,
+                       prompt_version, input_summary, output_summary, tokens_input,
+                       tokens_output, tokens_total, error_type, error_message,
+                       metrics, started_at, completed_at
+                FROM knowledge_surface_compiler_stages
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            RetrievalSurfaceCompilerStage(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                stage_kind=str(row["stage_kind"]),
+                status=str(row["status"]),
+                model=str(row["model"]),
+                prompt_version=str(row["prompt_version"]),
+                input_summary=str(row["input_summary"]),
+                output_summary=str(row["output_summary"]),
+                tokens_input=int(row["tokens_input"]),
+                tokens_output=int(row["tokens_output"]),
+                tokens_total=int(row["tokens_total"]),
+                error_type=str(row["error_type"]) if row["error_type"] is not None else None,
+                error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+                started_at=normalize_timestamp(row.get("started_at")),
+                completed_at=normalize_timestamp(row.get("completed_at")),
+                metrics=json_object_from_db(row["metrics"]),
+            )
+            for row in rows
+        )
+
     async def create_surface_compiler_stage(
         self,
         stage: RetrievalSurfaceCompilerStage,
