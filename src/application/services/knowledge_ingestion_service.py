@@ -104,6 +104,16 @@ from src.domain.project_plane.knowledge_acquisition import (
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
 )
+from src.application.services.retrieval_surface_compiler import (
+    RetrievalSurfaceSourceUnit,
+    assign_retrieval_surface_questions,
+    discover_retrieval_surfaces_from_source_unit,
+    extract_questions_from_source_unit,
+    merge_same_surface_drafts,
+    plan_retrieval_surface_relations,
+    project_surfaces_to_preprocessing_entries,
+    synthesize_retrieval_surface_answers,
+)
 
 
 class KnowledgeIngestionRepositoryPort(
@@ -787,6 +797,25 @@ def _compiler_source_chunks_for_preprocessing(
     if not _is_markdown_file(file_name):
         return chunks
     return _markdown_semantic_source_chunks(file_name=file_name, chunks=chunks)
+
+
+def _surface_source_unit_from_chunk(
+    chunk: JsonObject,
+    *,
+    chunk_index: int,
+    mode: KnowledgePreprocessingMode,
+) -> RetrievalSurfaceSourceUnit:
+    return RetrievalSurfaceSourceUnit(
+        source_unit_key=str(chunk.get("id") or f"chunk-{chunk_index}"),
+        title=str(chunk.get("section_title") or chunk.get("title") or f"Раздел {chunk_index}"),
+        body=str(chunk.get("section_body") or chunk.get("content") or ""),
+        raw_text=str(chunk.get("content") or ""),
+        section_path=tuple(str(i) for i in (chunk.get("section_path") or [])),
+        source_chunk_indexes=(chunk_index,),
+        source_refs=(str(chunk.get("id") or f"chunk-{chunk_index}"),),
+        preprocessing_mode=mode,
+        metadata=dict(chunk.get("metadata") or {}),
+    )
 
 
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
@@ -4978,6 +5007,43 @@ class KnowledgeIngestionService:
                             )
 
                         safe_entries = list(execution.result.entries)
+                        if mode != MODE_PLAIN:
+                            surface_entries: list[KnowledgePreprocessingEntry] = []
+                            for local_idx, technical_chunk in enumerate(technical_chunks):
+                                source_unit = _surface_source_unit_from_chunk(
+                                    technical_chunk,
+                                    chunk_index=local_idx,
+                                    mode=mode,
+                                )
+                                discovered = discover_retrieval_surfaces_from_source_unit(
+                                    source_unit
+                                )
+                                relations = plan_retrieval_surface_relations(discovered)
+                                synthesized = tuple(
+                                    synthesize_retrieval_surface_answers(
+                                        source_unit,
+                                        surface,
+                                        relations,
+                                    )
+                                    for surface in discovered
+                                )
+                                question_candidates = extract_questions_from_source_unit(
+                                    source_unit
+                                )
+                                with_questions = assign_retrieval_surface_questions(
+                                    synthesized,
+                                    question_candidates,
+                                )
+                                merged = merge_same_surface_drafts(
+                                    with_questions,
+                                    relations,
+                                )
+                                projected = project_surfaces_to_preprocessing_entries(
+                                    merged
+                                )
+                                surface_entries.extend(projected)
+                            if surface_entries:
+                                safe_entries = surface_entries
 
                         raw_candidates = (
                             _raw_answer_candidates_from_preprocessing_entries(
