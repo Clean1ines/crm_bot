@@ -80,3 +80,14 @@ def test_repository_has_document_level_surface_relation_and_ownership_methods() 
     assert "async def list_surface_ownership_for_document(" in source
     assert "async def list_surface_reassignments_for_document(" in source
     assert "get_latest_surface_run_for_document(" in source
+
+
+def test_repository_has_surface_publication_support_methods() -> None:
+    source = Path("src/infrastructure/db/repositories/knowledge_repository.py").read_text(encoding="utf-8")
+    assert "async def get_surface_by_id(" in source
+    assert "WHERE id = $1::uuid" in source
+    assert "async def update_surface_publication_status(" in source
+    assert "UPDATE knowledge_surfaces" in source
+    assert "SET publication_status = $2::text" in source
+    assert "async def link_surface_to_runtime_entry(" in source
+    assert "SET linked_runtime_entry_id = $2::uuid" in source
