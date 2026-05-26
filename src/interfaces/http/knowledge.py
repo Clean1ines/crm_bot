@@ -378,6 +378,62 @@ async def knowledge_surface_compilation(
     }
 
 
+
+
+@router.get("/{document_id}/surfaces")
+async def knowledge_surfaces(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
+    repo = make_knowledge_repo(pool)
+    latest = await repo.get_latest_surface_run_for_document(project_id=project_id, document_id=document_id)
+    if latest is None:
+        return {"surfaces": []}
+    surfaces = await repo.list_surfaces_for_run(run_id=latest.id)
+    return {
+        "surfaces": [
+            {
+                "id": s.id,
+                "run_id": s.run_id,
+                "surface_key": s.local_surface_key,
+                "surface_kind": s.surface_kind,
+                "title": s.title,
+                "canonical_question": s.canonical_question,
+                "answer": s.answer,
+                "short_answer": s.short_answer,
+                "answer_scope": s.answer_scope,
+                "question_scope": s.question_scope,
+                "exclusion_scope": s.exclusion_scope,
+                "status": s.status,
+                "publication_status": s.publication_status,
+                "source_refs": list(s.source_refs),
+                "source_chunk_indexes": list(s.source_chunk_indexes),
+                "confidence": s.confidence,
+                "warnings": list(s.warnings),
+                "linked_candidate_id": s.linked_candidate_id,
+                "linked_canonical_entry_id": s.linked_canonical_entry_id,
+                "linked_runtime_entry_id": s.linked_runtime_entry_id,
+            }
+            for s in surfaces
+        ]
+    }
 @router.get("/{document_id}/surface-relations")
 async def knowledge_surface_relations(
     project_id: str,
