@@ -469,6 +469,37 @@ async def knowledge_surface_ownership(
         "reassignments": [{"question": r.question, "from_surface_key": r.from_surface_key, "to_surface_key": r.to_surface_key, "reason": r.reason, "confidence": r.confidence} for r in reassignments],
     }
 
+
+@router.post("/{document_id}/surfaces/{surface_id}/publish")
+async def publish_surface(
+    project_id: str,
+    document_id: str,
+    surface_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    service = KnowledgeService(project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder, service_config=KnowledgeServiceConfig(model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET), voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS), model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED)))
+    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
+    repo = make_knowledge_repo(pool)
+    surface = await repo.get_surface_by_id(surface_id=surface_id)
+    if surface is None:
+        raise HTTPException(status_code=404, detail="Surface not found")
+    if surface.document_id != document_id:
+        raise HTTPException(status_code=400, detail="Surface does not belong to document")
+    if surface.linked_runtime_entry_id is None:
+        await repo.update_surface_publication_status(surface_id=surface_id, publication_status="publish_failed")
+        raise HTTPException(status_code=409, detail="Surface has no linked runtime entry yet")
+    await repo.update_surface_publication_status(surface_id=surface_id, publication_status="publishing")
+    await repo.link_surface_to_runtime_entry(surface_id=surface_id, runtime_entry_id=surface.linked_runtime_entry_id)
+    await repo.update_surface_publication_status(surface_id=surface_id, publication_status="published")
+    return {
+        "surface_id": surface_id,
+        "publication_status": "published",
+        "linked_runtime_entry_id": surface.linked_runtime_entry_id,
+    }
+
 @router.get("/{document_id}/import-quality")
 async def knowledge_import_quality_report(
     project_id: str,
