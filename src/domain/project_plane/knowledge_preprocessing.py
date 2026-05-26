@@ -220,6 +220,8 @@ def parse_preprocessing_payload(
     model: str,
     prompt_version: str,
 ) -> KnowledgePreprocessingResult:
+    if mode == MODE_FAQ:
+        raise KnowledgePreprocessingValidationError("Legacy fragments parser is forbidden for mode=faq; use retrieval surface compiler")
     parsed = _coerce_json_object(payload, "Preprocessing")
     entries_payload = parsed.get("fragments")
     if not isinstance(entries_payload, list):

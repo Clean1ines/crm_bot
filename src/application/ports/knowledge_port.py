@@ -20,6 +20,10 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
 )
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilationResult,
+    RetrievalSurfaceSourceUnit,
+)
 from src.domain.project_plane.model_usage_views import (
     ModelUsageEventCreate,
     ModelUsageSummaryView,
@@ -101,6 +105,25 @@ class KnowledgePreprocessorFactoryPort(Protocol):
     def __call__(self) -> KnowledgePreprocessorPort: ...
 
 
+
+
+class KnowledgeSurfaceCompilerPort(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
+    async def compile_surfaces(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        source_units: Sequence[RetrievalSurfaceSourceUnit],
+        file_name: str,
+        run_id: str,
+    ) -> RetrievalSurfaceCompilationResult: ...
+
+
+class KnowledgeSurfaceCompilerFactoryPort(Protocol):
+    def __call__(self) -> KnowledgeSurfaceCompilerPort: ...
+
 class ModelUsageRepositoryPort(Protocol):
     async def record_event(self, event: ModelUsageEventCreate) -> None: ...
 
@@ -159,6 +182,8 @@ __all__ = [
     "KnowledgeRepositoryPort",
     "KnowledgeRuntimeRetrievalPort",
     "KnowledgeSourceMaterialPort",
+    "KnowledgeSurfaceCompilerFactoryPort",
+    "KnowledgeSurfaceCompilerPort",
     "ModelUsageRepositoryFactoryPort",
     "ModelUsageRepositoryPort",
     "PlatformUserAdminPort",
