@@ -36,6 +36,7 @@ from src.application.services.knowledge_service import (
 )
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ, normalize_preprocessing_mode
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.commercial_price_repository import (
     CommercialPriceRepository,
@@ -109,7 +110,10 @@ def make_commercial_price_repo(
     return cast(CommercialPriceKnowledgePort, CommercialPriceRepository(pool))
 
 
-def make_knowledge_preprocessor() -> KnowledgePreprocessorPort:
+def make_knowledge_preprocessor(*, preprocessing_mode: str) -> KnowledgePreprocessorPort:
+    mode = normalize_preprocessing_mode(preprocessing_mode)
+    if mode == MODE_FAQ:
+        raise ValueError("Legacy FAQ preprocessor factory is forbidden; FAQ must use surface compiler")
     return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
 
 
@@ -748,7 +752,9 @@ async def upload_knowledge(
         upload_request=KnowledgeUploadRequestDto(
             preprocessing_mode=preprocessing_mode,
         ),
-        preprocessor_factory=make_knowledge_preprocessor,
+        preprocessor_factory=(
+            lambda: make_knowledge_preprocessor(preprocessing_mode=preprocessing_mode)
+        ),
     )
     return result.to_dict()
 
