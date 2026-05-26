@@ -1101,6 +1101,74 @@ class KnowledgeRepository:
             )
         return tuple(result)
 
+
+    async def save_surface_relations(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        relations: tuple[RetrievalSurfaceRelation, ...],
+    ) -> None:
+        if not relations:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for rel in relations:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_relations (
+                            id, run_id, document_id, parent_surface_key,
+                            child_surface_key, relation_type, reason,
+                            confidence, source_refs
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4,
+                            $5, $6, $7,
+                            $8, $9::jsonb
+                        )
+                        """,
+                        ensure_uuid(rel.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        rel.parent_surface_key,
+                        rel.child_surface_key,
+                        rel.relation_type,
+                        rel.reason,
+                        rel.confidence,
+                        json.dumps(list(rel.source_refs), ensure_ascii=False),
+                    )
+
+    async def list_surface_relations_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceRelation, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, parent_surface_key,
+                       child_surface_key, relation_type, reason,
+                       confidence, source_refs
+                FROM knowledge_surface_relations
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            RetrievalSurfaceRelation(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                parent_surface_key=str(row["parent_surface_key"]),
+                child_surface_key=str(row["child_surface_key"]),
+                relation_type=str(row["relation_type"]),
+                reason=str(row["reason"]),
+                confidence=float(row["confidence"]),
+                source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+            )
+            for row in rows
+        )
+
     async def create_surface_compiler_stage(
         self,
         stage: RetrievalSurfaceCompilerStage,
