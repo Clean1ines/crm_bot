@@ -1237,6 +1237,137 @@ class KnowledgeRepository:
             for row in rows
         )
 
+
+    async def save_surface_question_reassignments(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        reassignments: tuple[SurfaceQuestionReassignment, ...],
+    ) -> None:
+        if not reassignments:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for item in reassignments:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_question_reassignments (
+                            id, run_id, document_id, question,
+                            from_surface_key, to_surface_key, reason, confidence
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4,
+                            $5, $6, $7, $8
+                        )
+                        """,
+                        ensure_uuid(item.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        item.question,
+                        item.from_surface_key,
+                        item.to_surface_key,
+                        item.reason,
+                        item.confidence,
+                    )
+
+    async def list_surface_reassignments_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[SurfaceQuestionReassignment, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, question,
+                       from_surface_key, to_surface_key, reason, confidence
+                FROM knowledge_surface_question_reassignments
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            SurfaceQuestionReassignment(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                question=str(row["question"]),
+                from_surface_key=str(row["from_surface_key"]),
+                to_surface_key=str(row["to_surface_key"]),
+                reason=str(row["reason"]),
+                confidence=float(row["confidence"]),
+            )
+            for row in rows
+        )
+
+
+    async def save_surface_merge_decisions(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+    ) -> None:
+        if not merge_decisions:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for item in merge_decisions:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_merge_decisions (
+                            id, run_id, document_id, survivor_surface_key,
+                            merged_surface_keys, keep_separate_surface_keys,
+                            decision_type, reason, confidence
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4,
+                            $5::jsonb, $6::jsonb,
+                            $7, $8, $9
+                        )
+                        """,
+                        ensure_uuid(item.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        item.survivor_surface_key,
+                        json.dumps(list(item.merged_surface_keys), ensure_ascii=False),
+                        json.dumps(list(item.keep_separate_surface_keys), ensure_ascii=False),
+                        item.decision_type,
+                        item.reason,
+                        item.confidence,
+                    )
+
+    async def list_surface_merge_decisions_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceMergeDecision, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, survivor_surface_key,
+                       merged_surface_keys, keep_separate_surface_keys,
+                       decision_type, reason, confidence
+                FROM knowledge_surface_merge_decisions
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            RetrievalSurfaceMergeDecision(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                survivor_surface_key=str(row["survivor_surface_key"]),
+                merged_surface_keys=tuple(str(i) for i in json_list_from_db(row["merged_surface_keys"])),
+                keep_separate_surface_keys=tuple(str(i) for i in json_list_from_db(row["keep_separate_surface_keys"])),
+                decision_type=str(row["decision_type"]),
+                reason=str(row["reason"]),
+                confidence=float(row["confidence"]),
+            )
+            for row in rows
+        )
+
     async def create_surface_compiler_stage(
         self,
         stage: RetrievalSurfaceCompilerStage,
