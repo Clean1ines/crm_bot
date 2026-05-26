@@ -192,7 +192,9 @@ def test_raw_candidates_are_built_before_merge_publication() -> None:
     assert candidates[0].source_refs[0].source_chunk_id == "doc:0"
 
 
-def test_answer_resolution_merges_russian_product_duplicates_with_short_answers() -> None:
+def test_answer_resolution_merges_russian_product_duplicates_with_short_answers() -> (
+    None
+):
     entries = (
         KnowledgePreprocessingEntry(
             title="Что это за продукт",
@@ -224,5 +226,8 @@ def test_answer_resolution_merges_russian_product_duplicates_with_short_answers(
     )
 
     assert len(merged) == 1
-    assert merged[0].answer == "Это CRM-бот: он автоматизирует продажи и помогает поддержке."
+    assert (
+        merged[0].answer
+        == "Это CRM-бот: он автоматизирует продажи и помогает поддержке."
+    )
     assert "как продукт помогает" in merged[0].questions

@@ -4,6 +4,7 @@ import { FileText } from 'lucide-react';
 import { ImportQualitySummary } from './ImportQualitySummary';
 import { PriceFactsSummary } from './PriceFactsSummary';
 import { CommercialTruthReviewSummary } from './CommercialTruthReviewSummary';
+import { SurfaceCompilationSummary } from './SurfaceCompilationSummary';
 
 import { t } from '@shared/i18n';
 import { type KnowledgeCommercialTruthReviewPolicy, type KnowledgeCommercialTruthReviewResponse, type KnowledgePriceFact, type KnowledgePriceFactsResponse, type KnowledgeImportQualityReport, type KnowledgeProcessingReport } from '@shared/api/modules/knowledge';
@@ -166,6 +167,7 @@ export const KnowledgeDocumentCard: React.FC<{
     <div className="mt-4 space-y-3">
       {actionsNode}
       <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
+      <SurfaceCompilationSummary documentId={doc.id} enabled={doc.preprocessing_mode === 'faq'} isDocumentProcessing={isDocumentProcessing} />
       <PriceFactsSummary response={priceFactsResponse} isLoading={isPriceFactsLoading} onPublishFact={onPublishFact} onRejectFact={onRejectFact} mutatingFactId={mutatingPriceFactId} />
       <CommercialTruthReviewSummary response={commercialTruthReviewResponse} isLoading={isCommercialTruthReviewLoading} policy={commercialTruthReviewPolicy} onPolicyChange={onPolicyChange} />
       {processingNode}

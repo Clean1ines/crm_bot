@@ -278,7 +278,9 @@ async def update_me(
     user_repo: UserRepository = Depends(get_user_repository),
 ):
     auth_service = build_auth_service(user_repo)
-    return (await auth_service.update_profile_login(current_user_id, data.login)).to_dict()
+    return (
+        await auth_service.update_profile_login(current_user_id, data.login)
+    ).to_dict()
 
 
 @router.get("/methods", response_model=AuthMethodsResponse)
