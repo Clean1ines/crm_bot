@@ -27,7 +27,10 @@ from src.interfaces.http.dependencies import (
     get_user_repository,
 )
 from src.interfaces.http.knowledge import make_knowledge_repo
-from src.interfaces.http.knowledge_surface import _knowledge_service
+from src.interfaces.http.knowledge_surface import (
+    _knowledge_service,
+    router as surface_router,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
@@ -194,3 +197,8 @@ async def retry_knowledge_surface_lifecycle(
         "preprocessing_mode": MODE_FAQ,
         "source": "faq_surface_retry",
     }
+
+
+for lifecycle_route in router.routes:
+    if lifecycle_route not in surface_router.routes:
+        surface_router.routes.append(lifecycle_route)
