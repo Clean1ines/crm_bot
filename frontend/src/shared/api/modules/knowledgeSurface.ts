@@ -4,6 +4,7 @@ export type SurfaceCompilationRun = {
   id: string;
   project_id: string;
   document_id: string;
+  mode?: string;
   status: string;
   compiler_kind: string;
   model: string;
@@ -18,6 +19,7 @@ export type SurfaceCompilationRun = {
 export type SurfaceCompilationStage = {
   id: string;
   run_id: string;
+  document_id?: string;
   stage_kind: string;
   status: string;
   model: string;
@@ -34,15 +36,89 @@ export type SurfaceCompilationStage = {
   metrics: Record<string, unknown>;
 };
 
+export type SurfaceSourceChild = {
+  title: string;
+  body: string;
+  raw_text: string;
+  label_kind: string;
+  metadata: Record<string, unknown>;
+};
+
+export type SurfaceSourceUnit = {
+  id: string;
+  run_id: string;
+  document_id: string;
+  source_unit_key: string;
+  source_chunk_indexes: number[];
+  title: string;
+  body: string;
+  children: SurfaceSourceChild[];
+  raw_text: string;
+  section_path: string[];
+  source_refs: string[];
+  preprocessing_mode: string;
+  metadata: Record<string, unknown>;
+};
+
 export type SurfaceCompilationResponse = {
   run: SurfaceCompilationRun | null;
   stages: SurfaceCompilationStage[];
+  source_units?: SurfaceSourceUnit[];
+};
+
+export type SurfaceRelation = {
+  id?: string;
+  run_id?: string;
+  document_id?: string;
+  parent_surface_key: string;
+  child_surface_key: string;
+  relation_type: string;
+  reason: string;
+  confidence: number;
+  source_refs?: string[];
+};
+
+export type SurfaceOwnership = {
+  id?: string;
+  run_id?: string;
+  document_id?: string;
+  question: string;
+  owner_surface_key: string;
+  question_kind: string;
+  confidence: number;
+  reason: string;
+  rejected_from_surface_keys: string[];
+};
+
+export type SurfaceReassignment = {
+  id?: string;
+  run_id?: string;
+  document_id?: string;
+  question: string;
+  from_surface_key: string;
+  to_surface_key: string;
+  reason: string;
+  confidence: number;
+};
+
+export type SurfaceMergeDecision = {
+  id: string;
+  run_id: string;
+  document_id: string;
+  survivor_surface_key: string;
+  merged_surface_keys: string[];
+  keep_separate_surface_keys: string[];
+  decision_type: string;
+  reason: string;
+  confidence: number;
 };
 
 export type RetrievalSurface = {
   id: string;
   run_id: string;
+  document_id?: string;
   surface_key: string;
+  local_surface_key?: string;
   surface_kind: string;
   title: string;
   canonical_question: string;
@@ -54,9 +130,19 @@ export type RetrievalSurface = {
   status: string;
   publication_status: string;
   source_refs: string[];
+  source_excerpt?: string;
   source_chunk_indexes: number[];
   confidence: number;
   warnings: string[];
+  metadata?: Record<string, unknown>;
+  parent_surface_keys?: string[];
+  child_surface_keys?: string[];
+  owned_questions?: SurfaceOwnership[];
+  rejected_questions?: SurfaceOwnership[];
+  incoming_reassignments?: SurfaceReassignment[];
+  outgoing_reassignments?: SurfaceReassignment[];
+  relations?: SurfaceRelation[];
+  merge_decisions?: SurfaceMergeDecision[];
   linked_candidate_id: string | null;
   linked_canonical_entry_id: string | null;
   linked_runtime_entry_id: string | null;
@@ -66,38 +152,17 @@ export type SurfacesResponse = {
   surfaces: RetrievalSurface[];
 };
 
-export type SurfaceRelation = {
-  parent_surface_key: string;
-  child_surface_key: string;
-  relation_type: string;
-  reason: string;
-  confidence: number;
-};
-
 export type SurfaceRelationsResponse = {
   relations: SurfaceRelation[];
-};
-
-export type SurfaceOwnership = {
-  question: string;
-  owner_surface_key: string;
-  question_kind: string;
-  confidence: number;
-  reason: string;
-  rejected_from_surface_keys: string[];
-};
-
-export type SurfaceReassignment = {
-  question: string;
-  from_surface_key: string;
-  to_surface_key: string;
-  reason: string;
-  confidence: number;
 };
 
 export type SurfaceOwnershipResponse = {
   ownership: SurfaceOwnership[];
   reassignments: SurfaceReassignment[];
+};
+
+export type SurfaceMergeDecisionsResponse = {
+  merge_decisions: SurfaceMergeDecision[];
 };
 
 export type SurfacePublishResponse = {
@@ -128,6 +193,12 @@ export const knowledgeSurfaceApi = {
   ownership: (projectId: string, documentId: string) =>
     authedJsonRequest<SurfaceOwnershipResponse>(
       `/api/projects/${projectId}/knowledge/${documentId}/surface-ownership`,
+      { method: 'GET' },
+    ),
+
+  mergeDecisions: (projectId: string, documentId: string) =>
+    authedJsonRequest<SurfaceMergeDecisionsResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/surface-merge-decisions`,
       { method: 'GET' },
     ),
 
