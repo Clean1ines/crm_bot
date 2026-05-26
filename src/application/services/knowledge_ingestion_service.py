@@ -4,9 +4,10 @@ import json
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol, cast
+from typing import Protocol, cast, Any
 
 import asyncpg
 
@@ -104,6 +105,12 @@ from src.domain.project_plane.knowledge_acquisition import (
 )
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
+)
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilerRun,
+    RetrievalSurfaceCompilerStage,
+    RetrievalSurfaceSourceUnit,
+    RetrievalSurfaceSourceChild,
 )
 
 
@@ -4731,6 +4738,107 @@ class KnowledgeIngestionService:
             "usage_event_count": usage_event_count,
         }
 
+    async def _process_document_faq_surface(
+        self,
+        *,
+        repo: Any,
+        project_id: str,
+        document_id: str,
+        chunks: list[JsonObject],
+        source_chunks: tuple[SourceChunk, ...],
+    ) -> KnowledgeDocumentProcessingResult:
+        run_id = str(uuid.uuid4())
+        started_at = datetime.now(timezone.utc)
+        run = RetrievalSurfaceCompilerRun(
+            id=run_id,
+            project_id=project_id,
+            document_id=document_id,
+            mode=MODE_FAQ,
+            status="running",
+            compiler_kind="faq_surface_compiler",
+            model="bootstrap",
+            prompt_version="faq_surface_compiler_bootstrap_v1",
+            started_at=started_at,
+            metrics={"source_chunk_count": len(source_chunks)},
+        )
+        await repo.create_surface_compiler_run(run)
+
+        stage = RetrievalSurfaceCompilerStage(
+            id=str(uuid.uuid4()),
+            run_id=run_id,
+            document_id=document_id,
+            stage_kind="source_units",
+            status="running",
+            model="bootstrap",
+            prompt_version="faq_surface_compiler_bootstrap_v1",
+            input_summary=f"chunks={len(chunks)}",
+            started_at=started_at,
+        )
+        await repo.create_surface_compiler_stage(stage)
+
+        source_units: tuple[RetrievalSurfaceSourceUnit, ...] = tuple(
+            RetrievalSurfaceSourceUnit(
+                id=str(uuid.uuid4()),
+                run_id=run_id,
+                document_id=document_id,
+                source_unit_key=f"chunk:{idx}",
+                source_chunk_indexes=(idx,),
+                title=str(chunk.get("title") or f"Фрагмент {idx+1}"),
+                body=str(chunk.get("content") or ""),
+                children=(
+                    RetrievalSurfaceSourceChild(
+                        title="content",
+                        body=str(chunk.get("content") or ""),
+                        raw_text=str(chunk.get("content") or ""),
+                        label_kind="content_section",
+                    ),
+                ),
+                raw_text=str(chunk.get("content") or ""),
+                section_path=(),
+                source_refs=(f"chunk:{idx}",),
+                preprocessing_mode=MODE_FAQ,
+            )
+            for idx, chunk in enumerate(chunks)
+        )
+        await repo.save_surface_source_units(
+            run_id=run_id,
+            document_id=document_id,
+            source_units=source_units,
+        )
+
+        await repo.create_surface_compiler_stage(
+            RetrievalSurfaceCompilerStage(
+                id=str(uuid.uuid4()),
+                run_id=run_id,
+                document_id=document_id,
+                stage_kind="source_units",
+                status="completed",
+                model="bootstrap",
+                prompt_version="faq_surface_compiler_bootstrap_v1",
+                input_summary=f"chunks={len(chunks)}",
+                output_summary=f"source_units={len(source_units)}",
+                started_at=started_at,
+                completed_at=datetime.now(timezone.utc),
+                metrics={"source_unit_count": len(source_units)},
+            )
+        )
+        await repo.update_surface_compiler_run_status(run_id=run_id, status="completed")
+
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=MODE_FAQ,
+            status=PREPROCESSING_STATUS_COMPLETED,
+            model="bootstrap",
+            prompt_version="faq_surface_compiler_bootstrap_v1",
+            metrics={"source_unit_count": len(source_units), "surface_compiler_run_id": run_id},
+        )
+        await repo.update_document_status(document_id, "processed")
+        return KnowledgeDocumentProcessingResult(
+            document_id=document_id,
+            preprocessing_status=PREPROCESSING_STATUS_COMPLETED,
+            structured_entries=0,
+        )
+
     async def process_document(
         self,
         *,
@@ -4846,6 +4954,15 @@ class KnowledgeIngestionService:
             document_id=document_id,
             chunks=source_chunks,
         )
+
+        if mode == MODE_FAQ:
+            return await self._process_document_faq_surface(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                chunks=indexable_chunks,
+                source_chunks=source_chunks,
+            )
 
         await repo.update_document_preprocessing_status(
             document_id,
