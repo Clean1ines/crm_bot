@@ -202,3 +202,6 @@ async def retry_knowledge_surface_lifecycle(
 for lifecycle_route in reversed(router.routes):
     if lifecycle_route not in surface_router.routes:
         surface_router.routes.insert(0, lifecycle_route)
+
+
+import src.interfaces.http.knowledge_surface_upload_guard  # noqa: E402,F401
