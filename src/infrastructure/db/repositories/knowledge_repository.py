@@ -800,6 +800,45 @@ class KnowledgeRepository:
             metrics=json_object_from_db(row["metrics"]),
         )
 
+
+    async def list_surface_runs_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[RetrievalSurfaceCompilerRun, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, project_id, document_id, mode, status, compiler_kind, model,
+                       prompt_version, started_at, completed_at, error_type,
+                       error_message, metrics
+                FROM knowledge_surface_compiler_runs
+                WHERE project_id = $1::uuid AND document_id = $2::uuid
+                ORDER BY created_at DESC, id DESC
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        return tuple(
+            RetrievalSurfaceCompilerRun(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                document_id=str(row["document_id"]),
+                mode=str(row["mode"]),
+                status=str(row["status"]),
+                compiler_kind=str(row["compiler_kind"]),
+                model=str(row["model"]),
+                prompt_version=str(row["prompt_version"]),
+                started_at=normalize_timestamp(row.get("started_at")),
+                completed_at=normalize_timestamp(row.get("completed_at")),
+                error_type=str(row["error_type"]) if row["error_type"] is not None else None,
+                error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+                metrics=json_object_from_db(row["metrics"]),
+            )
+            for row in rows
+        )
+
     async def list_surface_stages_for_run(
         self,
         *,
