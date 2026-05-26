@@ -221,7 +221,9 @@ def parse_preprocessing_payload(
     prompt_version: str,
 ) -> KnowledgePreprocessingResult:
     if mode == MODE_FAQ:
-        raise KnowledgePreprocessingValidationError("Legacy fragments parser is forbidden for mode=faq; use retrieval surface compiler")
+        raise KnowledgePreprocessingValidationError(
+            "Legacy fragments parser is forbidden for mode=faq; use retrieval surface compiler"
+        )
     parsed = _coerce_json_object(payload, "Preprocessing")
     entries_payload = parsed.get("fragments")
     if not isinstance(entries_payload, list):
@@ -414,7 +416,7 @@ def _parse_entry(
     source_excerpt = _required_text(payload, "source_excerpt", index=index)
 
     questions = _dedupe_texts((canonical_question, *variants))
-    synonyms = _dedupe_texts(payload.get("synonyms") or ())
+    synonyms = _dedupe_texts(_string_list(payload.get("synonyms")))
     tags: tuple[str, ...] = ()
     source_chunk_indexes = tuple(
         _non_negative_ints(payload.get("source_chunk_indexes"))

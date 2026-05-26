@@ -4,10 +4,9 @@ import json
 import re
 import time
 import uuid
-from datetime import datetime, timezone
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol, cast, Any
+from typing import Protocol, cast
 
 import asyncpg
 
@@ -105,17 +104,6 @@ from src.domain.project_plane.knowledge_acquisition import (
 )
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
-)
-from src.domain.project_plane.retrieval_surface_compilation import (
-    RetrievalSurfaceCompilerRun,
-    RetrievalSurfaceCompilerStage,
-    RetrievalSurfaceSourceUnit,
-    RetrievalSurfaceSourceChild,
-    RetrievalSurfaceDraft,
-    RetrievalSurfaceRelation,
-    SurfaceQuestionOwnership,
-    SurfaceQuestionReassignment,
-    RetrievalSurfaceMergeDecision,
 )
 
 
@@ -524,7 +512,7 @@ def _technical_chunk_batches_for_answer_compiler(
 
         is_markdown_semantic = bool(chunk.get("section_title") or chunk.get("children"))
         if is_markdown_semantic:
-            parts = (content.strip(),)
+            parts: tuple[str, ...] = (content.strip(),)
         else:
             parts = _split_technical_source_text(
                 content,
@@ -812,8 +800,6 @@ KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
-
-
 def _source_excerpt_to_text(value: object) -> str:
     if isinstance(value, tuple):
         return "\n\n".join(
@@ -835,9 +821,13 @@ def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
     return overlap / max(1, min(len(source_tokens), 36))
 
 
-def _regenerate_entry_from_source_excerpt(entry: KnowledgePreprocessingEntry, source_excerpt: str) -> KnowledgePreprocessingEntry:
+def _regenerate_entry_from_source_excerpt(
+    entry: KnowledgePreprocessingEntry, source_excerpt: str
+) -> KnowledgePreprocessingEntry:
     sanitized_source = "\n".join(
-        line for line in source_excerpt.splitlines() if not line.lstrip().startswith("#")
+        line
+        for line in source_excerpt.splitlines()
+        if not line.lstrip().startswith("#")
     ).strip()
     rebuilt_answer = _answer_digest(
         sanitized_source or source_excerpt,
@@ -946,17 +936,48 @@ def _repair_generated_entry(
             updated = _remove_forbidden_cjk_korean_chars(value)
             if updated != value:
                 sanitized_fields[name] = _clean_optional_text(updated)
-        for name, values in (("questions", repaired.questions), ("synonyms", repaired.synonyms), ("tags", repaired.tags)):
+        for name, values in (
+            ("questions", repaired.questions),
+            ("synonyms", repaired.synonyms),
+            ("tags", repaired.tags),
+        ):
             updated_values = tuple(
                 cleaned
                 for item in values
-                if (cleaned := _clean_optional_text(_remove_forbidden_cjk_korean_chars(item)))
+                if (
+                    cleaned := _clean_optional_text(
+                        _remove_forbidden_cjk_korean_chars(item)
+                    )
+                )
             )
             if updated_values != values:
                 sanitized_fields[name] = updated_values
         if sanitized_fields:
             warnings.append("generated_enrichment_forbidden_script_repaired")
-            repaired = replace(repaired, **sanitized_fields)
+            repaired = replace(
+                repaired,
+                title=cast(str, sanitized_fields.get("title", repaired.title)),
+                canonical_question=cast(
+                    str,
+                    sanitized_fields.get(
+                        "canonical_question",
+                        repaired.canonical_question,
+                    ),
+                ),
+                source_excerpt=cast(
+                    str,
+                    sanitized_fields.get("source_excerpt", repaired.source_excerpt),
+                ),
+                questions=cast(
+                    tuple[str, ...],
+                    sanitized_fields.get("questions", repaired.questions),
+                ),
+                synonyms=cast(
+                    tuple[str, ...],
+                    sanitized_fields.get("synonyms", repaired.synonyms),
+                ),
+                tags=cast(tuple[str, ...], sanitized_fields.get("tags", repaired.tags)),
+            )
 
     repaired_source_excerpt = _clean_optional_text(repaired.source_excerpt)
     repaired_answer = _clean_optional_text(repaired.answer)
@@ -3533,10 +3554,9 @@ def _merge_source_ref_tuple_values(
                 continue
             duplicate_index = None
             for idx, existing in enumerate(result):
-                same_origin = (
-                    (existing.source_chunk_id or "") == (source_ref.source_chunk_id or "")
-                    and existing.source_index == source_ref.source_index
-                )
+                same_origin = (existing.source_chunk_id or "") == (
+                    source_ref.source_chunk_id or ""
+                ) and existing.source_index == source_ref.source_index
                 if not same_origin:
                     continue
                 existing_fp = _publication_text_fingerprint(existing.quote)
@@ -4745,183 +4765,13 @@ class KnowledgeIngestionService:
 
     async def _process_document_faq_surface(
         self,
-        *,
-        repo: Any,
-        project_id: str,
-        document_id: str,
-        chunks: list[JsonObject],
-        source_chunks: tuple[SourceChunk, ...],
+        *args: object,
+        **kwargs: object,
     ) -> KnowledgeDocumentProcessingResult:
-        run_id = str(uuid.uuid4())
-        started_at = datetime.now(timezone.utc)
-        run = RetrievalSurfaceCompilerRun(
-            id=run_id,
-            project_id=project_id,
-            document_id=document_id,
-            mode=MODE_FAQ,
-            status="running",
-            compiler_kind="faq_surface_compiler",
-            model="bootstrap",
-            prompt_version="faq_surface_compiler_bootstrap_v1",
-            started_at=started_at,
-            metrics={"source_chunk_count": len(source_chunks)},
-        )
-        await repo.create_surface_compiler_run(run)
-
-        stage = RetrievalSurfaceCompilerStage(
-            id=str(uuid.uuid4()),
-            run_id=run_id,
-            document_id=document_id,
-            stage_kind="source_units",
-            status="running",
-            model="bootstrap",
-            prompt_version="faq_surface_compiler_bootstrap_v1",
-            input_summary=f"chunks={len(chunks)}",
-            started_at=started_at,
-        )
-        await repo.create_surface_compiler_stage(stage)
-
-        source_units: tuple[RetrievalSurfaceSourceUnit, ...] = tuple(
-            RetrievalSurfaceSourceUnit(
-                id=str(uuid.uuid4()),
-                run_id=run_id,
-                document_id=document_id,
-                source_unit_key=f"chunk:{idx}",
-                source_chunk_indexes=(idx,),
-                title=str(chunk.get("title") or f"Фрагмент {idx+1}"),
-                body=str(chunk.get("content") or ""),
-                children=(
-                    RetrievalSurfaceSourceChild(
-                        title="content",
-                        body=str(chunk.get("content") or ""),
-                        raw_text=str(chunk.get("content") or ""),
-                        label_kind="content_section",
-                    ),
-                ),
-                raw_text=str(chunk.get("content") or ""),
-                section_path=(),
-                source_refs=(f"chunk:{idx}",),
-                preprocessing_mode=MODE_FAQ,
-            )
-            for idx, chunk in enumerate(chunks)
-        )
-        await repo.save_surface_source_units(
-            run_id=run_id,
-            document_id=document_id,
-            source_units=source_units,
-        )
-        surfaces: tuple[RetrievalSurfaceDraft, ...] = tuple(
-            RetrievalSurfaceDraft(
-                id=str(uuid.uuid4()),
-                run_id=run_id,
-                document_id=document_id,
-                local_surface_key=f"surface:{idx}",
-                title=unit.title or f"Поверхность {idx + 1}",
-                canonical_question=unit.title or f"О чем раздел {idx + 1}?",
-                surface_kind="standalone",
-                answer_scope="Локальный ответ по содержимому секции",
-                question_scope="Вопросы по конкретной секции документа",
-                exclusion_scope="Не включает другие разделы",
-                answer=(unit.body or unit.raw_text or "").strip()[:1500] or "Нет содержимого",
-                short_answer=(unit.body or unit.raw_text or "").strip()[:240] or "Нет содержимого",
-                status="draft",
-                publication_status="unpublished",
-                source_refs=unit.source_refs,
-                source_excerpt=(unit.raw_text or unit.body or "")[:500],
-                confidence=0.6,
-                source_chunk_indexes=unit.source_chunk_indexes,
-                metadata={"bootstrap": True},
-            )
-            for idx, unit in enumerate(source_units)
-        )
-        await repo.save_surfaces(
-            run_id=run_id,
-            document_id=document_id,
-            surfaces=surfaces,
-        )
-
-        relations: tuple[RetrievalSurfaceRelation, ...] = tuple(
-            RetrievalSurfaceRelation(
-                id=str(uuid.uuid4()),
-                run_id=run_id,
-                document_id=document_id,
-                parent_surface_key=surfaces[0].local_surface_key,
-                child_surface_key=surface.local_surface_key,
-                relation_type="sibling",
-                reason="Bootstrap: отдельные секции документа",
-                confidence=0.4,
-                source_refs=surface.source_refs,
-            )
-            for surface in surfaces[1:]
-        )
-        await repo.save_surface_relations(
-            run_id=run_id,
-            document_id=document_id,
-            relations=relations,
-        )
-
-        ownership: tuple[SurfaceQuestionOwnership, ...] = tuple(
-            SurfaceQuestionOwnership(
-                id=str(uuid.uuid4()),
-                run_id=run_id,
-                document_id=document_id,
-                question=surface.canonical_question,
-                owner_surface_key=surface.local_surface_key,
-                question_kind="faq_question",
-                confidence=0.6,
-                reason="Bootstrap ownership by section title",
-                rejected_from_surface_keys=(),
-            )
-            for surface in surfaces
-        )
-        await repo.save_surface_question_ownership(
-            run_id=run_id,
-            document_id=document_id,
-            ownership=ownership,
-        )
-
-        await repo.save_surface_question_reassignments(
-            run_id=run_id,
-            document_id=document_id,
-            reassignments=tuple[SurfaceQuestionReassignment, ...](),
-        )
-        await repo.save_surface_merge_decisions(
-            run_id=run_id,
-            document_id=document_id,
-            merge_decisions=tuple[RetrievalSurfaceMergeDecision, ...](),
-        )
-
-        await repo.create_surface_compiler_stage(
-            RetrievalSurfaceCompilerStage(
-                id=str(uuid.uuid4()),
-                run_id=run_id,
-                document_id=document_id,
-                stage_kind="source_units",
-                status="completed",
-                model="bootstrap",
-                prompt_version="faq_surface_compiler_bootstrap_v1",
-                input_summary=f"chunks={len(chunks)}",
-                output_summary=f"source_units={len(source_units)}",
-                started_at=started_at,
-                completed_at=datetime.now(timezone.utc),
-                metrics={"source_unit_count": len(source_units), "surface_count": len(surfaces), "relation_count": len(relations), "ownership_count": len(ownership)},
-            )
-        )
-        await repo.update_surface_compiler_run_status(run_id=run_id, status="completed")
-
-        await repo.update_document_preprocessing_status(
-            document_id,
-            mode=MODE_FAQ,
-            status=PREPROCESSING_STATUS_COMPLETED,
-            model="bootstrap",
-            prompt_version="faq_surface_compiler_bootstrap_v1",
-            metrics={"source_unit_count": len(source_units), "surface_count": len(surfaces), "relation_count": len(relations), "ownership_count": len(ownership), "surface_compiler_run_id": run_id},
-        )
-        await repo.update_document_status(document_id, "processed")
-        return KnowledgeDocumentProcessingResult(
-            document_id=document_id,
-            preprocessing_status=PREPROCESSING_STATUS_COMPLETED,
-            structured_entries=0,
+        raise KnowledgePreprocessingValidationError(
+            "Bootstrap FAQ surface path was removed from the primary pipeline. "
+            "FAQ uploads must use KnowledgeSurfaceCompilerPort.compile_surfaces via "
+            "KnowledgeFaqSurfaceIngestionService."
         )
 
     async def process_document(

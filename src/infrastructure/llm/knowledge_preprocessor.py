@@ -163,7 +163,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         file_name: str,
     ) -> KnowledgePreprocessingExecutionResult:
         if mode == MODE_FAQ:
-            raise KnowledgePreprocessingValidationError("Legacy GroqKnowledgePreprocessor.preprocess is forbidden for mode=faq")
+            raise KnowledgePreprocessingValidationError(
+                "Legacy GroqKnowledgePreprocessor.preprocess is forbidden for mode=faq"
+            )
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(
             mode=mode,
@@ -405,9 +407,13 @@ def _structured_source_chunk_payload(
     max_content_chars: int,
 ) -> JsonObject:
     is_markdown_semantic = bool(chunk.get("section_body") or chunk.get("children"))
-    section_max_chars = max_content_chars if not is_markdown_semantic else max(
-        max_content_chars,
-        12000,
+    section_max_chars = (
+        max_content_chars
+        if not is_markdown_semantic
+        else max(
+            max_content_chars,
+            12000,
+        )
     )
     payload: JsonObject = {
         "index": index,

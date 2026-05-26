@@ -19,17 +19,6 @@ from pydantic import BaseModel, Field
 
 from src.application.dto.knowledge_dto import (
     KnowledgePreviewRequestDto,
-    SurfaceCompilationResponseDto,
-    SurfaceCompilationRunDto,
-    SurfaceCompilationStageDto,
-    SurfacesResponseDto,
-    RetrievalSurfaceDto,
-    SurfaceRelationsResponseDto,
-    RelationDto,
-    SurfaceOwnershipResponseDto,
-    OwnershipDto,
-    ReassignmentDto,
-    SurfacePublishResponseDto,
     KnowledgeUploadRequestDto,
 )
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
@@ -47,7 +36,10 @@ from src.application.services.knowledge_service import (
 )
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ, normalize_preprocessing_mode
+from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
+    normalize_preprocessing_mode,
+)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.commercial_price_repository import (
     CommercialPriceRepository,
@@ -121,10 +113,14 @@ def make_commercial_price_repo(
     return cast(CommercialPriceKnowledgePort, CommercialPriceRepository(pool))
 
 
-def make_knowledge_preprocessor(*, preprocessing_mode: str) -> KnowledgePreprocessorPort:
+def make_knowledge_preprocessor(
+    *, preprocessing_mode: str
+) -> KnowledgePreprocessorPort:
     mode = normalize_preprocessing_mode(preprocessing_mode)
     if mode == MODE_FAQ:
-        raise ValueError("Legacy FAQ preprocessor factory is forbidden; FAQ must use surface compiler")
+        raise ValueError(
+            "Legacy FAQ preprocessor factory is forbidden; FAQ must use surface compiler"
+        )
     return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
 
 
@@ -320,226 +316,6 @@ async def knowledge_source_units(
     )
     return result.to_dict()
 
-
-
-
-@router.get("/{document_id}/surface-compilation", response_model=SurfaceCompilationResponseDto)
-async def knowledge_surface_compilation(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
-    repo = make_knowledge_repo(pool)
-    latest = await repo.get_latest_surface_run_for_document(project_id=project_id, document_id=document_id)
-    if latest is None:
-        return {"run": None, "stages": []}
-    stages = await repo.list_surface_stages_for_run(run_id=latest.id)
-    return {
-        "run": {
-            "id": latest.id,
-            "project_id": latest.project_id,
-            "document_id": latest.document_id,
-            "status": latest.status,
-            "compiler_kind": latest.compiler_kind,
-            "model": latest.model,
-            "prompt_version": latest.prompt_version,
-            "started_at": latest.started_at.isoformat() if latest.started_at else None,
-            "completed_at": latest.completed_at.isoformat() if latest.completed_at else None,
-            "error_type": latest.error_type,
-            "error_message": latest.error_message,
-            "metrics": latest.metrics,
-        },
-        "stages": [
-            {
-                "id": stage.id,
-                "run_id": stage.run_id,
-                "stage_kind": stage.stage_kind,
-                "status": stage.status,
-                "model": stage.model,
-                "prompt_version": stage.prompt_version,
-                "input_summary": stage.input_summary,
-                "output_summary": stage.output_summary,
-                "tokens_input": stage.tokens_input,
-                "tokens_output": stage.tokens_output,
-                "tokens_total": stage.tokens_total,
-                "error_type": stage.error_type,
-                "error_message": stage.error_message,
-                "started_at": stage.started_at.isoformat() if stage.started_at else None,
-                "completed_at": stage.completed_at.isoformat() if stage.completed_at else None,
-                "metrics": stage.metrics,
-            }
-            for stage in stages
-        ],
-    }
-
-
-
-
-@router.get("/{document_id}/surfaces", response_model=SurfacesResponseDto)
-async def knowledge_surfaces(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
-    repo = make_knowledge_repo(pool)
-    latest = await repo.get_latest_surface_run_for_document(project_id=project_id, document_id=document_id)
-    if latest is None:
-        return {"surfaces": []}
-    surfaces = await repo.list_surfaces_for_run(run_id=latest.id)
-    return {
-        "surfaces": [
-            {
-                "id": s.id,
-                "run_id": s.run_id,
-                "surface_key": s.local_surface_key,
-                "surface_kind": s.surface_kind,
-                "title": s.title,
-                "canonical_question": s.canonical_question,
-                "answer": s.answer,
-                "short_answer": s.short_answer,
-                "answer_scope": s.answer_scope,
-                "question_scope": s.question_scope,
-                "exclusion_scope": s.exclusion_scope,
-                "status": s.status,
-                "publication_status": s.publication_status,
-                "source_refs": list(s.source_refs),
-                "source_chunk_indexes": list(s.source_chunk_indexes),
-                "confidence": s.confidence,
-                "warnings": list(s.warnings),
-                "linked_candidate_id": s.linked_candidate_id,
-                "linked_canonical_entry_id": s.linked_canonical_entry_id,
-                "linked_runtime_entry_id": s.linked_runtime_entry_id,
-            }
-            for s in surfaces
-        ]
-    }
-@router.get("/{document_id}/surface-relations", response_model=SurfaceRelationsResponseDto)
-async def knowledge_surface_relations(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    service = KnowledgeService(project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder, service_config=KnowledgeServiceConfig(model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET), voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS), model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED)))
-    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
-    repo = make_knowledge_repo(pool)
-    relations = await repo.list_surface_relations_for_document(project_id=project_id, document_id=document_id)
-    return SurfaceRelationsResponseDto(
-        relations=[
-            RelationDto(
-                parent_surface_key=r.parent_surface_key,
-                child_surface_key=r.child_surface_key,
-                relation_type=r.relation_type,
-                reason=r.reason,
-                confidence=r.confidence,
-            )
-            for r in relations
-        ]
-    )
-
-
-@router.get("/{document_id}/surface-ownership", response_model=SurfaceOwnershipResponseDto)
-async def knowledge_surface_ownership(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    service = KnowledgeService(project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder, service_config=KnowledgeServiceConfig(model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET), voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS), model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED)))
-    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
-    repo = make_knowledge_repo(pool)
-    ownership = await repo.list_surface_ownership_for_document(project_id=project_id, document_id=document_id)
-    reassignments = await repo.list_surface_reassignments_for_document(project_id=project_id, document_id=document_id)
-    return SurfaceOwnershipResponseDto(
-        ownership=[
-            OwnershipDto(
-                question=o.question,
-                owner_surface_key=o.owner_surface_key,
-                question_kind=o.question_kind,
-                confidence=o.confidence,
-                reason=o.reason,
-                rejected_from_surface_keys=list(o.rejected_from_surface_keys),
-            )
-            for o in ownership
-        ],
-        reassignments=[
-            ReassignmentDto(
-                question=r.question,
-                from_surface_key=r.from_surface_key,
-                to_surface_key=r.to_surface_key,
-                reason=r.reason,
-                confidence=r.confidence,
-            )
-            for r in reassignments
-        ],
-    )
-
-
-@router.post("/{document_id}/surfaces/{surface_id}/publish", response_model=SurfacePublishResponseDto)
-async def publish_surface(
-    project_id: str,
-    document_id: str,
-    surface_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    service = KnowledgeService(project_repo, user_repo, pool, settings.JWT_SECRET_KEY, jwt_decoder, service_config=KnowledgeServiceConfig(model_usage_monthly_token_budget=int(settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET), voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS), model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED)))
-    await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
-    repo = make_knowledge_repo(pool)
-    surface = await repo.get_surface_by_id(surface_id=surface_id)
-    if surface is None:
-        raise HTTPException(status_code=404, detail="Surface not found")
-    if surface.document_id != document_id:
-        raise HTTPException(status_code=400, detail="Surface does not belong to document")
-    if surface.linked_runtime_entry_id is None:
-        await repo.update_surface_publication_status(surface_id=surface_id, publication_status="publish_failed")
-        raise HTTPException(status_code=409, detail="Surface has no linked runtime entry yet")
-    await repo.update_surface_publication_status(surface_id=surface_id, publication_status="publishing")
-    await repo.link_surface_to_runtime_entry(surface_id=surface_id, runtime_entry_id=surface.linked_runtime_entry_id)
-    await repo.update_surface_publication_status(surface_id=surface_id, publication_status="published")
-    return SurfacePublishResponseDto(
-        surface_id=surface_id,
-        publication_status="published",
-        linked_runtime_entry_id=surface.linked_runtime_entry_id,
-    )
 
 @router.get("/{document_id}/import-quality")
 async def knowledge_import_quality_report(

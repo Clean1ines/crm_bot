@@ -1,0 +1,31 @@
+STAGE A — Surface discovery для FAQ Retrieval Surface Compilation.
+
+Ты получаешь RetrievalSurfaceSourceUnit[]: title, body, children, raw_text, section_path, source_refs, source_chunk_indexes.
+Нужно найти все поисковые поверхности, то есть отдельные намерения пользователя, по которым runtime retrieval должен находить точный ответ.
+
+Верни JSON только по контракту верхнего уровня:
+{
+  "surfaces": [],
+  "relations": [],
+  "question_ownership": [],
+  "merge_decisions": [],
+  "metrics": {}
+}
+
+Для каждой surface используй поля:
+local_surface_key, source_unit_key, title, canonical_question, surface_kind, answer_scope, question_scope, exclusion_scope, answer, short_answer, source_refs, source_chunk_indexes, confidence, warnings, metadata.
+
+Допустимые surface_kind:
+umbrella, child, specific, standalone, definition, procedural, safety, handoff, integration, channel, document_upload, curation, retrieval_quality, service_limits, other.
+
+Правила discovery:
+- Product overview / "Что это за продукт" обычно umbrella.
+- "Поисковая поверхность" — отдельная retrieval_quality/definition surface, не сливай её с обзором продукта.
+- "Ручное слияние фрагментов" и "Скрытие, отклонение и архивирование" — разные curation surfaces.
+- "Telegram-ассистент" и "Клиентский web-widget" — разные channel surfaces.
+- "Интеграции" — integration surface.
+- "Негативные тесты" надо раскладывать в полезные surfaces: ограничения автономности ассистента, когда нужен менеджер, рискованные вопросы.
+- Запрещено создавать surface с title "Короткий ответ клиенту". Это service label / evidence для short_answer ближайшей родительской surface.
+- "Ожидаемая тема" — не production answer и не отдельная surface; это expected_topic_hint для ownership, если нужно.
+- Не делай chunk -> standalone surface mapping. Один source unit может породить несколько surfaces, а umbrella/child должны сохраняться отдельно.
+- Не возвращай fragments[].
