@@ -26,6 +26,13 @@ from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilerRun,
     RetrievalSurfaceCompilerStage,
+    RetrievalSurfaceSourceChild,
+    RetrievalSurfaceSourceUnit,
+    RetrievalSurfaceDraft,
+    RetrievalSurfaceRelation,
+    SurfaceQuestionOwnership,
+    SurfaceQuestionReassignment,
+    RetrievalSurfaceMergeDecision,
     SurfaceCompilerRunStatus,
 )
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
@@ -879,6 +886,110 @@ class KnowledgeRepository:
             )
             for row in rows
         )
+
+
+    async def save_surface_source_units(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        source_units: tuple[RetrievalSurfaceSourceUnit, ...],
+    ) -> None:
+        if not source_units:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for unit in source_units:
+                    children_payload = [
+                        {
+                            "title": child.title,
+                            "body": child.body,
+                            "raw_text": child.raw_text,
+                            "label_kind": child.label_kind,
+                            "metadata": child.metadata,
+                        }
+                        for child in unit.children
+                    ]
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_source_units (
+                            id, run_id, document_id, source_unit_key, source_chunk_indexes,
+                            title, body, children, raw_text, section_path, source_refs,
+                            preprocessing_mode, metadata
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4, $5::int[],
+                            $6, $7, $8::jsonb, $9, $10::text[], $11::jsonb,
+                            $12, $13::jsonb
+                        )
+                        """,
+                        ensure_uuid(unit.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        unit.source_unit_key,
+                        list(unit.source_chunk_indexes),
+                        unit.title,
+                        unit.body,
+                        json.dumps(children_payload, ensure_ascii=False),
+                        unit.raw_text,
+                        list(unit.section_path),
+                        json.dumps(list(unit.source_refs), ensure_ascii=False),
+                        unit.preprocessing_mode,
+                        json.dumps(unit.metadata, ensure_ascii=False),
+                    )
+
+    async def list_surface_source_units_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceSourceUnit, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, source_unit_key, source_chunk_indexes,
+                       title, body, children, raw_text, section_path, source_refs,
+                       preprocessing_mode, metadata
+                FROM knowledge_surface_source_units
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        result: list[RetrievalSurfaceSourceUnit] = []
+        for row in rows:
+            children_payload = json_list_from_db(row["children"])
+            children = tuple(
+                RetrievalSurfaceSourceChild(
+                    title=str(item.get("title", "")),
+                    body=str(item.get("body", "")),
+                    raw_text=str(item.get("raw_text", "")),
+                    label_kind=str(item.get("label_kind", "other")),
+                    metadata=json_object_from_unknown(item.get("metadata", {})),
+                )
+                for item in children_payload
+                if isinstance(item, dict)
+            )
+            source_refs_payload = json_list_from_db(row["source_refs"])
+            source_refs = tuple(str(item) for item in source_refs_payload)
+            section_path = tuple(str(item) for item in (row["section_path"] or []))
+            chunk_indexes = tuple(int(item) for item in (row["source_chunk_indexes"] or []))
+            result.append(
+                RetrievalSurfaceSourceUnit(
+                    id=str(row["id"]),
+                    run_id=str(row["run_id"]),
+                    document_id=str(row["document_id"]),
+                    source_unit_key=str(row["source_unit_key"]),
+                    source_chunk_indexes=chunk_indexes,
+                    title=str(row["title"]),
+                    body=str(row["body"]),
+                    children=children,
+                    raw_text=str(row["raw_text"]),
+                    section_path=section_path,
+                    source_refs=source_refs,
+                    preprocessing_mode=str(row["preprocessing_mode"]),
+                    metadata=json_object_from_db(row["metadata"]),
+                )
+            )
+        return tuple(result)
 
     async def create_surface_compiler_stage(
         self,
