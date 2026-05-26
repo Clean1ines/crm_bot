@@ -56,3 +56,19 @@ def test_repository_has_surface_ownership_persistence_methods() -> None:
     assert "INSERT INTO knowledge_surface_question_ownership" in source
     assert "async def list_surface_ownership_for_run(" in source
     assert "FROM knowledge_surface_question_ownership" in source
+
+
+def test_repository_has_surface_reassignment_persistence_methods() -> None:
+    source = Path("src/infrastructure/db/repositories/knowledge_repository.py").read_text(encoding="utf-8")
+    assert "async def save_surface_question_reassignments(" in source
+    assert "INSERT INTO knowledge_surface_question_reassignments" in source
+    assert "async def list_surface_reassignments_for_run(" in source
+    assert "FROM knowledge_surface_question_reassignments" in source
+
+
+def test_repository_has_surface_merge_decision_persistence_methods() -> None:
+    source = Path("src/infrastructure/db/repositories/knowledge_repository.py").read_text(encoding="utf-8")
+    assert "async def save_surface_merge_decisions(" in source
+    assert "INSERT INTO knowledge_surface_merge_decisions" in source
+    assert "async def list_surface_merge_decisions_for_run(" in source
+    assert "FROM knowledge_surface_merge_decisions" in source
