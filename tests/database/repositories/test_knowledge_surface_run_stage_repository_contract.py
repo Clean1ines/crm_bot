@@ -72,3 +72,11 @@ def test_repository_has_surface_merge_decision_persistence_methods() -> None:
     assert "INSERT INTO knowledge_surface_merge_decisions" in source
     assert "async def list_surface_merge_decisions_for_run(" in source
     assert "FROM knowledge_surface_merge_decisions" in source
+
+
+def test_repository_has_document_level_surface_relation_and_ownership_methods() -> None:
+    source = Path("src/infrastructure/db/repositories/knowledge_repository.py").read_text(encoding="utf-8")
+    assert "async def list_surface_relations_for_document(" in source
+    assert "async def list_surface_ownership_for_document(" in source
+    assert "async def list_surface_reassignments_for_document(" in source
+    assert "get_latest_surface_run_for_document(" in source
