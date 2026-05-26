@@ -32,3 +32,11 @@ def test_repository_has_surface_source_unit_persistence_methods() -> None:
     assert "INSERT INTO knowledge_surface_source_units" in source
     assert "async def list_surface_source_units_for_run(" in source
     assert "FROM knowledge_surface_source_units" in source
+
+
+def test_repository_has_surface_draft_persistence_methods() -> None:
+    source = Path("src/infrastructure/db/repositories/knowledge_repository.py").read_text(encoding="utf-8")
+    assert "async def save_surfaces(" in source
+    assert "INSERT INTO knowledge_surfaces" in source
+    assert "async def list_surfaces_for_run(" in source
+    assert "FROM knowledge_surfaces" in source

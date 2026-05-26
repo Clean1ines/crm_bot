@@ -991,6 +991,116 @@ class KnowledgeRepository:
             )
         return tuple(result)
 
+
+    async def save_surfaces(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        surfaces: tuple[RetrievalSurfaceDraft, ...],
+    ) -> None:
+        if not surfaces:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for surface in surfaces:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surfaces (
+                            id, run_id, document_id, local_surface_key, title,
+                            canonical_question, surface_kind, answer_scope,
+                            question_scope, exclusion_scope, answer, short_answer,
+                            status, publication_status, source_refs, source_excerpt,
+                            confidence, warnings, metadata, source_chunk_indexes,
+                            linked_candidate_id, linked_canonical_entry_id,
+                            linked_runtime_entry_id
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4, $5,
+                            $6, $7, $8,
+                            $9, $10, $11, $12,
+                            $13, $14, $15::jsonb, $16,
+                            $17, $18::jsonb, $19::jsonb, $20::int[],
+                            $21::uuid, $22::uuid,
+                            $23::uuid
+                        )
+                        """,
+                        ensure_uuid(surface.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        surface.local_surface_key,
+                        surface.title,
+                        surface.canonical_question,
+                        surface.surface_kind,
+                        surface.answer_scope,
+                        surface.question_scope,
+                        surface.exclusion_scope,
+                        surface.answer,
+                        surface.short_answer,
+                        surface.status,
+                        surface.publication_status,
+                        json.dumps(list(surface.source_refs), ensure_ascii=False),
+                        surface.source_excerpt,
+                        surface.confidence,
+                        json.dumps(list(surface.warnings), ensure_ascii=False),
+                        json.dumps(surface.metadata, ensure_ascii=False),
+                        list(surface.source_chunk_indexes),
+                        ensure_uuid(surface.linked_candidate_id) if surface.linked_candidate_id else None,
+                        ensure_uuid(surface.linked_canonical_entry_id) if surface.linked_canonical_entry_id else None,
+                        ensure_uuid(surface.linked_runtime_entry_id) if surface.linked_runtime_entry_id else None,
+                    )
+
+    async def list_surfaces_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceDraft, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, local_surface_key, title,
+                       canonical_question, surface_kind, answer_scope,
+                       question_scope, exclusion_scope, answer, short_answer,
+                       status, publication_status, source_refs, source_excerpt,
+                       confidence, warnings, metadata, source_chunk_indexes,
+                       linked_candidate_id, linked_canonical_entry_id,
+                       linked_runtime_entry_id
+                FROM knowledge_surfaces
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        result: list[RetrievalSurfaceDraft] = []
+        for row in rows:
+            result.append(
+                RetrievalSurfaceDraft(
+                    id=str(row["id"]),
+                    run_id=str(row["run_id"]),
+                    document_id=str(row["document_id"]),
+                    local_surface_key=str(row["local_surface_key"]),
+                    title=str(row["title"]),
+                    canonical_question=str(row["canonical_question"]),
+                    surface_kind=str(row["surface_kind"]),
+                    answer_scope=str(row["answer_scope"]),
+                    question_scope=str(row["question_scope"]),
+                    exclusion_scope=str(row["exclusion_scope"]),
+                    answer=str(row["answer"]),
+                    short_answer=str(row["short_answer"]),
+                    status=str(row["status"]),
+                    publication_status=str(row["publication_status"]),
+                    source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+                    source_excerpt=str(row["source_excerpt"]),
+                    confidence=float(row["confidence"]),
+                    warnings=tuple(str(item) for item in json_list_from_db(row["warnings"])),
+                    metadata=json_object_from_db(row["metadata"]),
+                    source_chunk_indexes=tuple(int(item) for item in (row["source_chunk_indexes"] or [])),
+                    linked_candidate_id=str(row["linked_candidate_id"]) if row["linked_candidate_id"] is not None else None,
+                    linked_canonical_entry_id=str(row["linked_canonical_entry_id"]) if row["linked_canonical_entry_id"] is not None else None,
+                    linked_runtime_entry_id=str(row["linked_runtime_entry_id"]) if row["linked_runtime_entry_id"] is not None else None,
+                )
+            )
+        return tuple(result)
+
     async def create_surface_compiler_stage(
         self,
         stage: RetrievalSurfaceCompilerStage,
