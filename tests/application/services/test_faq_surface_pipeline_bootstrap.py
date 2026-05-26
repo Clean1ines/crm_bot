@@ -13,6 +13,9 @@ class _CallState:
     surface_runs: int = 0
     surface_stages: int = 0
     surface_source_units: int = 0
+    surfaces: int = 0
+    relations: int = 0
+    ownership: int = 0
     document_status_updates: int = 0
     preprocessing_updates: int = 0
 
@@ -41,6 +44,21 @@ class _FakeRepo:
             self.calls.surface_source_units += len(source_units)
 
     async def update_surface_compiler_run_status(self, *, run_id: str, status: str, error_type=None, error_message=None) -> None:  # noqa: ANN001, ARG002
+        return
+
+    async def save_surfaces(self, *, run_id: str, document_id: str, surfaces) -> None:  # noqa: ANN001, ARG002
+        self.calls.surfaces += len(surfaces)
+
+    async def save_surface_relations(self, *, run_id: str, document_id: str, relations) -> None:  # noqa: ANN001, ARG002
+        self.calls.relations += len(relations)
+
+    async def save_surface_question_ownership(self, *, run_id: str, document_id: str, ownership) -> None:  # noqa: ANN001, ARG002
+        self.calls.ownership += len(ownership)
+
+    async def save_surface_question_reassignments(self, *, run_id: str, document_id: str, reassignments) -> None:  # noqa: ANN001, ARG002
+        return
+
+    async def save_surface_merge_decisions(self, *, run_id: str, document_id: str, merge_decisions) -> None:  # noqa: ANN001, ARG002
         return
 
     async def update_document_preprocessing_status(self, document_id: str, **kwargs) -> None:  # noqa: ANN001, ARG002
@@ -77,3 +95,5 @@ async def test_process_document_routes_faq_into_surface_bootstrap_flow() -> None
     assert repo.calls.surface_source_units == 1
     assert repo.calls.preprocessing_updates == 1
     assert repo.calls.document_status_updates == 1
+    assert repo.calls.surfaces == 1
+    assert repo.calls.ownership == 1
