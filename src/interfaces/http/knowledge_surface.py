@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import uuid
+from collections.abc import Sequence
 from datetime import datetime
+import uuid
 
 import asyncpg
-from collections.abc import Sequence
-
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 
 from src.application.dto.knowledge_dto import (
