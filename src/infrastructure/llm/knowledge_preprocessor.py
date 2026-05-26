@@ -162,6 +162,8 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         chunks: list[JsonObject],
         file_name: str,
     ) -> KnowledgePreprocessingExecutionResult:
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError("Legacy GroqKnowledgePreprocessor.preprocess is forbidden for mode=faq")
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(
             mode=mode,
