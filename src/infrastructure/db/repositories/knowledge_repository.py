@@ -1169,6 +1169,74 @@ class KnowledgeRepository:
             for row in rows
         )
 
+
+    async def save_surface_question_ownership(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        ownership: tuple[SurfaceQuestionOwnership, ...],
+    ) -> None:
+        if not ownership:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for item in ownership:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_question_ownership (
+                            id, run_id, document_id, question, owner_surface_key,
+                            question_kind, confidence, reason,
+                            rejected_from_surface_keys
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4, $5,
+                            $6, $7, $8,
+                            $9::jsonb
+                        )
+                        """,
+                        ensure_uuid(item.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        item.question,
+                        item.owner_surface_key,
+                        item.question_kind,
+                        item.confidence,
+                        item.reason,
+                        json.dumps(list(item.rejected_from_surface_keys), ensure_ascii=False),
+                    )
+
+    async def list_surface_ownership_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[SurfaceQuestionOwnership, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, question, owner_surface_key,
+                       question_kind, confidence, reason,
+                       rejected_from_surface_keys
+                FROM knowledge_surface_question_ownership
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            SurfaceQuestionOwnership(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                question=str(row["question"]),
+                owner_surface_key=str(row["owner_surface_key"]),
+                question_kind=str(row["question_kind"]),
+                confidence=float(row["confidence"]),
+                reason=str(row["reason"]),
+                rejected_from_surface_keys=tuple(str(i) for i in json_list_from_db(row["rejected_from_surface_keys"])),
+            )
+            for row in rows
+        )
+
     async def create_surface_compiler_stage(
         self,
         stage: RetrievalSurfaceCompilerStage,
