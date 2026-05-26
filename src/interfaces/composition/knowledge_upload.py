@@ -32,7 +32,10 @@ from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
-from src.domain.project_plane.knowledge_preprocessing import normalize_preprocessing_mode, MODE_FAQ
+from src.domain.project_plane.knowledge_preprocessing import (
+    normalize_preprocessing_mode,
+    MODE_FAQ,
+)
 
 
 jwt_decoder: JwtDecoderPort = cast(JwtDecoderPort, jwt)
@@ -48,10 +51,14 @@ def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepository
     )
 
 
-def make_knowledge_preprocessor(*, preprocessing_mode: str) -> KnowledgePreprocessorPort:
+def make_knowledge_preprocessor(
+    *, preprocessing_mode: str
+) -> KnowledgePreprocessorPort:
     mode = normalize_preprocessing_mode(preprocessing_mode)
     if mode == MODE_FAQ:
-        raise ValueError("Legacy FAQ preprocessor factory is forbidden; FAQ must use surface compiler")
+        raise ValueError(
+            "Legacy FAQ preprocessor factory is forbidden; FAQ must use surface compiler"
+        )
     return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
 
 

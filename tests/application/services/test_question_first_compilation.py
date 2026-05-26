@@ -61,7 +61,11 @@ def test_markdown_semantic_section_is_not_silently_truncated_to_900_chars() -> N
                 "section_body": long_section,
                 "source_excerpt": long_excerpt,
                 "children": [
-                    {"title": "Child 1", "body": long_child_body, "source_excerpt": long_child_body}
+                    {
+                        "title": "Child 1",
+                        "body": long_child_body,
+                        "source_excerpt": long_child_body,
+                    }
                 ],
             }
         ],

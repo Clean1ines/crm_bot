@@ -105,8 +105,6 @@ class KnowledgePreprocessorFactoryPort(Protocol):
     def __call__(self) -> KnowledgePreprocessorPort: ...
 
 
-
-
 class KnowledgeSurfaceCompilerPort(Protocol):
     @property
     def model_name(self) -> str: ...
@@ -123,6 +121,7 @@ class KnowledgeSurfaceCompilerPort(Protocol):
 
 class KnowledgeSurfaceCompilerFactoryPort(Protocol):
     def __call__(self) -> KnowledgeSurfaceCompilerPort: ...
+
 
 class ModelUsageRepositoryPort(Protocol):
     async def record_event(self, event: ModelUsageEventCreate) -> None: ...
