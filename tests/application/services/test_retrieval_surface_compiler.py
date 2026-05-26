@@ -4,17 +4,23 @@ from src.application.services.retrieval_surface_compiler import (
     DeterministicKnowledgeSurfaceCompiler,
     assign_retrieval_surface_questions,
     discover_retrieval_surfaces_from_source_unit,
-    extract_questions_from_source_unit,
     merge_same_surface_drafts,
     plan_retrieval_surface_relations,
     project_surfaces_to_preprocessing_entries,
     synthesize_retrieval_surface_answers,
 )
-from src.domain.project_plane.retrieval_surface_compilation import RetrievalSurfaceDraft, RetrievalSurfaceRelation, RetrievalSurfaceSourceChild, RetrievalSurfaceSourceUnit
+from src.domain.project_plane.retrieval_surface_compilation import RetrievalSurfaceDraft, RetrievalSurfaceRelation, RetrievalSurfaceSourceChild, RetrievalSurfaceSourceUnit, SurfaceQuestionReassignment
 
 
 def _unit(title: str, raw: str, children: tuple[RetrievalSurfaceSourceChild, ...] = (), mode: str = "faq") -> RetrievalSurfaceSourceUnit:
     return RetrievalSurfaceSourceUnit(source_unit_key="u1", title=title, body=raw, raw_text=raw, source_chunk_indexes=(1,), children=children, preprocessing_mode=mode)
+
+
+def _owner_by_question(surfaces, question: str):
+    for s in surfaces:
+        if question in s.owned_questions:
+            return s
+    return None
 
 
 def test_children_used_for_discovery_without_markdown_headings() -> None:
@@ -74,19 +80,77 @@ def test_ownership_routing_cases() -> None:
     assert "Можно вернуть деньги?" in by["refund"].owned_questions
 
 
-def test_negative_tests_routing() -> None:
-    raw = """- гарантируете ли вы возврат денег?\n- сколько точно будет стоить мой проект?\n- подключите CRM прямо сейчас\n- у вас уже есть web-widget?\n- можно ли подключить WhatsApp?\n- дайте юридическую гарантию\n- кто имеет доступ к персональным данным?"""
-    unit = _unit("Негативные тесты", raw)
+def test_negative_tests_routing_by_owner_kind() -> None:
+    raw = """- гарантируете ли вы возврат денег?\n- сколько точно будет стоить мой проект?\n- подключите CRM прямо сейчас\n- у вас уже есть web-widget?\n- можно ли подключить WhatsApp?\n- дайте юридическую гарантию\n- кто имеет доступ к персональным данным?\n- можно ли оплатить нестандартным способом?"""
+    children = (
+        RetrievalSurfaceSourceChild("Интеграции", "CRM и web-widget и WhatsApp", "", "content_section"),
+        RetrievalSurfaceSourceChild("Возврат средств", "Возврат и деньги", "", "content_section"),
+        RetrievalSurfaceSourceChild("Стоимость", "Цена и тарифы", "", "content_section"),
+        RetrievalSurfaceSourceChild("Оплата", "Оплата и нестандартные способы", "", "content_section"),
+    )
+    unit = _unit("Негативные тесты", raw, children)
     execution = asyncio.run(DeterministicKnowledgeSurfaceCompiler().compile_surfaces(mode="faq", source_units=(unit,), file_name="x.md"))
-    all_owned = {q for s in execution.result.graph.surfaces for q in s.owned_questions}
-    assert "гарантируете ли вы возврат денег?" in all_owned
-    assert "сколько точно будет стоить мой проект?" in all_owned
+    surfaces = execution.result.graph.surfaces
+
+    refund_owner = _owner_by_question(surfaces, "гарантируете ли вы возврат денег?")
+    assert refund_owner is not None and refund_owner.surface_kind in {"refund", "handoff", "service_limits"}
+
+    price_owner = _owner_by_question(surfaces, "сколько точно будет стоить мой проект?")
+    assert price_owner is not None and price_owner.surface_kind in {"pricing", "handoff", "service_limits"}
+
+    crm_owner = _owner_by_question(surfaces, "подключите CRM прямо сейчас")
+    wa_owner = _owner_by_question(surfaces, "можно ли подключить WhatsApp?")
+    assert crm_owner is not None and crm_owner.surface_kind in {"integration", "service_limits", "handoff"}
+    assert wa_owner is not None and wa_owner.surface_kind in {"integration", "service_limits", "handoff"}
+
+    widget_owner = _owner_by_question(surfaces, "у вас уже есть web-widget?")
+    assert widget_owner is not None and widget_owner.surface_kind in {"integration", "service_limits", "handoff"}
+
+    legal_owner = _owner_by_question(surfaces, "дайте юридическую гарантию")
+    privacy_owner = _owner_by_question(surfaces, "кто имеет доступ к персональным данным?")
+    pay_owner = _owner_by_question(surfaces, "можно ли оплатить нестандартным способом?")
+    assert legal_owner is not None and legal_owner.surface_kind in {"service_limits", "handoff"}
+    assert privacy_owner is not None and privacy_owner.surface_kind in {"service_limits", "handoff"}
+    assert pay_owner is not None and pay_owner.surface_kind in {"payment", "handoff", "service_limits"}
 
 
-def test_merge_rules_and_projection_tags() -> None:
+def test_price_list_commercial_behavior() -> None:
+    children = (
+        RetrievalSurfaceSourceChild("Стоимость", "Стоимость зависит от объёма базы знаний, количества документов, сложности курации, числа ботов и менеджеров.", "", "content_section"),
+        RetrievalSurfaceSourceChild("Оплата", "Условия оплаты уточняет менеджер. Нестандартный способ оплаты требует согласования.", "", "content_section"),
+        RetrievalSurfaceSourceChild("Возврат средств", "Условия возврата зависят от ситуации и этапа работы. Лучше передать вопрос менеджеру.", "", "content_section"),
+        RetrievalSurfaceSourceChild("Коммерческие ограничения", "Ассистент не должен обещать точную стоимость, гарантии возврата или юридические условия.", "", "content_section"),
+    )
+    raw = """- Сколько стоит?\n- Можно оплатить нестандартным способом?\n- Можно вернуть деньги?\n- Вы гарантируете возврат?\n- Сколько точно будет стоить мой проект?"""
+    unit = _unit("Коммерческие условия", raw, children, mode="price_list")
+    execution = asyncio.run(DeterministicKnowledgeSurfaceCompiler().compile_surfaces(mode="price_list", source_units=(unit,), file_name="price.md"))
+    surfaces = execution.result.graph.surfaces
+    kinds = {s.surface_kind for s in surfaces}
+    assert "pricing" in kinds and "payment" in kinds and "refund" in kinds
+    assert any(k in kinds for k in {"service_limits", "handoff"})
+
+    q1 = _owner_by_question(surfaces, "Сколько стоит?")
+    q2 = _owner_by_question(surfaces, "Можно оплатить нестандартным способом?")
+    q3 = _owner_by_question(surfaces, "Можно вернуть деньги?")
+    q4 = _owner_by_question(surfaces, "Вы гарантируете возврат?")
+    q5 = _owner_by_question(surfaces, "Сколько точно будет стоить мой проект?")
+    assert q1 is not None and q1.surface_kind == "pricing"
+    assert q2 is not None and q2.surface_kind in {"payment", "handoff", "service_limits"}
+    assert q3 is not None and q3.surface_kind in {"refund", "handoff", "service_limits"}
+    assert q4 is not None and q4.surface_kind in {"refund", "service_limits", "handoff"}
+    assert q5 is not None and q5.surface_kind in {"pricing", "service_limits", "handoff"}
+    umbrella = next(s for s in surfaces if s.surface_kind == "umbrella")
+    for q in ("Сколько стоит?", "Можно вернуть деньги?", "Сколько точно будет стоить мой проект?"):
+        assert q not in umbrella.owned_questions
+
+
+def test_merge_rules_projection_tags_and_reassignment_preserved() -> None:
     u = RetrievalSurfaceDraft("u", "A", "?", "umbrella", "A", "A", "", source_excerpt="")
     c = RetrievalSurfaceDraft("c", "A", "?", "child", "A", "A", "", source_excerpt="", parent_candidate_keys=("u",))
-    r = RetrievalSurfaceDraft("r", "Refund", "?", "refund", "refund", "refund", "", source_excerpt="")
+    r = RetrievalSurfaceDraft("r", "Refund", "?", "refund", "refund", "refund", "", source_excerpt="", rejected_or_reassigned_questions=(
+        # should survive merge
+        SurfaceQuestionReassignment('q','r','reason'),
+    ))
     r2 = RetrievalSurfaceDraft("r2", "Refund", "?", "refund", "refund", "refund", "", source_excerpt="")
     rel = (
         RetrievalSurfaceRelation("u", "c", "umbrella_contains", "", 0.9, ()),
@@ -94,6 +158,8 @@ def test_merge_rules_and_projection_tags() -> None:
     )
     merged = merge_same_surface_drafts((u, c, r, r2), rel)
     assert len(merged) == 3
+    refund = next(x for x in merged if x.surface_kind == "refund")
+    assert len(refund.rejected_or_reassigned_questions) == 1
     entry = project_surfaces_to_preprocessing_entries((r,))[0]
     assert any(t.startswith("surface_key:") for t in entry.tags)
     assert any(t.startswith("surface_kind:") for t in entry.tags)

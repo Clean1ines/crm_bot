@@ -4776,7 +4776,7 @@ class KnowledgeIngestionService:
         knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
-        surface_compiler_factory: KnowledgeSurfaceCompilerFactoryPort | None,
+        surface_compiler_factory: KnowledgeSurfaceCompilerFactoryPort | None = None,
         logger: LoggerPort,
         commercial_price_repo_factory: CommercialPriceRepositoryFactoryPort
         | None = None,

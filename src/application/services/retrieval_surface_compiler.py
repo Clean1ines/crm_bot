@@ -30,7 +30,7 @@ _KIND_MARKERS: dict[str, tuple[str, ...]] = {
     "payment": ("оплат", "payment", "нестандартным способом"),
     "refund": ("вернуть", "возврат", "деньги"),
     "commercial_terms": ("договор", "условия"),
-    "service_limits": ("гарантия", "юрид", "персональны", "данн", "точно", "персональный расчёт", "риск", "жалоба"),
+    "service_limits": ("гарантия", "юрид", "персональны", "данн", "точно", "персональный расчёт", "риск", "жалоба", "огранич"),
     "handoff": ("менеджер", "человек", "техподдержк", "не работает"),
 }
 
@@ -146,8 +146,9 @@ def extract_questions_from_source_unit(unit: RetrievalSurfaceSourceUnit) -> tupl
         for line in lines:
             m = _QUESTION_BULLET_RE.match(line.strip())
             candidate = m.group(1) if m else line.strip()
-            if "?" in candidate:
-                out.append(_normalize(candidate))
+            normalized = _normalize(candidate)
+            if normalized and ("?" in normalized or m is not None):
+                out.append(normalized)
 
     consume((unit.raw_text or unit.body).splitlines())
     for child in unit.children:
@@ -231,6 +232,9 @@ def merge_same_surface_drafts(surfaces: Sequence[RetrievalSurfaceDraft], relatio
             e,
             answer=e.answer if len(e.answer) >= len(s.answer) else s.answer,
             owned_questions=tuple(dict.fromkeys(e.owned_questions + s.owned_questions)),
+            rejected_or_reassigned_questions=tuple(e.rejected_or_reassigned_questions + s.rejected_or_reassigned_questions),
+            relation_hints=tuple(dict.fromkeys(e.relation_hints + s.relation_hints)),
+            warnings=tuple(dict.fromkeys(e.warnings + s.warnings)),
             source_refs=tuple(dict.fromkeys(e.source_refs + s.source_refs)),
             source_chunk_indexes=tuple(dict.fromkeys(e.source_chunk_indexes + s.source_chunk_indexes)),
         )
