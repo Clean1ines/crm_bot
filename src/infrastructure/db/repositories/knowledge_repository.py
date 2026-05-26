@@ -22,6 +22,12 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilerRun,
+    RetrievalSurfaceCompilerStage,
+    SurfaceCompilerRunStatus,
+)
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.domain.project_plane.knowledge_retrieval_surface import (
@@ -695,6 +701,105 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await upsert_compiler_run(conn, run=run)
+
+    async def create_surface_compiler_run(
+        self,
+        run: RetrievalSurfaceCompilerRun,
+    ) -> RetrievalSurfaceCompilerRun:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO knowledge_surface_compiler_runs (
+                    id, project_id, document_id, mode, status, compiler_kind, model,
+                    prompt_version, started_at, completed_at, error_type,
+                    error_message, metrics
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7,
+                    $8, $9, $10, $11, $12, $13::jsonb
+                )
+                """,
+                ensure_uuid(run.id),
+                ensure_uuid(run.project_id),
+                ensure_uuid(run.document_id),
+                run.mode,
+                run.status,
+                run.compiler_kind,
+                run.model,
+                run.prompt_version,
+                run.started_at,
+                run.completed_at,
+                run.error_type,
+                run.error_message,
+                json.dumps(run.metrics, ensure_ascii=False),
+            )
+        return run
+
+    async def update_surface_compiler_run_status(
+        self,
+        *,
+        run_id: str,
+        status: SurfaceCompilerRunStatus,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_surface_compiler_runs
+                SET
+                    status = $2,
+                    error_type = $3,
+                    error_message = $4,
+                    completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE completed_at END,
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(run_id),
+                status,
+                error_type,
+                error_message,
+            )
+
+    async def create_surface_compiler_stage(
+        self,
+        stage: RetrievalSurfaceCompilerStage,
+    ) -> RetrievalSurfaceCompilerStage:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO knowledge_surface_compiler_stages (
+                    id, run_id, document_id, stage_kind, status, model,
+                    prompt_version, input_summary, output_summary, tokens_input,
+                    tokens_output, tokens_total, error_type, error_message,
+                    metrics, started_at, completed_at
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+                    $7, $8, $9, $10,
+                    $11, $12, $13, $14,
+                    $15::jsonb, $16, $17
+                )
+                """,
+                ensure_uuid(stage.id),
+                ensure_uuid(stage.run_id),
+                ensure_uuid(stage.document_id),
+                stage.stage_kind,
+                stage.status,
+                stage.model,
+                stage.prompt_version,
+                stage.input_summary,
+                stage.output_summary,
+                stage.tokens_input,
+                stage.tokens_output,
+                stage.tokens_total,
+                stage.error_type,
+                stage.error_message,
+                json.dumps(stage.metrics, ensure_ascii=False),
+                stage.started_at,
+                stage.completed_at,
+            )
+        return stage
 
     async def create_compiler_batches(
         self,
