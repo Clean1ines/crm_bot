@@ -398,6 +398,26 @@ def _metadata_int_list(metadata: Mapping[str, object], key: str) -> tuple[int, .
     return tuple(result)
 
 
+
+
+def _tag_value(tags: Sequence[str], prefix: str) -> str | None:
+    for tag in tags:
+        if tag.startswith(prefix):
+            value = tag[len(prefix):].strip()
+            if value:
+                return value
+    return None
+
+
+def _tag_values(tags: Sequence[str], prefix: str) -> tuple[str, ...]:
+    values: list[str] = []
+    for tag in tags:
+        if tag.startswith(prefix):
+            value = tag[len(prefix):].strip()
+            if value and value not in values:
+                values.append(value)
+    return tuple(values)
+
 @dataclass(frozen=True, slots=True)
 class KnowledgeAnswerDraftDto:
     id: str
@@ -414,6 +434,13 @@ class KnowledgeAnswerDraftDto:
     source_chunk_indexes: tuple[int, ...]
     source_refs: tuple[SourceRefDto, ...]
     rejection_reason: str = ""
+    is_retrieval_surface: bool = False
+    surface_key: str | None = None
+    surface_kind: str | None = None
+    answer_scope: str | None = None
+    parent_surface_keys: tuple[str, ...] = ()
+    child_surface_keys: tuple[str, ...] = ()
+    short_answer: str | None = None
 
     @classmethod
     def from_candidate(cls, candidate: AnswerCandidate) -> "KnowledgeAnswerDraftDto":
@@ -436,6 +463,13 @@ class KnowledgeAnswerDraftDto:
                 for source_ref in candidate.source_refs
             ),
             rejection_reason=candidate.rejection_reason,
+            is_retrieval_surface=any(tag.startswith("surface_key:") for tag in _metadata_text_list(metadata, "tags")),
+            surface_key=_tag_value(_metadata_text_list(metadata, "tags"), "surface_key:"),
+            surface_kind=_tag_value(_metadata_text_list(metadata, "tags"), "surface_kind:"),
+            answer_scope=_tag_value(_metadata_text_list(metadata, "tags"), "answer_scope:"),
+            parent_surface_keys=_tag_values(_metadata_text_list(metadata, "tags"), "parent_surface:"),
+            child_surface_keys=_tag_values(_metadata_text_list(metadata, "tags"), "child_surface:"),
+            short_answer=_tag_value(_metadata_text_list(metadata, "tags"), "short_answer:"),
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -454,6 +488,13 @@ class KnowledgeAnswerDraftDto:
             "source_chunk_indexes": list(self.source_chunk_indexes),
             "source_refs": [source_ref.to_dict() for source_ref in self.source_refs],
             "rejection_reason": self.rejection_reason,
+            "is_retrieval_surface": self.is_retrieval_surface,
+            "surface_key": self.surface_key,
+            "surface_kind": self.surface_kind,
+            "answer_scope": self.answer_scope,
+            "parent_surface_keys": list(self.parent_surface_keys),
+            "child_surface_keys": list(self.child_surface_keys),
+            "short_answer": self.short_answer,
         }
 
 

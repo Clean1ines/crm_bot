@@ -248,6 +248,8 @@ def project_surfaces_to_preprocessing_entries(surfaces: Sequence[RetrievalSurfac
         tags = [f"surface_key:{s.local_surface_key}", f"surface_kind:{s.surface_kind}", f"answer_scope:{s.answer_scope}"]
         tags.extend(f"parent_surface:{p}" for p in s.parent_candidate_keys)
         tags.extend(f"child_surface:{c}" for c in s.child_candidate_keys)
+        if s.short_answer:
+            tags.append(f"short_answer:{s.short_answer}")
         entry = KnowledgePreprocessingEntry(
             title=s.title,
             canonical_question=s.canonical_question,

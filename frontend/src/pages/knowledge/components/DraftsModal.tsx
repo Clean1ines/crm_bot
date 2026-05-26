@@ -9,6 +9,27 @@ const formatPreviewScore = (value: number): string => (
   Number.isFinite(value) ? value.toFixed(3) : '0.000'
 );
 
+const SURFACE_KIND_LABELS: Record<string, string> = {
+  umbrella: 'Зонтичная',
+  child: 'Дочерняя',
+  pricing: 'Цена',
+  refund: 'Возврат',
+  payment: 'Оплата',
+  integration: 'Интеграция',
+  channel: 'Канал',
+  document_upload: 'Документы',
+  curation: 'Курация',
+  retrieval_quality: 'Качество поиска',
+  handoff: 'Передача менеджеру',
+  service_limits: 'Ограничения',
+};
+
+const surfaceKindLabel = (kind: string | null | undefined): string => {
+  if (!kind) return 'Surface';
+  return SURFACE_KIND_LABELS[kind] || kind;
+};
+
+
 const draftTitle = (draft: KnowledgeAnswerDraft): string => (
   draft.canonical_question.trim() || draft.title.trim() || t('knowledge.drafts.untitled')
 );
@@ -129,6 +150,7 @@ export const DraftsModal: React.FC<{
                       <div className="truncate font-semibold text-[var(--text-primary)]" title={draftTitle(draft)}>{draftTitle(draft)}</div>
                       <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
                         {draft.status && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{draft.status}</span>}
+                        {draft.surface_kind && <span className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-0.5 text-[var(--accent-primary)]">{surfaceKindLabel(draft.surface_kind)}</span>}
                         {isDebugMode && draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">batch {draft.batch_index}</span>}
                         {isDebugMode && sourceChunkIndexes.length > 0 && (
                           <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
@@ -181,11 +203,17 @@ export const DraftsModal: React.FC<{
                         </DraftDetailRow>
                       )}
 
-                      {(draft.status || draft.rejection_reason || (isDebugMode && (draft.batch_index !== null || draft.fragment_index !== null || sourceChunkIndexes.length > 0))) && (
+                      {(draft.status || draft.rejection_reason || draft.is_retrieval_surface || draft.answer_scope || draft.short_answer || (isDebugMode && (draft.batch_index !== null || draft.fragment_index !== null || sourceChunkIndexes.length > 0))) && (
                         <DraftDetailRow label={t('knowledge.drafts.fields.metadata')}>
                           <div className="flex flex-wrap gap-1.5 text-xs text-[var(--text-muted)]">
                             {draft.status && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">status: {draft.status}</span>}
                             {draft.rejection_reason && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">reason: {draft.rejection_reason}</span>}
+                            {draft.is_retrieval_surface && <span className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)]">Retrieval Surface</span>}
+                            {draft.surface_kind && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">surface_kind: {draft.surface_kind}</span>}
+                            {draft.answer_scope && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">Область ответа: {draft.answer_scope}</span>}
+                            {draft.parent_surface_keys && draft.parent_surface_keys.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">Родительские поверхности: {draft.parent_surface_keys.join(', ')}</span>}
+                            {draft.child_surface_keys && draft.child_surface_keys.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">Дочерние поверхности: {draft.child_surface_keys.join(', ')}</span>}
+                            {draft.short_answer && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">Короткий ответ: {draft.short_answer}</span>}
                             {isDebugMode && draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">batch_index: {draft.batch_index}</span>}
                             {isDebugMode && draft.fragment_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">fragment_index: {draft.fragment_index}</span>}
                             {isDebugMode && sourceChunkIndexes.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_chunk_indexes: {sourceChunkIndexes.join(', ')}</span>}

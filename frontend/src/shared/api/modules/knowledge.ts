@@ -120,6 +120,13 @@ export type KnowledgeAnswerDraft = {
     confidence?: number;
   }>;
   rejection_reason: string;
+  is_retrieval_surface?: boolean;
+  surface_key?: string | null;
+  surface_kind?: string | null;
+  answer_scope?: string | null;
+  parent_surface_keys?: string[];
+  child_surface_keys?: string[];
+  short_answer?: string | null;
 };
 
 export type KnowledgeAnswerDraftsResponse = {
