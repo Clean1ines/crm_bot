@@ -458,7 +458,18 @@ async def knowledge_surface_relations(
     await service.list(project_id, authorization, knowledge_repo_factory=make_knowledge_repo, logger=logger, limit=1, offset=0)
     repo = make_knowledge_repo(pool)
     relations = await repo.list_surface_relations_for_document(project_id=project_id, document_id=document_id)
-    return {"relations": [{"parent_surface_key": r.parent_surface_key, "child_surface_key": r.child_surface_key, "relation_type": r.relation_type, "reason": r.reason, "confidence": r.confidence} for r in relations]}
+    return SurfaceRelationsResponseDto(
+        relations=[
+            RelationDto(
+                parent_surface_key=r.parent_surface_key,
+                child_surface_key=r.child_surface_key,
+                relation_type=r.relation_type,
+                reason=r.reason,
+                confidence=r.confidence,
+            )
+            for r in relations
+        ]
+    )
 
 
 @router.get("/{document_id}/surface-ownership", response_model=SurfaceOwnershipResponseDto)
@@ -475,10 +486,29 @@ async def knowledge_surface_ownership(
     repo = make_knowledge_repo(pool)
     ownership = await repo.list_surface_ownership_for_document(project_id=project_id, document_id=document_id)
     reassignments = await repo.list_surface_reassignments_for_document(project_id=project_id, document_id=document_id)
-    return {
-        "ownership": [{"question": o.question, "owner_surface_key": o.owner_surface_key, "question_kind": o.question_kind, "confidence": o.confidence, "reason": o.reason, "rejected_from_surface_keys": list(o.rejected_from_surface_keys)} for o in ownership],
-        "reassignments": [{"question": r.question, "from_surface_key": r.from_surface_key, "to_surface_key": r.to_surface_key, "reason": r.reason, "confidence": r.confidence} for r in reassignments],
-    }
+    return SurfaceOwnershipResponseDto(
+        ownership=[
+            OwnershipDto(
+                question=o.question,
+                owner_surface_key=o.owner_surface_key,
+                question_kind=o.question_kind,
+                confidence=o.confidence,
+                reason=o.reason,
+                rejected_from_surface_keys=list(o.rejected_from_surface_keys),
+            )
+            for o in ownership
+        ],
+        reassignments=[
+            ReassignmentDto(
+                question=r.question,
+                from_surface_key=r.from_surface_key,
+                to_surface_key=r.to_surface_key,
+                reason=r.reason,
+                confidence=r.confidence,
+            )
+            for r in reassignments
+        ],
+    )
 
 
 @router.post("/{document_id}/surfaces/{surface_id}/publish", response_model=SurfacePublishResponseDto)
@@ -505,11 +535,11 @@ async def publish_surface(
     await repo.update_surface_publication_status(surface_id=surface_id, publication_status="publishing")
     await repo.link_surface_to_runtime_entry(surface_id=surface_id, runtime_entry_id=surface.linked_runtime_entry_id)
     await repo.update_surface_publication_status(surface_id=surface_id, publication_status="published")
-    return {
-        "surface_id": surface_id,
-        "publication_status": "published",
-        "linked_runtime_entry_id": surface.linked_runtime_entry_id,
-    }
+    return SurfacePublishResponseDto(
+        surface_id=surface_id,
+        publication_status="published",
+        linked_runtime_entry_id=surface.linked_runtime_entry_id,
+    )
 
 @router.get("/{document_id}/import-quality")
 async def knowledge_import_quality_report(

@@ -8,3 +8,10 @@ def test_knowledge_http_exposes_surface_endpoints() -> None:
     assert '@router.get("/{document_id}/surface-relations",' in source
     assert '@router.get("/{document_id}/surface-ownership",' in source
     assert '@router.post("/{document_id}/surfaces/{surface_id}/publish",' in source
+
+
+def test_knowledge_http_surface_endpoints_use_typed_dto_responses() -> None:
+    source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+    assert "return SurfaceRelationsResponseDto(" in source
+    assert "return SurfaceOwnershipResponseDto(" in source
+    assert "return SurfacePublishResponseDto(" in source
