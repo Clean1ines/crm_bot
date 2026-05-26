@@ -93,6 +93,7 @@ def _usage_repo() -> Mock:
 async def test_ingestion_does_not_call_legacy_preprocess_for_surface_modes(mode: str) -> None:
     service = KnowledgeIngestionService(object())
     repo = _repo()
+    surface_factory = Mock(return_value=_FakeSurfaceCompiler())
 
     result = await service.process_document(
         project_id="p1",
@@ -103,9 +104,10 @@ async def test_ingestion_does_not_call_legacy_preprocess_for_surface_modes(mode:
         knowledge_repo_factory=Mock(return_value=repo),
         model_usage_repo_factory=Mock(return_value=_usage_repo()),
         preprocessor_factory=Mock(return_value=_FailIfPreprocessCalled()),
-        surface_compiler_factory=Mock(return_value=_FakeSurfaceCompiler()),
+        surface_compiler_factory=surface_factory,
         logger=Mock(),
     )
 
     assert result.document_id == "d1"
     repo.complete_compiler_batch.assert_awaited()
+    surface_factory.assert_called_once()

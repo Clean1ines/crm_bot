@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import re
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingEntry, build_embedding_text
 from src.domain.project_plane.retrieval_surface_compilation import (
@@ -18,8 +18,21 @@ from src.domain.project_plane.retrieval_surface_compilation import (
 
 _SERVICE_LABELS = {"короткий ответ клиенту", "короткий ответ", "ожидаемая тема", "о продукте", "о знаниях", "о поиске", "о telegram", "о web-widget", "о crm", "негативные тесты"}
 _SHORT_ANSWER_RE = re.compile(r"^\s*короткий ответ(?:\s+клиенту)?\s*:\s*(.+)$", re.IGNORECASE)
-_EXPECTED_TOPIC_RE = re.compile(r"^\s*ожидаемая тема\s*:\s*(.+)$", re.IGNORECASE)
 _QUESTION_BULLET_RE = re.compile(r"^\s*[-•*]\s*(.+)$")
+
+_KIND_MARKERS: dict[str, tuple[str, ...]] = {
+    "document_upload": ("pdf", "документ", "файл", "загруз", "markdown", "txt", "json"),
+    "integration": ("crm", "интеграц", "google sheets", "whatsapp", "instagram", "vk", "webhook", "внешн", "web-widget", "widget"),
+    "channel": ("telegram", "телеграм", "бот", "клиент пишет", "где клиент", "канал"),
+    "curation": ("курац", "merge", "слить", "дубли", "фрагмент", "скрыть", "удалить", "архив", "отклонить"),
+    "retrieval_quality": ("поиск", "retrieval", "находится", "качество поиска", "score", "нестабильный"),
+    "pricing": ("цена", "стоимость", "сколько стоит", "тариф"),
+    "payment": ("оплат", "payment", "нестандартным способом"),
+    "refund": ("вернуть", "возврат", "деньги"),
+    "commercial_terms": ("договор", "условия"),
+    "service_limits": ("гарантия", "юрид", "персональны", "данн", "точно", "персональный расчёт", "риск", "жалоба"),
+    "handoff": ("менеджер", "человек", "техподдержк", "не работает"),
+}
 
 
 def _normalize(v: str) -> str:
@@ -36,24 +49,9 @@ def _canonical_question(title: str) -> str:
 
 def _kind(title: str) -> str:
     t = title.lower()
-    if any(k in t for k in ("цена", "стоим", "тариф")):
-        return "pricing"
-    if "возврат" in t:
-        return "refund"
-    if any(k in t for k in ("оплат", "payment")):
-        return "payment"
-    if any(k in t for k in ("widget", "web-widget", "интеграц", "crm")):
-        return "integration"
-    if any(k in t for k in ("telegram", "канал")):
-        return "channel"
-    if any(k in t for k in ("загруз", "pdf")):
-        return "document_upload"
-    if any(k in t for k in ("курац", "слияни", "архив", "hide", "merge")):
-        return "curation"
-    if "поиск" in t:
-        return "retrieval_quality"
-    if any(k in t for k in ("огранич", "риск", "гарант")):
-        return "service_limits"
+    for kind, markers in _KIND_MARKERS.items():
+        if any(m in t for m in markers):
+            return kind
     return "specific"
 
 
@@ -75,10 +73,9 @@ def discover_retrieval_surfaces_from_source_unit(unit: RetrievalSurfaceSourceUni
     )
     drafts = [umbrella]
 
-    # priority: structured children
     for child in unit.children:
         title = _normalize(child.title)
-        if not title or title.lower() in _SERVICE_LABELS or child.label_kind in {"service_label", "short_answer", "expected_topic"}:
+        if not title or title.lower() in _SERVICE_LABELS or child.label_kind in {"service_label", "short_answer", "expected_topic", "question_group"}:
             continue
         drafts.append(
             RetrievalSurfaceDraft(
@@ -97,9 +94,13 @@ def discover_retrieval_surfaces_from_source_unit(unit: RetrievalSurfaceSourceUni
         )
 
     if unit.title.lower() == "негативные тесты":
-        for t in ("Ограничения автономности ассистента", "Когда ассистент передаёт вопрос менеджеру", "Рискованные вопросы"):
+        for t, kind in (
+            ("Ограничения автономности ассистента", "service_limits"),
+            ("Когда ассистент передаёт вопрос менеджеру", "handoff"),
+            ("Рискованные вопросы", "safety"),
+        ):
             drafts.append(
-                RetrievalSurfaceDraft(_surface_key(t), t, _canonical_question(t), "safety", t, t, unit.title, source_excerpt=text, parent_candidate_keys=(umbrella.local_surface_key,), source_chunk_indexes=unit.source_chunk_indexes, metadata={"synthetic_from_negative_tests": True})
+                RetrievalSurfaceDraft(_surface_key(t), t, _canonical_question(t), kind, t, t, unit.title, source_excerpt=text, parent_candidate_keys=(umbrella.local_surface_key,), source_chunk_indexes=unit.source_chunk_indexes, metadata={"synthetic_from_negative_tests": True})
             )
     return tuple(drafts)
 
@@ -141,11 +142,16 @@ def synthesize_retrieval_surface_answers(unit: RetrievalSurfaceSourceUnit, surfa
 
 def extract_questions_from_source_unit(unit: RetrievalSurfaceSourceUnit) -> tuple[str, ...]:
     out: list[str] = []
-    for line in (unit.raw_text or unit.body).splitlines():
-        m = _QUESTION_BULLET_RE.match(line.strip())
-        candidate = m.group(1) if m else line.strip()
-        if "?" in candidate:
-            out.append(_normalize(candidate))
+    def consume(lines: Iterable[str]) -> None:
+        for line in lines:
+            m = _QUESTION_BULLET_RE.match(line.strip())
+            candidate = m.group(1) if m else line.strip()
+            if "?" in candidate:
+                out.append(_normalize(candidate))
+
+    consume((unit.raw_text or unit.body).splitlines())
+    for child in unit.children:
+        consume((child.raw_text or child.body).splitlines())
     return tuple(dict.fromkeys(q for q in out if q))
 
 
@@ -153,21 +159,32 @@ def _score(surface: RetrievalSurfaceDraft, question: str, relations: Sequence[Re
     q = question.lower()
     score = 0.0
     if surface.title.lower() in q:
-        score += 4
+        score += 5
     for t in surface.question_scope.lower().split():
         if len(t) > 3 and t in q:
-            score += 1.2
+            score += 1.4
     for t in surface.answer_scope.lower().split():
         if len(t) > 3 and t in q:
-            score += 1
+            score += 1.2
     if surface.exclusion_scope and surface.exclusion_scope.lower() in q:
-        score -= 1
-    if surface.surface_kind == "umbrella" and any(k in q for k in ("что это", "чем вы", "для чего")):
+        score -= 1.5
+
+    for kind, markers in _KIND_MARKERS.items():
+        if surface.surface_kind == kind and any(m in q for m in markers):
+            score += 4
+
+    is_child = any(r.child_key == surface.local_surface_key and r.relation_type in {"umbrella_contains", "specializes"} for r in relations)
+    if surface.surface_kind == "umbrella":
+        if any(k in q for k in ("что это", "что за сервис", "чем занимаетесь", "для чего", "зачем нужна", "чем отличается")):
+            score += 3
+        if any(any(m in q for m in v) for v in _KIND_MARKERS.values()):
+            score -= 2
+    elif is_child:
+        score += 0.5
+
+    if surface.surface_kind in {"pricing", "payment", "refund", "commercial_terms", "service_limits", "handoff"} and any(k in q for k in ("сколько стоит", "вернуть", "оплат", "договор", "гарант")):
         score += 2
-    if surface.surface_kind != "umbrella" and any(k in q for k in ("как", "можно", "где", "есть ли")):
-        score += 1
-    if any(r.child_key == surface.local_surface_key and r.relation_type in {"umbrella_contains", "specializes"} for r in relations):
-        score += 0.3
+
     return score
 
 
@@ -198,15 +215,25 @@ def merge_same_surface_drafts(surfaces: Sequence[RetrievalSurfaceDraft], relatio
         for i, e in enumerate(merged):
             same_scope = e.surface_kind == s.surface_kind and e.answer_scope.lower() == s.answer_scope.lower()
             same_id = e.local_surface_key == s.local_surface_key
+            duplicate_rel = any(
+                ((r.parent_key == e.local_surface_key and r.child_key == s.local_surface_key) or (r.parent_key == s.local_surface_key and r.child_key == e.local_surface_key)) and r.relation_type == "duplicates"
+                for r in relations
+            )
             blocked = (e.local_surface_key, s.local_surface_key) in blocked_pairs or (s.local_surface_key, e.local_surface_key) in blocked_pairs
-            if (same_id or same_scope) and not blocked:
+            if (duplicate_rel or same_id or same_scope) and not blocked:
                 found = i
                 break
         if found is None:
             merged.append(s)
             continue
         e = merged[found]
-        merged[found] = replace(e, answer=e.answer if len(e.answer) >= len(s.answer) else s.answer, owned_questions=tuple(dict.fromkeys(e.owned_questions + s.owned_questions)))
+        merged[found] = replace(
+            e,
+            answer=e.answer if len(e.answer) >= len(s.answer) else s.answer,
+            owned_questions=tuple(dict.fromkeys(e.owned_questions + s.owned_questions)),
+            source_refs=tuple(dict.fromkeys(e.source_refs + s.source_refs)),
+            source_chunk_indexes=tuple(dict.fromkeys(e.source_chunk_indexes + s.source_chunk_indexes)),
+        )
     return tuple(merged)
 
 
@@ -214,6 +241,9 @@ def project_surfaces_to_preprocessing_entries(surfaces: Sequence[RetrievalSurfac
     entries = []
     for s in surfaces:
         indexes = s.source_chunk_indexes or source_chunk_indexes
+        tags = [f"surface_key:{s.local_surface_key}", f"surface_kind:{s.surface_kind}", f"answer_scope:{s.answer_scope}"]
+        tags.extend(f"parent_surface:{p}" for p in s.parent_candidate_keys)
+        tags.extend(f"child_surface:{c}" for c in s.child_candidate_keys)
         entry = KnowledgePreprocessingEntry(
             title=s.title,
             canonical_question=s.canonical_question,
@@ -222,7 +252,7 @@ def project_surfaces_to_preprocessing_entries(surfaces: Sequence[RetrievalSurfac
             questions=s.owned_questions,
             embedding_text="",
             source_chunk_indexes=indexes,
-            tags=(f"surface_key:{s.local_surface_key}", f"surface_kind:{s.surface_kind}", f"answer_scope:{s.answer_scope}"),
+            tags=tuple(tags),
             synonyms=s.relation_hints,
         )
         entries.append(replace(entry, embedding_text=build_embedding_text(entry)))
@@ -238,10 +268,16 @@ class DeterministicKnowledgeSurfaceCompiler:
         all_relations: list[RetrievalSurfaceRelation] = []
         ownership: list[SurfaceQuestionOwnership] = []
         questions_total = 0
+        service_labels = 0
+        short_answers = 0
+        boundary_kept = 0
+        same_surface_merges = 0
         for unit in source_units:
+            service_labels += sum(1 for c in unit.children if c.label_kind in {"service_label", "expected_topic", "short_answer", "question_group", "negative_test"} or c.title.lower() in _SERVICE_LABELS)
             discovered = discover_retrieval_surfaces_from_source_unit(unit)
             relations = plan_retrieval_surface_relations(discovered)
             synthesized = tuple(synthesize_retrieval_surface_answers(unit, s, relations) for s in discovered)
+            short_answers += sum(1 for s in synthesized if s.short_answer)
             questions = extract_questions_from_source_unit(unit)
             questions_total += len(questions)
             assigned = assign_retrieval_surface_questions(synthesized, questions, relations)
@@ -249,23 +285,39 @@ class DeterministicKnowledgeSurfaceCompiler:
                 for q in surf.owned_questions:
                     ownership.append(SurfaceQuestionOwnership(q, surf.local_surface_key, "user_like_question", 0.7, "relation_scope_scoring", tuple(r.target_surface_key for r in surf.rejected_or_reassigned_questions)))
             merged = merge_same_surface_drafts(assigned, relations)
+            same_surface_merges += max(0, len(assigned) - len(merged))
+            boundary_kept += sum(1 for r in relations if r.relation_type in {"umbrella_contains", "specializes"})
             all_surfaces.extend(merged)
             all_relations.extend(relations)
         projected = project_surfaces_to_preprocessing_entries(tuple(all_surfaces))
+        moved_question_count = sum(1 for s in all_surfaces for r in s.rejected_or_reassigned_questions if r.target_surface_key)
+        metrics = {
+            "retrieval_surface_pipeline_enabled": True,
+            "legacy_flat_preprocessor_used": False,
+            "compiler": "deterministic",
+            "source_unit_count": len(source_units),
+            "surface_count": len(all_surfaces),
+            "relation_count": len(all_relations),
+            "question_count": questions_total,
+            "question_ownership_count": len(ownership),
+            "owned_question_count": sum(len(s.owned_questions) for s in all_surfaces),
+            "moved_question_count": moved_question_count,
+            "short_answer_absorbed_count": short_answers,
+            "service_label_detected_count": service_labels,
+            "umbrella_surface_count": sum(1 for s in all_surfaces if s.surface_kind == "umbrella"),
+            "child_surface_count": sum(1 for s in all_surfaces if s.parent_candidate_keys),
+            "standalone_surface_count": sum(1 for s in all_surfaces if s.surface_kind != "umbrella" and not s.parent_candidate_keys),
+            "same_surface_merge_count": same_surface_merges,
+            "relation_boundary_keep_separate_count": boundary_kept,
+            "commercial_surface_count": sum(1 for s in all_surfaces if s.surface_kind in {"pricing", "refund", "payment", "commercial_terms", "service_limits"}),
+            "projection_entry_count": len(projected),
+        }
         graph = RetrievalSurfaceGraph(
             source_unit_keys=tuple(u.source_unit_key for u in source_units),
             surfaces=tuple(all_surfaces),
             relations=tuple(all_relations),
             question_ownership=tuple(ownership),
-            metrics={
-                "compiler": "deterministic",
-                "source_unit_count": len(source_units),
-                "surface_count": len(all_surfaces),
-                "relation_count": len(all_relations),
-                "question_count": questions_total,
-                "owned_question_count": len(ownership),
-                "projected_entry_count": len(projected),
-            },
+            metrics=metrics,
         )
-        result = RetrievalSurfaceCompilationResult(mode=mode, prompt_version="retrieval_surface_compiler_v2", model=self.model_name, graph=graph, projected_entries=projected, metrics=dict(graph.metrics))
+        result = RetrievalSurfaceCompilationResult(mode=mode, prompt_version="retrieval_surface_compiler_v2", model=self.model_name, graph=graph, projected_entries=projected, metrics=dict(metrics))
         return RetrievalSurfaceCompilationExecutionResult(result=result, usage=None)
