@@ -79,7 +79,7 @@ async def _require_document(
     return service, repo, document
 
 
-@router.get("/{document_id}/fragments")
+@router.get("/{document_id}/fragments", include_in_schema=False)
 async def answer_drafts_surface_clean_break(
     project_id: str,
     document_id: str,
@@ -115,7 +115,7 @@ async def answer_drafts_surface_clean_break(
     return result.to_dict()
 
 
-@router.post("/{document_id}/retry-failed-batches")
+@router.post("/{document_id}/retry-failed-batches", include_in_schema=False)
 async def retry_knowledge_surface_lifecycle(
     project_id: str,
     document_id: str,
@@ -199,6 +199,6 @@ async def retry_knowledge_surface_lifecycle(
     }
 
 
-for lifecycle_route in router.routes:
+for lifecycle_route in reversed(router.routes):
     if lifecycle_route not in surface_router.routes:
-        surface_router.routes.append(lifecycle_route)
+        surface_router.routes.insert(0, lifecycle_route)
