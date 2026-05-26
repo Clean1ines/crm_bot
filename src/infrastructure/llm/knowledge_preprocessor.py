@@ -498,7 +498,11 @@ def _log_llm_response(
 
 
 def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
-    if mode not in {MODE_FAQ, MODE_PRICE_LIST, MODE_INSTRUCTION}:
+    if mode == MODE_FAQ:
+        raise KnowledgePreprocessingValidationError(
+            "Legacy fragments prompt is forbidden for mode=faq; use retrieval surface compiler"
+        )
+    if mode not in {MODE_PRICE_LIST, MODE_INSTRUCTION}:
         raise KnowledgePreprocessingValidationError(
             f"Knowledge answer compiler is unavailable for mode: {mode}"
         )
