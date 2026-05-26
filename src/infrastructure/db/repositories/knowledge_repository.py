@@ -8,7 +8,9 @@ Clean Architecture contract:
 
 import json
 from dataclasses import asdict
+from datetime import datetime
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 import asyncpg
 
@@ -35,6 +37,12 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceMergeDecision,
     SurfacePublicationStatus,
     SurfaceCompilerRunStatus,
+    SurfaceSourceChildLabelKind,
+    SurfaceStatus,
+    SurfaceKind,
+    SurfaceRelationType,
+    SurfaceQuestionKind,
+    SurfaceMergeDecisionType,
 )
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
@@ -180,6 +188,19 @@ def _jsonb_array(value: object) -> str:
     return json.dumps(list(value), ensure_ascii=False)
 
 
+def _surface_timestamp(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
 class KnowledgeRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
@@ -226,7 +247,6 @@ class KnowledgeRepository:
                     list(TERMINAL_QUEUE_STATUSES),
                     reason,
                 )
-
 
                 await conn.execute(
                     """
@@ -769,7 +789,6 @@ class KnowledgeRepository:
                 error_message,
             )
 
-
     async def get_latest_surface_run_for_document(
         self,
         *,
@@ -796,18 +815,21 @@ class KnowledgeRepository:
             id=str(row["id"]),
             project_id=str(row["project_id"]),
             document_id=str(row["document_id"]),
-            mode=str(row["mode"]),
-            status=str(row["status"]),
+            mode=cast(KnowledgePreprocessingMode, str(row["mode"])),
+            status=cast(SurfaceCompilerRunStatus, str(row["status"])),
             compiler_kind=str(row["compiler_kind"]),
             model=str(row["model"]),
             prompt_version=str(row["prompt_version"]),
-            started_at=normalize_timestamp(row.get("started_at")),
-            completed_at=normalize_timestamp(row.get("completed_at")),
-            error_type=str(row["error_type"]) if row["error_type"] is not None else None,
-            error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+            started_at=_surface_timestamp(row["started_at"]),
+            completed_at=_surface_timestamp(row["completed_at"]),
+            error_type=str(row["error_type"])
+            if row["error_type"] is not None
+            else None,
+            error_message=str(row["error_message"])
+            if row["error_message"] is not None
+            else None,
             metrics=json_object_from_db(row["metrics"]),
         )
-
 
     async def list_surface_runs_for_document(
         self,
@@ -833,15 +855,19 @@ class KnowledgeRepository:
                 id=str(row["id"]),
                 project_id=str(row["project_id"]),
                 document_id=str(row["document_id"]),
-                mode=str(row["mode"]),
-                status=str(row["status"]),
+                mode=cast(KnowledgePreprocessingMode, str(row["mode"])),
+                status=cast(SurfaceCompilerRunStatus, str(row["status"])),
                 compiler_kind=str(row["compiler_kind"]),
                 model=str(row["model"]),
                 prompt_version=str(row["prompt_version"]),
-                started_at=normalize_timestamp(row.get("started_at")),
-                completed_at=normalize_timestamp(row.get("completed_at")),
-                error_type=str(row["error_type"]) if row["error_type"] is not None else None,
-                error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+                started_at=_surface_timestamp(row["started_at"]),
+                completed_at=_surface_timestamp(row["completed_at"]),
+                error_type=str(row["error_type"])
+                if row["error_type"] is not None
+                else None,
+                error_message=str(row["error_message"])
+                if row["error_message"] is not None
+                else None,
                 metrics=json_object_from_db(row["metrics"]),
             )
             for row in rows
@@ -871,7 +897,7 @@ class KnowledgeRepository:
                 run_id=str(row["run_id"]),
                 document_id=str(row["document_id"]),
                 stage_kind=str(row["stage_kind"]),
-                status=str(row["status"]),
+                status=cast(SurfaceCompilerRunStatus, str(row["status"])),
                 model=str(row["model"]),
                 prompt_version=str(row["prompt_version"]),
                 input_summary=str(row["input_summary"]),
@@ -879,15 +905,18 @@ class KnowledgeRepository:
                 tokens_input=int(row["tokens_input"]),
                 tokens_output=int(row["tokens_output"]),
                 tokens_total=int(row["tokens_total"]),
-                error_type=str(row["error_type"]) if row["error_type"] is not None else None,
-                error_message=str(row["error_message"]) if row["error_message"] is not None else None,
-                started_at=normalize_timestamp(row.get("started_at")),
-                completed_at=normalize_timestamp(row.get("completed_at")),
+                error_type=str(row["error_type"])
+                if row["error_type"] is not None
+                else None,
+                error_message=str(row["error_message"])
+                if row["error_message"] is not None
+                else None,
+                started_at=_surface_timestamp(row["started_at"]),
+                completed_at=_surface_timestamp(row["completed_at"]),
                 metrics=json_object_from_db(row["metrics"]),
             )
             for row in rows
         )
-
 
     async def save_surface_source_units(
         self,
@@ -963,7 +992,10 @@ class KnowledgeRepository:
                     title=str(item.get("title", "")),
                     body=str(item.get("body", "")),
                     raw_text=str(item.get("raw_text", "")),
-                    label_kind=str(item.get("label_kind", "other")),
+                    label_kind=cast(
+                        SurfaceSourceChildLabelKind,
+                        str(item.get("label_kind", "other")),
+                    ),
                     metadata=json_object_from_unknown(item.get("metadata", {})),
                 )
                 for item in children_payload
@@ -972,7 +1004,9 @@ class KnowledgeRepository:
             source_refs_payload = json_list_from_db(row["source_refs"])
             source_refs = tuple(str(item) for item in source_refs_payload)
             section_path = tuple(str(item) for item in (row["section_path"] or []))
-            chunk_indexes = tuple(int(item) for item in (row["source_chunk_indexes"] or []))
+            chunk_indexes = tuple(
+                int(item) for item in (row["source_chunk_indexes"] or [])
+            )
             result.append(
                 RetrievalSurfaceSourceUnit(
                     id=str(row["id"]),
@@ -986,12 +1020,13 @@ class KnowledgeRepository:
                     raw_text=str(row["raw_text"]),
                     section_path=section_path,
                     source_refs=source_refs,
-                    preprocessing_mode=str(row["preprocessing_mode"]),
+                    preprocessing_mode=cast(
+                        KnowledgePreprocessingMode, str(row["preprocessing_mode"])
+                    ),
                     metadata=json_object_from_db(row["metadata"]),
                 )
             )
         return tuple(result)
-
 
     async def save_surfaces(
         self,
@@ -1045,9 +1080,15 @@ class KnowledgeRepository:
                         json.dumps(list(surface.warnings), ensure_ascii=False),
                         json.dumps(surface.metadata, ensure_ascii=False),
                         list(surface.source_chunk_indexes),
-                        ensure_uuid(surface.linked_candidate_id) if surface.linked_candidate_id else None,
-                        ensure_uuid(surface.linked_canonical_entry_id) if surface.linked_canonical_entry_id else None,
-                        ensure_uuid(surface.linked_runtime_entry_id) if surface.linked_runtime_entry_id else None,
+                        ensure_uuid(surface.linked_candidate_id)
+                        if surface.linked_candidate_id
+                        else None,
+                        ensure_uuid(surface.linked_canonical_entry_id)
+                        if surface.linked_canonical_entry_id
+                        else None,
+                        ensure_uuid(surface.linked_runtime_entry_id)
+                        if surface.linked_runtime_entry_id
+                        else None,
                     )
 
     async def list_surfaces_for_run(
@@ -1081,23 +1122,37 @@ class KnowledgeRepository:
                     local_surface_key=str(row["local_surface_key"]),
                     title=str(row["title"]),
                     canonical_question=str(row["canonical_question"]),
-                    surface_kind=str(row["surface_kind"]),
+                    surface_kind=cast(SurfaceKind, str(row["surface_kind"])),
                     answer_scope=str(row["answer_scope"]),
                     question_scope=str(row["question_scope"]),
                     exclusion_scope=str(row["exclusion_scope"]),
                     answer=str(row["answer"]),
                     short_answer=str(row["short_answer"]),
-                    status=str(row["status"]),
-                    publication_status=str(row["publication_status"]),
-                    source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+                    status=cast(SurfaceStatus, str(row["status"])),
+                    publication_status=cast(
+                        SurfacePublicationStatus, str(row["publication_status"])
+                    ),
+                    source_refs=tuple(
+                        str(item) for item in json_list_from_db(row["source_refs"])
+                    ),
                     source_excerpt=str(row["source_excerpt"]),
                     confidence=float(row["confidence"]),
-                    warnings=tuple(str(item) for item in json_list_from_db(row["warnings"])),
+                    warnings=tuple(
+                        str(item) for item in json_list_from_db(row["warnings"])
+                    ),
                     metadata=json_object_from_db(row["metadata"]),
-                    source_chunk_indexes=tuple(int(item) for item in (row["source_chunk_indexes"] or [])),
-                    linked_candidate_id=str(row["linked_candidate_id"]) if row["linked_candidate_id"] is not None else None,
-                    linked_canonical_entry_id=str(row["linked_canonical_entry_id"]) if row["linked_canonical_entry_id"] is not None else None,
-                    linked_runtime_entry_id=str(row["linked_runtime_entry_id"]) if row["linked_runtime_entry_id"] is not None else None,
+                    source_chunk_indexes=tuple(
+                        int(item) for item in (row["source_chunk_indexes"] or [])
+                    ),
+                    linked_candidate_id=str(row["linked_candidate_id"])
+                    if row["linked_candidate_id"] is not None
+                    else None,
+                    linked_canonical_entry_id=str(row["linked_canonical_entry_id"])
+                    if row["linked_canonical_entry_id"] is not None
+                    else None,
+                    linked_runtime_entry_id=str(row["linked_runtime_entry_id"])
+                    if row["linked_runtime_entry_id"] is not None
+                    else None,
                 )
             )
         return tuple(result)
@@ -1131,23 +1186,35 @@ class KnowledgeRepository:
             local_surface_key=str(row["local_surface_key"]),
             title=str(row["title"]),
             canonical_question=str(row["canonical_question"]),
-            surface_kind=str(row["surface_kind"]),
+            surface_kind=cast(SurfaceKind, str(row["surface_kind"])),
             answer_scope=str(row["answer_scope"]),
             question_scope=str(row["question_scope"]),
             exclusion_scope=str(row["exclusion_scope"]),
             answer=str(row["answer"]),
             short_answer=str(row["short_answer"]),
-            status=str(row["status"]),
-            publication_status=str(row["publication_status"]),
-            source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+            status=cast(SurfaceStatus, str(row["status"])),
+            publication_status=cast(
+                SurfacePublicationStatus, str(row["publication_status"])
+            ),
+            source_refs=tuple(
+                str(item) for item in json_list_from_db(row["source_refs"])
+            ),
             source_excerpt=str(row["source_excerpt"]),
             confidence=float(row["confidence"]),
             warnings=tuple(str(item) for item in json_list_from_db(row["warnings"])),
             metadata=json_object_from_db(row["metadata"]),
-            source_chunk_indexes=tuple(int(item) for item in (row["source_chunk_indexes"] or [])),
-            linked_candidate_id=str(row["linked_candidate_id"]) if row["linked_candidate_id"] is not None else None,
-            linked_canonical_entry_id=str(row["linked_canonical_entry_id"]) if row["linked_canonical_entry_id"] is not None else None,
-            linked_runtime_entry_id=str(row["linked_runtime_entry_id"]) if row["linked_runtime_entry_id"] is not None else None,
+            source_chunk_indexes=tuple(
+                int(item) for item in (row["source_chunk_indexes"] or [])
+            ),
+            linked_candidate_id=str(row["linked_candidate_id"])
+            if row["linked_candidate_id"] is not None
+            else None,
+            linked_canonical_entry_id=str(row["linked_canonical_entry_id"])
+            if row["linked_canonical_entry_id"] is not None
+            else None,
+            linked_runtime_entry_id=str(row["linked_runtime_entry_id"])
+            if row["linked_runtime_entry_id"] is not None
+            else None,
         )
 
     async def update_surface_publication_status(
@@ -1185,7 +1252,6 @@ class KnowledgeRepository:
                 ensure_uuid(surface_id),
                 ensure_uuid(runtime_entry_id),
             )
-
 
     async def save_surface_relations(
         self,
@@ -1246,14 +1312,15 @@ class KnowledgeRepository:
                 document_id=str(row["document_id"]),
                 parent_surface_key=str(row["parent_surface_key"]),
                 child_surface_key=str(row["child_surface_key"]),
-                relation_type=str(row["relation_type"]),
+                relation_type=cast(SurfaceRelationType, str(row["relation_type"])),
                 reason=str(row["reason"]),
                 confidence=float(row["confidence"]),
-                source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+                source_refs=tuple(
+                    str(item) for item in json_list_from_db(row["source_refs"])
+                ),
             )
             for row in rows
         )
-
 
     async def save_surface_question_ownership(
         self,
@@ -1287,7 +1354,9 @@ class KnowledgeRepository:
                         item.question_kind,
                         item.confidence,
                         item.reason,
-                        json.dumps(list(item.rejected_from_surface_keys), ensure_ascii=False),
+                        json.dumps(
+                            list(item.rejected_from_surface_keys), ensure_ascii=False
+                        ),
                     )
 
     async def list_surface_ownership_for_run(
@@ -1314,14 +1383,15 @@ class KnowledgeRepository:
                 document_id=str(row["document_id"]),
                 question=str(row["question"]),
                 owner_surface_key=str(row["owner_surface_key"]),
-                question_kind=str(row["question_kind"]),
+                question_kind=cast(SurfaceQuestionKind, str(row["question_kind"])),
                 confidence=float(row["confidence"]),
                 reason=str(row["reason"]),
-                rejected_from_surface_keys=tuple(str(i) for i in json_list_from_db(row["rejected_from_surface_keys"])),
+                rejected_from_surface_keys=tuple(
+                    str(i) for i in json_list_from_db(row["rejected_from_surface_keys"])
+                ),
             )
             for row in rows
         )
-
 
     async def save_surface_question_reassignments(
         self,
@@ -1385,7 +1455,6 @@ class KnowledgeRepository:
             for row in rows
         )
 
-
     async def save_surface_merge_decisions(
         self,
         *,
@@ -1415,7 +1484,9 @@ class KnowledgeRepository:
                         ensure_uuid(document_id),
                         item.survivor_surface_key,
                         json.dumps(list(item.merged_surface_keys), ensure_ascii=False),
-                        json.dumps(list(item.keep_separate_surface_keys), ensure_ascii=False),
+                        json.dumps(
+                            list(item.keep_separate_surface_keys), ensure_ascii=False
+                        ),
                         item.decision_type,
                         item.reason,
                         item.confidence,
@@ -1444,15 +1515,18 @@ class KnowledgeRepository:
                 run_id=str(row["run_id"]),
                 document_id=str(row["document_id"]),
                 survivor_surface_key=str(row["survivor_surface_key"]),
-                merged_surface_keys=tuple(str(i) for i in json_list_from_db(row["merged_surface_keys"])),
-                keep_separate_surface_keys=tuple(str(i) for i in json_list_from_db(row["keep_separate_surface_keys"])),
-                decision_type=str(row["decision_type"]),
+                merged_surface_keys=tuple(
+                    str(i) for i in json_list_from_db(row["merged_surface_keys"])
+                ),
+                keep_separate_surface_keys=tuple(
+                    str(i) for i in json_list_from_db(row["keep_separate_surface_keys"])
+                ),
+                decision_type=cast(SurfaceMergeDecisionType, str(row["decision_type"])),
                 reason=str(row["reason"]),
                 confidence=float(row["confidence"]),
             )
             for row in rows
         )
-
 
     async def list_surface_relations_for_document(
         self,

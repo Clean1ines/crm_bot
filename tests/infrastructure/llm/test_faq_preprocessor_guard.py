@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ, KnowledgePreprocessingValidationError
+from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
+    KnowledgePreprocessingValidationError,
+)
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 
 

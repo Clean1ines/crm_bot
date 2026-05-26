@@ -1108,14 +1108,18 @@ def test_publication_guard_collapses_exact_duplicate_answers():
     )
 
 
-def test_repair_generated_entry_strips_markdown_heading_and_keeps_entry_publishable() -> None:
+def test_repair_generated_entry_strips_markdown_heading_and_keeps_entry_publishable() -> (
+    None
+):
     entry = KnowledgePreprocessingEntry(
         title="Возвраты",
         answer="## Возврат средств\nОформите заявку через чат поддержки.",
         source_excerpt="Возврат средств: оформите заявку через чат поддержки.",
         questions=("Как вернуть деньги?",),
     )
-    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    repaired, warnings = _repair_generated_entry(
+        entry, source_excerpt=entry.source_excerpt
+    )
     assert repaired.answer.startswith("Возврат средств")
     assert "generated_answer_markdown_heading_repaired" in warnings
     assert repaired.embedding_text
@@ -1128,7 +1132,9 @@ def test_repair_generated_entry_removes_cjk_artifact_in_question_variant() -> No
         source_excerpt="Оплата доступна картой.",
         questions=("Как оплатить 가 заказ?",),
     )
-    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    repaired, warnings = _repair_generated_entry(
+        entry, source_excerpt=entry.source_excerpt
+    )
     assert repaired.questions == ("Как оплатить заказ?",)
     assert "generated_enrichment_forbidden_script_repaired" in warnings
 
@@ -1140,7 +1146,9 @@ def test_repair_generated_entry_low_coverage_is_warning_only() -> None:
         source_excerpt="Тариф Pro включает SLA 99.9%, выделенного менеджера и приоритетную поддержку.",
         questions=("Что в тарифе Pro?",),
     )
-    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    repaired, warnings = _repair_generated_entry(
+        entry, source_excerpt=entry.source_excerpt
+    )
     assert repaired.answer
     assert "generated_answer_low_coverage_warning" in warnings
 
@@ -1152,7 +1160,9 @@ def test_repair_generated_entry_language_mismatch_is_warning_only() -> None:
         source_excerpt="Доставка курьером за 1-2 дня.",
         questions=("Какие сроки доставки?",),
     )
-    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    repaired, warnings = _repair_generated_entry(
+        entry, source_excerpt=entry.source_excerpt
+    )
     assert repaired.answer
     assert "answer_language_mismatch_warning" in warnings
 
@@ -1164,13 +1174,17 @@ def test_repair_generated_entry_empty_answer_falls_back_to_source_digest() -> No
         source_excerpt="Поддержка отвечает в рабочие часы по чату.",
         questions=("Когда отвечает поддержка?",),
     )
-    repaired, warnings = _repair_generated_entry(entry, source_excerpt=entry.source_excerpt)
+    repaired, warnings = _repair_generated_entry(
+        entry, source_excerpt=entry.source_excerpt
+    )
     assert repaired.answer == "Поддержка отвечает в рабочие часы по чату."
     assert "generated_answer_empty_after_repair_warning" in warnings
 
 
 @pytest.mark.asyncio
-async def test_process_document_keeps_repairable_generated_entry_without_document_error() -> None:
+async def test_process_document_keeps_repairable_generated_entry_without_document_error() -> (
+    None
+):
     repo = _knowledge_repo(canonical_count=1)
     usage_repo = _usage_repo()
     preprocessor = Mock()

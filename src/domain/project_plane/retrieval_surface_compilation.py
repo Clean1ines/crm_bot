@@ -17,19 +17,47 @@ SurfacePublicationStatus: TypeAlias = Literal[
     "unpublished", "publishing", "published", "publish_failed"
 ]
 SurfaceKind: TypeAlias = Literal[
-    "umbrella", "child", "specific", "standalone", "definition", "procedural",
-    "safety", "handoff", "integration", "channel", "document_upload", "curation",
-    "retrieval_quality", "service_limits", "other",
+    "umbrella",
+    "child",
+    "specific",
+    "standalone",
+    "definition",
+    "procedural",
+    "safety",
+    "handoff",
+    "integration",
+    "channel",
+    "document_upload",
+    "curation",
+    "retrieval_quality",
+    "service_limits",
+    "other",
 ]
 SurfaceRelationType: TypeAlias = Literal[
-    "umbrella_contains", "specializes", "sibling", "duplicates", "overlaps", "contradicts", "unrelated"
+    "umbrella_contains",
+    "specializes",
+    "sibling",
+    "duplicates",
+    "overlaps",
+    "contradicts",
+    "unrelated",
 ]
 SurfaceQuestionKind: TypeAlias = Literal[
-    "faq_question", "test_question", "generated_variant", "user_like_question",
-    "negative_test_question", "expected_topic_hint",
+    "faq_question",
+    "test_question",
+    "generated_variant",
+    "user_like_question",
+    "negative_test_question",
+    "expected_topic_hint",
 ]
 SurfaceSourceChildLabelKind: TypeAlias = Literal[
-    "service_label", "content_section", "question_group", "expected_topic", "short_answer", "negative_test", "other"
+    "service_label",
+    "content_section",
+    "question_group",
+    "expected_topic",
+    "short_answer",
+    "negative_test",
+    "other",
 ]
 SurfaceMergeDecisionType: TypeAlias = Literal["merge", "keep_separate"]
 

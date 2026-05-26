@@ -1,0 +1,16 @@
+STAGE D — Question ownership.
+
+Верни question_ownership[] с полями:
+question, owner_surface_key, question_kind, confidence, reason, rejected_from_surface_keys.
+
+Допустимые question_kind:
+faq_question, test_question, generated_variant, user_like_question, negative_test_question, expected_topic_hint.
+
+Правила ownership:
+- Каждый вопрос принадлежит лучшей surface, а не всем похожим surfaces.
+- Если вопрос относится к child/specific, umbrella его не получает.
+- Если вопрос относится к web-widget, Telegram/channel surface его не получает, и наоборот.
+- Если вопрос относится к merge, hide/archive surface его не получает, и наоборот.
+- Вопросы про ограничения автономности ассистента, менеджера и рискованные вопросы должны принадлежать соответствующим safety/handoff/service_limits surfaces.
+- rejected_from_surface_keys должен перечислять близкие, но отклонённые surfaces с reason/confidence в reason.
+- expected_topic labels не должны становиться production answer.

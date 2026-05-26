@@ -1,20 +1,27 @@
 from __future__ import annotations
 
-from typing import cast
-
 from collections.abc import Mapping
+from typing import cast
 
 import asyncpg
 
-from src.application.errors import EmbeddingProviderError, ValidationError
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingValidationError,
-)
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
+from src.application.errors import EmbeddingProviderError, ValidationError
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
+from src.application.ports.knowledge_port import (
+    KnowledgeDbPoolPort,
+    ModelUsageRepositoryPort,
+)
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryPort,
     KnowledgeIngestionService,
+)
+from src.application.services.knowledge_surface_ingestion_service import (
+    KnowledgeFaqSurfaceIngestionService,
+)
+from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
+    KnowledgePreprocessingValidationError,
 )
 from src.infrastructure.db.repositories.commercial_price_repository import (
     CommercialPriceRepository,
@@ -24,14 +31,13 @@ from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
 )
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
+from src.infrastructure.llm.knowledge_surface_compiler import (
+    GroqKnowledgeSurfaceCompiler,
+)
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
 from src.interfaces.composition.commercial_price_acquisition import (
     make_commercial_price_acquisition_service,
-)
-from src.application.ports.knowledge_port import (
-    KnowledgeDbPoolPort,
-    ModelUsageRepositoryPort,
 )
 
 logger = get_logger(__name__)
@@ -73,9 +79,20 @@ async def handle_process_knowledge_upload(
     except ValueError as exc:
         raise PermanentJobError(str(exc)) from exc
 
-    service = KnowledgeIngestionService(db_pool)
     try:
-        await service.process_document(
+        if mode == MODE_FAQ:
+            await KnowledgeFaqSurfaceIngestionService(db_pool).process_document(
+                project_id=dto.project_id,
+                document_id=dto.document_id,
+                file_name=dto.file_name,
+                chunks=dto.chunks,
+                knowledge_repo_factory=make_knowledge_repository,
+                surface_compiler_factory=GroqKnowledgeSurfaceCompiler,
+                logger=logger,
+            )
+            return
+
+        await KnowledgeIngestionService(db_pool).process_document(
             project_id=dto.project_id,
             document_id=dto.document_id,
             file_name=dto.file_name,

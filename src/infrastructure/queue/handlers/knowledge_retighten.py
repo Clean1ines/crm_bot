@@ -15,6 +15,7 @@ from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
     KnowledgePreprocessingValidationError,
 )
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
@@ -63,6 +64,12 @@ async def handle_retighten_knowledge_document(
     project_id = _required_text(payload, "project_id")
     document_id = _required_text(payload, "document_id")
     file_name = str(payload.get("file_name") or f"retighten:{document_id}")
+    preprocessing_mode = str(payload.get("preprocessing_mode") or "").strip().lower()
+    if preprocessing_mode == MODE_FAQ:
+        raise PermanentJobError(
+            "Legacy knowledge retighten handler cannot process mode=faq. "
+            "Use Retrieval Surface Compilation pipeline."
+        )
 
     service = KnowledgeIngestionService(db_pool)
 

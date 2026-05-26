@@ -58,6 +58,7 @@ from src.domain.project_plane.knowledge_semantic_builder import (
     canonicalize_knowledge_chunk_drafts,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
     MODE_PLAIN,
     MODE_PRICE_LIST,
     PREPROCESSING_STATUS_COMPLETED,
@@ -511,7 +512,7 @@ def _technical_chunk_batches_for_answer_compiler(
 
         is_markdown_semantic = bool(chunk.get("section_title") or chunk.get("children"))
         if is_markdown_semantic:
-            parts = (content.strip(),)
+            parts: tuple[str, ...] = (content.strip(),)
         else:
             parts = _split_technical_source_text(
                 content,
@@ -799,8 +800,6 @@ KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
-
-
 def _source_excerpt_to_text(value: object) -> str:
     if isinstance(value, tuple):
         return "\n\n".join(
@@ -822,9 +821,13 @@ def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
     return overlap / max(1, min(len(source_tokens), 36))
 
 
-def _regenerate_entry_from_source_excerpt(entry: KnowledgePreprocessingEntry, source_excerpt: str) -> KnowledgePreprocessingEntry:
+def _regenerate_entry_from_source_excerpt(
+    entry: KnowledgePreprocessingEntry, source_excerpt: str
+) -> KnowledgePreprocessingEntry:
     sanitized_source = "\n".join(
-        line for line in source_excerpt.splitlines() if not line.lstrip().startswith("#")
+        line
+        for line in source_excerpt.splitlines()
+        if not line.lstrip().startswith("#")
     ).strip()
     rebuilt_answer = _answer_digest(
         sanitized_source or source_excerpt,
@@ -933,17 +936,48 @@ def _repair_generated_entry(
             updated = _remove_forbidden_cjk_korean_chars(value)
             if updated != value:
                 sanitized_fields[name] = _clean_optional_text(updated)
-        for name, values in (("questions", repaired.questions), ("synonyms", repaired.synonyms), ("tags", repaired.tags)):
+        for name, values in (
+            ("questions", repaired.questions),
+            ("synonyms", repaired.synonyms),
+            ("tags", repaired.tags),
+        ):
             updated_values = tuple(
                 cleaned
                 for item in values
-                if (cleaned := _clean_optional_text(_remove_forbidden_cjk_korean_chars(item)))
+                if (
+                    cleaned := _clean_optional_text(
+                        _remove_forbidden_cjk_korean_chars(item)
+                    )
+                )
             )
             if updated_values != values:
                 sanitized_fields[name] = updated_values
         if sanitized_fields:
             warnings.append("generated_enrichment_forbidden_script_repaired")
-            repaired = replace(repaired, **sanitized_fields)
+            repaired = replace(
+                repaired,
+                title=cast(str, sanitized_fields.get("title", repaired.title)),
+                canonical_question=cast(
+                    str,
+                    sanitized_fields.get(
+                        "canonical_question",
+                        repaired.canonical_question,
+                    ),
+                ),
+                source_excerpt=cast(
+                    str,
+                    sanitized_fields.get("source_excerpt", repaired.source_excerpt),
+                ),
+                questions=cast(
+                    tuple[str, ...],
+                    sanitized_fields.get("questions", repaired.questions),
+                ),
+                synonyms=cast(
+                    tuple[str, ...],
+                    sanitized_fields.get("synonyms", repaired.synonyms),
+                ),
+                tags=cast(tuple[str, ...], sanitized_fields.get("tags", repaired.tags)),
+            )
 
     repaired_source_excerpt = _clean_optional_text(repaired.source_excerpt)
     repaired_answer = _clean_optional_text(repaired.answer)
@@ -3520,10 +3554,9 @@ def _merge_source_ref_tuple_values(
                 continue
             duplicate_index = None
             for idx, existing in enumerate(result):
-                same_origin = (
-                    (existing.source_chunk_id or "") == (source_ref.source_chunk_id or "")
-                    and existing.source_index == source_ref.source_index
-                )
+                same_origin = (existing.source_chunk_id or "") == (
+                    source_ref.source_chunk_id or ""
+                ) and existing.source_index == source_ref.source_index
                 if not same_origin:
                     continue
                 existing_fp = _publication_text_fingerprint(existing.quote)
@@ -4366,6 +4399,11 @@ class KnowledgeIngestionService:
             raise ValidationError("Knowledge document not found")
 
         mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy knowledge ingestion preprocessor path is forbidden for mode=faq. "
+                "Use Retrieval Surface Compilation pipeline."
+            )
         if mode == MODE_PLAIN:
             raise ValidationError("Plain knowledge documents do not have answer drafts")
         if document.status in {"pending", "processing"} or (
@@ -4491,6 +4529,11 @@ class KnowledgeIngestionService:
             raise ValidationError("Knowledge document not found")
 
         mode = normalize_preprocessing_mode(document.preprocessing_mode)
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy knowledge ingestion retry path is forbidden for mode=faq. "
+                "Use Retrieval Surface Compilation pipeline."
+            )
         if mode == MODE_PLAIN:
             raise ValidationError(
                 "Plain knowledge documents do not have compiler batches"
@@ -4720,6 +4763,17 @@ class KnowledgeIngestionService:
             "usage_event_count": usage_event_count,
         }
 
+    async def _process_document_faq_surface(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> KnowledgeDocumentProcessingResult:
+        raise KnowledgePreprocessingValidationError(
+            "Bootstrap FAQ surface path was removed from the primary pipeline. "
+            "FAQ uploads must use KnowledgeSurfaceCompilerPort.compile_surfaces via "
+            "KnowledgeFaqSurfaceIngestionService."
+        )
+
     async def process_document(
         self,
         *,
@@ -4835,6 +4889,15 @@ class KnowledgeIngestionService:
             document_id=document_id,
             chunks=source_chunks,
         )
+
+        if mode == MODE_FAQ:
+            return await self._process_document_faq_surface(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                chunks=indexable_chunks,
+                source_chunks=source_chunks,
+            )
 
         await repo.update_document_preprocessing_status(
             document_id,
