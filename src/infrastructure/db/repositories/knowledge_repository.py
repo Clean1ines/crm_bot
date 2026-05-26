@@ -22,6 +22,20 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
+
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilerRun,
+    RetrievalSurfaceCompilerStage,
+    RetrievalSurfaceSourceChild,
+    RetrievalSurfaceSourceUnit,
+    RetrievalSurfaceDraft,
+    RetrievalSurfaceRelation,
+    SurfaceQuestionOwnership,
+    SurfaceQuestionReassignment,
+    RetrievalSurfaceMergeDecision,
+    SurfacePublicationStatus,
+    SurfaceCompilerRunStatus,
+)
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.domain.project_plane.knowledge_retrieval_surface import (
@@ -210,6 +224,39 @@ class KnowledgeRepository:
                     document_id_text,
                     list(CANCELLABLE_KNOWLEDGE_JOB_TYPES),
                     list(TERMINAL_QUEUE_STATUSES),
+                    reason,
+                )
+
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_surface_compiler_runs
+                    SET
+                        status = 'cancelled',
+                        error_type = 'processing_cancelled',
+                        error_message = $2,
+                        completed_at = now(),
+                        updated_at = now()
+                    WHERE document_id = $1
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    """,
+                    document_uuid,
+                    reason,
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE knowledge_surface_compiler_stages
+                    SET
+                        status = 'cancelled',
+                        error_type = 'processing_cancelled',
+                        error_message = $2,
+                        completed_at = now(),
+                        updated_at = now()
+                    WHERE document_id = $1
+                      AND status NOT IN ('completed', 'failed', 'cancelled')
+                    """,
+                    document_uuid,
                     reason,
                 )
 
@@ -662,6 +709,832 @@ class KnowledgeRepository:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 await upsert_compiler_run(conn, run=run)
+
+    async def create_surface_compiler_run(
+        self,
+        run: RetrievalSurfaceCompilerRun,
+    ) -> RetrievalSurfaceCompilerRun:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO knowledge_surface_compiler_runs (
+                    id, project_id, document_id, mode, status, compiler_kind, model,
+                    prompt_version, started_at, completed_at, error_type,
+                    error_message, metrics
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7,
+                    $8, $9, $10, $11, $12, $13::jsonb
+                )
+                """,
+                ensure_uuid(run.id),
+                ensure_uuid(run.project_id),
+                ensure_uuid(run.document_id),
+                run.mode,
+                run.status,
+                run.compiler_kind,
+                run.model,
+                run.prompt_version,
+                run.started_at,
+                run.completed_at,
+                run.error_type,
+                run.error_message,
+                json.dumps(run.metrics, ensure_ascii=False),
+            )
+        return run
+
+    async def update_surface_compiler_run_status(
+        self,
+        *,
+        run_id: str,
+        status: SurfaceCompilerRunStatus,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_surface_compiler_runs
+                SET
+                    status = $2,
+                    error_type = $3,
+                    error_message = $4,
+                    completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE completed_at END,
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(run_id),
+                status,
+                error_type,
+                error_message,
+            )
+
+
+    async def get_latest_surface_run_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> RetrievalSurfaceCompilerRun | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, project_id, document_id, mode, status, compiler_kind, model,
+                       prompt_version, started_at, completed_at, error_type,
+                       error_message, metrics
+                FROM knowledge_surface_compiler_runs
+                WHERE project_id = $1::uuid AND document_id = $2::uuid
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        if row is None:
+            return None
+        return RetrievalSurfaceCompilerRun(
+            id=str(row["id"]),
+            project_id=str(row["project_id"]),
+            document_id=str(row["document_id"]),
+            mode=str(row["mode"]),
+            status=str(row["status"]),
+            compiler_kind=str(row["compiler_kind"]),
+            model=str(row["model"]),
+            prompt_version=str(row["prompt_version"]),
+            started_at=normalize_timestamp(row.get("started_at")),
+            completed_at=normalize_timestamp(row.get("completed_at")),
+            error_type=str(row["error_type"]) if row["error_type"] is not None else None,
+            error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+            metrics=json_object_from_db(row["metrics"]),
+        )
+
+
+    async def list_surface_runs_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[RetrievalSurfaceCompilerRun, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, project_id, document_id, mode, status, compiler_kind, model,
+                       prompt_version, started_at, completed_at, error_type,
+                       error_message, metrics
+                FROM knowledge_surface_compiler_runs
+                WHERE project_id = $1::uuid AND document_id = $2::uuid
+                ORDER BY created_at DESC, id DESC
+                """,
+                ensure_uuid(project_id),
+                ensure_uuid(document_id),
+            )
+        return tuple(
+            RetrievalSurfaceCompilerRun(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                document_id=str(row["document_id"]),
+                mode=str(row["mode"]),
+                status=str(row["status"]),
+                compiler_kind=str(row["compiler_kind"]),
+                model=str(row["model"]),
+                prompt_version=str(row["prompt_version"]),
+                started_at=normalize_timestamp(row.get("started_at")),
+                completed_at=normalize_timestamp(row.get("completed_at")),
+                error_type=str(row["error_type"]) if row["error_type"] is not None else None,
+                error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+                metrics=json_object_from_db(row["metrics"]),
+            )
+            for row in rows
+        )
+
+    async def list_surface_stages_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceCompilerStage, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, stage_kind, status, model,
+                       prompt_version, input_summary, output_summary, tokens_input,
+                       tokens_output, tokens_total, error_type, error_message,
+                       metrics, started_at, completed_at
+                FROM knowledge_surface_compiler_stages
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            RetrievalSurfaceCompilerStage(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                stage_kind=str(row["stage_kind"]),
+                status=str(row["status"]),
+                model=str(row["model"]),
+                prompt_version=str(row["prompt_version"]),
+                input_summary=str(row["input_summary"]),
+                output_summary=str(row["output_summary"]),
+                tokens_input=int(row["tokens_input"]),
+                tokens_output=int(row["tokens_output"]),
+                tokens_total=int(row["tokens_total"]),
+                error_type=str(row["error_type"]) if row["error_type"] is not None else None,
+                error_message=str(row["error_message"]) if row["error_message"] is not None else None,
+                started_at=normalize_timestamp(row.get("started_at")),
+                completed_at=normalize_timestamp(row.get("completed_at")),
+                metrics=json_object_from_db(row["metrics"]),
+            )
+            for row in rows
+        )
+
+
+    async def save_surface_source_units(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        source_units: tuple[RetrievalSurfaceSourceUnit, ...],
+    ) -> None:
+        if not source_units:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for unit in source_units:
+                    children_payload = [
+                        {
+                            "title": child.title,
+                            "body": child.body,
+                            "raw_text": child.raw_text,
+                            "label_kind": child.label_kind,
+                            "metadata": child.metadata,
+                        }
+                        for child in unit.children
+                    ]
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_source_units (
+                            id, run_id, document_id, source_unit_key, source_chunk_indexes,
+                            title, body, children, raw_text, section_path, source_refs,
+                            preprocessing_mode, metadata
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4, $5::int[],
+                            $6, $7, $8::jsonb, $9, $10::text[], $11::jsonb,
+                            $12, $13::jsonb
+                        )
+                        """,
+                        ensure_uuid(unit.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        unit.source_unit_key,
+                        list(unit.source_chunk_indexes),
+                        unit.title,
+                        unit.body,
+                        json.dumps(children_payload, ensure_ascii=False),
+                        unit.raw_text,
+                        list(unit.section_path),
+                        json.dumps(list(unit.source_refs), ensure_ascii=False),
+                        unit.preprocessing_mode,
+                        json.dumps(unit.metadata, ensure_ascii=False),
+                    )
+
+    async def list_surface_source_units_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceSourceUnit, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, source_unit_key, source_chunk_indexes,
+                       title, body, children, raw_text, section_path, source_refs,
+                       preprocessing_mode, metadata
+                FROM knowledge_surface_source_units
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        result: list[RetrievalSurfaceSourceUnit] = []
+        for row in rows:
+            children_payload = json_list_from_db(row["children"])
+            children = tuple(
+                RetrievalSurfaceSourceChild(
+                    title=str(item.get("title", "")),
+                    body=str(item.get("body", "")),
+                    raw_text=str(item.get("raw_text", "")),
+                    label_kind=str(item.get("label_kind", "other")),
+                    metadata=json_object_from_unknown(item.get("metadata", {})),
+                )
+                for item in children_payload
+                if isinstance(item, dict)
+            )
+            source_refs_payload = json_list_from_db(row["source_refs"])
+            source_refs = tuple(str(item) for item in source_refs_payload)
+            section_path = tuple(str(item) for item in (row["section_path"] or []))
+            chunk_indexes = tuple(int(item) for item in (row["source_chunk_indexes"] or []))
+            result.append(
+                RetrievalSurfaceSourceUnit(
+                    id=str(row["id"]),
+                    run_id=str(row["run_id"]),
+                    document_id=str(row["document_id"]),
+                    source_unit_key=str(row["source_unit_key"]),
+                    source_chunk_indexes=chunk_indexes,
+                    title=str(row["title"]),
+                    body=str(row["body"]),
+                    children=children,
+                    raw_text=str(row["raw_text"]),
+                    section_path=section_path,
+                    source_refs=source_refs,
+                    preprocessing_mode=str(row["preprocessing_mode"]),
+                    metadata=json_object_from_db(row["metadata"]),
+                )
+            )
+        return tuple(result)
+
+
+    async def save_surfaces(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        surfaces: tuple[RetrievalSurfaceDraft, ...],
+    ) -> None:
+        if not surfaces:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for surface in surfaces:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surfaces (
+                            id, run_id, document_id, local_surface_key, title,
+                            canonical_question, surface_kind, answer_scope,
+                            question_scope, exclusion_scope, answer, short_answer,
+                            status, publication_status, source_refs, source_excerpt,
+                            confidence, warnings, metadata, source_chunk_indexes,
+                            linked_candidate_id, linked_canonical_entry_id,
+                            linked_runtime_entry_id
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4, $5,
+                            $6, $7, $8,
+                            $9, $10, $11, $12,
+                            $13, $14, $15::jsonb, $16,
+                            $17, $18::jsonb, $19::jsonb, $20::int[],
+                            $21::uuid, $22::uuid,
+                            $23::uuid
+                        )
+                        """,
+                        ensure_uuid(surface.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        surface.local_surface_key,
+                        surface.title,
+                        surface.canonical_question,
+                        surface.surface_kind,
+                        surface.answer_scope,
+                        surface.question_scope,
+                        surface.exclusion_scope,
+                        surface.answer,
+                        surface.short_answer,
+                        surface.status,
+                        surface.publication_status,
+                        json.dumps(list(surface.source_refs), ensure_ascii=False),
+                        surface.source_excerpt,
+                        surface.confidence,
+                        json.dumps(list(surface.warnings), ensure_ascii=False),
+                        json.dumps(surface.metadata, ensure_ascii=False),
+                        list(surface.source_chunk_indexes),
+                        ensure_uuid(surface.linked_candidate_id) if surface.linked_candidate_id else None,
+                        ensure_uuid(surface.linked_canonical_entry_id) if surface.linked_canonical_entry_id else None,
+                        ensure_uuid(surface.linked_runtime_entry_id) if surface.linked_runtime_entry_id else None,
+                    )
+
+    async def list_surfaces_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceDraft, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, local_surface_key, title,
+                       canonical_question, surface_kind, answer_scope,
+                       question_scope, exclusion_scope, answer, short_answer,
+                       status, publication_status, source_refs, source_excerpt,
+                       confidence, warnings, metadata, source_chunk_indexes,
+                       linked_candidate_id, linked_canonical_entry_id,
+                       linked_runtime_entry_id
+                FROM knowledge_surfaces
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        result: list[RetrievalSurfaceDraft] = []
+        for row in rows:
+            result.append(
+                RetrievalSurfaceDraft(
+                    id=str(row["id"]),
+                    run_id=str(row["run_id"]),
+                    document_id=str(row["document_id"]),
+                    local_surface_key=str(row["local_surface_key"]),
+                    title=str(row["title"]),
+                    canonical_question=str(row["canonical_question"]),
+                    surface_kind=str(row["surface_kind"]),
+                    answer_scope=str(row["answer_scope"]),
+                    question_scope=str(row["question_scope"]),
+                    exclusion_scope=str(row["exclusion_scope"]),
+                    answer=str(row["answer"]),
+                    short_answer=str(row["short_answer"]),
+                    status=str(row["status"]),
+                    publication_status=str(row["publication_status"]),
+                    source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+                    source_excerpt=str(row["source_excerpt"]),
+                    confidence=float(row["confidence"]),
+                    warnings=tuple(str(item) for item in json_list_from_db(row["warnings"])),
+                    metadata=json_object_from_db(row["metadata"]),
+                    source_chunk_indexes=tuple(int(item) for item in (row["source_chunk_indexes"] or [])),
+                    linked_candidate_id=str(row["linked_candidate_id"]) if row["linked_candidate_id"] is not None else None,
+                    linked_canonical_entry_id=str(row["linked_canonical_entry_id"]) if row["linked_canonical_entry_id"] is not None else None,
+                    linked_runtime_entry_id=str(row["linked_runtime_entry_id"]) if row["linked_runtime_entry_id"] is not None else None,
+                )
+            )
+        return tuple(result)
+
+    async def get_surface_by_id(
+        self,
+        *,
+        surface_id: str,
+    ) -> RetrievalSurfaceDraft | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, run_id, document_id, local_surface_key, title,
+                       canonical_question, surface_kind, answer_scope,
+                       question_scope, exclusion_scope, answer, short_answer,
+                       status, publication_status, source_refs, source_excerpt,
+                       confidence, warnings, metadata, source_chunk_indexes,
+                       linked_candidate_id, linked_canonical_entry_id,
+                       linked_runtime_entry_id
+                FROM knowledge_surfaces
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(surface_id),
+            )
+        if row is None:
+            return None
+        return RetrievalSurfaceDraft(
+            id=str(row["id"]),
+            run_id=str(row["run_id"]),
+            document_id=str(row["document_id"]),
+            local_surface_key=str(row["local_surface_key"]),
+            title=str(row["title"]),
+            canonical_question=str(row["canonical_question"]),
+            surface_kind=str(row["surface_kind"]),
+            answer_scope=str(row["answer_scope"]),
+            question_scope=str(row["question_scope"]),
+            exclusion_scope=str(row["exclusion_scope"]),
+            answer=str(row["answer"]),
+            short_answer=str(row["short_answer"]),
+            status=str(row["status"]),
+            publication_status=str(row["publication_status"]),
+            source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+            source_excerpt=str(row["source_excerpt"]),
+            confidence=float(row["confidence"]),
+            warnings=tuple(str(item) for item in json_list_from_db(row["warnings"])),
+            metadata=json_object_from_db(row["metadata"]),
+            source_chunk_indexes=tuple(int(item) for item in (row["source_chunk_indexes"] or [])),
+            linked_candidate_id=str(row["linked_candidate_id"]) if row["linked_candidate_id"] is not None else None,
+            linked_canonical_entry_id=str(row["linked_canonical_entry_id"]) if row["linked_canonical_entry_id"] is not None else None,
+            linked_runtime_entry_id=str(row["linked_runtime_entry_id"]) if row["linked_runtime_entry_id"] is not None else None,
+        )
+
+    async def update_surface_publication_status(
+        self,
+        *,
+        surface_id: str,
+        publication_status: SurfacePublicationStatus,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_surfaces
+                SET publication_status = $2::text,
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(surface_id),
+                publication_status,
+            )
+
+    async def link_surface_to_runtime_entry(
+        self,
+        *,
+        surface_id: str,
+        runtime_entry_id: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE knowledge_surfaces
+                SET linked_runtime_entry_id = $2::uuid,
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                ensure_uuid(surface_id),
+                ensure_uuid(runtime_entry_id),
+            )
+
+
+    async def save_surface_relations(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        relations: tuple[RetrievalSurfaceRelation, ...],
+    ) -> None:
+        if not relations:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for rel in relations:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_relations (
+                            id, run_id, document_id, parent_surface_key,
+                            child_surface_key, relation_type, reason,
+                            confidence, source_refs
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4,
+                            $5, $6, $7,
+                            $8, $9::jsonb
+                        )
+                        """,
+                        ensure_uuid(rel.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        rel.parent_surface_key,
+                        rel.child_surface_key,
+                        rel.relation_type,
+                        rel.reason,
+                        rel.confidence,
+                        json.dumps(list(rel.source_refs), ensure_ascii=False),
+                    )
+
+    async def list_surface_relations_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceRelation, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, parent_surface_key,
+                       child_surface_key, relation_type, reason,
+                       confidence, source_refs
+                FROM knowledge_surface_relations
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            RetrievalSurfaceRelation(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                parent_surface_key=str(row["parent_surface_key"]),
+                child_surface_key=str(row["child_surface_key"]),
+                relation_type=str(row["relation_type"]),
+                reason=str(row["reason"]),
+                confidence=float(row["confidence"]),
+                source_refs=tuple(str(item) for item in json_list_from_db(row["source_refs"])),
+            )
+            for row in rows
+        )
+
+
+    async def save_surface_question_ownership(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        ownership: tuple[SurfaceQuestionOwnership, ...],
+    ) -> None:
+        if not ownership:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for item in ownership:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_question_ownership (
+                            id, run_id, document_id, question, owner_surface_key,
+                            question_kind, confidence, reason,
+                            rejected_from_surface_keys
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4, $5,
+                            $6, $7, $8,
+                            $9::jsonb
+                        )
+                        """,
+                        ensure_uuid(item.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        item.question,
+                        item.owner_surface_key,
+                        item.question_kind,
+                        item.confidence,
+                        item.reason,
+                        json.dumps(list(item.rejected_from_surface_keys), ensure_ascii=False),
+                    )
+
+    async def list_surface_ownership_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[SurfaceQuestionOwnership, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, question, owner_surface_key,
+                       question_kind, confidence, reason,
+                       rejected_from_surface_keys
+                FROM knowledge_surface_question_ownership
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            SurfaceQuestionOwnership(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                question=str(row["question"]),
+                owner_surface_key=str(row["owner_surface_key"]),
+                question_kind=str(row["question_kind"]),
+                confidence=float(row["confidence"]),
+                reason=str(row["reason"]),
+                rejected_from_surface_keys=tuple(str(i) for i in json_list_from_db(row["rejected_from_surface_keys"])),
+            )
+            for row in rows
+        )
+
+
+    async def save_surface_question_reassignments(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        reassignments: tuple[SurfaceQuestionReassignment, ...],
+    ) -> None:
+        if not reassignments:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for item in reassignments:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_question_reassignments (
+                            id, run_id, document_id, question,
+                            from_surface_key, to_surface_key, reason, confidence
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4,
+                            $5, $6, $7, $8
+                        )
+                        """,
+                        ensure_uuid(item.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        item.question,
+                        item.from_surface_key,
+                        item.to_surface_key,
+                        item.reason,
+                        item.confidence,
+                    )
+
+    async def list_surface_reassignments_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[SurfaceQuestionReassignment, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, question,
+                       from_surface_key, to_surface_key, reason, confidence
+                FROM knowledge_surface_question_reassignments
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            SurfaceQuestionReassignment(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                question=str(row["question"]),
+                from_surface_key=str(row["from_surface_key"]),
+                to_surface_key=str(row["to_surface_key"]),
+                reason=str(row["reason"]),
+                confidence=float(row["confidence"]),
+            )
+            for row in rows
+        )
+
+
+    async def save_surface_merge_decisions(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+    ) -> None:
+        if not merge_decisions:
+            return
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                for item in merge_decisions:
+                    await conn.execute(
+                        """
+                        INSERT INTO knowledge_surface_merge_decisions (
+                            id, run_id, document_id, survivor_surface_key,
+                            merged_surface_keys, keep_separate_surface_keys,
+                            decision_type, reason, confidence
+                        ) VALUES (
+                            $1::uuid, $2::uuid, $3::uuid, $4,
+                            $5::jsonb, $6::jsonb,
+                            $7, $8, $9
+                        )
+                        """,
+                        ensure_uuid(item.id),
+                        ensure_uuid(run_id),
+                        ensure_uuid(document_id),
+                        item.survivor_surface_key,
+                        json.dumps(list(item.merged_surface_keys), ensure_ascii=False),
+                        json.dumps(list(item.keep_separate_surface_keys), ensure_ascii=False),
+                        item.decision_type,
+                        item.reason,
+                        item.confidence,
+                    )
+
+    async def list_surface_merge_decisions_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceMergeDecision, ...]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, run_id, document_id, survivor_surface_key,
+                       merged_surface_keys, keep_separate_surface_keys,
+                       decision_type, reason, confidence
+                FROM knowledge_surface_merge_decisions
+                WHERE run_id = $1::uuid
+                ORDER BY created_at ASC, id ASC
+                """,
+                ensure_uuid(run_id),
+            )
+        return tuple(
+            RetrievalSurfaceMergeDecision(
+                id=str(row["id"]),
+                run_id=str(row["run_id"]),
+                document_id=str(row["document_id"]),
+                survivor_surface_key=str(row["survivor_surface_key"]),
+                merged_surface_keys=tuple(str(i) for i in json_list_from_db(row["merged_surface_keys"])),
+                keep_separate_surface_keys=tuple(str(i) for i in json_list_from_db(row["keep_separate_surface_keys"])),
+                decision_type=str(row["decision_type"]),
+                reason=str(row["reason"]),
+                confidence=float(row["confidence"]),
+            )
+            for row in rows
+        )
+
+
+    async def list_surface_relations_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[RetrievalSurfaceRelation, ...]:
+        latest = await self.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if latest is None:
+            return ()
+        return await self.list_surface_relations_for_run(run_id=latest.id)
+
+    async def list_surface_ownership_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SurfaceQuestionOwnership, ...]:
+        latest = await self.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if latest is None:
+            return ()
+        return await self.list_surface_ownership_for_run(run_id=latest.id)
+
+    async def list_surface_reassignments_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SurfaceQuestionReassignment, ...]:
+        latest = await self.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if latest is None:
+            return ()
+        return await self.list_surface_reassignments_for_run(run_id=latest.id)
+
+    async def create_surface_compiler_stage(
+        self,
+        stage: RetrievalSurfaceCompilerStage,
+    ) -> RetrievalSurfaceCompilerStage:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO knowledge_surface_compiler_stages (
+                    id, run_id, document_id, stage_kind, status, model,
+                    prompt_version, input_summary, output_summary, tokens_input,
+                    tokens_output, tokens_total, error_type, error_message,
+                    metrics, started_at, completed_at
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
+                    $7, $8, $9, $10,
+                    $11, $12, $13, $14,
+                    $15::jsonb, $16, $17
+                )
+                """,
+                ensure_uuid(stage.id),
+                ensure_uuid(stage.run_id),
+                ensure_uuid(stage.document_id),
+                stage.stage_kind,
+                stage.status,
+                stage.model,
+                stage.prompt_version,
+                stage.input_summary,
+                stage.output_summary,
+                stage.tokens_input,
+                stage.tokens_output,
+                stage.tokens_total,
+                stage.error_type,
+                stage.error_message,
+                json.dumps(stage.metrics, ensure_ascii=False),
+                stage.started_at,
+                stage.completed_at,
+            )
+        return stage
 
     async def create_compiler_batches(
         self,
