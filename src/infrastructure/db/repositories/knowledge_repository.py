@@ -1368,6 +1368,49 @@ class KnowledgeRepository:
             for row in rows
         )
 
+
+    async def list_surface_relations_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[RetrievalSurfaceRelation, ...]:
+        latest = await self.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if latest is None:
+            return ()
+        return await self.list_surface_relations_for_run(run_id=latest.id)
+
+    async def list_surface_ownership_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SurfaceQuestionOwnership, ...]:
+        latest = await self.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if latest is None:
+            return ()
+        return await self.list_surface_ownership_for_run(run_id=latest.id)
+
+    async def list_surface_reassignments_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> tuple[SurfaceQuestionReassignment, ...]:
+        latest = await self.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if latest is None:
+            return ()
+        return await self.list_surface_reassignments_for_run(run_id=latest.id)
+
     async def create_surface_compiler_stage(
         self,
         stage: RetrievalSurfaceCompilerStage,
