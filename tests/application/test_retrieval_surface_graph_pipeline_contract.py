@@ -114,7 +114,9 @@ def test_large_document_cannot_collapse_to_two_generic_surfaces() -> None:
                 _surface("generic_details", kind="standalone"),
             ),
             relations=(_relation("generic_overview", "generic_details"),),
-            ownership=(_ownership("generic_details", "Что это?", ("generic_overview",)),),
+            ownership=(
+                _ownership("generic_details", "Что это?", ("generic_overview",)),
+            ),
         )
     )
 
@@ -202,7 +204,9 @@ def test_parent_child_relation_is_not_duplicate_merge() -> None:
             relations=(_relation("knowledge_base", "pdf_upload"),),
             ownership=(
                 _ownership("knowledge_base", "что включает база знаний?"),
-                _ownership("pdf_upload", "можно ли загрузить PDF?", ("knowledge_base",)),
+                _ownership(
+                    "pdf_upload", "можно ли загрузить PDF?", ("knowledge_base",)
+                ),
             ),
         )
     )

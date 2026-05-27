@@ -334,7 +334,9 @@ def _canonical_candidates(
 ) -> dict[str, SurfaceCandidate]:
     canonical_candidates = dict(synthetic_candidates)
     absorbed_keys = {
-        key for key, canonical_key in canonical_key_by_key.items() if key != canonical_key
+        key
+        for key, canonical_key in canonical_key_by_key.items()
+        if key != canonical_key
     }
     for key, candidate in candidates_by_key.items():
         canonical_key = canonical_key_by_key[key]
@@ -349,7 +351,9 @@ def _canonical_relations(
     local_relations: Sequence[SurfaceRelation],
     canonical_key_by_key: dict[str, str],
 ) -> tuple[SurfaceRelation, ...]:
-    relations_by_identity: dict[tuple[str, str, SurfaceRelationType], SurfaceRelation] = {}
+    relations_by_identity: dict[
+        tuple[str, str, SurfaceRelationType], SurfaceRelation
+    ] = {}
     for relation in local_relations:
         parent_key = canonical_key_by_key.get(relation.parent_key, relation.parent_key)
         child_key = canonical_key_by_key.get(relation.child_key, relation.child_key)
@@ -377,7 +381,9 @@ def _canonical_question_ownership(
 ) -> tuple[QuestionOwnership, ...]:
     ownership_by_identity: dict[tuple[str, str, QuestionKind], QuestionOwnership] = {}
     for ownership in initial_questions:
-        surface_key = canonical_key_by_key.get(ownership.surface_key, ownership.surface_key)
+        surface_key = canonical_key_by_key.get(
+            ownership.surface_key, ownership.surface_key
+        )
         identity = (surface_key, ownership.question, ownership.kind)
         ownership_by_identity.setdefault(
             identity,
@@ -398,8 +404,12 @@ def _relation_indexes(
     for relation in relations:
         if relation.relation_type != "umbrella_contains":
             continue
-        parent_keys_by_child.setdefault(relation.child_key, set()).add(relation.parent_key)
-        child_keys_by_parent.setdefault(relation.parent_key, set()).add(relation.child_key)
+        parent_keys_by_child.setdefault(relation.child_key, set()).add(
+            relation.parent_key
+        )
+        child_keys_by_parent.setdefault(relation.parent_key, set()).add(
+            relation.child_key
+        )
     return parent_keys_by_child, child_keys_by_parent
 
 
@@ -444,7 +454,9 @@ def _surface_answer(*, candidate: SurfaceCandidate, child_keys: tuple[str, ...])
         return candidate.answer
     if candidate.kind == "umbrella" and child_keys:
         children = "; ".join(_display_key(child_key) for child_key in child_keys)
-        return f"{candidate.title}: обзорная карточка. Дочерние поверхности: {children}."
+        return (
+            f"{candidate.title}: обзорная карточка. Дочерние поверхности: {children}."
+        )
     return candidate.answer_scope
 
 

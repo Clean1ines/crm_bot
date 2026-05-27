@@ -20,7 +20,9 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceRelation,
     RetrievalSurfaceSourceUnit,
 )
-from src.infrastructure.llm.knowledge_surface_compiler import GroqKnowledgeSurfaceCompiler
+from src.infrastructure.llm.knowledge_surface_compiler import (
+    GroqKnowledgeSurfaceCompiler,
+)
 
 SURFACE_KEY_PATTERN = re.compile(r"[^0-9A-Za-z_]+")
 

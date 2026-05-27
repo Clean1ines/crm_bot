@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import cast
@@ -17,6 +16,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceAnswerDraft,
     SurfaceDiscoveryResult,
     SurfaceKind,
+    SurfaceQuestionKind,
     SurfaceQuestionOwnershipDecision,
     SurfaceQuestionOwnershipResult,
     SurfaceRejectedQuestion,
@@ -102,7 +102,9 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         )
         candidates = tuple(
             self._candidate(item, source_unit=source_unit, run_id=run_id, index=index)
-            for index, item in enumerate(_objects(data.get("surface_candidates"), "surface_candidates"))
+            for index, item in enumerate(
+                _objects(data.get("surface_candidates"), "surface_candidates")
+            )
         )
         return SurfaceDiscoveryResult(
             surface_candidates=candidates,
@@ -129,7 +131,9 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             },
         )
         relations = tuple(
-            self._relation(item, source_unit=source_unit, run_id=run_id, keys=keys, index=index)
+            self._relation(
+                item, source_unit=source_unit, run_id=run_id, keys=keys, index=index
+            )
             for index, item in enumerate(_objects(data.get("relations"), "relations"))
         )
         return LocalRelationPlanningResult(
@@ -161,20 +165,27 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         )
         payload = data.get("surface_answer")
         if not isinstance(payload, Mapping):
-            raise KnowledgePreprocessingValidationError("surface_answer must be an object")
+            raise KnowledgePreprocessingValidationError(
+                "surface_answer must be an object"
+            )
         return SurfaceAnswerDraft(
             id=_stable_uuid(run_id, "answer", candidate.local_surface_key),
             run_id=run_id,
             document_id=source_unit.document_id,
             candidate_key=candidate.local_surface_key,
             title=_compact_text(payload.get("title")) or candidate.provisional_title,
-            canonical_question=_compact_text(payload.get("canonical_question")) or candidate.provisional_title,
+            canonical_question=_compact_text(payload.get("canonical_question"))
+            or candidate.provisional_title,
             short_answer=_compact_text(payload.get("short_answer")),
             answer=_compact_text(payload.get("answer")),
-            answer_scope=_compact_text(payload.get("answer_scope")) or candidate.answer_scope,
-            question_scope=_compact_text(payload.get("question_scope")) or candidate.question_scope,
-            exclusion_scope=_compact_text(payload.get("exclusion_scope")) or candidate.exclusion_scope,
-            source_refs=_text_tuple(payload.get("source_refs")) or candidate.source_refs,
+            answer_scope=_compact_text(payload.get("answer_scope"))
+            or candidate.answer_scope,
+            question_scope=_compact_text(payload.get("question_scope"))
+            or candidate.question_scope,
+            exclusion_scope=_compact_text(payload.get("exclusion_scope"))
+            or candidate.exclusion_scope,
+            source_refs=_text_tuple(payload.get("source_refs"))
+            or candidate.source_refs,
             warnings=_text_tuple(payload.get("warnings")),
             metadata=_json_object(payload.get("metadata")),
         )
@@ -210,19 +221,27 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
                 surface_key=candidate.local_surface_key,
                 question=_compact_text(item.get("question")),
                 question_kind=cast(
-                    str,
-                    _enum_text(item.get("question_kind"), allowed=QUESTION_KINDS, default="generated_variant"),
+                    SurfaceQuestionKind,
+                    _enum_text(
+                        item.get("question_kind"),
+                        allowed=QUESTION_KINDS,
+                        default="generated_variant",
+                    ),
                 ),
                 ownership_confidence=_confidence(item.get("confidence"), default=0.75),
                 source=_compact_text(item.get("source")) or "generated",
                 status="owned",
             )
-            for index, item in enumerate(_objects(data.get("owned_questions"), "owned_questions"))
+            for index, item in enumerate(
+                _objects(data.get("owned_questions"), "owned_questions")
+            )
         )
         rejected = tuple(
             SurfaceRejectedQuestion(
                 question=_compact_text(item.get("question")),
-                belongs_to_surface_key=_compact_text(item.get("belongs_to_surface_key")),
+                belongs_to_surface_key=_compact_text(
+                    item.get("belongs_to_surface_key")
+                ),
                 reason=_compact_text(item.get("reason")),
                 confidence=_confidence(item.get("confidence"), default=0.75),
             )
@@ -235,14 +254,20 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             metrics=_json_object(data.get("metrics")),
         )
 
-    async def _stage(self, stage: str, payload: Mapping[str, object]) -> Mapping[str, object]:
+    async def _stage(
+        self, stage: str, payload: Mapping[str, object]
+    ) -> Mapping[str, object]:
         prompt = (PROMPTS_DIR / PROMPTS[stage]).read_text(encoding="utf-8")
-        full_prompt = f"{prompt}\n\nINPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
+        full_prompt = (
+            f"{prompt}\n\nINPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
+        )
         _, content = await self._request_json(prompt=full_prompt, max_tokens=3000)
         parsed = _loads_json_object(content)
         if not isinstance(parsed, Mapping):
-            raise KnowledgePreprocessingValidationError("stage response must be a JSON object")
-        return cast(Mapping[str, object], parsed)
+            raise KnowledgePreprocessingValidationError(
+                "stage response must be a JSON object"
+            )
+        return parsed
 
     def _candidate(
         self,
@@ -262,7 +287,9 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             provisional_title=_compact_text(payload.get("provisional_title")) or key,
             surface_kind=cast(
                 SurfaceKind,
-                _enum_text(payload.get("surface_kind"), allowed=SURFACE_KINDS, default="other"),
+                _enum_text(
+                    payload.get("surface_kind"), allowed=SURFACE_KINDS, default="other"
+                ),
             ),
             answer_scope=_compact_text(payload.get("answer_scope")),
             question_scope=_compact_text(payload.get("question_scope")),
@@ -270,7 +297,8 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             parent_candidate_keys=_text_tuple(payload.get("parent_candidate_keys")),
             child_candidate_keys=_text_tuple(payload.get("child_candidate_keys")),
             sibling_candidate_keys=_text_tuple(payload.get("sibling_candidate_keys")),
-            source_refs=_text_tuple(payload.get("source_refs")) or source_unit.source_refs,
+            source_refs=_text_tuple(payload.get("source_refs"))
+            or source_unit.source_refs,
             confidence=_confidence(payload.get("confidence"), default=0.75),
             metadata=_json_object(payload.get("metadata")),
         )
@@ -287,7 +315,9 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         source_key = _compact_text(payload.get("source_surface_key"))
         target_key = _compact_text(payload.get("target_surface_key"))
         if source_key not in keys or target_key not in keys:
-            raise KnowledgePreprocessingValidationError("local relation references unknown surface")
+            raise KnowledgePreprocessingValidationError(
+                "local relation references unknown surface"
+            )
         return LocalSurfaceRelation(
             id=_stable_uuid(run_id, "relation", source_unit.id, index),
             run_id=run_id,
@@ -297,7 +327,11 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             target_surface_key=target_key,
             relation_type=cast(
                 SurfaceRelationType,
-                _enum_text(payload.get("relation_type"), allowed=RELATION_TYPES, default="unrelated"),
+                _enum_text(
+                    payload.get("relation_type"),
+                    allowed=RELATION_TYPES,
+                    default="unrelated",
+                ),
             ),
             confidence=_confidence(payload.get("confidence"), default=0.7),
             reason=_compact_text(payload.get("reason")),
@@ -313,6 +347,8 @@ def _objects(value: object, name: str) -> tuple[Mapping[str, object], ...]:
     result: list[Mapping[str, object]] = []
     for index, item in enumerate(value):
         if not isinstance(item, Mapping):
-            raise KnowledgePreprocessingValidationError(f"{name}[{index}] must be an object")
+            raise KnowledgePreprocessingValidationError(
+                f"{name}[{index}] must be an object"
+            )
         result.append(cast(Mapping[str, object], item))
     return tuple(result)

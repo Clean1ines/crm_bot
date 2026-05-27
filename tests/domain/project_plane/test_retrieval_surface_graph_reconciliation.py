@@ -8,7 +8,9 @@ from src.domain.project_plane.retrieval_surface_graph import (
 )
 
 
-def test_surface_graph_handles_late_parent_merge_and_non_overlapping_question_ownership() -> None:
+def test_surface_graph_handles_late_parent_merge_and_non_overlapping_question_ownership() -> (
+    None
+):
     candidates = [
         SurfaceCandidate(
             key="surface_1",

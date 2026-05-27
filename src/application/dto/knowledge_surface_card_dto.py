@@ -219,18 +219,14 @@ def _is_parent_relation(
     )
 
 
-def _is_child_relation(
-    *, relation: RetrievalSurfaceRelation, surface_key: str
-) -> bool:
+def _is_child_relation(*, relation: RetrievalSurfaceRelation, surface_key: str) -> bool:
     return (
         relation.parent_surface_key == surface_key
         and relation.relation_type == "umbrella_contains"
     )
 
 
-def _other_surface_key(
-    *, relation: RetrievalSurfaceRelation, surface_key: str
-) -> str:
+def _other_surface_key(*, relation: RetrievalSurfaceRelation, surface_key: str) -> str:
     if relation.parent_surface_key == surface_key:
         return relation.child_surface_key
     return relation.parent_surface_key

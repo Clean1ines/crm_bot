@@ -15,7 +15,10 @@ def test_faq_queue_uses_quality_gated_surface_compiler() -> None:
 
     assert "KnowledgeFaqSurfaceIngestionService" in faq_branch
     assert "GroqQualityGatedKnowledgeSurfaceCompiler" in faq_branch
-    assert "surface_compiler_factory=GroqQualityGatedKnowledgeSurfaceCompiler" in faq_branch
+    assert (
+        "surface_compiler_factory=GroqQualityGatedKnowledgeSurfaceCompiler"
+        in faq_branch
+    )
     assert "surface_compiler_factory=GroqKnowledgeSurfaceCompiler" not in faq_branch
     assert "GroqKnowledgePreprocessor" not in faq_branch
 
