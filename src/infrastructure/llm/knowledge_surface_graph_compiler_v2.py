@@ -38,7 +38,7 @@ from src.infrastructure.llm.knowledge_surface_compiler import (
     _text_tuple,
 )
 
-GRAPH_PROMPT_VERSION = "faq_retrieval_surface_graph_v1"
+GRAPH_PROMPT_VERSION = "faq_retrieval_surface_graph_v2"
 PROMPTS = {
     "discover": "faq_surface_local_discovery.ru.txt",
     "relations": "faq_surface_local_relations.ru.txt",

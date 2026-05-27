@@ -46,8 +46,8 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceCompilerRunStatus,
     SurfaceSourceChildLabelKind,
 )
-from src.infrastructure.llm.knowledge_surface_compiler import (
-    FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
+    GRAPH_PROMPT_VERSION,
 )
 
 
@@ -361,7 +361,7 @@ def _stage(
         stage_kind=stage_kind,
         status=status,
         model=model,
-        prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+        prompt_version=GRAPH_PROMPT_VERSION,
         input_summary=input_summary,
         output_summary=output_summary,
         error_type=error_type,
@@ -386,7 +386,7 @@ def _success_stage_metrics(
         "relation_count": relation_count,
         "ownership_count": ownership_count,
         "merge_decision_count": merge_decision_count,
-        "prompt_version": FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+        "prompt_version": GRAPH_PROMPT_VERSION,
     }
 
 
@@ -477,7 +477,7 @@ class KnowledgeFaqSurfaceIngestionService:
                 status="running",
                 compiler_kind="faq_retrieval_surface_compiler",
                 model=compiler.model_name,
-                prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+                prompt_version=GRAPH_PROMPT_VERSION,
                 started_at=started_at,
                 metrics={
                     "source_unit_count": len(source_units),
@@ -514,7 +514,7 @@ class KnowledgeFaqSurfaceIngestionService:
             mode=FAQ_MODE,
             status=PREPROCESSING_STATUS_PROCESSING,
             model=compiler.model_name,
-            prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+            prompt_version=GRAPH_PROMPT_VERSION,
             metrics={
                 "stage": "faq_retrieval_surface_compilation",
                 "status_message": "Компилируем FAQ в поисковые поверхности",
@@ -522,6 +522,8 @@ class KnowledgeFaqSurfaceIngestionService:
                 "bootstrap_forbidden": True,
             },
         )
+
+        persisted_surface_ids: set[str] = set()
 
         async def record_surface_progress(event: Mapping[str, object]) -> None:
             stage_kind = (
@@ -553,12 +555,40 @@ class KnowledgeFaqSurfaceIngestionService:
                     metrics=metrics,
                 )
             )
+            raw_partial_surfaces = event.get("partial_surfaces")
+            if isinstance(raw_partial_surfaces, (list, tuple)):
+                partial_surfaces = tuple(
+                    item
+                    for item in raw_partial_surfaces
+                    if isinstance(item, RetrievalSurfaceDraft)
+                )
+            else:
+                partial_surfaces = ()
+            new_partial_surfaces = tuple(
+                surface
+                for surface in partial_surfaces
+                if surface.id not in persisted_surface_ids
+            )
+            if new_partial_surfaces:
+                await repo.save_surfaces(
+                    run_id=run_id,
+                    document_id=document_id,
+                    surfaces=new_partial_surfaces,
+                )
+                persisted_surface_ids.update(
+                    surface.id for surface in new_partial_surfaces
+                )
+                metrics = {
+                    **metrics,
+                    "partial_surface_count": len(new_partial_surfaces),
+                    "persisted_surface_count": len(persisted_surface_ids),
+                }
             await repo.update_document_preprocessing_status(
                 document_id,
                 mode=FAQ_MODE,
                 status=PREPROCESSING_STATUS_PROCESSING,
                 model=compiler.model_name,
-                prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+                prompt_version=GRAPH_PROMPT_VERSION,
                 metrics={
                     **metrics,
                     "stage": stage_kind,
@@ -579,10 +609,15 @@ class KnowledgeFaqSurfaceIngestionService:
                 run_id=run_id,
             )
             graph = result.graph
+            final_surfaces_to_save = tuple(
+                surface
+                for surface in graph.surfaces
+                if surface.id not in persisted_surface_ids
+            )
             await repo.save_surfaces(
                 run_id=run_id,
                 document_id=document_id,
-                surfaces=graph.surfaces,
+                surfaces=final_surfaces_to_save,
             )
             await repo.save_surface_relations(
                 run_id=run_id,
@@ -631,7 +666,7 @@ class KnowledgeFaqSurfaceIngestionService:
                 status=PREPROCESSING_STATUS_FAILED,
                 error=error_message,
                 model=compiler.model_name,
-                prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+                prompt_version=GRAPH_PROMPT_VERSION,
                 metrics={
                     "stage": "faq_retrieval_surface_compilation_failed",
                     "status_message": "FAQ surface compiler failed; bootstrap fallback is disabled",
