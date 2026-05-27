@@ -8,6 +8,7 @@ from dataclasses import replace
 from src.application.services.knowledge_surface_graph_quality import (
     validate_faq_surface_graph_quality,
 )
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
@@ -62,9 +63,11 @@ class GroqSplitKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceCompiler):
                 "FAQ surface graph quality failed: " + ", ".join(quality.issues)
             )
 
-        metrics = {**result.metrics, **quality.metrics}
+        metrics = _json_object({**result.metrics, **quality.metrics})
         if quality.warnings:
-            metrics["quality_warnings"] = list(quality.warnings)
+            metrics["quality_warnings"] = [
+                json_value_from_unknown(warning) for warning in quality.warnings
+            ]
         return RetrievalSurfaceCompilationResult(
             mode=result.mode,
             prompt_version=result.prompt_version,
@@ -106,16 +109,18 @@ def _merge_parts(
         document_id=document_id,
         surfaces=tuple(surfaces),
     )
-    metrics = {
-        "source_unit_split_compilation": True,
-        "source_unit_count": len(units),
-        "source_unit_compilation_count": len(parts),
-        "surface_count": len(surfaces),
-        "relation_count": len(relations),
-        "ownership_count": 0,
-        "reassignment_count": 0,
-        "merge_decision_count": 0,
-    }
+    metrics = _json_object(
+        {
+            "source_unit_split_compilation": True,
+            "source_unit_count": len(units),
+            "source_unit_compilation_count": len(parts),
+            "surface_count": len(surfaces),
+            "relation_count": len(relations),
+            "ownership_count": 0,
+            "reassignment_count": 0,
+            "merge_decision_count": 0,
+        }
+    )
     graph = RetrievalSurfaceGraph(
         run_id=run_id,
         document_id=document_id,
@@ -164,3 +169,7 @@ def _key(unit_index: int, value: str) -> str:
 
 def _id(*parts: object) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, ":".join(str(part) for part in parts)))
+
+
+def _json_object(payload: dict[str, object]) -> JsonObject:
+    return {str(key): json_value_from_unknown(value) for key, value in payload.items()}
