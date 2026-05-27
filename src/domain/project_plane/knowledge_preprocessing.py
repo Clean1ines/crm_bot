@@ -12,17 +12,13 @@ from src.domain.project_plane.knowledge_semantic_markers import (
     BROAD_NOISY_PRICE_SYNONYMS,
 )
 
-KnowledgePreprocessingMode: TypeAlias = Literal[
-    "plain", "faq", "price_list", "instruction"
-]
+KnowledgePreprocessingMode: TypeAlias = Literal["faq", "price_list"]
 
-MODE_PLAIN = "plain"
-MODE_FAQ = "faq"
-MODE_PRICE_LIST = "price_list"
-MODE_INSTRUCTION = "instruction"
+MODE_FAQ: KnowledgePreprocessingMode = "faq"
+MODE_PRICE_LIST: KnowledgePreprocessingMode = "price_list"
 
 ALLOWED_KNOWLEDGE_PREPROCESSING_MODES: frozenset[str] = frozenset(
-    {MODE_PLAIN, MODE_FAQ, MODE_PRICE_LIST, MODE_INSTRUCTION}
+    {MODE_FAQ, MODE_PRICE_LIST}
 )
 
 PREPROCESSING_STATUS_NOT_REQUESTED = "not_requested"
@@ -32,7 +28,6 @@ PREPROCESSING_STATUS_FAILED = "failed"
 
 PROMPT_VERSION_FAQ = "knowledge_answer_compiler_faq_v1"
 PROMPT_VERSION_PRICE_LIST = "knowledge_preprocess_price_list_v2"
-PROMPT_VERSION_INSTRUCTION = "knowledge_preprocess_instruction_v2"
 ANSWER_RESOLUTION_PROMPT_VERSION = "knowledge_answer_resolution_v1"
 
 AnswerResolutionDecisionAction: TypeAlias = Literal["merge", "keep_separate"]
@@ -188,13 +183,13 @@ def entry_kind_for_preprocessing_mode(
         return KnowledgeEntryKind.FAQ_ANSWER
     if mode == MODE_PRICE_LIST:
         return KnowledgeEntryKind.PRICE_ANSWER
-    if mode == MODE_INSTRUCTION:
-        return KnowledgeEntryKind.PROCEDURE
-    return KnowledgeEntryKind.ANSWER
+    raise KnowledgePreprocessingValidationError(
+        f"Unsupported knowledge preprocessing mode: {mode}"
+    )
 
 
 def normalize_preprocessing_mode(value: object) -> KnowledgePreprocessingMode:
-    mode = str(value or MODE_PLAIN).strip().lower()
+    mode = str(value or MODE_FAQ).strip().lower()
     if mode not in ALLOWED_KNOWLEDGE_PREPROCESSING_MODES:
         allowed = ", ".join(sorted(ALLOWED_KNOWLEDGE_PREPROCESSING_MODES))
         raise KnowledgePreprocessingValidationError(
@@ -208,9 +203,9 @@ def prompt_version_for_mode(mode: KnowledgePreprocessingMode) -> str:
         return PROMPT_VERSION_FAQ
     if mode == MODE_PRICE_LIST:
         return PROMPT_VERSION_PRICE_LIST
-    if mode == MODE_INSTRUCTION:
-        return PROMPT_VERSION_INSTRUCTION
-    return "plain"
+    raise KnowledgePreprocessingValidationError(
+        f"Unsupported knowledge preprocessing mode: {mode}"
+    )
 
 
 def parse_preprocessing_payload(

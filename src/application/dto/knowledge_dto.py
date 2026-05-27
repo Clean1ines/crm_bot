@@ -128,7 +128,7 @@ class KnowledgeUploadJobPayloadDto:
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeUploadRequestDto:
-    preprocessing_mode: str = "plain"
+    preprocessing_mode: str = "faq"
 
     def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
         return normalize_preprocessing_mode(self.preprocessing_mode)

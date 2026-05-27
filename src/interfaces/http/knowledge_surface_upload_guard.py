@@ -25,7 +25,7 @@ from src.interfaces.http.knowledge_surface import (
 async def upload_knowledge_surface_read_guard(
     project_id: str,
     file: UploadFile = File(...),
-    preprocessing_mode: str = Form(default="plain"),
+    preprocessing_mode: str = Form(default="faq"),
     authorization: str | None = Header(default=None),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: KnowledgeProjectAccessPort = Depends(get_project_repo),

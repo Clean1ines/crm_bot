@@ -126,12 +126,6 @@ def make_knowledge_preprocessing_mode_keyboard(project_id: str) -> InlineKeyboar
         [
             [
                 InlineKeyboardButton(
-                    "Без предобработки",
-                    callback_data=f"knowledge_mode:{project_id}:plain",
-                )
-            ],
-            [
-                InlineKeyboardButton(
                     "FAQ / вопросы-ответы",
                     callback_data=f"knowledge_mode:{project_id}:faq",
                 )
@@ -140,12 +134,6 @@ def make_knowledge_preprocessing_mode_keyboard(project_id: str) -> InlineKeyboar
                 InlineKeyboardButton(
                     "Прайс / каталог",
                     callback_data=f"knowledge_mode:{project_id}:price_list",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "Инструкция / регламент",
-                    callback_data=f"knowledge_mode:{project_id}:instruction",
                 )
             ],
             [InlineKeyboardButton("Назад", callback_data=f"project:{project_id}")],

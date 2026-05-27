@@ -357,8 +357,8 @@ async def _handle_knowledge_callback(
     await clear_admin_state(chat_id)
     return (
         "Выберите режим обработки файла для базы знаний.\n\n"
-        "Без предобработки — быстрее, но хуже для сложных документов.\n"
-        "FAQ, прайс и инструкция — LLM-нормализация перед индексацией.",
+        "FAQ — новый Retrieval Surface Compilation pipeline.\n"
+        "Прайс — коммерческий price_list pipeline.",
         make_knowledge_preprocessing_mode_keyboard(project_id),
     )
 
@@ -369,7 +369,7 @@ def _parse_knowledge_mode_callback(callback_data: str) -> tuple[str, str] | None
         return None
 
     _, project_id, preprocessing_mode = parts
-    if preprocessing_mode not in {"plain", "faq", "price_list", "instruction"}:
+    if preprocessing_mode not in {"faq", "price_list"}:
         return None
 
     return project_id, preprocessing_mode

@@ -707,7 +707,7 @@ async def cancel_knowledge_processing(
 async def upload_knowledge(
     project_id: str,
     file: UploadFile = File(...),
-    preprocessing_mode: str = Form(default="plain"),
+    preprocessing_mode: str = Form(default="faq"),
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
@@ -719,10 +719,8 @@ async def upload_knowledge(
     генерирует эмбеддинги и сохраняет в базу знаний проекта.
 
     preprocessing_mode:
-    - plain: legacy chunk persistence, no LLM preprocessing
-    - faq: FAQ normalization
+    - faq: FAQ Retrieval Surface Compilation
     - price_list: price/menu/catalog normalization
-    - instruction: policy/procedure normalization
     """
     service = KnowledgeService(
         project_repo,

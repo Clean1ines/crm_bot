@@ -2,7 +2,9 @@ from pathlib import Path
 
 
 def test_surface_publish_endpoint_has_required_publication_flow() -> None:
-    source = Path("src/interfaces/http/knowledge_surface.py").read_text(encoding="utf-8")
+    source = Path("src/interfaces/http/knowledge_surface.py").read_text(
+        encoding="utf-8"
+    )
 
     assert 'detail="Surface not found"' in source
     assert 'detail="Surface does not belong to document"' in source

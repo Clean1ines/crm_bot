@@ -51,7 +51,7 @@ from src.infrastructure.llm.knowledge_surface_compiler import (
 )
 
 
-FAQ_MODE = cast(KnowledgePreprocessingMode, MODE_FAQ)
+FAQ_MODE: KnowledgePreprocessingMode = MODE_FAQ
 
 
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):

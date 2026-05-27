@@ -258,3 +258,58 @@ def test_frontend_surface_api_exists_and_is_rendered() -> None:
         assert needle in api_source
     assert "SurfaceCompilationSummary" in card_source
     assert "enabled={doc.preprocessing_mode === 'faq'}" in card_source
+
+
+def test_surface_compiler_parses_explicit_question_reassignments() -> None:
+    result = parse_surface_compilation_payload(
+        {
+            "surfaces": [
+                {
+                    "local_surface_key": "product_overview",
+                    "source_unit_key": "product",
+                    "title": "Что это за продукт",
+                    "canonical_question": "Что делает продукт?",
+                    "surface_kind": "umbrella",
+                    "answer": "Продукт компилирует FAQ в поисковые поверхности.",
+                },
+                {
+                    "local_surface_key": "pricing",
+                    "source_unit_key": "product",
+                    "title": "Стоимость",
+                    "canonical_question": "Сколько стоит продукт?",
+                    "surface_kind": "specific",
+                    "answer": "Стоимость относится к отдельной коммерческой поверхности.",
+                },
+            ],
+            "relations": [],
+            "question_ownership": [
+                {
+                    "question": "Сколько стоит продукт?",
+                    "owner_surface_key": "pricing",
+                    "rejected_from_surface_keys": ["product_overview"],
+                }
+            ],
+            "question_reassignments": [
+                {
+                    "question": "Сколько стоит продукт?",
+                    "from_surface_key": "product_overview",
+                    "to_surface_key": "pricing",
+                    "reason": "Pricing question must not be owned by product overview.",
+                    "confidence": 0.92,
+                }
+            ],
+            "merge_decisions": [],
+        },
+        mode=MODE_FAQ,
+        model="test-model",
+        run_id="run-1",
+        document_id="doc-1",
+        source_units=(_source_unit(),),
+    )
+
+    assert len(result.graph.reassignments) == 1
+    reassignment = result.graph.reassignments[0]
+    assert reassignment.question == "Сколько стоит продукт?"
+    assert reassignment.from_surface_key == "product_overview"
+    assert reassignment.to_surface_key == "pricing"
+    assert result.metrics["reassignment_count"] == 1

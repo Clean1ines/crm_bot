@@ -35,6 +35,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfacePublicationStatus,
     SurfaceQuestionKind,
     SurfaceQuestionOwnership,
+    SurfaceQuestionReassignment,
     SurfaceRelationType,
     SurfaceStatus,
 )
@@ -496,6 +497,59 @@ def _parse_ownership(
     return tuple(ownership)
 
 
+def _parse_reassignments(
+    payloads: Sequence[Mapping[str, object]],
+    *,
+    run_id: str,
+    document_id: str,
+    surface_keys: frozenset[str],
+) -> tuple[SurfaceQuestionReassignment, ...]:
+    reassignments: list[SurfaceQuestionReassignment] = []
+    seen: set[tuple[str, str, str]] = set()
+    for index, item in enumerate(payloads):
+        question = _compact_text(item.get("question"))
+        from_key = _compact_text(
+            item.get("from_surface_key")
+            or item.get("previous_owner_surface_key")
+            or item.get("source_surface_key")
+        )
+        to_key = _compact_text(
+            item.get("to_surface_key")
+            or item.get("owner_surface_key")
+            or item.get("target_surface_key")
+        )
+        if not question or not from_key or not to_key or from_key == to_key:
+            continue
+        if from_key not in surface_keys or to_key not in surface_keys:
+            raise KnowledgePreprocessingValidationError(
+                f"FAQ question reassignment {index} references unknown surface"
+            )
+        key = (_fingerprint(question), from_key, to_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        reassignments.append(
+            SurfaceQuestionReassignment(
+                id=_stable_uuid(
+                    run_id,
+                    "question_reassignment",
+                    index,
+                    from_key,
+                    to_key,
+                    question,
+                ),
+                run_id=run_id,
+                document_id=document_id,
+                question=question,
+                from_surface_key=from_key,
+                to_surface_key=to_key,
+                reason=_limited_text(item.get("reason"), max_chars=1000),
+                confidence=_confidence(item.get("confidence"), default=0.75),
+            )
+        )
+    return tuple(reassignments)
+
+
 def _parse_merge_decisions(
     payloads: Sequence[Mapping[str, object]],
     *,
@@ -595,6 +649,15 @@ def parse_surface_compilation_payload(
         document_id=document_id,
         surface_keys=surface_keys,
     )
+    reassignments = _parse_reassignments(
+        _mapping_items(
+            parsed.get("question_reassignments", []),
+            field_name="question_reassignments",
+        ),
+        run_id=run_id,
+        document_id=document_id,
+        surface_keys=surface_keys,
+    )
     merge_decisions = _parse_merge_decisions(
         _mapping_items(parsed.get("merge_decisions", []), field_name="merge_decisions"),
         run_id=run_id,
@@ -608,6 +671,7 @@ def parse_surface_compilation_payload(
             "surface_count": len(surfaces),
             "relation_count": len(relations),
             "ownership_count": len(ownership),
+            "reassignment_count": len(reassignments),
             "merge_decision_count": len(merge_decisions),
             "source_unit_count": len(source_units),
             "bootstrap_forbidden": True,
@@ -621,7 +685,7 @@ def parse_surface_compilation_payload(
         surfaces=surfaces,
         relations=relations,
         ownership=ownership,
-        reassignments=(),
+        reassignments=reassignments,
         merge_decisions=merge_decisions,
         metrics=metrics,
     )
