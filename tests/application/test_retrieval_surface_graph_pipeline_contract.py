@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from src.application.services.knowledge_surface_graph_quality import (
     validate_faq_surface_graph_quality,
 )
@@ -9,6 +11,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceGraph,
     RetrievalSurfaceRelation,
     RetrievalSurfaceSourceUnit,
+    SurfaceKind,
     SurfaceQuestionOwnership,
 )
 
@@ -30,7 +33,9 @@ def _source_unit(index: int) -> RetrievalSurfaceSourceUnit:
     )
 
 
-def _surface(key: str, *, kind: str = "specific", answer: str = "Answer") -> RetrievalSurfaceDraft:
+def _surface(
+    key: str, *, kind: str = "specific", answer: str = "Answer"
+) -> RetrievalSurfaceDraft:
     return RetrievalSurfaceDraft(
         id=f"surface-{key}",
         run_id="run-1",
@@ -38,7 +43,7 @@ def _surface(key: str, *, kind: str = "specific", answer: str = "Answer") -> Ret
         local_surface_key=key,
         title=key,
         canonical_question=f"What is {key}?",
-        surface_kind=kind,  # type: ignore[arg-type]
+        surface_kind=cast(SurfaceKind, kind),
         answer_scope=f"Answer scope for {key}",
         question_scope=f"Question scope for {key}",
         exclusion_scope=f"Exclusion scope for {key}",
@@ -65,7 +70,9 @@ def _relation(parent: str, child: str) -> RetrievalSurfaceRelation:
     )
 
 
-def _ownership(owner: str, question: str, rejected_from: tuple[str, ...] = ()) -> SurfaceQuestionOwnership:
+def _ownership(
+    owner: str, question: str, rejected_from: tuple[str, ...] = ()
+) -> SurfaceQuestionOwnership:
     return SurfaceQuestionOwnership(
         id=f"ownership-{owner}-{question}",
         run_id="run-1",
@@ -202,4 +209,3 @@ def test_parent_child_relation_is_not_duplicate_merge() -> None:
 
     assert result.passed
     assert not result.issues
-}
