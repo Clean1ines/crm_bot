@@ -412,7 +412,7 @@ def _parse_entry(
     source_excerpt = _required_text(payload, "source_excerpt", index=index)
 
     questions = _dedupe_texts((canonical_question, *variants))
-    synonyms = _dedupe_texts(payload.get("synonyms") or ())
+    synonyms = _dedupe_texts(_string_list(payload.get("synonyms")))
     tags: tuple[str, ...] = ()
     source_chunk_indexes = tuple(
         _non_negative_ints(payload.get("source_chunk_indexes"))

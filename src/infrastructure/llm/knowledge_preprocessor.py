@@ -428,7 +428,11 @@ def _structured_child_payload(value: object, *, max_chars: int) -> JsonObject:
 
 def _source_payload_index(chunk: JsonObject, *, fallback: int) -> int:
     raw_index = chunk.get("index")
-    if isinstance(raw_index, int) and not isinstance(raw_index, bool) and raw_index >= 0:
+    if (
+        isinstance(raw_index, int)
+        and not isinstance(raw_index, bool)
+        and raw_index >= 0
+    ):
         return raw_index
     return fallback
 
@@ -440,9 +444,13 @@ def _structured_source_chunk_payload(
     max_content_chars: int,
 ) -> JsonObject:
     is_markdown_semantic = bool(chunk.get("section_body") or chunk.get("children"))
-    section_max_chars = max_content_chars if not is_markdown_semantic else max(
-        max_content_chars,
-        12000,
+    section_max_chars = (
+        max_content_chars
+        if not is_markdown_semantic
+        else max(
+            max_content_chars,
+            12000,
+        )
     )
     payload: JsonObject = {
         "index": index,

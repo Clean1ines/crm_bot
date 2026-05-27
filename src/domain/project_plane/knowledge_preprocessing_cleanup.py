@@ -157,7 +157,9 @@ def prune_broad_card_questions(
             result[narrow_index] = _entry_with_rebuilt_embedding(
                 replace(
                     narrow_entry,
-                    questions=_merge_text_tuple_values(narrow_entry.questions, (question,)),
+                    questions=_merge_text_tuple_values(
+                        narrow_entry.questions, (question,)
+                    ),
                 )
             )
             moved_question_count += 1
@@ -209,7 +211,10 @@ def dedupe_source_excerpts(excerpts: Sequence[str]) -> tuple[str, ...]:
 def _is_short_answer_service_card(entry: KnowledgePreprocessingEntry) -> bool:
     title = _service_label_fingerprint(entry.title)
     canonical = _service_label_fingerprint(entry.canonical_question)
-    if title in _SHORT_ANSWER_SERVICE_LABELS or canonical in _SHORT_ANSWER_SERVICE_LABELS:
+    if (
+        title in _SHORT_ANSWER_SERVICE_LABELS
+        or canonical in _SHORT_ANSWER_SERVICE_LABELS
+    ):
         return True
     excerpt = _compact_text(entry.source_excerpt).lower()
     return excerpt.startswith("короткий ответ клиенту:") or excerpt.startswith(
@@ -366,7 +371,9 @@ def _direct_question_score(
     score = _token_similarity(question, candidate_text)
     if title_key and (title_key in question_key or question_key in title_key):
         score = max(score, 0.82)
-    if canonical_key and (canonical_key in question_key or question_key in canonical_key):
+    if canonical_key and (
+        canonical_key in question_key or question_key in canonical_key
+    ):
         score = max(score, 0.74)
     if _token_overlap_coverage(question, candidate.title) >= 0.5:
         score = max(score, 0.48)
@@ -403,7 +410,7 @@ def _expanded_tokens(value: str) -> tuple[str, ...]:
     for token in _tokens(value):
         if token not in expanded:
             expanded.append(token)
-        for alias in _QUESTION_TOKEN_ALIASES.get(token, ()): 
+        for alias in _QUESTION_TOKEN_ALIASES.get(token, ()):
             if alias not in expanded:
                 expanded.append(alias)
     return tuple(expanded)

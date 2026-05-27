@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import SupportsInt
 
 
 def _optional_str(value: object) -> str | None:
@@ -7,8 +6,19 @@ def _optional_str(value: object) -> str | None:
 
 
 def _optional_int(value: object) -> int | None:
-    if value is None:
+    if value is None or isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str | bytes | bytearray):
+        text = value.strip() if isinstance(value, str) else value
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
+    return None
 
 
 def _profile_login_from_metadata(metadata: object) -> str | None:
@@ -19,14 +29,6 @@ def _profile_login_from_metadata(metadata: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-
-    if not isinstance(value, str | bytes | bytearray | SupportsInt):
-        return None
-
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 @dataclass(slots=True)

@@ -119,9 +119,10 @@ def test_prune_broad_questions_moves_specific_questions_to_narrow_cards() -> Non
     assert "для чего нужна AI-база знаний?" in by_title["Что это за продукт"].questions
     assert "что такое компиляция знаний?" in by_title["Компиляция знаний"].questions
     assert "можно ли загрузить PDF?" in by_title["Работа с PDF"].questions
-    assert "как удалить плохой фрагмент?" in by_title[
-        "Скрытие, отклонение и архивирование"
-    ].questions
+    assert (
+        "как удалить плохой фрагмент?"
+        in by_title["Скрытие, отклонение и архивирование"].questions
+    )
     assert result.metrics["moved_question_count"] == 3
 
 
@@ -167,7 +168,10 @@ def test_acceptance_fixture_cleanup_keeps_demo_ready_faq_cards() -> None:
         _entry(
             "Ручное слияние фрагментов",
             "Ручное слияние объединяет дубли карточек без удаления исходной evidence.",
-            questions=("как объединить фрагменты вручную?", "как удалить плохой фрагмент?"),
+            questions=(
+                "как объединить фрагменты вручную?",
+                "как удалить плохой фрагмент?",
+            ),
         ),
         _entry(
             "Скрытие, отклонение и архивирование",
@@ -185,15 +189,20 @@ def test_acceptance_fixture_cleanup_keeps_demo_ready_faq_cards() -> None:
     by_title = {entry.title: entry for entry in result.entries}
 
     assert "Короткий ответ клиенту" not in by_title
-    assert "что такое компиляция знаний?" not in by_title["Что это за продукт"].questions
+    assert (
+        "что такое компиляция знаний?" not in by_title["Что это за продукт"].questions
+    )
     assert "что такое компиляция знаний?" in by_title["Компиляция знаний"].questions
-    assert "как удалить плохой фрагмент?" not in by_title[
-        "Ручное слияние фрагментов"
-    ].questions
-    assert "как удалить плохой фрагмент?" in by_title[
-        "Скрытие, отклонение и архивирование"
-    ].questions
-    assert "не смешивать AI-базу и Telegram-бота" in by_title[
-        "Правила для RAG-поиска"
-    ].answer
+    assert (
+        "как удалить плохой фрагмент?"
+        not in by_title["Ручное слияние фрагментов"].questions
+    )
+    assert (
+        "как удалить плохой фрагмент?"
+        in by_title["Скрытие, отклонение и архивирование"].questions
+    )
+    assert (
+        "не смешивать AI-базу и Telegram-бота"
+        in by_title["Правила для RAG-поиска"].answer
+    )
     assert result.metrics["short_answer_absorbed_count"] == 1
