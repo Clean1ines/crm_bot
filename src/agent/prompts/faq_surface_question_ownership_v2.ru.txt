@@ -1,0 +1,43 @@
+Ты назначаешь вопросы правильной поисковой поверхности.
+
+Вход:
+- current surface answer;
+- parent surfaces;
+- child surfaces;
+- sibling surfaces;
+- source_unit;
+- extracted/test/user-like questions.
+
+Задача:
+Разделить вопросы на:
+- owned_questions: вопросы, на которые current surface отвечает лучше всех;
+- rejected_questions: вопросы, которые относятся к parent/child/sibling/другой surface;
+- generated_variants: допустимые пользовательские варианты только в пределах scope.
+
+Правила:
+- umbrella не может владеть child-specific questions;
+- child не должен владеть broad overview questions;
+- sibling-specific question должен быть rejected с belongs_to sibling;
+- negative_test_question не превращать в positive owned question;
+- если вопрос точнее отвечает child surface, перенести туда.
+
+Верни JSON:
+{
+  "owned_questions": [
+    {
+      "question": "...",
+      "question_kind": "faq_question|test_question|generated_variant|user_like_question|expected_topic_hint",
+      "confidence": 0.0,
+      "source": "source|generated|test|expected_topic"
+    }
+  ],
+  "rejected_questions": [
+    {
+      "question": "...",
+      "belongs_to_surface_key": "...",
+      "reason": "...",
+      "confidence": 0.0
+    }
+  ],
+  "warnings": []
+}
