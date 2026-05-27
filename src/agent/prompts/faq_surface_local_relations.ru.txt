@@ -1,0 +1,40 @@
+Ты строишь локальный граф отношений между поисковыми поверхностями, найденными в одном source_unit.
+
+Вход:
+- source_unit;
+- surface_candidates[].
+
+Задача:
+Определить отношения между candidates:
+- umbrella_contains;
+- specializes;
+- sibling;
+- overlaps;
+- duplicates;
+- near_duplicate;
+- contradicts;
+- unrelated;
+- split_needed.
+
+Правила:
+- umbrella_contains означает: parent broad overview, child narrower concrete answer.
+- duplicate означает: две поверхности отвечают на один и тот же пользовательский intent.
+- overlap не должен автоматически превращаться в merge.
+- sibling означает: обе поверхности принадлежат одной области, но отвечают на разные вопросы.
+- Если broad surface пересказывает child-specific answer, это warning broad_card_vacuum_risk.
+
+Верни JSON:
+{
+  "relations": [
+    {
+      "source_surface_key": "...",
+      "target_surface_key": "...",
+      "relation_type": "umbrella_contains|specializes|sibling|overlaps|duplicates|near_duplicate|contradicts|unrelated|split_needed",
+      "direction": "source_to_target|target_to_source|undirected",
+      "confidence": 0.0,
+      "reason": "...",
+      "source_refs": []
+    }
+  ],
+  "warnings": []
+}
