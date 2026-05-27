@@ -11,6 +11,10 @@ import {
   type KnowledgeEntryMergeIncludeOptions,
   type KnowledgeEntryMergePreview,
 } from '@shared/api/modules/knowledgeCuration';
+import {
+  knowledgeSurfaceApi,
+  type RetrievalSurface,
+} from '@shared/api/modules/knowledgeSurface';
 import { getErrorMessage } from '@shared/api/core/errors';
 
 const DEFAULT_INCLUDE: KnowledgeEntryMergeIncludeOptions = {
@@ -59,6 +63,25 @@ const entryQuestionCount = (entry: KnowledgeCurationEntry): number => {
   const questions = entry.enrichment.questions;
   return Array.isArray(questions) ? questions.length : 0;
 };
+
+const surfaceSearchText = (surface: RetrievalSurface): string => [
+  surface.title,
+  surface.answer,
+  surface.short_answer,
+  surface.canonical_question,
+  surface.surface_kind,
+  surface.status,
+  surface.publication_status,
+].join(' ').toLowerCase();
+
+const surfaceQuestionCount = (surface: RetrievalSurface): number => (
+  (surface.owned_questions?.length || 0)
+  + (surface.rejected_questions?.length || 0)
+);
+
+const surfaceIsPublished = (surface: RetrievalSurface): boolean => (
+  surface.publication_status === 'published' || Boolean(surface.linked_runtime_entry_id)
+);
 
 const defaultParentId = (entries: KnowledgeCurationEntry[]): string | null => {
   if (entries.length === 0) return null;
@@ -119,6 +142,33 @@ export const KnowledgeDocumentCurationModal: React.FC<{
     },
   });
 
+  const surfacesQuery = useQuery({
+    queryKey: ['knowledge-document-surface-curation', projectId, documentId],
+    queryFn: async () => {
+      const { data } = await knowledgeSurfaceApi.surfaces(projectId, documentId);
+      return data.surfaces;
+    },
+  });
+
+  const publishSurfaceMutation = useMutation({
+    mutationFn: async (surfaceId: string) => {
+      const { data } = await knowledgeSurfaceApi.publish(projectId, documentId, surfaceId);
+      return data;
+    },
+    onSuccess: async () => {
+      toast.success('Surface опубликована в runtime retrieval');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['knowledge-document-surface-curation', projectId, documentId] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-document-curation', projectId, documentId] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['knowledge-surfaces', projectId, documentId] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Не удалось опубликовать surface'));
+    },
+  });
+
   const entries = useMemo(
     () => curationQuery.data?.entries ?? [],
     [curationQuery.data?.entries],
@@ -130,6 +180,18 @@ export const KnowledgeDocumentCurationModal: React.FC<{
     if (!normalized) return mergeableEntries;
     return mergeableEntries.filter((entry) => entrySearchText(entry).includes(normalized));
   }, [filter, mergeableEntries]);
+
+  const surfaces = useMemo(
+    () => surfacesQuery.data ?? [],
+    [surfacesQuery.data],
+  );
+  const filteredSurfaces = useMemo(() => {
+    const normalized = filter.trim().toLowerCase();
+    const candidates = surfaces.filter((surface) => !surfaceIsPublished(surface));
+    if (!normalized) return candidates;
+    return candidates.filter((surface) => surfaceSearchText(surface).includes(normalized));
+  }, [filter, surfaces]);
+  const showSurfaceCuration = filteredEntries.length === 0 && filteredSurfaces.length > 0;
 
   const selectedEntries = selectedIds
     .map((id) => mergeableEntries.find((entry) => entry.id === id))
@@ -263,6 +325,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
             <span>{t('knowledge.curation.summary.publishedRuntime')}: {curationQuery.data?.summary.published_runtime_entries ?? 0}</span>
             <span>{t('knowledge.curation.summary.duplicates')}: {duplicateGroups.length}</span>
             <span>{t('knowledge.curation.summary.merged')}: {curationQuery.data?.summary.merged_entries ?? 0}</span>
+            <span>surface cards: {surfaces.length}</span>
           </div>
         </div>
 
@@ -296,9 +359,59 @@ export const KnowledgeDocumentCurationModal: React.FC<{
               className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
 
-            {curationQuery.isLoading ? (
+            {curationQuery.isLoading || surfacesQuery.isLoading ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
                 {t('knowledge.curation.loading')}
+              </div>
+            ) : showSurfaceCuration ? (
+              <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
+                {filteredSurfaces.map((surface) => (
+                  <div
+                    key={surface.id}
+                    className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{surface.title}</div>
+                        <div className="mt-1 text-sm text-[var(--text-muted)] line-clamp-3">
+                          {surface.short_answer || surface.answer || surface.canonical_question}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{surface.surface_kind}</span>
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">{surface.status}</span>
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">questions: {surfaceQuestionCount(surface)}</span>
+                          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">sources: {surface.source_refs.length}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={publishSurfaceMutation.isPending}
+                        onClick={() => publishSurfaceMutation.mutate(surface.id)}
+                        className="rounded-lg bg-[var(--accent-primary)] px-2.5 py-1 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Опубликовать
+                      </button>
+                    </div>
+
+                    <details className="mt-3 text-xs text-[var(--text-secondary)]">
+                      <summary className="cursor-pointer">Graph context</summary>
+                      <div className="mt-2 space-y-2">
+                        <EntryDetailRow label="answer scope">
+                          {surface.answer_scope || '—'}
+                        </EntryDetailRow>
+                        <EntryDetailRow label="question scope">
+                          {surface.question_scope || '—'}
+                        </EntryDetailRow>
+                        <EntryDetailRow label="exclusion scope">
+                          {surface.exclusion_scope || '—'}
+                        </EntryDetailRow>
+                        <EntryDetailRow label={t('knowledge.drafts.fields.answer')}>
+                          <div className="whitespace-pre-wrap">{surface.answer || '—'}</div>
+                        </EntryDetailRow>
+                      </div>
+                    </details>
+                  </div>
+                ))}
               </div>
             ) : filteredEntries.length === 0 ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
@@ -401,6 +514,11 @@ export const KnowledgeDocumentCurationModal: React.FC<{
           </section>
 
           <aside className="space-y-3 rounded-xl bg-[var(--surface-secondary)] p-3">
+            {showSurfaceCuration && (
+              <div className="rounded-lg bg-[var(--control-bg)] p-3 text-xs leading-relaxed text-[var(--text-muted)]">
+                Сейчас показаны новые surface-карточки. Опубликуй нужные карточки, после этого они появятся в runtime curation merge flow.
+              </div>
+            )}
             <div>
               <div className="text-sm font-semibold text-[var(--text-primary)]">
                 {t('knowledge.curation.selectionTitle')}
@@ -428,7 +546,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
 
             <button
               type="button"
-              disabled={!canPreview || previewMutation.isPending}
+              disabled={showSurfaceCuration || !canPreview || previewMutation.isPending}
               onClick={() => previewMutation.mutate()}
               className="w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
             >
