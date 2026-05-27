@@ -510,6 +510,7 @@ def _technical_chunk_batches_for_answer_compiler(
             continue
 
         is_markdown_semantic = bool(chunk.get("section_title") or chunk.get("children"))
+        parts: tuple[str, ...]
         if is_markdown_semantic:
             parts = (content.strip(),)
         else:
@@ -799,8 +800,6 @@ KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
-
-
 def _source_excerpt_to_text(value: object) -> str:
     if isinstance(value, tuple):
         return "\n\n".join(
@@ -822,9 +821,13 @@ def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
     return overlap / max(1, min(len(source_tokens), 36))
 
 
-def _regenerate_entry_from_source_excerpt(entry: KnowledgePreprocessingEntry, source_excerpt: str) -> KnowledgePreprocessingEntry:
+def _regenerate_entry_from_source_excerpt(
+    entry: KnowledgePreprocessingEntry, source_excerpt: str
+) -> KnowledgePreprocessingEntry:
     sanitized_source = "\n".join(
-        line for line in source_excerpt.splitlines() if not line.lstrip().startswith("#")
+        line
+        for line in source_excerpt.splitlines()
+        if not line.lstrip().startswith("#")
     ).strip()
     rebuilt_answer = _answer_digest(
         sanitized_source or source_excerpt,
@@ -898,19 +901,23 @@ def _repair_generated_entry(
     if _entry_has_markdown_heading(repaired_answer):
         repaired_answer = _strip_markdown_heading_markers(repaired_answer)
         warnings.append("generated_answer_markdown_heading_repaired")
+
     answer_without_labels = _strip_service_labels(repaired_answer)
     if answer_without_labels != repaired_answer:
         repaired_answer = answer_without_labels
         warnings.append("generated_answer_service_label_repaired")
+
     answer_without_prefix = _strip_conversational_prefix(repaired_answer)
     if answer_without_prefix != repaired_answer:
         repaired_answer = answer_without_prefix
         warnings.append("generated_answer_conversational_prefix_repaired")
+
     if not source_has_cjk:
         answer_without_cjk = _remove_forbidden_cjk_korean_chars(repaired_answer)
         if answer_without_cjk != repaired_answer:
             repaired_answer = _clean_optional_text(answer_without_cjk)
             warnings.append("generated_answer_forbidden_script_repaired")
+
     repaired = replace(repaired, answer=repaired_answer)
 
     source_ru = len(re.findall(r"[Ѐ-ӿ]", source_excerpt))
@@ -919,31 +926,67 @@ def _repair_generated_entry(
     answer_latin = len(re.findall(r"[A-Za-z]", repaired.answer))
     if source_ru > source_latin and answer_ru < answer_latin:
         warnings.append("answer_language_mismatch_warning")
+
     coverage = _source_answer_coverage_ratio(repaired.answer, source_excerpt)
     if coverage < 0.45:
         warnings.append("generated_answer_low_coverage_warning")
 
     if not source_has_cjk:
-        sanitized_fields: dict[str, str | tuple[str, ...]] = {}
-        for name, value in (
-            ("title", repaired.title),
-            ("canonical_question", repaired.canonical_question),
-            ("source_excerpt", repaired.source_excerpt),
-        ):
-            updated = _remove_forbidden_cjk_korean_chars(value)
-            if updated != value:
-                sanitized_fields[name] = _clean_optional_text(updated)
-        for name, values in (("questions", repaired.questions), ("synonyms", repaired.synonyms), ("tags", repaired.tags)):
-            updated_values = tuple(
-                cleaned
-                for item in values
-                if (cleaned := _clean_optional_text(_remove_forbidden_cjk_korean_chars(item)))
+        sanitized_title = _clean_optional_text(
+            _remove_forbidden_cjk_korean_chars(repaired.title)
+        )
+        sanitized_canonical_question = _clean_optional_text(
+            _remove_forbidden_cjk_korean_chars(repaired.canonical_question)
+        )
+        sanitized_source_excerpt = _clean_optional_text(
+            _remove_forbidden_cjk_korean_chars(repaired.source_excerpt)
+        )
+        sanitized_questions = tuple(
+            cleaned
+            for item in repaired.questions
+            if (
+                cleaned := _clean_optional_text(
+                    _remove_forbidden_cjk_korean_chars(item)
+                )
             )
-            if updated_values != values:
-                sanitized_fields[name] = updated_values
-        if sanitized_fields:
+        )
+        sanitized_synonyms = tuple(
+            cleaned
+            for item in repaired.synonyms
+            if (
+                cleaned := _clean_optional_text(
+                    _remove_forbidden_cjk_korean_chars(item)
+                )
+            )
+        )
+        sanitized_tags = tuple(
+            cleaned
+            for item in repaired.tags
+            if (
+                cleaned := _clean_optional_text(
+                    _remove_forbidden_cjk_korean_chars(item)
+                )
+            )
+        )
+
+        if (
+            sanitized_title != repaired.title
+            or sanitized_canonical_question != repaired.canonical_question
+            or sanitized_source_excerpt != repaired.source_excerpt
+            or sanitized_questions != repaired.questions
+            or sanitized_synonyms != repaired.synonyms
+            or sanitized_tags != repaired.tags
+        ):
             warnings.append("generated_enrichment_forbidden_script_repaired")
-            repaired = replace(repaired, **sanitized_fields)
+            repaired = replace(
+                repaired,
+                title=sanitized_title,
+                canonical_question=sanitized_canonical_question,
+                source_excerpt=sanitized_source_excerpt,
+                questions=sanitized_questions,
+                synonyms=sanitized_synonyms,
+                tags=sanitized_tags,
+            )
 
     repaired_source_excerpt = _clean_optional_text(repaired.source_excerpt)
     repaired_answer = _clean_optional_text(repaired.answer)
@@ -954,6 +997,7 @@ def _repair_generated_entry(
         fallback_answer = _answer_digest(repaired_source_excerpt or source_excerpt)
         repaired_answer = fallback_answer
         warnings.append("generated_answer_empty_after_repair_warning")
+
     repaired = replace(
         repaired,
         answer=repaired_answer,
@@ -3520,10 +3564,9 @@ def _merge_source_ref_tuple_values(
                 continue
             duplicate_index = None
             for idx, existing in enumerate(result):
-                same_origin = (
-                    (existing.source_chunk_id or "") == (source_ref.source_chunk_id or "")
-                    and existing.source_index == source_ref.source_index
-                )
+                same_origin = (existing.source_chunk_id or "") == (
+                    source_ref.source_chunk_id or ""
+                ) and existing.source_index == source_ref.source_index
                 if not same_origin:
                     continue
                 existing_fp = _publication_text_fingerprint(existing.quote)
