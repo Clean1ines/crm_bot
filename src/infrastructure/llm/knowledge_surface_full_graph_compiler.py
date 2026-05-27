@@ -67,7 +67,7 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
         reassignments: list[SurfaceQuestionReassignment] = []
         warnings: list[str] = []
 
-        for unit in units:
+        for unit_index, unit in enumerate(units, start=1):
             discovered = await self.discover_surfaces_for_source_unit(
                 source_unit=unit,
                 file_name=file_name,
@@ -76,6 +76,18 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             unit_candidates = discovered.surface_candidates
             candidates.extend(unit_candidates)
             warnings.extend(discovered.warnings)
+            await self._emit_progress(
+                stage_kind="surface_discovery",
+                status="completed",
+                input_summary=f"source_unit={unit_index}/{len(units)} {unit.title}",
+                output_summary=f"candidates={len(unit_candidates)}",
+                metrics={
+                    "source_unit_index": unit_index,
+                    "source_unit_count": len(units),
+                    "candidate_count": len(unit_candidates),
+                    "source_unit_key": unit.source_unit_key,
+                },
+            )
 
             planned = await self.plan_local_relations(
                 source_unit=unit,
@@ -86,8 +98,21 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             unit_relations = planned.relations
             local_relations.extend(unit_relations)
             warnings.extend(planned.warnings)
+            await self._emit_progress(
+                stage_kind="relation_planning",
+                status="completed",
+                input_summary=f"source_unit={unit_index}/{len(units)} {unit.title}",
+                output_summary=f"relations={len(unit_relations)}",
+                metrics={
+                    "source_unit_index": unit_index,
+                    "source_unit_count": len(units),
+                    "relation_count": len(unit_relations),
+                    "candidate_count": len(unit_candidates),
+                    "source_unit_key": unit.source_unit_key,
+                },
+            )
 
-            for candidate in unit_candidates:
+            for candidate_index, candidate in enumerate(unit_candidates, start=1):
                 related_candidates = _related_candidates(
                     candidate, unit_candidates, unit_relations
                 )
@@ -104,6 +129,19 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 )
                 drafts.append(draft)
                 warnings.extend(draft.warnings)
+                await self._emit_progress(
+                    stage_kind="answer_synthesis",
+                    status="completed",
+                    input_summary=f"source_unit={unit_index}/{len(units)} candidate={candidate_index}/{len(unit_candidates)}",
+                    output_summary=f"surface={candidate.local_surface_key}",
+                    metrics={
+                        "source_unit_index": unit_index,
+                        "source_unit_count": len(units),
+                        "candidate_index": candidate_index,
+                        "candidate_count": len(unit_candidates),
+                        "surface_key": candidate.local_surface_key,
+                    },
+                )
 
                 ownership_result = await self.assign_surface_questions(
                     source_unit=unit,
@@ -116,6 +154,26 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 )
                 ownership_decisions.extend(ownership_result.owned_questions)
                 warnings.extend(ownership_result.warnings)
+                await self._emit_progress(
+                    stage_kind="question_ownership",
+                    status="completed",
+                    input_summary=f"source_unit={unit_index}/{len(units)} candidate={candidate_index}/{len(unit_candidates)}",
+                    output_summary=(
+                        f"owned={len(ownership_result.owned_questions)} "
+                        f"rejected={len(ownership_result.rejected_questions)}"
+                    ),
+                    metrics={
+                        "source_unit_index": unit_index,
+                        "source_unit_count": len(units),
+                        "candidate_index": candidate_index,
+                        "candidate_count": len(unit_candidates),
+                        "surface_key": candidate.local_surface_key,
+                        "owned_question_count": len(ownership_result.owned_questions),
+                        "rejected_question_count": len(
+                            ownership_result.rejected_questions
+                        ),
+                    },
+                )
                 reassignments.extend(
                     _reassign_rejected(
                         run_id=run_id,
@@ -136,6 +194,15 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             local_relations=tuple(local_relations),
         )
         warnings.extend(judge_warnings)
+        await self._emit_progress(
+            stage_kind="global_relation_judge",
+            status="completed",
+            output_summary=f"judge_relations={len(judge_relations)} merges={len(merge_decisions)}",
+            metrics={
+                "judge_relation_count": len(judge_relations),
+                "merge_decision_count": len(merge_decisions),
+            },
+        )
         final_relations = _merge_relations(
             run_id=run_id,
             document_id=units[0].document_id,

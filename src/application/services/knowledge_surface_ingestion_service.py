@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 from src.application.errors import ValidationError
 from src.application.ports.knowledge_port import (
@@ -52,6 +52,14 @@ from src.infrastructure.llm.knowledge_surface_compiler import (
 
 
 FAQ_MODE: KnowledgePreprocessingMode = MODE_FAQ
+
+
+@runtime_checkable
+class KnowledgeSurfaceProgressAwareCompilerPort(Protocol):
+    def set_progress_callback(
+        self,
+        callback: Callable[[Mapping[str, object]], Awaitable[None]] | None,
+    ) -> None: ...
 
 
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
@@ -382,6 +390,34 @@ def _success_stage_metrics(
     }
 
 
+def _surface_progress_message(stage_kind: str, metrics: JsonObject) -> str:
+    source_unit_index = metrics.get("source_unit_index")
+    source_unit_count = metrics.get("source_unit_count")
+    candidate_index = metrics.get("candidate_index")
+    candidate_count = metrics.get("candidate_count")
+    if stage_kind == "surface_discovery":
+        return f"Ищем карточки: блок {source_unit_index}/{source_unit_count}"
+    if stage_kind == "relation_planning":
+        return f"Строим связи: блок {source_unit_index}/{source_unit_count}"
+    if stage_kind == "answer_synthesis":
+        return (
+            f"Пишем ответы: блок {source_unit_index}/{source_unit_count}, "
+            f"карточка {candidate_index}/{candidate_count}"
+        )
+    if stage_kind == "question_ownership":
+        return (
+            f"Назначаем вопросы: блок {source_unit_index}/{source_unit_count}, "
+            f"карточка {candidate_index}/{candidate_count}"
+        )
+    if stage_kind == "global_reconciliation":
+        return "Собираем глобальный граф карточек"
+    if stage_kind == "global_relation_judge":
+        return "Проверяем глобальные связи и дубликаты"
+    if stage_kind == "question_reassignment":
+        return "Переносим вопросы между карточками"
+    return "Компилируем FAQ graph"
+
+
 class KnowledgeFaqSurfaceIngestionService:
     def __init__(self, pool: KnowledgeDbPoolPort) -> None:
         self.pool = pool
@@ -486,6 +522,54 @@ class KnowledgeFaqSurfaceIngestionService:
                 "bootstrap_forbidden": True,
             },
         )
+
+        async def record_surface_progress(event: Mapping[str, object]) -> None:
+            stage_kind = (
+                _compact_text(event.get("stage_kind")) or "faq_surface_compilation"
+            )
+            raw_status = _compact_text(event.get("status")) or "running"
+            status = cast(
+                SurfaceCompilerRunStatus,
+                raw_status
+                if raw_status in {"running", "completed", "failed", "cancelled"}
+                else "running",
+            )
+            metrics = _json_object(event.get("metrics"))
+            input_summary = _compact_text(event.get("input_summary"))
+            output_summary = _compact_text(event.get("output_summary"))
+            error_type = _compact_text(event.get("error_type")) or None
+            error_message = _compact_text(event.get("error_message")) or None
+            await repo.create_surface_compiler_stage(
+                _stage(
+                    run_id=run_id,
+                    document_id=document_id,
+                    stage_kind=stage_kind,
+                    status=status,
+                    model=compiler.model_name,
+                    input_summary=input_summary,
+                    output_summary=output_summary,
+                    error_type=error_type,
+                    error_message=error_message,
+                    metrics=metrics,
+                )
+            )
+            await repo.update_document_preprocessing_status(
+                document_id,
+                mode=FAQ_MODE,
+                status=PREPROCESSING_STATUS_PROCESSING,
+                model=compiler.model_name,
+                prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+                metrics={
+                    **metrics,
+                    "stage": stage_kind,
+                    "status": status,
+                    "status_message": _surface_progress_message(stage_kind, metrics),
+                    "surface_compiler_run_id": run_id,
+                },
+            )
+
+        if isinstance(compiler, KnowledgeSurfaceProgressAwareCompilerPort):
+            compiler.set_progress_callback(record_surface_progress)
 
         try:
             result = await compiler.compile_surfaces(

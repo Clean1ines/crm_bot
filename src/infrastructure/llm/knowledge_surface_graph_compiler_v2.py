@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict
 from typing import cast
 
@@ -76,6 +76,9 @@ RELATION_TYPES = frozenset(
         "split_needed",
     }
 )
+SurfaceGraphProgressCallback = Callable[[Mapping[str, object]], Awaitable[None]]
+
+
 QUESTION_KINDS = frozenset(
     {
         "faq_question",
@@ -313,6 +316,38 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             return await self._request_json(prompt=prompt, max_tokens=max_tokens)
         finally:
             self._model = previous_model
+
+    def set_progress_callback(
+        self,
+        callback: SurfaceGraphProgressCallback | None,
+    ) -> None:
+        self._progress_callback = callback
+
+    async def _emit_progress(
+        self,
+        *,
+        stage_kind: str,
+        status: str,
+        input_summary: str = "",
+        output_summary: str = "",
+        metrics: Mapping[str, object] | None = None,
+        error_type: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        callback = getattr(self, "_progress_callback", None)
+        if callback is None:
+            return
+        await callback(
+            {
+                "stage_kind": stage_kind,
+                "status": status,
+                "input_summary": input_summary,
+                "output_summary": output_summary,
+                "metrics": dict(metrics or {}),
+                "error_type": error_type or "",
+                "error_message": error_message or "",
+            }
+        )
 
     def _candidate(
         self,
