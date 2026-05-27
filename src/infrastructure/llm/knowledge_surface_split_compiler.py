@@ -5,7 +5,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import replace
 
-from src.application.services.knowledge_surface_graph_quality import validate_faq_surface_graph_quality
+from src.application.services.knowledge_surface_graph_quality import (
+    validate_faq_surface_graph_quality,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
@@ -19,6 +21,8 @@ from src.domain.project_plane.retrieval_surface_compilation import (
 )
 from src.infrastructure.llm.knowledge_surface_compiler import GroqKnowledgeSurfaceCompiler
 
+SURFACE_KEY_PATTERN = re.compile(r"[^0-9A-Za-z_]+")
+
 
 class GroqSplitKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceCompiler):
     async def compile_surfaces(
@@ -31,23 +35,33 @@ class GroqSplitKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceCompiler):
     ) -> RetrievalSurfaceCompilationResult:
         units = tuple(source_units)
         if not units:
-            raise KnowledgePreprocessingValidationError("FAQ surface compiler requires source units")
-
-        parts = [
-            await super().compile_surfaces(
-                mode=mode,
-                source_units=(unit,),
-                file_name=file_name,
-                run_id=f"{run_id}:unit:{index}",
+            raise KnowledgePreprocessingValidationError(
+                "FAQ surface compiler requires source units"
             )
-            for index, unit in enumerate(units)
-        ]
-        result = _merge_parts(mode=mode, run_id=run_id, units=units, parts=tuple(parts))
+
+        parts: list[RetrievalSurfaceCompilationResult] = []
+        for index, unit in enumerate(units):
+            parts.append(
+                await super().compile_surfaces(
+                    mode=mode,
+                    source_units=(unit,),
+                    file_name=file_name,
+                    run_id=f"{run_id}:unit:{index}",
+                )
+            )
+
+        result = _merge_parts(
+            mode=mode,
+            run_id=run_id,
+            units=units,
+            parts=tuple(parts),
+        )
         quality = validate_faq_surface_graph_quality(result.graph)
         if not quality.passed:
             raise KnowledgePreprocessingValidationError(
                 "FAQ surface graph quality failed: " + ", ".join(quality.issues)
             )
+
         metrics = {**result.metrics, **quality.metrics}
         if quality.warnings:
             metrics["quality_warnings"] = list(quality.warnings)
@@ -87,7 +101,11 @@ def _merge_parts(
                     },
                 )
             )
-    relations = _relations(run_id=run_id, document_id=document_id, surfaces=tuple(surfaces))
+    relations = _relations(
+        run_id=run_id,
+        document_id=document_id,
+        surfaces=tuple(surfaces),
+    )
     metrics = {
         "source_unit_split_compilation": True,
         "source_unit_count": len(units),
@@ -119,7 +137,10 @@ def _merge_parts(
 
 
 def _relations(
-    *, run_id: str, document_id: str, surfaces: tuple[RetrievalSurfaceDraft, ...]
+    *,
+    run_id: str,
+    document_id: str,
+    surfaces: tuple[RetrievalSurfaceDraft, ...],
 ) -> tuple[RetrievalSurfaceRelation, ...]:
     return tuple(
         RetrievalSurfaceRelation(
@@ -137,7 +158,8 @@ def _relations(
 
 
 def _key(unit_index: int, value: str) -> str:
-    return f"u{unit_index}_{re.sub(r'[^0-9A-Za-z_]+', '_', value).strip('_') or 'surface'}"
+    normalized = SURFACE_KEY_PATTERN.sub("_", value).strip("_") or "surface"
+    return f"u{unit_index}_{normalized}"
 
 
 def _id(*parts: object) -> str:
