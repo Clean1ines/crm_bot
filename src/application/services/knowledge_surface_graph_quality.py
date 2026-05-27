@@ -76,20 +76,29 @@ def _umbrella_owns_child_specific_questions(graph: RetrievalSurfaceGraph) -> boo
     surface_kind_by_key = {
         surface.local_surface_key: surface.surface_kind for surface in graph.surfaces
     }
-    child_keys_by_parent = {
-        relation.parent_surface_key: relation.child_surface_key
-        for relation in graph.relations
-        if relation.relation_type == "umbrella_contains"
-    }
+    child_keys_by_parent: dict[str, set[str]] = {}
+    for relation in graph.relations:
+        if relation.relation_type != "umbrella_contains":
+            continue
+        child_keys_by_parent.setdefault(relation.parent_surface_key, set()).add(
+            relation.child_surface_key
+        )
     ownership_by_owner = _ownership_by_surface(graph.ownership)
 
-    for parent_key, child_key in child_keys_by_parent.items():
+    for parent_key, child_keys in child_keys_by_parent.items():
         if surface_kind_by_key.get(parent_key) != "umbrella":
             continue
-        parent_questions = {_question_fingerprint(item.question) for item in ownership_by_owner.get(parent_key, ())}
-        child_questions = {_question_fingerprint(item.question) for item in ownership_by_owner.get(child_key, ())}
-        if parent_questions.intersection(child_questions):
-            return True
+        parent_questions = {
+            _question_fingerprint(item.question)
+            for item in ownership_by_owner.get(parent_key, ())
+        }
+        for child_key in child_keys:
+            child_questions = {
+                _question_fingerprint(item.question)
+                for item in ownership_by_owner.get(child_key, ())
+            }
+            if parent_questions.intersection(child_questions):
+                return True
     return False
 
 
