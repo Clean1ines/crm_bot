@@ -239,35 +239,35 @@ const compilePipelineSteps = (
     {
       id: 'local_discovery',
       title: '2. Поиск будущих карточек в каждом блоке',
-      status: discoveryDone ? 'completed' : sourceStatus === 'completed' && baseStatus === 'active' ? 'active' : baseStatus === 'stopped' ? 'stopped' : 'pending',
+      status: discoveryDone ? 'completed' : sourceStatus === 'completed' && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
       description: 'LLM проходит по каждому source unit и находит surface candidates: зонтики, дочерние и узкие карточки.',
       detail: surfaceCount > 0 ? `${formatMetric(surfaceCount)} карточек уже сохранено` : 'Карточки ещё не сохранены — это нормально до завершения LLM-стадии',
     },
     {
       id: 'local_relations',
       title: '3. Локальные связи: parent / child / sibling',
-      status: relationDone ? 'completed' : discoveryDone && baseStatus === 'active' ? 'active' : baseStatus === 'stopped' ? 'stopped' : 'pending',
+      status: relationDone ? 'completed' : discoveryDone && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
       description: 'Система определяет, какие карточки являются зонтиками, какие — дочерними, а какие надо держать отдельно.',
       detail: relationCount > 0 ? `${formatMetric(relationCount)} связей найдено` : 'Связей пока нет',
     },
     {
       id: 'answers',
       title: '4. Ответы и owned questions',
-      status: answerDone && ownershipDone ? 'completed' : discoveryDone && baseStatus === 'active' ? 'active' : baseStatus === 'stopped' ? 'stopped' : 'pending',
+      status: answerDone && ownershipDone ? 'completed' : discoveryDone && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
       description: 'Для каждой карточки пишется answer, короткий ответ и список вопросов, которыми она имеет право владеть.',
       detail: `${formatMetric(ownershipCount)} owned questions · ${formatMetric(reassignmentCount)} переносов вопросов`,
     },
     {
       id: 'global_reconciliation',
       title: '5. Глобальная сборка графа',
-      status: reconciliationDone ? 'completed' : ownershipDone && baseStatus === 'active' ? 'active' : baseStatus === 'stopped' ? 'stopped' : 'pending',
+      status: reconciliationDone ? 'completed' : ownershipDone && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
       description: 'После всех блоков граф пересобирается: дубликаты мержатся, вопросы переносятся, поздние зонтики могут стать parent.',
       detail: `${formatMetric(mergeCount)} merge decisions`,
     },
     {
       id: 'curation',
       title: '6. Курация и публикация',
-      status: surfaces.length > 0 ? 'active' : baseStatus === 'stopped' ? 'stopped' : 'pending',
+      status: surfaces.length > 0 ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
       description: 'Здесь уже можно смотреть карточки, проверять источники, вопросы, связи и публиковать знания в runtime retrieval.',
       detail: surfaces.length > 0 ? 'Карточки доступны ниже' : 'Кураторские карточки пока не появились',
     },
@@ -504,22 +504,24 @@ export const SurfaceCompilationSummary: React.FC<{
         </div>
       )}
 
-      <div className="mb-3 flex flex-wrap gap-1 text-xs">
-        {FILTERS.map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setFilter(value)}
-            className={`rounded-full px-2 py-0.5 transition-colors ${
-              filter === value
-                ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
-                : 'bg-[var(--control-bg)] text-[var(--text-secondary)]'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {surfaces.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1 text-xs">
+          {FILTERS.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFilter(value)}
+              className={`rounded-full px-2 py-0.5 transition-colors ${
+                filter === value
+                  ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
+                  : 'bg-[var(--control-bg)] text-[var(--text-secondary)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {stages.length > 0 && (
         <details className="mb-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">
@@ -544,6 +546,8 @@ export const SurfaceCompilationSummary: React.FC<{
         <div className="rounded-lg bg-[var(--surface-elevated)] p-3 text-xs leading-relaxed text-[var(--text-muted)]">
           {isLoading ? (
             'Загружаю состояние graph pipeline…'
+          ) : run?.status === 'failed' ? (
+            'Карточки не появились, потому что graph compiler завершился ошибкой. Исправь ошибку модели/лимита и загрузи документ заново.'
           ) : run?.status === 'running' && !isDocumentProcessing ? (
             'Карточек нет, потому что документ уже не обрабатывается, а последний compiler run остался в running. Вероятнее всего, обработку остановили до сохранения карточек. Для проверки нового пайплайна загрузи документ заново.'
           ) : run ? (
