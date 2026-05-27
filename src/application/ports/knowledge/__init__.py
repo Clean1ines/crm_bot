@@ -32,6 +32,14 @@ from src.application.ports.knowledge.surface_entities import (
     KnowledgeSurfaceRelationPort,
     KnowledgeSurfaceSourceUnitPort,
 )
+from src.application.ports.knowledge.surface_graph_entities import (
+    KnowledgeSurfaceAnswerDraftPort,
+    KnowledgeSurfaceCandidatePort,
+    KnowledgeSurfaceCurationCardPort,
+    KnowledgeSurfaceGraphQuestionPort,
+    KnowledgeSurfaceGraphRelationPort,
+    KnowledgeSurfaceReconciliationPort,
+)
 from src.application.ports.knowledge.surface_publication import (
     KnowledgeSurfacePublicationPort,
 )
@@ -46,12 +54,18 @@ __all__ = [
     "KnowledgeDocumentRuntimeEntries",
     "KnowledgeRuntimeRetrievalPort",
     "KnowledgeSourceMaterialPort",
-    "KnowledgeSurfacePublicationPort",
-    "KnowledgeSurfaceMergeDecisionPort",
-    "KnowledgeSurfaceQuestionOwnershipPort",
-    "KnowledgeSurfaceRelationPort",
-    "KnowledgeSurfaceDraftPort",
-    "KnowledgeSurfaceSourceUnitPort",
-    "KnowledgeSurfaceCompilerStagePort",
+    "KnowledgeSurfaceAnswerDraftPort",
+    "KnowledgeSurfaceCandidatePort",
     "KnowledgeSurfaceCompilerRunPort",
+    "KnowledgeSurfaceCompilerStagePort",
+    "KnowledgeSurfaceCurationCardPort",
+    "KnowledgeSurfaceDraftPort",
+    "KnowledgeSurfaceGraphQuestionPort",
+    "KnowledgeSurfaceGraphRelationPort",
+    "KnowledgeSurfaceMergeDecisionPort",
+    "KnowledgeSurfacePublicationPort",
+    "KnowledgeSurfaceQuestionOwnershipPort",
+    "KnowledgeSurfaceReconciliationPort",
+    "KnowledgeSurfaceRelationPort",
+    "KnowledgeSurfaceSourceUnitPort",
 ]
