@@ -166,12 +166,64 @@ export const KnowledgeDocumentCard: React.FC<{
 
     <div className="mt-4 space-y-3">
       {actionsNode}
-      <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
-      <SurfaceCompilationSummary documentId={doc.id} enabled={doc.preprocessing_mode === 'faq'} isDocumentProcessing={isDocumentProcessing} />
-      <PriceFactsSummary response={priceFactsResponse} isLoading={isPriceFactsLoading} onPublishFact={onPublishFact} onRejectFact={onRejectFact} mutatingFactId={mutatingPriceFactId} />
-      <CommercialTruthReviewSummary response={commercialTruthReviewResponse} isLoading={isCommercialTruthReviewLoading} policy={commercialTruthReviewPolicy} onPolicyChange={onPolicyChange} />
-      {processingNode}
-      {retightenReportNode}
+
+      {doc.preprocessing_mode === 'faq' ? (
+        <SurfaceCompilationSummary
+          documentId={doc.id}
+          enabled
+          isDocumentProcessing={isDocumentProcessing}
+        />
+      ) : (
+        <>
+          <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
+          <PriceFactsSummary
+            response={priceFactsResponse}
+            isLoading={isPriceFactsLoading}
+            onPublishFact={onPublishFact}
+            onRejectFact={onRejectFact}
+            mutatingFactId={mutatingPriceFactId}
+          />
+          <CommercialTruthReviewSummary
+            response={commercialTruthReviewResponse}
+            isLoading={isCommercialTruthReviewLoading}
+            policy={commercialTruthReviewPolicy}
+            onPolicyChange={onPolicyChange}
+          />
+        </>
+      )}
+
+      {doc.preprocessing_mode === 'faq' && (
+        <details className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
+          <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
+            Диагностика импорта и старый прогресс
+          </summary>
+          <div className="mt-3 space-y-3">
+            <ImportQualitySummary report={importQualityReport} isLoading={importQualityLoading} />
+            {processingNode}
+            {retightenReportNode}
+            <PriceFactsSummary
+              response={priceFactsResponse}
+              isLoading={isPriceFactsLoading}
+              onPublishFact={onPublishFact}
+              onRejectFact={onRejectFact}
+              mutatingFactId={mutatingPriceFactId}
+            />
+            <CommercialTruthReviewSummary
+              response={commercialTruthReviewResponse}
+              isLoading={isCommercialTruthReviewLoading}
+              policy={commercialTruthReviewPolicy}
+              onPolicyChange={onPolicyChange}
+            />
+          </div>
+        </details>
+      )}
+
+      {doc.preprocessing_mode !== 'faq' && (
+        <>
+          {processingNode}
+          {retightenReportNode}
+        </>
+      )}
     </div>
   </div>
 );

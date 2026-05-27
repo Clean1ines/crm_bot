@@ -582,25 +582,30 @@ export const SurfaceCompilationSummary: React.FC<{
         </div>
       )}
 
-      <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {pipelineSteps.map((step) => (
-          <div
-            key={step.id}
-            className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-3"
-          >
-            <div className="mb-1 flex items-start justify-between gap-2">
-              <div className="text-xs font-semibold text-[var(--text-primary)]">{step.title}</div>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${stepBadgeClass(step.status)}`}>
-                {statusLabel(step.status)}
-              </span>
+      <details className="mb-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">
+        <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+          Карта стадий FAQ Graph
+        </summary>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {pipelineSteps.map((step) => (
+            <div
+              key={step.id}
+              className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3"
+            >
+              <div className="mb-1 flex items-start justify-between gap-2">
+                <div className="text-xs font-semibold text-[var(--text-primary)]">{step.title}</div>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${stepBadgeClass(step.status)}`}>
+                  {statusLabel(step.status)}
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed text-[var(--text-muted)]">{step.description}</p>
+              {step.detail && (
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">{step.detail}</p>
+              )}
             </div>
-            <p className="text-xs leading-relaxed text-[var(--text-muted)]">{step.description}</p>
-            {step.detail && (
-              <p className="mt-1 text-xs text-[var(--text-secondary)]">{step.detail}</p>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </details>
 
       {run?.metrics && (
         <div className="mb-3 flex flex-wrap gap-1 text-xs text-[var(--text-secondary)]">
