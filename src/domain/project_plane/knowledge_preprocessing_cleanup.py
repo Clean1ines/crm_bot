@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Sequence
 
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
@@ -25,7 +25,6 @@ _SHORT_ANSWER_SERVICE_LABELS: frozenset[str] = frozenset(
         "short customer answer",
     }
 )
-
 _BROAD_CARD_TITLE_PATTERNS: tuple[str, ...] = (
     "что это за продукт",
     "что это за сервис",
@@ -34,36 +33,64 @@ _BROAD_CARD_TITLE_PATTERNS: tuple[str, ...] = (
     "как работает система",
     "главная ценность",
 )
-
-_MIN_BROAD_QUESTION_COUNT = 5
+_STOP_TOKENS: frozenset[str] = frozenset(
+    {
+        "что",
+        "это",
+        "как",
+        "для",
+        "или",
+        "при",
+        "про",
+        "можно",
+        "нужно",
+        "такое",
+        "чем",
+        "за",
+    }
+)
+_QUESTION_TOKEN_ALIASES: dict[str, tuple[str, ...]] = {
+    "удалить": ("удаление", "скрыть", "отклонить", "архивировать"),
+    "удаление": ("удалить", "скрыть", "отклонить", "архивировать"),
+    "скрыть": ("удалить", "отклонить", "архивировать"),
+    "скрытие": ("скрыть", "удалить", "отклонить", "архивировать"),
+    "отклонить": ("удалить", "скрыть", "архивировать"),
+    "отклонение": ("отклонить", "удалить", "скрыть", "архивировать"),
+    "архивировать": ("удалить", "скрыть", "отклонить"),
+    "архивирование": ("архивировать", "удалить", "скрыть", "отклонить"),
+    "плохой": ("слабый", "мусорный", "некачественный"),
+    "слабый": ("плохой", "мусорный", "некачественный"),
+    "мусорный": ("плохой", "слабый", "некачественный"),
+}
+_MODERATION_ACTION_TOKENS: frozenset[str] = frozenset(
+    {
+        "скрыть",
+        "скрытие",
+        "отклонить",
+        "отклонение",
+        "архивировать",
+        "архивирование",
+    }
+)
 _MIN_DIRECT_QUESTION_SCORE = 0.34
 
 
 def cleanup_faq_preprocessing_entries(
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> KnowledgePreprocessingCleanupResult:
-    """Apply deterministic post-merge cleanup for FAQ preprocessing entries.
-
-    This is intentionally a small local layer: it does not introduce hierarchy,
-    graph relations, new persistence tables, or LLM calls. It only prevents
-    service summary cards from being published as standalone knowledge and moves
-    clearly narrower questions away from broad overview cards.
-    """
-
     absorbed = absorb_short_answer_cards(entries)
     pruned = prune_broad_card_questions(absorbed.entries)
-    metrics: dict[str, object] = {
-        **absorbed.metrics,
-        **pruned.metrics,
-    }
-    return KnowledgePreprocessingCleanupResult(entries=pruned.entries, metrics=metrics)
+    return KnowledgePreprocessingCleanupResult(
+        entries=pruned.entries,
+        metrics={**absorbed.metrics, **pruned.metrics},
+    )
 
 
 def absorb_short_answer_cards(
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> KnowledgePreprocessingCleanupResult:
-    retained: list[KnowledgePreprocessingEntry] = []
     absorbed_indexes: set[int] = set()
+    parent_by_child: dict[int, int] = {}
     absorbed_count = 0
     unpublishable_count = 0
 
@@ -71,25 +98,24 @@ def absorb_short_answer_cards(
         if not _is_short_answer_service_card(entry):
             continue
         parent_index = _find_short_answer_parent(index=index, entries=entries)
+        absorbed_indexes.add(index)
         if parent_index is None:
-            absorbed_indexes.add(index)
             unpublishable_count += 1
             continue
-        absorbed_indexes.add(index)
+        parent_by_child[index] = parent_index
         absorbed_count += 1
 
+    retained: list[KnowledgePreprocessingEntry] = []
     for index, entry in enumerate(entries):
         if index in absorbed_indexes:
             continue
-        children = [
-            child
-            for child_index, child in enumerate(entries)
-            if child_index in absorbed_indexes
-            and _find_short_answer_parent(index=child_index, entries=entries) == index
-        ]
         merged = entry
-        for child in children:
-            merged = _merge_child_summary_into_parent(parent=merged, child=child)
+        for child_index, parent_index in parent_by_child.items():
+            if parent_index == index:
+                merged = _merge_child_summary_into_parent(
+                    parent=merged,
+                    child=entries[child_index],
+                )
         retained.append(merged)
 
     return KnowledgePreprocessingCleanupResult(
@@ -108,18 +134,19 @@ def prune_broad_card_questions(
     moved_question_count = 0
     audit: list[dict[str, str]] = []
 
-    for broad_index, broad_entry in enumerate(tuple(result)):
-        if not _is_broad_card(broad_entry, entries=result):
+    for owner_index, owner_entry in enumerate(tuple(result)):
+        if not _is_question_cleanup_candidate(owner_entry, entries=result):
             continue
 
-        broad_questions = list(broad_entry.questions)
         retained_questions: list[str] = []
-        changed_broad = False
-
-        for question in broad_questions:
+        changed_owner = False
+        for question in owner_entry.questions:
+            if _is_generic_overview_question(question):
+                retained_questions.append(question)
+                continue
             narrow_index = _best_narrow_question_owner(
                 question=question,
-                broad_index=broad_index,
+                current_index=owner_index,
                 entries=result,
             )
             if narrow_index is None:
@@ -127,26 +154,25 @@ def prune_broad_card_questions(
                 continue
 
             narrow_entry = result[narrow_index]
-            updated_questions = _merge_text_tuple_values(
-                narrow_entry.questions,
-                (question,),
-            )
             result[narrow_index] = _entry_with_rebuilt_embedding(
-                replace(narrow_entry, questions=updated_questions)
+                replace(
+                    narrow_entry,
+                    questions=_merge_text_tuple_values(narrow_entry.questions, (question,)),
+                )
             )
             moved_question_count += 1
-            changed_broad = True
+            changed_owner = True
             audit.append(
                 {
                     "question": question,
-                    "from_title": broad_entry.title,
+                    "from_title": owner_entry.title,
                     "to_title": narrow_entry.title,
                 }
             )
 
-        if changed_broad:
-            result[broad_index] = _entry_with_rebuilt_embedding(
-                replace(broad_entry, questions=tuple(retained_questions))
+        if changed_owner:
+            result[owner_index] = _entry_with_rebuilt_embedding(
+                replace(owner_entry, questions=tuple(retained_questions))
             )
 
     return KnowledgePreprocessingCleanupResult(
@@ -158,37 +184,25 @@ def prune_broad_card_questions(
     )
 
 
-def dedupe_source_excerpts(
-    excerpts: Sequence[str],
-) -> tuple[str, ...]:
-    """Dedupe evidence excerpts and keep the richer containing quote."""
-
+def dedupe_source_excerpts(excerpts: Sequence[str]) -> tuple[str, ...]:
     retained: list[str] = []
     for excerpt in excerpts:
         cleaned = _compact_text(excerpt)
-        if not cleaned:
-            continue
         normalized = _text_fingerprint(cleaned)
         if not normalized:
             continue
-
-        replaced_existing = False
-        duplicate = False
+        should_append = True
         for existing_index, existing in enumerate(tuple(retained)):
             existing_normalized = _text_fingerprint(existing)
-            if normalized == existing_normalized:
-                duplicate = True
+            if normalized == existing_normalized or normalized in existing_normalized:
+                should_append = False
                 break
-            if normalized in existing_normalized:
-                duplicate = True
-                break
-            if existing_normalized in normalized:
+            if existing_normalized and existing_normalized in normalized:
                 retained[existing_index] = cleaned
-                replaced_existing = True
+                should_append = False
                 break
-        if duplicate or replaced_existing:
-            continue
-        retained.append(cleaned)
+        if should_append:
+            retained.append(cleaned)
     return tuple(retained)
 
 
@@ -198,9 +212,9 @@ def _is_short_answer_service_card(entry: KnowledgePreprocessingEntry) -> bool:
     if title in _SHORT_ANSWER_SERVICE_LABELS or canonical in _SHORT_ANSWER_SERVICE_LABELS:
         return True
     excerpt = _compact_text(entry.source_excerpt).lower()
-    if excerpt.startswith("короткий ответ клиенту:"):
-        return True
-    return excerpt.startswith("короткий ответ:")
+    return excerpt.startswith("короткий ответ клиенту:") or excerpt.startswith(
+        "короткий ответ:"
+    )
 
 
 def _find_short_answer_parent(
@@ -254,24 +268,31 @@ def _merge_child_summary_into_parent(
     parent: KnowledgePreprocessingEntry,
     child: KnowledgePreprocessingEntry,
 ) -> KnowledgePreprocessingEntry:
-    source_excerpt = "\n\n".join(
-        dedupe_source_excerpts((parent.source_excerpt, child.source_excerpt))
-    )
-    questions = _merge_text_tuple_values(parent.questions, child.questions)
-    synonyms = _merge_text_tuple_values(parent.synonyms, child.synonyms)
-    tags = _merge_text_tuple_values(parent.tags, child.tags)
-    source_chunk_indexes = tuple(
-        dict.fromkeys((*parent.source_chunk_indexes, *child.source_chunk_indexes))
-    )
     merged = replace(
         parent,
-        source_excerpt=source_excerpt,
-        questions=questions,
-        synonyms=synonyms,
-        tags=tags,
-        source_chunk_indexes=source_chunk_indexes,
+        source_excerpt="\n\n".join(
+            dedupe_source_excerpts((parent.source_excerpt, child.source_excerpt))
+        ),
+        questions=_merge_text_tuple_values(parent.questions, child.questions),
+        synonyms=_merge_text_tuple_values(parent.synonyms, child.synonyms),
+        tags=_merge_text_tuple_values(parent.tags, child.tags),
+        source_chunk_indexes=tuple(
+            dict.fromkeys((*parent.source_chunk_indexes, *child.source_chunk_indexes))
+        ),
     )
     return _entry_with_rebuilt_embedding(merged)
+
+
+def _is_question_cleanup_candidate(
+    entry: KnowledgePreprocessingEntry,
+    *,
+    entries: Sequence[KnowledgePreprocessingEntry],
+) -> bool:
+    if _is_short_answer_service_card(entry):
+        return False
+    if _is_broad_card(entry, entries=entries):
+        return True
+    return len(entry.questions) >= 2
 
 
 def _is_broad_card(
@@ -283,32 +304,44 @@ def _is_broad_card(
     canonical = _service_label_fingerprint(entry.canonical_question)
     if title in _BROAD_CARD_TITLE_PATTERNS or canonical in _BROAD_CARD_TITLE_PATTERNS:
         return True
-    if len(entry.questions) >= _MIN_BROAD_QUESTION_COUNT:
-        median = sorted(len(item.questions) for item in entries)[len(entries) // 2]
-        return len(entry.questions) >= max(_MIN_BROAD_QUESTION_COUNT, median + 3)
-    return False
+    if len(entry.questions) < 5:
+        return False
+    median = sorted(len(item.questions) for item in entries)[len(entries) // 2]
+    return len(entry.questions) >= max(5, median + 3)
+
+
+def _is_generic_overview_question(question: str) -> bool:
+    key = _text_fingerprint(question)
+    if key in {
+        "что это за сервис",
+        "чем вы занимаетесь",
+        "для чего нужна ai база знаний",
+        "для чего нужна аи база знаний",
+        "для чего нужна база знаний",
+    }:
+        return True
+    return key.startswith("для чего нужна ") and "база знаний" in key
 
 
 def _best_narrow_question_owner(
     *,
     question: str,
-    broad_index: int,
+    current_index: int,
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> int | None:
-    question_tokens = _tokens(question)
-    if len(question_tokens) < 2:
+    if len(_tokens(question)) < 2:
         return None
-
     best_index: int | None = None
     best_score = 0.0
     for index, candidate in enumerate(entries):
-        if index == broad_index or _is_short_answer_service_card(candidate):
+        if index == current_index or _is_short_answer_service_card(candidate):
+            continue
+        if _is_broad_card(candidate, entries=entries):
             continue
         score = _direct_question_score(question=question, candidate=candidate)
         if score > best_score:
             best_score = score
             best_index = index
-
     if best_index is not None and best_score >= _MIN_DIRECT_QUESTION_SCORE:
         return best_index
     return None
@@ -337,43 +370,54 @@ def _direct_question_score(
         score = max(score, 0.74)
     if _token_overlap_coverage(question, candidate.title) >= 0.5:
         score = max(score, 0.48)
+
+    question_tokens = set(_expanded_tokens(question))
+    candidate_tokens = set(_expanded_tokens(candidate_text))
+    if (
+        "фрагмент" in question_tokens
+        and question_tokens & {"удалить", "удаление"}
+        and candidate_tokens & _MODERATION_ACTION_TOKENS
+    ):
+        score = max(score, 0.76)
     return score
 
 
 def _token_similarity(left: str, right: str) -> float:
-    left_tokens = set(_tokens(left))
-    right_tokens = set(_tokens(right))
+    left_tokens = set(_expanded_tokens(left))
+    right_tokens = set(_expanded_tokens(right))
     if not left_tokens or not right_tokens:
         return 0.0
     return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
 
 
 def _token_overlap_coverage(left: str, right: str) -> float:
-    left_tokens = set(_tokens(left))
-    right_tokens = set(_tokens(right))
+    left_tokens = set(_expanded_tokens(left))
+    right_tokens = set(_expanded_tokens(right))
     if not left_tokens or not right_tokens:
         return 0.0
     return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens))
+
+
+def _expanded_tokens(value: str) -> tuple[str, ...]:
+    expanded: list[str] = []
+    for token in _tokens(value):
+        if token not in expanded:
+            expanded.append(token)
+        for alias in _QUESTION_TOKEN_ALIASES.get(token, ()): 
+            if alias not in expanded:
+                expanded.append(alias)
+    return tuple(expanded)
 
 
 def _tokens(value: str) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
             token
-            for token in re.findall(r"[0-9a-zа-яё]+", value.casefold().replace("ё", "е"))
-            if len(token) >= 3
-            and token
-            not in {
-                "что",
-                "это",
-                "как",
-                "для",
-                "или",
-                "при",
-                "про",
-                "можно",
-                "нужно",
-            }
+            for token in re.findall(
+                r"[0-9a-zа-яё]+",
+                value.casefold().replace("ё", "е"),
+            )
+            if len(token) >= 3 and token not in _STOP_TOKENS
         )
     )
 
