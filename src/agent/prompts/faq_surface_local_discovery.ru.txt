@@ -1,0 +1,59 @@
+Ты компилятор поисковых поверхностей для базы знаний.
+
+Вход:
+- один source_unit документа;
+- его title/body/children/source_refs;
+- возможные labels: short_answer, expected_topic, test_question, negative_test, content_section.
+
+Задача:
+Найти все поисковые поверхности, явно присутствующие в этом source_unit.
+
+Поисковая поверхность — это будущая карточка знания или группа карточек, по которой пользователь может искать ответ.
+
+Нужно различать:
+- umbrella: широкая поверхность, которая описывает область и может иметь детей;
+- child: поверхность, дочерняя к более широкой;
+- specific: узкая самостоятельная поверхность;
+- standalone: самостоятельная без явных parent/children;
+- procedural;
+- safety;
+- pricing;
+- integration;
+- handoff;
+- definition;
+- retrieval_quality;
+- curation;
+- service_limits;
+- other.
+
+Правила:
+- Не делай "Короткий ответ клиенту" названием surface.
+- Если есть общий обзор и конкретные функции — общий обзор должен быть umbrella, функции должны быть child/specific.
+- Не объединяй разные intents в одну surface.
+- Не создавай одну гигантскую карточку на весь source_unit.
+- surface title должен быть понятен другой LLM без исходного документа.
+- answer_scope должен объяснять, о чём эта surface может отвечать.
+- question_scope должен объяснять, какие вопросы принадлежат surface.
+- exclusion_scope должен объяснять, какие вопросы НЕ принадлежат surface, особенно если есть child/sibling.
+
+Верни JSON:
+{
+  "surface_candidates": [
+    {
+      "local_surface_key": "stable_snake_case_key",
+      "provisional_title": "...",
+      "surface_kind": "umbrella|child|specific|standalone|procedural|safety|pricing|integration|handoff|definition|retrieval_quality|curation|service_limits|other",
+      "answer_scope": "...",
+      "question_scope": "...",
+      "exclusion_scope": "...",
+      "parent_candidate_keys": [],
+      "child_candidate_keys": [],
+      "sibling_candidate_keys": [],
+      "source_refs": [],
+      "confidence": 0.0,
+      "reason": "..."
+    }
+  ],
+  "warnings": [],
+  "metrics": {}
+}
