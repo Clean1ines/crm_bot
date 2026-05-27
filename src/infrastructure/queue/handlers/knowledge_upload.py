@@ -31,8 +31,8 @@ from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
 )
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
-from src.infrastructure.llm.knowledge_surface_compiler import (
-    GroqKnowledgeSurfaceCompiler,
+from src.infrastructure.llm.knowledge_surface_quality_gated_compiler import (
+    GroqQualityGatedKnowledgeSurfaceCompiler,
 )
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
@@ -87,7 +87,7 @@ async def handle_process_knowledge_upload(
                 file_name=dto.file_name,
                 chunks=dto.chunks,
                 knowledge_repo_factory=make_knowledge_repository,
-                surface_compiler_factory=GroqKnowledgeSurfaceCompiler,
+                surface_compiler_factory=GroqQualityGatedKnowledgeSurfaceCompiler,
                 logger=logger,
             )
             return
