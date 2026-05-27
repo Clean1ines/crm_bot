@@ -7,7 +7,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import cast
 
-from src.application.services.knowledge_surface_graph_quality import validate_faq_surface_graph_quality
+from src.application.services.knowledge_surface_graph_quality import (
+    validate_faq_surface_graph_quality,
+)
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
@@ -27,8 +29,12 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceQuestionOwnershipDecision,
     SurfaceQuestionReassignment,
     SurfaceRelationClusterContext,
+    SurfaceRelationType,
 )
-from src.infrastructure.llm.knowledge_surface_compiler import PROMPTS_DIR, _loads_json_object
+from src.infrastructure.llm.knowledge_surface_compiler import (
+    PROMPTS_DIR,
+    _loads_json_object,
+)
 from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
     GRAPH_PROMPT_VERSION,
     GroqKnowledgeSurfaceGraphCompilerV2,
@@ -50,7 +56,9 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
     ) -> RetrievalSurfaceCompilationResult:
         units = tuple(source_units)
         if not units:
-            raise KnowledgePreprocessingValidationError("FAQ graph compiler requires source units")
+            raise KnowledgePreprocessingValidationError(
+                "FAQ graph compiler requires source units"
+            )
 
         candidates: list[RetrievalSurfaceCandidate] = []
         local_relations: list[LocalSurfaceRelation] = []
@@ -80,8 +88,12 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             warnings.extend(planned.warnings)
 
             for candidate in unit_candidates:
-                related_candidates = _related_candidates(candidate, unit_candidates, unit_relations)
-                related_relations = _related_relations(candidate.local_surface_key, unit_relations)
+                related_candidates = _related_candidates(
+                    candidate, unit_candidates, unit_relations
+                )
+                related_relations = _related_relations(
+                    candidate.local_surface_key, unit_relations
+                )
                 draft = await self.synthesize_surface_answer(
                     source_unit=unit,
                     candidate=candidate,
@@ -93,7 +105,7 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 drafts.append(draft)
                 warnings.extend(draft.warnings)
 
-                ownership = await self.assign_surface_questions(
+                ownership_result = await self.assign_surface_questions(
                     source_unit=unit,
                     answer_draft=draft,
                     candidate=candidate,
@@ -102,18 +114,22 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                     file_name=file_name,
                     run_id=run_id,
                 )
-                ownership_decisions.extend(ownership.owned_questions)
-                warnings.extend(ownership.warnings)
+                ownership_decisions.extend(ownership_result.owned_questions)
+                warnings.extend(ownership_result.warnings)
                 reassignments.extend(
                     _reassign_rejected(
                         run_id=run_id,
                         document_id=unit.document_id,
                         from_surface_key=candidate.local_surface_key,
-                        rejected_questions=ownership.rejected_questions,
+                        rejected_questions=ownership_result.rejected_questions,
                     )
                 )
 
-        judge_relations, merge_decisions, judge_warnings = await self._judge_global_relations(
+        (
+            judge_relations,
+            merge_decisions,
+            judge_warnings,
+        ) = await self._judge_global_relations(
             run_id=run_id,
             document_id=units[0].document_id,
             drafts=tuple(drafts),
@@ -136,8 +152,10 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             existing_reassignments=tuple(reassignments),
         )
         warnings.extend(reassignment_warnings)
-        reassignments = list(_dedupe_reassignments(tuple(reassignments) + final_reassignments))
-        ownership = _final_ownership(
+        reassignments = list(
+            _dedupe_reassignments(tuple(reassignments) + final_reassignments)
+        )
+        final_ownership = _final_ownership(
             run_id=run_id,
             document_id=units[0].document_id,
             decisions=tuple(ownership_decisions),
@@ -156,7 +174,7 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             source_units=units,
             surfaces=surfaces,
             relations=final_relations,
-            ownership=ownership,
+            ownership=final_ownership,
             reassignments=tuple(reassignments),
             merge_decisions=merge_decisions,
             metrics=_json_object(
@@ -166,7 +184,7 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                     "candidate_count": len(candidates),
                     "surface_count": len(surfaces),
                     "relation_count": len(final_relations),
-                    "ownership_count": len(ownership),
+                    "ownership_count": len(final_ownership),
                     "reassignment_count": len(reassignments),
                     "merge_decision_count": len(merge_decisions),
                     "warning_count": len(warnings),
@@ -180,7 +198,9 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             )
         metrics = _json_object({**graph.metrics, **quality.metrics})
         if quality.warnings:
-            metrics["quality_warnings"] = [json_value_from_unknown(item) for item in quality.warnings]
+            metrics["quality_warnings"] = [
+                json_value_from_unknown(item) for item in quality.warnings
+            ]
         return RetrievalSurfaceCompilationResult(
             mode=mode,
             prompt_version=GRAPH_PROMPT_VERSION,
@@ -196,7 +216,11 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
         document_id: str,
         drafts: tuple[SurfaceAnswerDraft, ...],
         local_relations: tuple[LocalSurfaceRelation, ...],
-    ) -> tuple[tuple[RetrievalSurfaceRelation, ...], tuple[RetrievalSurfaceMergeDecision, ...], tuple[str, ...]]:
+    ) -> tuple[
+        tuple[RetrievalSurfaceRelation, ...],
+        tuple[RetrievalSurfaceMergeDecision, ...],
+        tuple[str, ...],
+    ]:
         relations: list[RetrievalSurfaceRelation] = []
         merges: list[RetrievalSurfaceMergeDecision] = []
         warnings: list[str] = []
@@ -214,7 +238,9 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             }
             data = await self._prompt_json(GLOBAL_JUDGE_PROMPT, payload)
             warnings.extend(_strings(data.get("warnings")))
-            for index, item in enumerate(_objects(data.get("judgements"), "judgements")):
+            for index, item in enumerate(
+                _objects(data.get("judgements"), "judgements")
+            ):
                 relation_type = _text(item.get("relation_type")) or "unrelated"
                 parent = _text(item.get("parent_key"))
                 child = _text(item.get("child_key"))
@@ -222,7 +248,9 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                     continue
                 relations.append(
                     RetrievalSurfaceRelation(
-                        id=_stable_id(run_id, "judge", cluster_index, index, parent, child),
+                        id=_stable_id(
+                            run_id, "judge", cluster_index, index, parent, child
+                        ),
                         run_id=run_id,
                         document_id=document_id,
                         parent_surface_key=parent,
@@ -242,7 +270,8 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                             merged_surface_keys=(child,),
                             keep_separate_surface_keys=(),
                             decision_type="merge",
-                            reason=_text(item.get("reason")) or "Global duplicate merge.",
+                            reason=_text(item.get("reason"))
+                            or "Global duplicate merge.",
                             confidence=_float(item.get("confidence"), 0.7),
                         )
                     )
@@ -277,19 +306,27 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 reason=_text(item.get("reason")) or "Global question reassignment.",
                 confidence=_float(item.get("confidence"), 0.7),
             )
-            for index, item in enumerate(_objects(data.get("reassignments"), "reassignments"))
+            for index, item in enumerate(
+                _objects(data.get("reassignments"), "reassignments")
+            )
             if _text(item.get("from_surface_key")) and _text(item.get("to_surface_key"))
         )
         return reassignments, tuple(_strings(data.get("warnings")))
 
-    async def _prompt_json(self, prompt_file: str, payload: Mapping[str, object]) -> Mapping[str, object]:
+    async def _prompt_json(
+        self, prompt_file: str, payload: Mapping[str, object]
+    ) -> Mapping[str, object]:
         prompt = (PROMPTS_DIR / prompt_file).read_text(encoding="utf-8")
-        full_prompt = f"{prompt}\n\nINPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
+        full_prompt = (
+            f"{prompt}\n\nINPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
+        )
         _, content = await self._request_json(prompt=full_prompt, max_tokens=3000)
         parsed = _loads_json_object(content)
         if not isinstance(parsed, Mapping):
-            raise KnowledgePreprocessingValidationError("stage response must be a JSON object")
-        return cast(Mapping[str, object], parsed)
+            raise KnowledgePreprocessingValidationError(
+                "stage response must be a JSON object"
+            )
+        return parsed
 
 
 def _related_candidates(
@@ -310,7 +347,9 @@ def _related_relations(
     key: str, relations: Sequence[LocalSurfaceRelation]
 ) -> tuple[LocalSurfaceRelation, ...]:
     return tuple(
-        relation for relation in relations if key in {relation.source_surface_key, relation.target_surface_key}
+        relation
+        for relation in relations
+        if key in {relation.source_surface_key, relation.target_surface_key}
     )
 
 
@@ -393,11 +432,27 @@ def _deterministic_global_relations(
             if not left_title or not right_title:
                 continue
             if left_title == right_title:
-                result.append(_relation(run_id, document_id, left.candidate_key, right.candidate_key, "duplicates"))
+                result.append(
+                    _relation(
+                        run_id,
+                        document_id,
+                        left.candidate_key,
+                        right.candidate_key,
+                        "duplicates",
+                    )
+                )
             elif left_title in right_title or right_title in left_title:
                 parent = left if len(left_title) < len(right_title) else right
                 child = right if parent is left else left
-                result.append(_relation(run_id, document_id, parent.candidate_key, child.candidate_key, "umbrella_contains"))
+                result.append(
+                    _relation(
+                        run_id,
+                        document_id,
+                        parent.candidate_key,
+                        child.candidate_key,
+                        "umbrella_contains",
+                    )
+                )
     return result
 
 
@@ -425,14 +480,25 @@ def _fallback_siblings(
     document_id: str,
     drafts: tuple[SurfaceAnswerDraft, ...],
 ) -> list[RetrievalSurfaceRelation]:
-    return [_relation(run_id, document_id, left.candidate_key, right.candidate_key, "sibling") for left, right in zip(drafts, drafts[1:])]
+    return [
+        _relation(
+            run_id, document_id, left.candidate_key, right.candidate_key, "sibling"
+        )
+        for left, right in zip(drafts, drafts[1:])
+    ]
 
 
-def _dedupe_relations(relations: list[RetrievalSurfaceRelation]) -> list[RetrievalSurfaceRelation]:
+def _dedupe_relations(
+    relations: list[RetrievalSurfaceRelation],
+) -> list[RetrievalSurfaceRelation]:
     seen: set[tuple[str, str, str]] = set()
     result: list[RetrievalSurfaceRelation] = []
     for relation in relations:
-        key = (relation.parent_surface_key, relation.child_surface_key, relation.relation_type)
+        key = (
+            relation.parent_surface_key,
+            relation.child_surface_key,
+            relation.relation_type,
+        )
         if key not in seen:
             seen.add(key)
             result.append(relation)
@@ -447,7 +513,9 @@ def _final_surfaces(
     drafts: tuple[SurfaceAnswerDraft, ...],
     warnings: tuple[str, ...],
 ) -> tuple[RetrievalSurfaceDraft, ...]:
-    candidate_by_key = {candidate.local_surface_key: candidate for candidate in candidates}
+    candidate_by_key = {
+        candidate.local_surface_key: candidate for candidate in candidates
+    }
     result: list[RetrievalSurfaceDraft] = []
     for draft in drafts:
         candidate = candidate_by_key[draft.candidate_key]
@@ -471,7 +539,11 @@ def _final_surfaces(
                 source_excerpt=draft.answer[:500],
                 confidence=candidate.confidence,
                 warnings=tuple(sorted(set(draft.warnings + warnings))),
-                metadata={**draft.metadata, "graph_context_compiled": True, "candidate_id": candidate.id},
+                metadata={
+                    **draft.metadata,
+                    "graph_context_compiled": True,
+                    "candidate_id": candidate.id,
+                },
                 source_chunk_indexes=_source_indexes(candidate.source_refs),
             )
         )
@@ -490,16 +562,20 @@ def _final_ownership(
         rejected_from = tuple(
             reassignment.from_surface_key
             for reassignment in reassignments
-            if reassignment.question == item.question and reassignment.to_surface_key == item.surface_key
+            if reassignment.question == item.question
+            and reassignment.to_surface_key == item.surface_key
         )
         if any(
-            reassignment.question == item.question and reassignment.from_surface_key == item.surface_key
+            reassignment.question == item.question
+            and reassignment.from_surface_key == item.surface_key
             for reassignment in reassignments
         ):
             continue
         ownership.append(
             SurfaceQuestionOwnership(
-                id=_stable_id(run_id, "ownership", index, item.surface_key, item.question),
+                id=_stable_id(
+                    run_id, "ownership", index, item.surface_key, item.question
+                ),
                 run_id=run_id,
                 document_id=document_id,
                 question=item.question,
@@ -514,7 +590,7 @@ def _final_ownership(
 
 
 def _dedupe_reassignments(
-    reassignments: tuple[SurfaceQuestionReassignment, ...]
+    reassignments: tuple[SurfaceQuestionReassignment, ...],
 ) -> tuple[SurfaceQuestionReassignment, ...]:
     seen: set[tuple[str, str, str]] = set()
     result: list[SurfaceQuestionReassignment] = []
@@ -526,8 +602,12 @@ def _dedupe_reassignments(
     return tuple(result)
 
 
-def _clusters(items: tuple[SurfaceAnswerDraft, ...], *, size: int) -> tuple[tuple[SurfaceAnswerDraft, ...], ...]:
-    return tuple(tuple(items[index : index + size]) for index in range(0, len(items), size))
+def _clusters(
+    items: tuple[SurfaceAnswerDraft, ...], *, size: int
+) -> tuple[tuple[SurfaceAnswerDraft, ...], ...]:
+    return tuple(
+        tuple(items[index : index + size]) for index in range(0, len(items), size)
+    )
 
 
 def _source_indexes(source_refs: tuple[str, ...]) -> tuple[int, ...]:
@@ -539,7 +619,7 @@ def _source_indexes(source_refs: tuple[str, ...]) -> tuple[int, ...]:
     return tuple(sorted(set(indexes)))
 
 
-def _relation_type(value: str) -> str:
+def _relation_type(value: str) -> SurfaceRelationType:
     allowed = {
         "umbrella_contains",
         "specializes",
@@ -553,7 +633,7 @@ def _relation_type(value: str) -> str:
         "needs_new_parent",
         "reparent_needed",
     }
-    return value if value in allowed else "unrelated"
+    return cast(SurfaceRelationType, value if value in allowed else "unrelated")
 
 
 def _objects(value: object, name: str) -> tuple[Mapping[str, object], ...]:
@@ -561,7 +641,9 @@ def _objects(value: object, name: str) -> tuple[Mapping[str, object], ...]:
         return ()
     if not isinstance(value, list):
         raise KnowledgePreprocessingValidationError(f"{name} must be an array")
-    return tuple(cast(Mapping[str, object], item) for item in value if isinstance(item, Mapping))
+    return tuple(
+        cast(Mapping[str, object], item) for item in value if isinstance(item, Mapping)
+    )
 
 
 def _strings(value: object) -> tuple[str, ...]:
@@ -576,9 +658,11 @@ def _text(value: object) -> str:
 
 def _float(value: object, default: float) -> float:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        if isinstance(value, (str, int, float)):
+            return float(value)
+    except ValueError:
         return default
+    return default
 
 
 def _norm(value: str) -> str:

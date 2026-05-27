@@ -17,10 +17,29 @@ def test_split_compiler_does_not_use_monolithic_source_units_prompt() -> None:
     assert "Fallback relation between adjacent source-unit surfaces" in source
 
 
-def test_quality_gated_compiler_keeps_backward_compatible_import_name() -> None:
+def test_quality_gated_compiler_uses_full_graph_pipeline() -> None:
     source = (
         ROOT / "src/infrastructure/llm/knowledge_surface_quality_gated_compiler.py"
     ).read_text(encoding="utf-8")
 
-    assert "GroqSplitKnowledgeSurfaceCompiler" in source
+    assert "GroqFullKnowledgeSurfaceGraphCompiler" in source
+    assert "GroqSplitKnowledgeSurfaceCompiler" not in source
     assert "class GroqQualityGatedKnowledgeSurfaceCompiler" in source
+
+
+def test_full_graph_compiler_runs_all_required_stages() -> None:
+    source = (
+        ROOT / "src/infrastructure/llm/knowledge_surface_full_graph_compiler.py"
+    ).read_text(encoding="utf-8")
+
+    for needle in (
+        "discover_surfaces_for_source_unit",
+        "plan_local_relations",
+        "synthesize_surface_answer",
+        "assign_surface_questions",
+        "_judge_global_relations",
+        "_reassign_questions",
+        "validate_faq_surface_graph_quality",
+        "full_staged_surface_graph_v1",
+    ):
+        assert needle in source

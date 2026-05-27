@@ -98,7 +98,7 @@ class GroqStagedKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceGraphCompilerV2):
                 answer_drafts.append(answer)
                 warnings.extend(answer.warnings)
 
-                ownership = await self.assign_surface_questions(
+                ownership_result = await self.assign_surface_questions(
                     source_unit=unit,
                     answer_draft=answer,
                     candidate=candidate,
@@ -107,12 +107,14 @@ class GroqStagedKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceGraphCompilerV2):
                     file_name=file_name,
                     run_id=run_id,
                 )
-                owned_decisions.extend(ownership.owned_questions)
-                warnings.extend(ownership.warnings)
-                for index, rejected in enumerate(ownership.rejected_questions):
+                owned_decisions.extend(ownership_result.owned_questions)
+                warnings.extend(ownership_result.warnings)
+                for index, rejected in enumerate(ownership_result.rejected_questions):
                     reassignments.append(
                         SurfaceQuestionReassignment(
-                            id=_stable_id(run_id, "rejected", candidate.local_surface_key, index),
+                            id=_stable_id(
+                                run_id, "rejected", candidate.local_surface_key, index
+                            ),
                             run_id=run_id,
                             document_id=unit.document_id,
                             question=rejected.question,
@@ -136,7 +138,7 @@ class GroqStagedKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceGraphCompilerV2):
             answer_drafts=tuple(answer_drafts),
             warnings=tuple(warnings),
         )
-        ownership = _final_ownership(
+        final_ownership = _final_ownership(
             run_id=run_id,
             document_id=units[0].document_id,
             decisions=tuple(owned_decisions),
@@ -148,7 +150,7 @@ class GroqStagedKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceGraphCompilerV2):
             source_units=units,
             surfaces=surfaces,
             relations=relations,
-            ownership=ownership,
+            ownership=final_ownership,
             reassignments=tuple(reassignments),
             merge_decisions=_merge_decisions(
                 run_id=run_id,
@@ -162,7 +164,7 @@ class GroqStagedKnowledgeSurfaceCompiler(GroqKnowledgeSurfaceGraphCompilerV2):
                     "candidate_count": len(candidates),
                     "surface_count": len(surfaces),
                     "relation_count": len(relations),
-                    "ownership_count": len(ownership),
+                    "ownership_count": len(final_ownership),
                     "reassignment_count": len(reassignments),
                     "warning_count": len(warnings),
                 }
@@ -220,7 +222,9 @@ def _final_surfaces(
     answer_drafts: tuple[SurfaceAnswerDraft, ...],
     warnings: tuple[str, ...],
 ) -> tuple[RetrievalSurfaceDraft, ...]:
-    candidate_by_key = {candidate.local_surface_key: candidate for candidate in candidates}
+    candidate_by_key = {
+        candidate.local_surface_key: candidate for candidate in candidates
+    }
     surfaces: list[RetrievalSurfaceDraft] = []
     for draft in answer_drafts:
         candidate = candidate_by_key[draft.candidate_key]
@@ -308,13 +312,25 @@ def _cross_surface_relations(
                 continue
             if left_title == right_title:
                 result.append(
-                    _relation(run_id, document_id, left.candidate_key, right.candidate_key, "duplicates")
+                    _relation(
+                        run_id,
+                        document_id,
+                        left.candidate_key,
+                        right.candidate_key,
+                        "duplicates",
+                    )
                 )
             elif left_title in right_title or right_title in left_title:
                 parent = left if len(left_title) < len(right_title) else right
                 child = right if parent is left else left
                 result.append(
-                    _relation(run_id, document_id, parent.candidate_key, child.candidate_key, "umbrella_contains")
+                    _relation(
+                        run_id,
+                        document_id,
+                        parent.candidate_key,
+                        child.candidate_key,
+                        "umbrella_contains",
+                    )
                 )
     return result
 
@@ -344,7 +360,9 @@ def _fallback_siblings(
     drafts: tuple[SurfaceAnswerDraft, ...],
 ) -> list[RetrievalSurfaceRelation]:
     return [
-        _relation(run_id, document_id, left.candidate_key, right.candidate_key, "sibling")
+        _relation(
+            run_id, document_id, left.candidate_key, right.candidate_key, "sibling"
+        )
         for left, right in zip(drafts, drafts[1:])
     ]
 
@@ -389,7 +407,9 @@ def _final_ownership(
         )
         ownership.append(
             SurfaceQuestionOwnership(
-                id=_stable_id(run_id, "ownership", index, item.surface_key, item.question),
+                id=_stable_id(
+                    run_id, "ownership", index, item.surface_key, item.question
+                ),
                 run_id=run_id,
                 document_id=document_id,
                 question=item.question,

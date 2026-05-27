@@ -20,6 +20,6 @@ def test_queue_handler_routes_faq_to_surface_ingestion_service() -> None:
         "KnowledgeIngestionService", 1
     )[0]
     assert "KnowledgeFaqSurfaceIngestionService" in faq_branch
-    assert "GroqKnowledgeSurfaceCompiler" in faq_branch
+    assert "GroqQualityGatedKnowledgeSurfaceCompiler" in faq_branch
     assert "process_document(" in faq_branch
     assert "return" in faq_branch

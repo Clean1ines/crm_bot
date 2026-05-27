@@ -16,7 +16,9 @@ class SurfaceGraphQualityResult:
     metrics: dict[str, int | str] = field(default_factory=dict)
 
 
-def validate_faq_surface_graph_quality(graph: RetrievalSurfaceGraph) -> SurfaceGraphQualityResult:
+def validate_faq_surface_graph_quality(
+    graph: RetrievalSurfaceGraph,
+) -> SurfaceGraphQualityResult:
     """Validate production-critical FAQ Retrieval Surface Graph invariants.
 
     This is intentionally deterministic application logic. It must not call DB,
@@ -27,12 +29,16 @@ def validate_faq_surface_graph_quality(graph: RetrievalSurfaceGraph) -> SurfaceG
     source_unit_count = len(graph.source_units)
     final_surface_count = len(graph.surfaces)
     final_relation_count = len(graph.relations)
-    surface_answer_count = sum(1 for surface in graph.surfaces if surface.answer.strip())
+    surface_answer_count = sum(
+        1 for surface in graph.surfaces if surface.answer.strip()
+    )
     rejected_question_count = sum(
         len(ownership.rejected_from_surface_keys) for ownership in graph.ownership
     )
     parent_child_relation_count = sum(
-        1 for relation in graph.relations if relation.relation_type == "umbrella_contains"
+        1
+        for relation in graph.relations
+        if relation.relation_type == "umbrella_contains"
     )
 
     issues: list[str] = []

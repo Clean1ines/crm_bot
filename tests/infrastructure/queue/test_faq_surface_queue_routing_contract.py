@@ -8,7 +8,7 @@ def test_knowledge_upload_queue_handler_routes_faq_to_service_pipeline() -> None
 
     assert "mode == MODE_FAQ" in source
     assert "KnowledgeFaqSurfaceIngestionService" in source
-    assert "GroqKnowledgeSurfaceCompiler" in source
+    assert "GroqQualityGatedKnowledgeSurfaceCompiler" in source
     assert "process_document(" in source
     assert "KnowledgeIngestionService" in source
 
