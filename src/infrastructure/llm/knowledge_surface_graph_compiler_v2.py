@@ -5,6 +5,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import cast
 
+from groq import APIError, RateLimitError
+
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingValidationError,
 )
@@ -23,6 +25,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceRelationType,
 )
 from src.infrastructure.llm.knowledge_surface_compiler import (
+    GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
     GroqKnowledgeSurfaceCompiler,
     PROMPTS_DIR,
     _compact_text,
@@ -82,6 +85,16 @@ QUESTION_KINDS = frozenset(
         "expected_topic_hint",
     }
 )
+
+
+def _is_large_request_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return (
+        "413" in text
+        or "request too large" in text
+        or "tokens per minute" in text
+        or "tpm" in text
+    )
 
 
 class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
@@ -261,13 +274,45 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         full_prompt = (
             f"{prompt}\n\nINPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
         )
-        _, content = await self._request_json(prompt=full_prompt, max_tokens=3000)
+        _, content = await self._request_json_with_large_request_fallback(
+            prompt=full_prompt,
+            max_tokens=3000,
+        )
         parsed = _loads_json_object(content)
         if not isinstance(parsed, Mapping):
             raise KnowledgePreprocessingValidationError(
                 "stage response must be a JSON object"
             )
         return parsed
+
+    async def _request_json_with_large_request_fallback(
+        self,
+        *,
+        prompt: str,
+        max_tokens: int,
+    ) -> tuple[str, str]:
+        try:
+            return await self._request_json(prompt=prompt, max_tokens=max_tokens)
+        except (APIError, RateLimitError) as exc:
+            if not _is_large_request_error(exc):
+                raise
+            return await self._request_json_using_fallback_model(
+                prompt=prompt,
+                max_tokens=max_tokens,
+            )
+
+    async def _request_json_using_fallback_model(
+        self,
+        *,
+        prompt: str,
+        max_tokens: int,
+    ) -> tuple[str, str]:
+        previous_model = self._model
+        try:
+            self._model = GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID
+            return await self._request_json(prompt=prompt, max_tokens=max_tokens)
+        finally:
+            self._model = previous_model
 
     def _candidate(
         self,
