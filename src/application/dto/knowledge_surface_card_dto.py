@@ -97,7 +97,7 @@ class SurfaceCardDto:
         overlap_warnings: list[str] = []
 
         for relation in relations:
-            if relation.child_surface_key == key and relation.relation_type == "umbrella_contains":
+            if _is_parent_relation(relation=relation, surface_key=key):
                 parent_surfaces.append(
                     SurfaceRelationSummaryDto(
                         surface_key=relation.parent_surface_key,
@@ -105,7 +105,7 @@ class SurfaceCardDto:
                         reason=relation.reason,
                     )
                 )
-            if relation.parent_surface_key == key and relation.relation_type == "umbrella_contains":
+            if _is_child_relation(relation=relation, surface_key=key):
                 child_surfaces.append(
                     SurfaceRelationSummaryDto(
                         surface_key=relation.child_surface_key,
@@ -113,22 +113,27 @@ class SurfaceCardDto:
                         reason=relation.reason,
                     )
                 )
-            if key in {relation.parent_surface_key, relation.child_surface_key}:
-                other_key = (
-                    relation.child_surface_key
-                    if relation.parent_surface_key == key
-                    else relation.parent_surface_key
+            if key not in {relation.parent_surface_key, relation.child_surface_key}:
+                continue
+            other_key = _other_surface_key(relation=relation, surface_key=key)
+            if relation.relation_type == "sibling":
+                sibling_surfaces.append(
+                    SurfaceRelationSummaryDto(
+                        other_key,
+                        relation.relation_type,
+                        relation.reason,
+                    )
                 )
-                if relation.relation_type == "sibling":
-                    sibling_surfaces.append(
-                        SurfaceRelationSummaryDto(other_key, relation.relation_type, relation.reason)
+            if relation.relation_type in {"duplicates", "near_duplicate"}:
+                duplicate_candidates.append(
+                    SurfaceRelationSummaryDto(
+                        other_key,
+                        relation.relation_type,
+                        relation.reason,
                     )
-                if relation.relation_type in {"duplicates", "near_duplicate"}:
-                    duplicate_candidates.append(
-                        SurfaceRelationSummaryDto(other_key, relation.relation_type, relation.reason)
-                    )
-                if relation.relation_type == "overlaps":
-                    overlap_warnings.append(relation.reason or f"overlaps:{other_key}")
+                )
+            if relation.relation_type == "overlaps":
+                overlap_warnings.append(relation.reason or f"overlaps:{other_key}")
 
         owned_questions = tuple(
             SurfaceOwnedQuestionDto(
@@ -194,13 +199,41 @@ class SurfaceCardDto:
             "parent_surfaces": [item.to_dict() for item in self.parent_surfaces],
             "child_surfaces": [item.to_dict() for item in self.child_surfaces],
             "sibling_surfaces": [item.to_dict() for item in self.sibling_surfaces],
-            "duplicate_candidates": [item.to_dict() for item in self.duplicate_candidates],
+            "duplicate_candidates": [
+                item.to_dict() for item in self.duplicate_candidates
+            ],
             "overlap_warnings": list(self.overlap_warnings),
             "source_refs": list(self.source_refs),
             "status": self.status,
             "publication_status": self.publication_status,
             "quality_warnings": list(self.quality_warnings),
         }
+
+
+def _is_parent_relation(
+    *, relation: RetrievalSurfaceRelation, surface_key: str
+) -> bool:
+    return (
+        relation.child_surface_key == surface_key
+        and relation.relation_type == "umbrella_contains"
+    )
+
+
+def _is_child_relation(
+    *, relation: RetrievalSurfaceRelation, surface_key: str
+) -> bool:
+    return (
+        relation.parent_surface_key == surface_key
+        and relation.relation_type == "umbrella_contains"
+    )
+
+
+def _other_surface_key(
+    *, relation: RetrievalSurfaceRelation, surface_key: str
+) -> str:
+    if relation.parent_surface_key == surface_key:
+        return relation.child_surface_key
+    return relation.parent_surface_key
 
 
 def _umbrella_quality_warnings(
