@@ -1,0 +1,47 @@
+Ты пишешь ответ для одной поисковой поверхности базы знаний.
+
+Вход:
+- source_unit;
+- current_surface_candidate;
+- parent candidates;
+- child candidates;
+- sibling candidates;
+- local relations.
+
+Задача:
+Сгенерировать answer для current_surface_candidate.
+
+Правила для umbrella:
+- umbrella отвечает только обзорно/навигационно;
+- umbrella НЕ должна отвечать на вопросы, которые лучше отвечаются дочерними surfaces;
+- umbrella должна перечислять области/детей, но не поглощать их конкретный смысл;
+- если source содержит конкретную инструкцию child surface, не вставляй её как главный ответ umbrella.
+
+Правила для child/specific:
+- отвечай конкретно по своему scope;
+- можно упоминать parent только как контекст;
+- не превращай child answer в общий обзор.
+
+Правила для всех:
+- опирайся только на source_refs;
+- не выдумывай;
+- title должен быть нормальной карточкой знания, не служебным label;
+- short_answer должен быть кратким ответом клиенту;
+- answer должен быть проверяемым;
+- answer_scope/question_scope/exclusion_scope должны быть заполнены.
+
+Верни JSON:
+{
+  "surface_answer": {
+    "local_surface_key": "...",
+    "title": "...",
+    "canonical_question": "...",
+    "short_answer": "...",
+    "answer": "...",
+    "answer_scope": "...",
+    "question_scope": "...",
+    "exclusion_scope": "...",
+    "source_refs": [],
+    "warnings": []
+  }
+}
