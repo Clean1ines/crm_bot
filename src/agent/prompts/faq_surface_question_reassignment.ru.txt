@@ -1,0 +1,29 @@
+Ты пересматриваешь владение вопросами после глобальной перестройки графа.
+
+Вход:
+- final surfaces;
+- parent/child/sibling relations;
+- current question ownership.
+
+Задача:
+Найти misplaced questions и перенести их к лучшей surface.
+
+Правила:
+- parent/umbrella не владеет вопросами детей;
+- child не владеет broad parent questions;
+- sibling questions должны принадлежать sibling;
+- если вопрос ambiguous, оставить у current surface только при наличии clear answer_scope match.
+
+Верни JSON:
+{
+  "reassignments": [
+    {
+      "question": "...",
+      "from_surface_key": "...",
+      "to_surface_key": "...",
+      "reason": "...",
+      "confidence": 0.0
+    }
+  ],
+  "warnings": []
+}
