@@ -60,7 +60,26 @@ SUPPORTED_PROMPT_LANGUAGES = {"ru", "en", "de", "es"}
 
 GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
 GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
-GROQ_INSTANT_FREE_TPM_LIMIT = 6000
+GROQ_MODEL_FALLBACK_ORDER: tuple[str, ...] = (
+    GROQ_INSTANT_MODEL_ID,
+    GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3-32b",
+    "groq/compound-mini",
+    "groq/compound",
+)
+GROQ_MODEL_TPM_LIMITS: dict[str, int] = {
+    GROQ_INSTANT_MODEL_ID: 6000,
+    GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID: 30000,
+    "llama-3.3-70b-versatile": 12000,
+    "openai/gpt-oss-120b": 8000,
+    "openai/gpt-oss-20b": 8000,
+    "qwen/qwen3-32b": 6000,
+    "groq/compound-mini": 70000,
+    "groq/compound": 70000,
+}
 
 
 def _estimate_groq_request_tokens(
@@ -68,13 +87,7 @@ def _estimate_groq_request_tokens(
     prompt: str,
     max_tokens: int,
 ) -> int:
-    """Conservative local estimate for Groq TPM routing.
-
-    Groq rejected the previous document batches because requested tokens
-    exceeded llama-3.1-8b-instant Free TPM. We do not need exact tokenizer
-    parity here; we need a safe preflight budget to route large requests to
-    a model with a larger TPM limit.
-    """
+    """Conservative local estimate for Groq TPM/model selection routing."""
 
     estimated_input_tokens = max(
         1,
@@ -171,12 +184,28 @@ def _groq_rate_limit_error(
 ) -> TransientEmbeddingProviderError:
     retry_after_seconds = _rate_limit_retry_after_seconds(exc)
     return TransientEmbeddingProviderError(
-        "Лимит модели временно исчерпан. Прогресс обработки сохранён; повторите проблемные части после паузы.",
+        "Лимит моделей Groq временно исчерпан. Прогресс обработки сохранён; повторите проблемные части после паузы.",
         provider="groq",
         task=f"knowledge_preprocessing.{task}",
         model=model,
         retry_after_seconds=retry_after_seconds,
     )
+
+
+def _dedupe_models(models: Sequence[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for model in models:
+        normalized = str(model or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return tuple(result)
+
+
+def _model_tpm_limit(model: str) -> int | None:
+    return GROQ_MODEL_TPM_LIMITS.get(model)
 
 
 class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
@@ -199,34 +228,46 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
     def model_name(self) -> str:
         return self._model
 
-    def _model_for_json_request(
+    def _models_for_json_request(
         self,
         *,
         task: str,
         prompt: str,
         max_tokens: int,
-    ) -> str:
+    ) -> tuple[str, ...]:
         estimated_request_tokens = _estimate_groq_request_tokens(
             prompt=prompt,
             max_tokens=max_tokens,
         )
-        if (
-            self._model == GROQ_INSTANT_MODEL_ID
-            and estimated_request_tokens > GROQ_INSTANT_FREE_TPM_LIMIT
-        ):
+        candidate_order = _dedupe_models((self._model, *GROQ_MODEL_FALLBACK_ORDER))
+        usable_models: list[str] = []
+        skipped_models: list[str] = []
+
+        for model in candidate_order:
+            tpm_limit = _model_tpm_limit(model)
+            if tpm_limit is not None and estimated_request_tokens > tpm_limit:
+                skipped_models.append(model)
+                continue
+            usable_models.append(model)
+
+        if skipped_models:
             logger.warning(
-                "Groq request exceeds selected model TPM; using fallback model for this call",
+                "Skipping Groq models below estimated request TPM",
                 extra={
                     "task": task,
-                    "selected_model": self._model,
-                    "fallback_model": GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
                     "estimated_request_tokens": estimated_request_tokens,
-                    "selected_model_tpm_limit": GROQ_INSTANT_FREE_TPM_LIMIT,
+                    "skipped_models": skipped_models,
                 },
             )
-            return GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID
 
-        return self._model
+        if usable_models:
+            return tuple(usable_models)
+
+        return _dedupe_models((
+            "groq/compound-mini",
+            "groq/compound",
+            GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
+        ))
 
     async def preprocess(
         self,
@@ -243,80 +284,89 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         )
 
         max_tokens = 4000
-        request_model = self._model_for_json_request(
+        request_models = self._models_for_json_request(
             task="preprocess",
             prompt=prompt,
             max_tokens=max_tokens,
         )
+        last_rate_limit: RateLimitError | None = None
 
-        try:
-            response = await self._client.chat.completions.create(
-                model=request_model,
-                messages=[
-                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content or ""
-            _log_llm_response(
-                task="preprocess",
-                mode=mode,
-                model=request_model,
-                prompt_version=prompt_version,
-                content=content,
-                response=response,
-            )
-            result = parse_preprocessing_payload(
-                content, mode=mode, model=request_model, prompt_version=prompt_version
-            )
-            result = _cleanup_faq_preprocessing_result(result)
-            return KnowledgePreprocessingExecutionResult(
-                result=result,
-                usage=_response_usage_measurement(
-                    response=response,
+        for model_index, request_model in enumerate(request_models):
+            try:
+                response = await self._client.chat.completions.create(
                     model=request_model,
-                    prompt=prompt,
+                    messages=[
+                        {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or ""
+                _log_llm_response(
+                    task="preprocess",
+                    mode=mode,
+                    model=request_model,
+                    prompt_version=prompt_version,
                     content=content,
-                ),
-            )
-        except RateLimitError as exc:
-            logger.warning(
-                "Knowledge preprocessing rate limited by Groq",
-                extra={
-                    "mode": mode,
-                    "model": request_model,
-                    "error_type": type(exc).__name__,
-                    "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
-                },
-            )
+                    response=response,
+                )
+                result = parse_preprocessing_payload(
+                    content, mode=mode, model=request_model, prompt_version=prompt_version
+                )
+                result = _cleanup_faq_preprocessing_result(result)
+                return KnowledgePreprocessingExecutionResult(
+                    result=result,
+                    usage=_response_usage_measurement(
+                        response=response,
+                        model=request_model,
+                        prompt=prompt,
+                        content=content,
+                    ),
+                )
+            except RateLimitError as exc:
+                last_rate_limit = exc
+                logger.warning(
+                    "Knowledge preprocessing model rate-limited by Groq; trying fallback model",
+                    extra={
+                        "mode": mode,
+                        "model": request_model,
+                        "fallback_models_remaining": len(request_models) - model_index - 1,
+                        "error_type": type(exc).__name__,
+                        "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
+                    },
+                )
+                continue
+            except (
+                APIConnectionError,
+                APIError,
+                APITimeoutError,
+                AttributeError,
+                IndexError,
+                TypeError,
+                ValueError,
+                KnowledgePreprocessingValidationError,
+            ) as exc:
+                logger.warning(
+                    "Knowledge preprocessing failed",
+                    extra={
+                        "mode": mode,
+                        "model": request_model,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:300],
+                    },
+                )
+                raise
+
+        if last_rate_limit is not None:
             raise _groq_rate_limit_error(
-                exc=exc,
+                exc=last_rate_limit,
                 task="preprocess",
-                model=request_model,
-            ) from exc
-        except (
-            APIConnectionError,
-            APIError,
-            APITimeoutError,
-            AttributeError,
-            IndexError,
-            TypeError,
-            ValueError,
-            KnowledgePreprocessingValidationError,
-        ) as exc:
-            logger.warning(
-                "Knowledge preprocessing failed",
-                extra={
-                    "mode": mode,
-                    "model": self._model,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:300],
-                },
-            )
-            raise
+                model=request_models[-1],
+            ) from last_rate_limit
+
+        raise KnowledgePreprocessingValidationError("No Groq preprocessing model candidates available")
 
     async def resolve_answer_cases(
         self,
@@ -350,84 +400,93 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         )
 
         max_tokens = 3000
-        request_model = self._model_for_json_request(
+        request_models = self._models_for_json_request(
             task="answer_resolution",
             prompt=prompt,
             max_tokens=max_tokens,
         )
+        last_rate_limit: RateLimitError | None = None
 
-        try:
-            response = await self._client.chat.completions.create(
-                model=request_model,
-                messages=[
-                    {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content or ""
-            _log_llm_response(
-                task="answer_resolution",
-                mode=mode,
-                model=request_model,
-                prompt_version=prompt_version,
-                content=content,
-                response=response,
-            )
-            result = parse_answer_resolution_payload(
-                content,
-                mode=mode,
-                model=request_model,
-                prompt_version=prompt_version,
-            )
-            return KnowledgeAnswerResolverExecutionResult(
-                result=result,
-                usage=_response_usage_measurement(
-                    response=response,
+        for model_index, request_model in enumerate(request_models):
+            try:
+                response = await self._client.chat.completions.create(
                     model=request_model,
-                    prompt=prompt,
+                    messages=[
+                        {"role": "system", "content": STRICT_JSON_SYSTEM_MESSAGE},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or ""
+                _log_llm_response(
+                    task="answer_resolution",
+                    mode=mode,
+                    model=request_model,
+                    prompt_version=prompt_version,
                     content=content,
-                ),
-            )
-        except RateLimitError as exc:
-            logger.warning(
-                "Knowledge answer resolution rate limited by Groq",
-                extra={
-                    "mode": mode,
-                    "model": request_model,
-                    "group_count": len(cases),
-                    "error_type": type(exc).__name__,
-                    "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
-                },
-            )
+                    response=response,
+                )
+                result = parse_answer_resolution_payload(
+                    content,
+                    mode=mode,
+                    model=request_model,
+                    prompt_version=prompt_version,
+                )
+                return KnowledgeAnswerResolverExecutionResult(
+                    result=result,
+                    usage=_response_usage_measurement(
+                        response=response,
+                        model=request_model,
+                        prompt=prompt,
+                        content=content,
+                    ),
+                )
+            except RateLimitError as exc:
+                last_rate_limit = exc
+                logger.warning(
+                    "Knowledge answer resolution model rate-limited by Groq; trying fallback model",
+                    extra={
+                        "mode": mode,
+                        "model": request_model,
+                        "group_count": len(cases),
+                        "fallback_models_remaining": len(request_models) - model_index - 1,
+                        "error_type": type(exc).__name__,
+                        "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
+                    },
+                )
+                continue
+            except (
+                APIConnectionError,
+                APIError,
+                APITimeoutError,
+                AttributeError,
+                IndexError,
+                TypeError,
+                ValueError,
+                KnowledgePreprocessingValidationError,
+            ) as exc:
+                logger.warning(
+                    "Knowledge answer resolution failed",
+                    extra={
+                        "mode": mode,
+                        "model": request_model,
+                        "group_count": len(cases),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:300],
+                    },
+                )
+                raise
+
+        if last_rate_limit is not None:
             raise _groq_rate_limit_error(
-                exc=exc,
+                exc=last_rate_limit,
                 task="answer_resolution",
-                model=request_model,
-            ) from exc
-        except (
-            APIConnectionError,
-            APIError,
-            APITimeoutError,
-            AttributeError,
-            IndexError,
-            TypeError,
-            ValueError,
-            KnowledgePreprocessingValidationError,
-        ) as exc:
-            logger.warning(
-                "Knowledge answer resolution failed",
-                extra={
-                    "mode": mode,
-                    "model": self._model,
-                    "group_count": len(cases),
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:300],
-                },
-            )
-            raise
+                model=request_models[-1],
+            ) from last_rate_limit
+
+        raise KnowledgePreprocessingValidationError("No Groq answer resolution model candidates available")
 
     def _build_answer_resolution_prompt(
         self,
