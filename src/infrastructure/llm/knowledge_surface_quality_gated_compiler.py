@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from src.infrastructure.llm.knowledge_surface_full_graph_compiler import (
-    GroqFullKnowledgeSurfaceGraphCompiler,
+from src.infrastructure.llm.knowledge_surface_parallel_graph_compiler import (
+    GroqParallelKnowledgeSurfaceGraphCompiler,
 )
 
 
-class GroqQualityGatedKnowledgeSurfaceCompiler(GroqFullKnowledgeSurfaceGraphCompiler):
-    """Backward-compatible import name for the full FAQ surface graph compiler."""
+class GroqQualityGatedKnowledgeSurfaceCompiler(
+    GroqParallelKnowledgeSurfaceGraphCompiler
+):
+    """Backward-compatible import name for the production FAQ surface graph compiler."""

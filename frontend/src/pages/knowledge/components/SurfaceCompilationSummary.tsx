@@ -118,7 +118,23 @@ const liveProgressFromStages = (
     ? ` · карточка ${candidateIndex}/${candidateCount}`
     : '';
   const rawDetail = stage.output_summary || stage.input_summary || '';
-  const detail = `${unitDetail}${candidateDetail}${rawDetail ? ` · ${rawDetail}` : ''}`;
+  const elapsedSeconds = metricNumber(stage.metrics, 'elapsed_seconds');
+  const tokensTotal = metricNumber(stage.metrics, 'tokens_total');
+  const llmCallCount = metricNumber(stage.metrics, 'llm_call_count');
+  const fallbackCallCount = metricNumber(stage.metrics, 'fallback_call_count');
+  const concurrency = metricNumber(stage.metrics, 'concurrency');
+  const runtimeDetail = [
+    elapsedSeconds !== null ? `${elapsedSeconds} сек` : '',
+    tokensTotal !== null ? `${tokensTotal.toLocaleString('ru-RU')} токенов` : '',
+    llmCallCount !== null ? `${llmCallCount} LLM вызовов` : '',
+    fallbackCallCount !== null && fallbackCallCount > 0 ? `${fallbackCallCount} fallback` : '',
+    concurrency !== null ? `parallel=${concurrency}` : '',
+  ].filter(Boolean).join(' · ');
+  const detail = [
+    `${unitDetail}${candidateDetail}`,
+    rawDetail,
+    runtimeDetail,
+  ].filter(Boolean).join(' · ');
 
   return {
     title: LIVE_STAGE_LABELS[stage.stage_kind] || stage.stage_kind,
@@ -618,6 +634,11 @@ export const SurfaceCompilationSummary: React.FC<{
             ['reassignment_count', 'question moves'],
             ['merge_decision_count', 'merges'],
             ['warning_count', 'warnings'],
+            ['elapsed_seconds', 'elapsed'],
+            ['llm_call_count', 'LLM calls'],
+            ['tokens_total', 'tokens'],
+            ['fallback_call_count', 'fallbacks'],
+            ['concurrency', 'parallel'],
           ].map(([key, label]) => {
             const value = formatMetric(run.metrics[key]);
             return value ? (
