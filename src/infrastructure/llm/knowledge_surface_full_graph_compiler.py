@@ -320,7 +320,10 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
         full_prompt = (
             f"{prompt}\n\nINPUT_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
         )
-        _, content = await self._request_json(prompt=full_prompt, max_tokens=3000)
+        _, content = await self._request_json_with_large_request_fallback(
+            prompt=full_prompt,
+            max_tokens=3000,
+        )
         parsed = _loads_json_object(content)
         if not isinstance(parsed, Mapping):
             raise KnowledgePreprocessingValidationError(
