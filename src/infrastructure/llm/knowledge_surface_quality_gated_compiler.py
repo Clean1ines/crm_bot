@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from src.infrastructure.llm.knowledge_surface_split_compiler import (
-    GroqSplitKnowledgeSurfaceCompiler,
+from src.infrastructure.llm.knowledge_surface_staged_compiler import (
+    GroqStagedKnowledgeSurfaceCompiler,
 )
 
 
-class GroqQualityGatedKnowledgeSurfaceCompiler(GroqSplitKnowledgeSurfaceCompiler):
-    """Backward-compatible import name for the split FAQ surface compiler."""
+class GroqQualityGatedKnowledgeSurfaceCompiler(GroqStagedKnowledgeSurfaceCompiler):
+    """Backward-compatible import name for the staged FAQ surface graph compiler."""
