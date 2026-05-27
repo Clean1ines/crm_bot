@@ -40,6 +40,96 @@ type PipelineStep = {
   detail?: string;
 };
 
+type LiveProgress = {
+  title: string;
+  status: string;
+  message: string;
+  detail: string;
+  percent: number | null;
+  stageKind: string;
+};
+
+const LIVE_STAGE_LABELS: Record<string, string> = {
+  source_units: 'Документ разобран на исходные блоки',
+  surface_discovery: 'Ищем будущие карточки',
+  relation_planning: 'Строим связи между карточками',
+  answer_synthesis: 'Пишем ответы для карточек',
+  question_ownership: 'Назначаем вопросы карточкам',
+  global_reconciliation: 'Собираем глобальный граф',
+  global_relation_judge: 'Проверяем связи и дубликаты',
+  question_reassignment: 'Переносим вопросы между карточками',
+  faq_surface_compilation: 'Компилируем FAQ graph',
+};
+
+const metricNumber = (
+  metrics: Record<string, unknown> | undefined,
+  key: string,
+): number | null => {
+  const value = metrics?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const latestMeaningfulStage = (
+  stages: SurfaceCompilationStage[],
+): SurfaceCompilationStage | null => {
+  for (let index = stages.length - 1; index >= 0; index -= 1) {
+    const stage = stages[index];
+    if (stage.stage_kind !== 'source_units') return stage;
+  }
+  return stages.length > 0 ? stages[stages.length - 1] : null;
+};
+
+const liveProgressFromStages = (
+  stages: SurfaceCompilationStage[],
+  run: SurfaceCompilationRun | null,
+): LiveProgress | null => {
+  const stage = latestMeaningfulStage(stages);
+  if (!stage) return null;
+
+  const sourceUnitIndex = metricNumber(stage.metrics, 'source_unit_index');
+  const sourceUnitCount = (
+    metricNumber(stage.metrics, 'source_unit_count')
+    ?? metricNumber(run?.metrics, 'source_unit_count')
+  );
+  const candidateIndex = metricNumber(stage.metrics, 'candidate_index');
+  const candidateCount = metricNumber(stage.metrics, 'candidate_count');
+
+  let percent: number | null = null;
+  if (sourceUnitIndex && sourceUnitCount && sourceUnitCount > 0) {
+    const unitBase = Math.max(0, sourceUnitIndex - 1);
+    const candidatePart = candidateIndex && candidateCount && candidateCount > 0
+      ? candidateIndex / candidateCount
+      : 1;
+    percent = Math.max(
+      1,
+      Math.min(99, Math.round(((unitBase + candidatePart) / sourceUnitCount) * 100)),
+    );
+  }
+
+  const unitDetail = sourceUnitIndex && sourceUnitCount
+    ? `Блок ${sourceUnitIndex}/${sourceUnitCount}`
+    : '';
+  const candidateDetail = candidateIndex && candidateCount
+    ? ` · карточка ${candidateIndex}/${candidateCount}`
+    : '';
+  const rawDetail = stage.output_summary || stage.input_summary || '';
+  const detail = `${unitDetail}${candidateDetail}${rawDetail ? ` · ${rawDetail}` : ''}`;
+
+  return {
+    title: LIVE_STAGE_LABELS[stage.stage_kind] || stage.stage_kind,
+    status: stage.status,
+    message: stage.error_message || stage.output_summary || stage.input_summary || statusLabel(stage.status),
+    detail: detail || 'Ожидаю следующий backend event…',
+    percent,
+    stageKind: stage.stage_kind,
+  };
+};
+
 const SURFACE_KIND_LABELS: Record<string, string> = {
   umbrella: 'Зонтичная карточка',
   child: 'Дочерняя карточка',
@@ -433,6 +523,8 @@ export const SurfaceCompilationSummary: React.FC<{
   const completedSteps = pipelineSteps.filter((step) => step.status === 'completed').length;
   const progressPercent = Math.round((completedSteps / pipelineSteps.length) * 100);
   const summaryText = pipelineSummaryText(run, pipelineSteps, isDocumentProcessing);
+  const liveProgress = liveProgressFromStages(stages, run);
+  const visibleProgressPercent = liveProgress?.percent ?? progressPercent;
 
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3 text-sm">
@@ -452,15 +544,43 @@ export const SurfaceCompilationSummary: React.FC<{
         </div>
 
         <div className="min-w-[160px] text-right text-xs text-[var(--text-secondary)]">
-          <div>{completedSteps}/{pipelineSteps.length} стадий</div>
+          <div>
+            {liveProgress?.percent ? `${liveProgress.percent}%` : `${completedSteps}/${pipelineSteps.length} стадий`}
+          </div>
           <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--control-bg)]">
             <div
               className="h-full rounded-full bg-[var(--accent-primary)] transition-all"
-              style={{ width: `${progressPercent}%` }}
+              style={{ width: `${visibleProgressPercent}%` }}
             />
           </div>
         </div>
       </div>
+
+      {liveProgress && (
+        <div className="mb-3 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--accent-primary)]/10 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--accent-primary)]">
+                Сейчас выполняется
+              </div>
+              <div className="mt-1 font-semibold text-[var(--text-primary)]">
+                {liveProgress.title}
+              </div>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--text-secondary)]">
+                {liveProgress.detail}
+              </p>
+              {liveProgress.message && (
+                <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                  {liveProgress.message}
+                </p>
+              )}
+            </div>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${stepBadgeClass(liveProgress.status === 'completed' ? 'completed' : liveProgress.status === 'failed' ? 'failed' : 'active')}`}>
+              {statusLabel(liveProgress.status)}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {pipelineSteps.map((step) => (
@@ -528,8 +648,8 @@ export const SurfaceCompilationSummary: React.FC<{
           <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
             Технические события backend
           </summary>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {stages.map((stage) => (
+          <div className="mt-2 flex max-h-40 flex-wrap gap-1 overflow-y-auto">
+            {stages.slice(-80).map((stage) => (
               <span
                 key={stage.id}
                 className="rounded-full bg-[var(--control-bg)] px-2 py-0.5"
