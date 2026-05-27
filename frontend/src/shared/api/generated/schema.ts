@@ -108,10 +108,8 @@ export interface paths {
          *     генерирует эмбеддинги и сохраняет в базу знаний проекта.
          *
          *     preprocessing_mode:
-         *     - plain: legacy chunk persistence, no LLM preprocessing
-         *     - faq: FAQ normalization
+         *     - faq: FAQ Retrieval Surface Compilation
          *     - price_list: price/menu/catalog normalization
-         *     - instruction: policy/procedure normalization
          */
         post: operations["upload_knowledge_api_projects__project_id__knowledge_post"];
         /**
@@ -119,6 +117,108 @@ export interface paths {
          * @description Deletes all knowledge documents and chunks for a project.
          */
         delete: operations["clear_knowledge_api_projects__project_id__knowledge_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/surface-compilation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Surface Compilation State */
+        get: operations["get_surface_compilation_state_api_projects__project_id__knowledge__document_id__surface_compilation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/surfaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Document Surfaces */
+        get: operations["list_document_surfaces_api_projects__project_id__knowledge__document_id__surfaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/surface-relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Document Surface Relations */
+        get: operations["list_document_surface_relations_api_projects__project_id__knowledge__document_id__surface_relations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/surface-ownership": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Document Surface Ownership */
+        get: operations["list_document_surface_ownership_api_projects__project_id__knowledge__document_id__surface_ownership_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/surface-merge-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Document Surface Merge Decisions */
+        get: operations["list_document_surface_merge_decisions_api_projects__project_id__knowledge__document_id__surface_merge_decisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/{document_id}/surfaces/{surface_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Surface To Runtime Entry */
+        post: operations["publish_surface_to_runtime_entry_api_projects__project_id__knowledge__document_id__surfaces__surface_id__publish_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1014,7 +1114,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update Me */
+        patch: operations["update_me_api_auth_me_patch"];
         trace?: never;
     };
     "/api/auth/methods": {
@@ -1761,7 +1862,17 @@ export interface components {
             file: string;
             /**
              * Preprocessing Mode
-             * @default plain
+             * @default faq
+             */
+            preprocessing_mode: string;
+        };
+        /** Body_upload_knowledge_surface_aware_api_projects__project_id__knowledge_post */
+        Body_upload_knowledge_surface_aware_api_projects__project_id__knowledge_post: {
+            /** File */
+            file: string;
+            /**
+             * Preprocessing Mode
+             * @default faq
              */
             preprocessing_mode: string;
         };
@@ -2446,6 +2557,11 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** UpdateProfileRequest */
+        UpdateProfileRequest: {
+            /** Login */
+            login?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -2682,6 +2798,211 @@ export interface operations {
             };
             path: {
                 project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_surface_compilation_state_api_projects__project_id__knowledge__document_id__surface_compilation_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_surfaces_api_projects__project_id__knowledge__document_id__surfaces_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_surface_relations_api_projects__project_id__knowledge__document_id__surface_relations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_surface_ownership_api_projects__project_id__knowledge__document_id__surface_ownership_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_document_surface_merge_decisions_api_projects__project_id__knowledge__document_id__surface_merge_decisions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    publish_surface_to_runtime_entry_api_projects__project_id__knowledge__document_id__surfaces__surface_id__publish_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+                surface_id: string;
             };
             cookie?: never;
         };
@@ -4456,6 +4777,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_me_api_auth_me_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

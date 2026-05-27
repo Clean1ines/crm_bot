@@ -17,7 +17,6 @@ from src.application.ports.knowledge_port import KnowledgePreprocessorPort
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
-    MODE_INSTRUCTION,
     MODE_PRICE_LIST,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
@@ -504,9 +503,9 @@ def _log_llm_response(
 
 
 def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
-    if mode not in {MODE_FAQ, MODE_PRICE_LIST, MODE_INSTRUCTION}:
+    if mode != MODE_PRICE_LIST:
         raise KnowledgePreprocessingValidationError(
-            f"Knowledge answer compiler is unavailable for mode: {mode}"
+            f"Legacy knowledge preprocessor is unavailable for mode: {mode}"
         )
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
 

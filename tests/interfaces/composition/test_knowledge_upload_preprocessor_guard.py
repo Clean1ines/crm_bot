@@ -11,5 +11,5 @@ def test_make_knowledge_preprocessor_forbids_faq_mode() -> None:
 
 
 def test_make_knowledge_preprocessor_allows_non_faq_mode() -> None:
-    preprocessor = make_knowledge_preprocessor(preprocessing_mode="plain")
+    preprocessor = make_knowledge_preprocessor(preprocessing_mode="price_list")
     assert preprocessor.model_name

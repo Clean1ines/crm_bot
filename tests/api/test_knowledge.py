@@ -21,6 +21,7 @@ from src.interfaces.http.knowledge import UPLOAD_TOO_LARGE_DETAIL
 
 
 TEST_USER_ID = "knowledge-user-id"
+TEST_DOCUMENT_ID = "00000000-0000-0000-0000-000000000001"
 
 
 @pytest.fixture
@@ -94,10 +95,12 @@ class TestKnowledgeUpload:
             MockChunker.return_value = mock_chunker
             mock_chunker.process_file = AsyncMock(return_value=chunks)
 
-            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
+            with patch(
+                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
+            ) as MockRepo:
                 mock_repo = AsyncMock()
                 MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(return_value="doc-1")
+                mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
                 mock_repo.update_document_preprocessing_status = AsyncMock()
 
                 with patch(
@@ -115,7 +118,7 @@ class TestKnowledgeUpload:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["message"] == "Queued 2 chunks for processing"
+        assert data["message"] == "Queued 2 chunks for FAQ surface compilation"
         assert data["chunks"] == 2
 
         mock_project_repo.project_exists.assert_awaited_once_with(project_id)
@@ -126,14 +129,16 @@ class TestKnowledgeUpload:
             file_size=len(b"Test content"),
             uploaded_by=TEST_USER_ID,
         )
-        mock_repo.update_document_status.assert_awaited_once_with("doc-1", "processing")
+        mock_repo.update_document_status.assert_awaited_once_with(
+            TEST_DOCUMENT_ID, "processing"
+        )
         mock_queue_repo.enqueue.assert_awaited_once_with(
             TASK_PROCESS_KNOWLEDGE_UPLOAD,
             payload={
                 "project_id": project_id,
-                "document_id": "doc-1",
+                "document_id": TEST_DOCUMENT_ID,
                 "file_name": "test.txt",
-                "preprocessing_mode": "plain",
+                "preprocessing_mode": "faq",
                 "chunks": chunks,
             },
         )
@@ -150,10 +155,12 @@ class TestKnowledgeUpload:
                 return_value=[{"content": "pdf chunk"}]
             )
 
-            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
+            with patch(
+                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
+            ) as MockRepo:
                 mock_repo = AsyncMock()
                 MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(return_value="doc-1")
+                mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
                 mock_repo.update_document_preprocessing_status = AsyncMock()
 
                 with patch(
@@ -185,10 +192,12 @@ class TestKnowledgeUpload:
                 return_value=[{"content": "## value_proposition\nanswer: useful"}]
             )
 
-            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
+            with patch(
+                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
+            ) as MockRepo:
                 mock_repo = AsyncMock()
                 MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(return_value="doc-1")
+                mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
                 mock_repo.update_document_preprocessing_status = AsyncMock()
 
                 with patch(
@@ -416,7 +425,9 @@ class TestKnowledgeUpload:
             MockChunker.return_value = mock_chunker
             mock_chunker.process_file = AsyncMock(return_value=[{"content": "chunk"}])
 
-            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
+            with patch(
+                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
+            ) as MockRepo:
                 mock_repo = AsyncMock()
                 MockRepo.return_value = mock_repo
                 mock_repo.create_document = AsyncMock(side_effect=Exception("DB error"))
@@ -473,11 +484,11 @@ class TestKnowledgeUpload:
                 )
 
                 with patch(
-                    "src.interfaces.http.knowledge.KnowledgeRepository"
+                    "src.interfaces.http.knowledge_surface.KnowledgeRepository"
                 ) as MockRepo:
                     mock_repo = AsyncMock()
                     MockRepo.return_value = mock_repo
-                    mock_repo.create_document = AsyncMock(return_value="doc-1")
+                    mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
                     mock_repo.update_document_preprocessing_status = AsyncMock()
 
                     response = client.post(
@@ -520,11 +531,11 @@ class TestKnowledgeUpload:
                 )
 
                 with patch(
-                    "src.interfaces.http.knowledge.KnowledgeRepository"
+                    "src.interfaces.http.knowledge_surface.KnowledgeRepository"
                 ) as MockRepo:
                     mock_repo = AsyncMock()
                     MockRepo.return_value = mock_repo
-                    mock_repo.create_document = AsyncMock(return_value="doc-1")
+                    mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
                     mock_repo.update_document_preprocessing_status = AsyncMock()
 
                     response = client.post(
@@ -574,16 +585,17 @@ class TestKnowledgeUpload:
     def test_clear_knowledge_success(self, client, mock_project_repo):
         project_id = str(uuid4())
         mock_project_repo.project_exists.return_value = True
+        mock_repo = AsyncMock()
+        mock_repo.clear_project_knowledge = AsyncMock()
 
         with patch(
             "src.interfaces.http.knowledge.jwt.decode",
             return_value={"sub": TEST_USER_ID},
         ):
-            with patch("src.interfaces.http.knowledge.KnowledgeRepository") as MockRepo:
-                mock_repo = AsyncMock()
-                MockRepo.return_value = mock_repo
-                mock_repo.clear_project_knowledge = AsyncMock()
-
+            with patch(
+                "src.interfaces.http.knowledge.make_knowledge_repo",
+                return_value=mock_repo,
+            ):
                 response = client.delete(
                     f"/api/projects/{project_id}/knowledge",
                     headers={"Authorization": "Bearer valid-token"},

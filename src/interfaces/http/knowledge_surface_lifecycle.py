@@ -4,6 +4,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.application.ports.knowledge_port import (
     KnowledgeProjectAccessPort,
     KnowledgeQueuePort,
@@ -36,9 +37,18 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 
 
-def _retry_chunk_payload(chunk: SourceChunk) -> dict[str, object]:
-    metadata = dict(chunk.metadata)
-    return {
+def _retry_chunk_payload(chunk: SourceChunk) -> JsonObject:
+    metadata: JsonObject = {
+        str(key): json_value_from_unknown(value)
+        for key, value in chunk.metadata.items()
+    }
+    source_ref: JsonObject = {
+        "source_chunk_id": chunk.id,
+        "source_index": chunk.source_index,
+        "start_offset": chunk.start_offset,
+        "end_offset": chunk.end_offset,
+    }
+    payload: JsonObject = {
         "content": chunk.content,
         "section_body": chunk.content,
         "section_title": chunk.section_title,
@@ -47,18 +57,12 @@ def _retry_chunk_payload(chunk: SourceChunk) -> dict[str, object]:
         "page": chunk.page,
         "start_offset": chunk.start_offset,
         "end_offset": chunk.end_offset,
-        "source_refs": [
-            {
-                "source_chunk_id": chunk.id,
-                "source_index": chunk.source_index,
-                "start_offset": chunk.start_offset,
-                "end_offset": chunk.end_offset,
-            }
-        ],
+        "source_refs": [source_ref],
         "metadata": metadata,
         "source_format": str(metadata.get("source_format") or ""),
         "semantic_unit_role_hint": str(metadata.get("semantic_unit_role_hint") or ""),
     }
+    return payload
 
 
 async def _require_document(

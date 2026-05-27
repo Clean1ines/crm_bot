@@ -37,8 +37,7 @@ from src.domain.project_plane.knowledge_compilation import (
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
-    MODE_PLAIN,
-    PREPROCESSING_STATUS_NOT_REQUESTED,
+    MODE_PRICE_LIST,
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
     normalize_preprocessing_mode,
@@ -104,7 +103,7 @@ def _knowledge_service(
 async def upload_knowledge_surface_aware(
     project_id: str,
     file: UploadFile = File(...),
-    preprocessing_mode: str = Form(default="plain"),
+    preprocessing_mode: str = Form(default=MODE_FAQ),
     authorization: str | None = Header(default=None),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: KnowledgeProjectAccessPort = Depends(get_project_repo),
@@ -113,9 +112,13 @@ async def upload_knowledge_surface_aware(
 ):
     """Upload knowledge with FAQ routed to Retrieval Surface Compilation.
 
-    This route is included before the legacy knowledge router and therefore
-    prevents FAQ uploads from being wired through the old flat preprocessor
-    factory. Non-FAQ legacy modes are delegated unchanged.
+    This route is the only supported document upload entrypoint.
+
+    Supported modes:
+    - faq: Retrieval Surface Compilation
+    - price_list: commercial price pipeline
+
+    Plain/instruction uploads are intentionally rejected by mode normalization.
     """
     try:
         mode = normalize_preprocessing_mode(preprocessing_mode)
@@ -123,7 +126,7 @@ async def upload_knowledge_surface_aware(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     service = _knowledge_service(project_repo, user_repo, pool)
-    if mode != MODE_FAQ:
+    if mode == MODE_PRICE_LIST:
         file_content = await _read_upload_bytes(file)
         result = await service.upload(
             project_id,
@@ -188,17 +191,12 @@ async def upload_knowledge_surface_aware(
             chunks=chunks,
         ).to_dict(),
     )
-    preprocessing_status = (
-        PREPROCESSING_STATUS_NOT_REQUESTED
-        if mode == MODE_PLAIN
-        else PREPROCESSING_STATUS_PROCESSING
-    )
     return KnowledgeUploadResultDto.create(
         message=f"Queued {len(chunks)} chunks for FAQ surface compilation",
         chunks=len(chunks),
         document_id=document_id,
         preprocessing_mode=MODE_FAQ,
-        preprocessing_status=preprocessing_status,
+        preprocessing_status=PREPROCESSING_STATUS_PROCESSING,
         structured_entries=0,
     ).to_dict()
 
@@ -379,7 +377,8 @@ def _surface_payload(
     surface_relations = [
         _relation_payload(item)
         for item in relations
-        if item.parent_surface_key == surface_key or item.child_surface_key == surface_key
+        if item.parent_surface_key == surface_key
+        or item.child_surface_key == surface_key
     ]
     surface_merge_decisions = [
         _merge_decision_payload(item)
@@ -461,7 +460,9 @@ async def get_surface_compilation_state(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    run = await _latest_surface_run(repo, project_id=project_id, document_id=document_id)
+    run = await _latest_surface_run(
+        repo, project_id=project_id, document_id=document_id
+    )
     if run is None:
         return {"run": None, "stages": [], "source_units": []}
     stages = await repo.list_surface_stages_for_run(run_id=run.id)
@@ -490,7 +491,9 @@ async def list_document_surfaces(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    run = await _latest_surface_run(repo, project_id=project_id, document_id=document_id)
+    run = await _latest_surface_run(
+        repo, project_id=project_id, document_id=document_id
+    )
     if run is None:
         return {"surfaces": []}
     surfaces = await repo.list_surfaces_for_run(run_id=run.id)
@@ -529,7 +532,9 @@ async def list_document_surface_relations(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    run = await _latest_surface_run(repo, project_id=project_id, document_id=document_id)
+    run = await _latest_surface_run(
+        repo, project_id=project_id, document_id=document_id
+    )
     if run is None:
         return {"relations": []}
     relations = await repo.list_surface_relations_for_run(run_id=run.id)
@@ -553,7 +558,9 @@ async def list_document_surface_ownership(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    run = await _latest_surface_run(repo, project_id=project_id, document_id=document_id)
+    run = await _latest_surface_run(
+        repo, project_id=project_id, document_id=document_id
+    )
     if run is None:
         return {"ownership": [], "reassignments": []}
     ownership = await repo.list_surface_ownership_for_run(run_id=run.id)
@@ -581,14 +588,14 @@ async def list_document_surface_merge_decisions(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    run = await _latest_surface_run(repo, project_id=project_id, document_id=document_id)
+    run = await _latest_surface_run(
+        repo, project_id=project_id, document_id=document_id
+    )
     if run is None:
         return {"merge_decisions": []}
     merge_decisions = await repo.list_surface_merge_decisions_for_run(run_id=run.id)
     return {
-        "merge_decisions": [
-            _merge_decision_payload(item) for item in merge_decisions
-        ]
+        "merge_decisions": [_merge_decision_payload(item) for item in merge_decisions]
     }
 
 
