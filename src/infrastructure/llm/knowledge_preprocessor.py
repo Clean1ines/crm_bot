@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from groq import (
     RateLimitError,
 )
 
+from src.application.errors import TransientEmbeddingProviderError
 from src.application.ports.knowledge_port import KnowledgePreprocessorPort
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -135,6 +137,48 @@ def _cleanup_faq_preprocessing_result(
     )
 
 
+def _rate_limit_retry_after_seconds(exc: RateLimitError) -> float | None:
+    retry_after = getattr(exc, "retry_after", None)
+    if isinstance(retry_after, int | float) and not isinstance(retry_after, bool):
+        return max(1.0, float(retry_after))
+
+    headers = getattr(exc, "headers", None)
+    if isinstance(headers, dict):
+        header_value = headers.get("retry-after") or headers.get("Retry-After")
+        if isinstance(header_value, str):
+            try:
+                return max(1.0, float(header_value.strip()))
+            except ValueError:
+                pass
+
+    message = str(exc)
+    match = re.search(r"try again in\s+(?:(\d+)m)?(?:(\d+)s)?", message, re.IGNORECASE)
+    if match:
+        minutes = int(match.group(1) or 0)
+        seconds = int(match.group(2) or 0)
+        retry_seconds = minutes * 60 + seconds
+        if retry_seconds > 0:
+            return float(retry_seconds)
+
+    return None
+
+
+def _groq_rate_limit_error(
+    *,
+    exc: RateLimitError,
+    task: str,
+    model: str,
+) -> TransientEmbeddingProviderError:
+    retry_after_seconds = _rate_limit_retry_after_seconds(exc)
+    return TransientEmbeddingProviderError(
+        "Лимит модели временно исчерпан. Прогресс обработки сохранён; повторите проблемные части после паузы.",
+        provider="groq",
+        task=f"knowledge_preprocessing.{task}",
+        model=model,
+        retry_after_seconds=retry_after_seconds,
+    )
+
+
 class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
     """Groq-backed adapter for optional knowledge preprocessing."""
 
@@ -238,11 +282,25 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                     content=content,
                 ),
             )
+        except RateLimitError as exc:
+            logger.warning(
+                "Knowledge preprocessing rate limited by Groq",
+                extra={
+                    "mode": mode,
+                    "model": request_model,
+                    "error_type": type(exc).__name__,
+                    "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
+                },
+            )
+            raise _groq_rate_limit_error(
+                exc=exc,
+                task="preprocess",
+                model=request_model,
+            ) from exc
         except (
             APIConnectionError,
             APIError,
             APITimeoutError,
-            RateLimitError,
             AttributeError,
             IndexError,
             TypeError,
@@ -333,11 +391,26 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                     content=content,
                 ),
             )
+        except RateLimitError as exc:
+            logger.warning(
+                "Knowledge answer resolution rate limited by Groq",
+                extra={
+                    "mode": mode,
+                    "model": request_model,
+                    "group_count": len(cases),
+                    "error_type": type(exc).__name__,
+                    "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
+                },
+            )
+            raise _groq_rate_limit_error(
+                exc=exc,
+                task="answer_resolution",
+                model=request_model,
+            ) from exc
         except (
             APIConnectionError,
             APIError,
             APITimeoutError,
-            RateLimitError,
             AttributeError,
             IndexError,
             TypeError,
