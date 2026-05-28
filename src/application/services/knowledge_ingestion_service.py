@@ -1573,13 +1573,82 @@ def _merge_compiled_answer_drafts(
     )
 
 
+
+
+def _is_service_short_answer_title(title: str) -> bool:
+    normalized = _clean_optional_text(title).lower()
+    return normalized in {"короткий ответ", "короткий ответ клиенту", "short answer"}
+
+
+def _reassign_questions_for_surface_ownership(entries: Sequence[KnowledgePreprocessingEntry]) -> tuple[KnowledgePreprocessingEntry, ...]:
+    if len(entries) < 2:
+        return tuple(entries)
+
+    child_hints = ("компиляц", "кураци", "pdf", "web-widget", "виджет", "crm", "telegram", "сли", "скрыт", "архив", "удал")
+    reassigned: list[KnowledgePreprocessingEntry] = list(entries)
+    for idx, entry in enumerate(entries):
+        questions = list(_text_tuple(entry.questions))
+        if not questions:
+            continue
+        if "что это за продукт" not in _clean_optional_text(entry.title).lower():
+            continue
+        keep: list[str] = []
+        moved: dict[int, list[str]] = {}
+        for q in questions:
+            qn = q.lower()
+            target = None
+            if any(h in qn for h in child_hints):
+                for j, other in enumerate(entries):
+                    if j == idx:
+                        continue
+                    title = _clean_optional_text(other.title).lower()
+                    if any(h in title for h in child_hints if len(h) > 3) or any(h in _clean_optional_text(other.answer).lower() for h in child_hints[:6]):
+                        target = j
+                        break
+            if target is None:
+                keep.append(q)
+            else:
+                moved.setdefault(target, []).append(q)
+        if keep != questions:
+            reassigned[idx] = replace(reassigned[idx], questions=tuple(keep))
+            for target, moved_q in moved.items():
+                reassigned[target] = replace(
+                    reassigned[target],
+                    questions=_merge_text_tuple_values(reassigned[target].questions, tuple(moved_q)),
+                )
+    return tuple(reassigned)
+
+
+def _normalize_retrieval_surface_entries(entries: Sequence[KnowledgePreprocessingEntry]) -> tuple[KnowledgePreprocessingEntry, ...]:
+    normalized: list[KnowledgePreprocessingEntry] = []
+    pending_short_answer: KnowledgePreprocessingEntry | None = None
+    for entry in entries:
+        if _is_service_short_answer_title(entry.title):
+            pending_short_answer = entry
+            continue
+        if pending_short_answer is not None:
+            merged_answer = _merge_answer_text(entry.answer, pending_short_answer.answer)
+            merged_excerpt = _merge_source_excerpt_text(entry, pending_short_answer)
+            entry = replace(entry, answer=merged_answer, source_excerpt=merged_excerpt)
+            pending_short_answer = None
+        normalized.append(entry)
+    if pending_short_answer is not None and normalized:
+        base = normalized[-1]
+        normalized[-1] = replace(
+            base,
+            answer=_merge_answer_text(base.answer, pending_short_answer.answer),
+            source_excerpt=_merge_source_excerpt_text(base, pending_short_answer),
+        )
+    return _reassign_questions_for_surface_ownership(tuple(normalized))
+
 def _compiled_answer_drafts_from_preprocessing_result(
     result: KnowledgePreprocessingResult,
 ) -> tuple[_CompiledAnswerEntryDraft, ...]:
     grouped: dict[str, _CompiledAnswerEntryDraft] = {}
     ordered_keys: list[str] = []
 
-    for index, entry in enumerate(result.entries):
+    normalized_entries = _normalize_retrieval_surface_entries(result.entries)
+    for index, entry in enumerate(normalized_entries):
         draft = _preprocessing_entry_to_compiled_draft(
             entry,
             mode=result.mode,
