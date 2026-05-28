@@ -62,6 +62,17 @@ class KnowledgeSurfaceProgressAwareCompilerPort(Protocol):
     ) -> None: ...
 
 
+@runtime_checkable
+class KnowledgeSurfaceCheckpointAwareCompilerPort(
+    KnowledgeSurfaceProgressAwareCompilerPort,
+    Protocol,
+):
+    def set_source_unit_result_checkpoints(
+        self,
+        checkpoints: Mapping[str, object],
+    ) -> None: ...
+
+
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
     async def delete_document_chunks(self, document_id: str) -> None: ...
 
@@ -110,6 +121,12 @@ class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
         self,
         stage: RetrievalSurfaceCompilerStage,
     ) -> RetrievalSurfaceCompilerStage: ...
+
+    async def list_surface_stages_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceCompilerStage, ...]: ...
 
     async def save_surface_source_units(
         self,
@@ -583,6 +600,27 @@ class KnowledgeFaqSurfaceIngestionService:
             else ()
         )
         persisted_surface_ids: set[str] = {surface.id for surface in existing_surfaces}
+
+        existing_unit_checkpoints: dict[str, object] = {}
+        if resume_run is not None:
+            for stage in await repo.list_surface_stages_for_run(run_id=run_id):
+                metrics = stage.metrics
+                checkpoint = metrics.get("source_unit_checkpoint")
+                source_unit_key = _compact_text(
+                    metrics.get("source_unit_key")
+                    or (
+                        checkpoint.get("source_unit_key")
+                        if isinstance(checkpoint, Mapping)
+                        else ""
+                    )
+                )
+                if source_unit_key and isinstance(checkpoint, Mapping):
+                    existing_unit_checkpoints[source_unit_key] = dict(checkpoint)
+
+        if existing_unit_checkpoints and isinstance(
+            compiler, KnowledgeSurfaceCheckpointAwareCompilerPort
+        ):
+            compiler.set_source_unit_result_checkpoints(existing_unit_checkpoints)
 
         async def record_surface_progress(event: Mapping[str, object]) -> None:
             stage_kind = (
