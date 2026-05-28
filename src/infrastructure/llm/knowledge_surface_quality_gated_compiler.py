@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 
+from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
+from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilationResult,
+    RetrievalSurfaceSourceUnit,
+)
 from src.infrastructure.llm.knowledge_surface_parallel_graph_compiler import (
     GroqParallelKnowledgeSurfaceGraphCompiler,
 )
+
+
+SurfaceProgressCallback = Callable[[Mapping[str, object]], Awaitable[None]]
 
 
 class GroqQualityGatedKnowledgeSurfaceCompiler(
@@ -18,3 +28,66 @@ class GroqQualityGatedKnowledgeSurfaceCompiler(
             return {}
         raw_value = snapshot()
         return dict(raw_value) if isinstance(raw_value, Mapping) else {}
+
+    def _route_metrics(self) -> JsonObject:
+        return {
+            str(key): json_value_from_unknown(value)
+            for key, value in self.route_observability_snapshot().items()
+        }
+
+    def set_progress_callback(
+        self,
+        callback: SurfaceProgressCallback | None,
+    ) -> None:
+        if callback is None:
+            super().set_progress_callback(None)
+            return
+
+        async def callback_with_route_metrics(event: Mapping[str, object]) -> None:
+            raw_metrics = event.get("metrics")
+            metrics = dict(raw_metrics) if isinstance(raw_metrics, Mapping) else {}
+            await callback(
+                {
+                    **dict(event),
+                    "metrics": {
+                        **metrics,
+                        **self._route_metrics(),
+                    },
+                }
+            )
+
+        super().set_progress_callback(callback_with_route_metrics)
+
+    async def compile_surfaces(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        source_units: Sequence[RetrievalSurfaceSourceUnit],
+        file_name: str,
+        run_id: str,
+    ) -> RetrievalSurfaceCompilationResult:
+        result = await super().compile_surfaces(
+            mode=mode,
+            source_units=source_units,
+            file_name=file_name,
+            run_id=run_id,
+        )
+        route_metrics = self._route_metrics()
+        if not route_metrics:
+            return result
+
+        graph = replace(
+            result.graph,
+            metrics={
+                **result.graph.metrics,
+                **route_metrics,
+            },
+        )
+        return replace(
+            result,
+            graph=graph,
+            metrics={
+                **result.metrics,
+                **route_metrics,
+            },
+        )
