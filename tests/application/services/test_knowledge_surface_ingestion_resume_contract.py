@@ -37,3 +37,12 @@ def test_faq_surface_ingestion_reuses_existing_source_units_and_surfaces() -> No
         "persisted_surface_ids: set[str] = {surface.id for surface in existing_surfaces}"
         in source
     )
+
+
+def test_faq_surface_ingestion_passes_source_unit_checkpoints_to_compiler() -> None:
+    source = INGESTION.read_text(encoding="utf-8")
+
+    assert "KnowledgeSurfaceCheckpointAwareCompilerPort" in source
+    assert "list_surface_stages_for_run" in source
+    assert "existing_unit_checkpoints" in source
+    assert "set_source_unit_result_checkpoints(existing_unit_checkpoints)" in source

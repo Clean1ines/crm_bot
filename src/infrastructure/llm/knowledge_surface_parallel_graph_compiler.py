@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict, dataclass, replace
+from typing import cast
 from groq import APIError, RateLimitError
 
 from src.application.services.knowledge_surface_graph_quality import (
@@ -23,8 +24,12 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceGraph,
     RetrievalSurfaceSourceUnit,
     SurfaceAnswerDraft,
+    SurfaceKind,
+    SurfaceQuestionKind,
     SurfaceQuestionOwnershipDecision,
+    SurfaceQuestionOwnershipStatus,
     SurfaceQuestionReassignment,
+    SurfaceRelationType,
 )
 from src.infrastructure.llm.knowledge_surface_compiler import (
     GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
@@ -60,6 +65,209 @@ class _UnitCompilationResult:
     warnings: tuple[str, ...]
 
 
+SOURCE_UNIT_CHECKPOINT_VERSION = 1
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _sequence(value: object) -> tuple[object, ...]:
+    return tuple(value) if isinstance(value, list | tuple) else ()
+
+
+def _text(value: object, default: str = "") -> str:
+    return str(value) if value is not None else default
+
+
+def _float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return default
+
+
+def _text_tuple(value: object) -> tuple[str, ...]:
+    return tuple(_text(item) for item in _sequence(value))
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): json_value_from_unknown(item) for key, item in value.items()}
+
+
+def _candidate_from_checkpoint(value: object) -> RetrievalSurfaceCandidate:
+    data = _mapping(value)
+    return RetrievalSurfaceCandidate(
+        id=_text(data.get("id")),
+        run_id=_text(data.get("run_id")),
+        document_id=_text(data.get("document_id")),
+        source_unit_id=_text(data.get("source_unit_id")),
+        local_surface_key=_text(data.get("local_surface_key")),
+        provisional_title=_text(data.get("provisional_title")),
+        surface_kind=cast(SurfaceKind, _text(data.get("surface_kind"), "standalone")),
+        answer_scope=_text(data.get("answer_scope")),
+        question_scope=_text(data.get("question_scope")),
+        exclusion_scope=_text(data.get("exclusion_scope")),
+        parent_candidate_keys=_text_tuple(data.get("parent_candidate_keys")),
+        child_candidate_keys=_text_tuple(data.get("child_candidate_keys")),
+        sibling_candidate_keys=_text_tuple(data.get("sibling_candidate_keys")),
+        source_refs=_text_tuple(data.get("source_refs")),
+        confidence=_float(data.get("confidence")),
+        metadata=_json_object(data.get("metadata")),
+    )
+
+
+def _local_relation_from_checkpoint(value: object) -> LocalSurfaceRelation:
+    data = _mapping(value)
+    return LocalSurfaceRelation(
+        id=_text(data.get("id")),
+        run_id=_text(data.get("run_id")),
+        document_id=_text(data.get("document_id")),
+        source_unit_id=_text(data.get("source_unit_id")),
+        source_surface_key=_text(data.get("source_surface_key")),
+        target_surface_key=_text(data.get("target_surface_key")),
+        relation_type=cast(
+            SurfaceRelationType, _text(data.get("relation_type"), "overlaps")
+        ),
+        confidence=_float(data.get("confidence")),
+        reason=_text(data.get("reason")),
+        source_refs=_text_tuple(data.get("source_refs")),
+    )
+
+
+def _answer_draft_from_checkpoint(value: object) -> SurfaceAnswerDraft:
+    data = _mapping(value)
+    return SurfaceAnswerDraft(
+        id=_text(data.get("id")),
+        run_id=_text(data.get("run_id")),
+        document_id=_text(data.get("document_id")),
+        candidate_key=_text(data.get("candidate_key")),
+        title=_text(data.get("title")),
+        canonical_question=_text(data.get("canonical_question")),
+        short_answer=_text(data.get("short_answer")),
+        answer=_text(data.get("answer")),
+        answer_scope=_text(data.get("answer_scope")),
+        question_scope=_text(data.get("question_scope")),
+        exclusion_scope=_text(data.get("exclusion_scope")),
+        source_refs=_text_tuple(data.get("source_refs")),
+        warnings=_text_tuple(data.get("warnings")),
+        metadata=_json_object(data.get("metadata")),
+    )
+
+
+def _ownership_decision_from_checkpoint(
+    value: object,
+) -> SurfaceQuestionOwnershipDecision:
+    data = _mapping(value)
+    return SurfaceQuestionOwnershipDecision(
+        id=_text(data.get("id")),
+        run_id=_text(data.get("run_id")),
+        document_id=_text(data.get("document_id")),
+        surface_key=_text(data.get("surface_key")),
+        question=_text(data.get("question")),
+        question_kind=cast(
+            SurfaceQuestionKind, _text(data.get("question_kind"), "faq_question")
+        ),
+        ownership_confidence=_float(data.get("ownership_confidence")),
+        source=_text(data.get("source")),
+        status=cast(SurfaceQuestionOwnershipStatus, _text(data.get("status"), "owned")),
+    )
+
+
+def _reassignment_from_checkpoint(value: object) -> SurfaceQuestionReassignment:
+    data = _mapping(value)
+    return SurfaceQuestionReassignment(
+        id=_text(data.get("id")),
+        run_id=_text(data.get("run_id")),
+        document_id=_text(data.get("document_id")),
+        question=_text(data.get("question")),
+        from_surface_key=_text(data.get("from_surface_key")),
+        to_surface_key=_text(data.get("to_surface_key")),
+        reason=_text(data.get("reason")),
+        confidence=_float(data.get("confidence")),
+    )
+
+
+def _unit_result_to_checkpoint(
+    *,
+    source_unit_key: str,
+    result: _UnitCompilationResult,
+) -> JsonObject:
+    return {
+        "version": SOURCE_UNIT_CHECKPOINT_VERSION,
+        "source_unit_key": source_unit_key,
+        "unit_index": result.unit_index,
+        "candidates": json_value_from_unknown(
+            [asdict(item) for item in result.candidates]
+        ),
+        "local_relations": json_value_from_unknown(
+            [asdict(item) for item in result.local_relations]
+        ),
+        "drafts": json_value_from_unknown([asdict(item) for item in result.drafts]),
+        "ownership_decisions": json_value_from_unknown(
+            [asdict(item) for item in result.ownership_decisions]
+        ),
+        "reassignments": json_value_from_unknown(
+            [asdict(item) for item in result.reassignments]
+        ),
+        "warnings": json_value_from_unknown(list(result.warnings)),
+    }
+
+
+def _unit_result_from_checkpoint(value: object) -> _UnitCompilationResult | None:
+    data = _mapping(value)
+    if _int(data.get("version")) != SOURCE_UNIT_CHECKPOINT_VERSION:
+        return None
+
+    candidates = tuple(
+        _candidate_from_checkpoint(item) for item in _sequence(data.get("candidates"))
+    )
+    drafts = tuple(
+        _answer_draft_from_checkpoint(item) for item in _sequence(data.get("drafts"))
+    )
+    if not candidates or not drafts:
+        return None
+
+    return _UnitCompilationResult(
+        unit_index=_int(data.get("unit_index")),
+        candidates=candidates,
+        local_relations=tuple(
+            _local_relation_from_checkpoint(item)
+            for item in _sequence(data.get("local_relations"))
+        ),
+        drafts=drafts,
+        ownership_decisions=tuple(
+            _ownership_decision_from_checkpoint(item)
+            for item in _sequence(data.get("ownership_decisions"))
+        ),
+        reassignments=tuple(
+            _reassignment_from_checkpoint(item)
+            for item in _sequence(data.get("reassignments"))
+        ),
+        warnings=_text_tuple(data.get("warnings")),
+    )
+
+
 class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCompiler):
     """Production FAQ graph compiler.
 
@@ -76,6 +284,17 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
         self._tokens_output = 0
         self._tokens_total = 0
         self._model_call_counts: dict[str, int] = {}
+
+    def set_source_unit_result_checkpoints(
+        self,
+        checkpoints: Mapping[str, object],
+    ) -> None:
+        restored: dict[str, _UnitCompilationResult] = {}
+        for source_unit_key, payload in checkpoints.items():
+            result = _unit_result_from_checkpoint(payload)
+            if result is not None:
+                restored[str(source_unit_key)] = result
+        self._source_unit_result_checkpoints = restored
 
     def _runtime_metrics_snapshot(self, *, started_monotonic: float) -> JsonObject:
         return {
@@ -223,10 +442,36 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             },
         )
 
+        checkpoint_results = dict(getattr(self, "_source_unit_result_checkpoints", {}))
+
         async def run_unit(
             unit_index: int,
             unit: RetrievalSurfaceSourceUnit,
         ) -> _UnitCompilationResult:
+            cached_result = checkpoint_results.get(unit.source_unit_key)
+            if cached_result is not None:
+                await self._emit_progress(
+                    stage_kind="source_unit_checkpoint_reused",
+                    status="completed",
+                    input_summary=f"source_unit={unit_index}/{len(units)} {unit.title}",
+                    output_summary=(
+                        f"surfaces={len(cached_result.drafts)} source=stage_checkpoint"
+                    ),
+                    metrics={
+                        "source_unit_index": unit_index,
+                        "source_unit_count": len(units),
+                        "source_unit_key": unit.source_unit_key,
+                        "candidate_count": len(cached_result.candidates),
+                        "surface_count": len(cached_result.drafts),
+                        "checkpoint_reused": True,
+                        "concurrency": concurrency,
+                        **self._runtime_metrics_snapshot(
+                            started_monotonic=started_monotonic
+                        ),
+                    },
+                )
+                return replace(cached_result, unit_index=unit_index)
+
             async with semaphore:
                 return await self._compile_source_unit(
                     unit_index=unit_index,
@@ -571,6 +816,15 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
                 },
             )
 
+        result = _UnitCompilationResult(
+            unit_index=unit_index,
+            candidates=unit_candidates,
+            local_relations=unit_relations,
+            drafts=tuple(unit_drafts),
+            ownership_decisions=tuple(unit_ownership),
+            reassignments=tuple(unit_reassignments),
+            warnings=tuple(warnings),
+        )
         partial_surfaces = _final_surfaces(
             run_id=run_id,
             document_id=unit.document_id,
@@ -581,27 +835,26 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
         await self._emit_partial_surfaces(
             unit_index=unit_index,
             source_unit_count=source_unit_count,
+            source_unit_key=unit.source_unit_key,
             surfaces=partial_surfaces,
+            unit_checkpoint=_unit_result_to_checkpoint(
+                source_unit_key=unit.source_unit_key,
+                result=result,
+            ),
             started_monotonic=started_monotonic,
             concurrency=concurrency,
         )
 
-        return _UnitCompilationResult(
-            unit_index=unit_index,
-            candidates=unit_candidates,
-            local_relations=unit_relations,
-            drafts=tuple(unit_drafts),
-            ownership_decisions=tuple(unit_ownership),
-            reassignments=tuple(unit_reassignments),
-            warnings=tuple(warnings),
-        )
+        return result
 
     async def _emit_partial_surfaces(
         self,
         *,
         unit_index: int,
         source_unit_count: int,
+        source_unit_key: str,
         surfaces: tuple[RetrievalSurfaceDraft, ...],
+        unit_checkpoint: JsonObject,
         started_monotonic: float,
         concurrency: int,
     ) -> None:
@@ -618,7 +871,10 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
                 "metrics": {
                     "source_unit_index": unit_index,
                     "source_unit_count": source_unit_count,
+                    "source_unit_key": source_unit_key,
                     "partial_surface_count": len(surfaces),
+                    "source_unit_checkpoint_version": SOURCE_UNIT_CHECKPOINT_VERSION,
+                    "source_unit_checkpoint": unit_checkpoint,
                     "concurrency": concurrency,
                     **self._runtime_metrics_snapshot(
                         started_monotonic=started_monotonic
