@@ -16,19 +16,23 @@ from groq import (
 from src.application.ports.knowledge_port import KnowledgePreprocessorPort
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 from src.domain.project_plane.knowledge_preprocessing import (
+    ANSWER_RESOLUTION_PROMPT_VERSION,
     MODE_FAQ,
     MODE_PRICE_LIST,
+    KnowledgeAnswerResolutionCase,
+    KnowledgeAnswerResolutionResult,
+    KnowledgeAnswerResolverExecutionResult,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingExecutionResult,
     KnowledgePreprocessingMode,
+    KnowledgePreprocessingResult,
     KnowledgePreprocessingValidationError,
-    KnowledgeAnswerResolverExecutionResult,
-    KnowledgeAnswerResolutionCase,
-    KnowledgeAnswerResolutionResult,
-    ANSWER_RESOLUTION_PROMPT_VERSION,
-    parse_preprocessing_payload,
     parse_answer_resolution_payload,
+    parse_preprocessing_payload,
     prompt_version_for_mode,
+)
+from src.domain.project_plane.knowledge_preprocessing_cleanup import (
+    cleanup_faq_preprocessing_entries,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageMeasurement
 from src.infrastructure.config.settings import settings
@@ -103,6 +107,31 @@ def _answer_resolution_prompt_file(language: str) -> str:
     if normalized in SUPPORTED_PROMPT_LANGUAGES:
         return f"knowledge_answer_resolution.{normalized}.txt"
     return ANSWER_RESOLUTION_PROMPT_FILE
+
+
+def _cleanup_faq_preprocessing_result(
+    result: KnowledgePreprocessingResult,
+) -> KnowledgePreprocessingResult:
+    if result.mode != MODE_FAQ:
+        return result
+
+    cleanup = cleanup_faq_preprocessing_entries(result.entries)
+    if not cleanup.metrics:
+        return result
+
+    return KnowledgePreprocessingResult(
+        mode=result.mode,
+        prompt_version=result.prompt_version,
+        model=result.model,
+        entries=cleanup.entries,
+        metrics={
+            **result.metrics,
+            "faq_post_merge_cleanup": {
+                str(key): json_value_from_unknown(value)
+                for key, value in cleanup.metrics.items()
+            },
+        },
+    )
 
 
 class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
@@ -202,6 +231,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             result = parse_preprocessing_payload(
                 content, mode=mode, model=request_model, prompt_version=prompt_version
             )
+            result = _cleanup_faq_preprocessing_result(result)
             return KnowledgePreprocessingExecutionResult(
                 result=result,
                 usage=_response_usage_measurement(
@@ -369,7 +399,7 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
             "chunks": [
                 _structured_source_chunk_payload(
                     chunk=chunk,
-                    index=index,
+                    index=_source_payload_index(chunk, fallback=index),
                     max_content_chars=self._max_chunk_chars,
                 )
                 for index, chunk in enumerate(chunks[: self._max_chunks])
@@ -397,6 +427,17 @@ def _structured_child_payload(value: object, *, max_chars: int) -> JsonObject:
         if key in value:
             payload[key] = json_value_from_unknown(value.get(key))
     return payload
+
+
+def _source_payload_index(chunk: JsonObject, *, fallback: int) -> int:
+    raw_index = chunk.get("index")
+    if (
+        isinstance(raw_index, int)
+        and not isinstance(raw_index, bool)
+        and raw_index >= 0
+    ):
+        return raw_index
+    return fallback
 
 
 def _structured_source_chunk_payload(
