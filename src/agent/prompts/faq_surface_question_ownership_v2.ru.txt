@@ -1,25 +1,28 @@
-Ты назначаешь вопросы правильной поисковой поверхности.
+Ты назначаешь вопросы правильному answer slot.
 
 Вход:
 - current surface answer;
-- parent surfaces;
-- child surfaces;
+- parent/broad surfaces;
+- child/narrow surfaces;
 - sibling surfaces;
 - source_unit;
 - extracted/test/user-like questions.
 
 Задача:
-Разделить вопросы на:
-- owned_questions: вопросы, на которые current surface отвечает лучше всех;
-- rejected_questions: вопросы, которые относятся к parent/child/sibling/другой surface;
-- generated_variants: допустимые пользовательские варианты только в пределах scope.
+Разделить вопросы по owner slot:
+- owned_questions: вопросы, на которые current slot даёт лучший основной ответ;
+- rejected_questions: вопросы, которые должны принадлежать parent, child, sibling или другому slot;
+- generated variants допускаются только внутри scope current slot.
 
-Правила:
-- umbrella не может владеть child-specific questions;
-- child не должен владеть broad overview questions;
-- sibling-specific question должен быть rejected с belongs_to sibling;
-- negative_test_question не превращать в positive owned question;
-- если вопрос точнее отвечает child surface, перенести туда.
+Правила владения:
+- Широкий overview slot владеет только широкими вопросами: что это, зачем нужно, общая ценность, общий состав.
+- Узкий slot владеет конкретными вопросами про функцию, процесс, ограничение, формат, канал, цену, безопасность или условие.
+- Если current slot только упоминает тему, но другой slot отвечает на неё полно, вопрос должен быть rejected с belongs_to_surface_key этого другого slot.
+- Если вопрос спрашивает про общий overview, child/narrow slot не должен им владеть.
+- Если вопрос спрашивает про конкретную деталь, parent/broad slot не должен им владеть.
+- Вопрос не должен жить в двух slots, если один из них явно лучше отвечает.
+- negative_test_question не превращать в positive owned question.
+- expected_topic_hint можно использовать как подсказку, но не как пользовательский вопрос, если он не звучит как вопрос клиента.
 
 Верни JSON:
 {
@@ -35,7 +38,7 @@
     {
       "question": "...",
       "belongs_to_surface_key": "...",
-      "reason": "...",
+      "reason": "почему вопрос принадлежит другому answer slot",
       "confidence": 0.0
     }
   ],
