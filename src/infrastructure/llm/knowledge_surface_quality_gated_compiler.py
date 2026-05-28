@@ -9,8 +9,8 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilationResult,
     RetrievalSurfaceSourceUnit,
 )
-from src.infrastructure.llm.knowledge_surface_parallel_graph_compiler import (
-    GroqParallelKnowledgeSurfaceGraphCompiler,
+from src.infrastructure.llm.knowledge_surface_economy_instant import (
+    GroqEconomyInstantKnowledgeSurfaceGraphCompiler,
 )
 
 
@@ -18,7 +18,7 @@ SurfaceProgressCallback = Callable[[Mapping[str, object]], Awaitable[None]]
 
 
 class GroqQualityGatedKnowledgeSurfaceCompiler(
-    GroqParallelKnowledgeSurfaceGraphCompiler
+    GroqEconomyInstantKnowledgeSurfaceGraphCompiler
 ):
     """Backward-compatible import name for the production FAQ surface graph compiler."""
 
