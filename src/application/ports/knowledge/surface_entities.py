@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceDraft,
+    RetrievalSurfaceMergeDecision,
+    RetrievalSurfaceRelation,
+    RetrievalSurfaceSourceUnit,
+    SurfaceQuestionOwnership,
+    SurfaceQuestionReassignment,
+    SurfacePublicationStatus,
+)
+
+
+class KnowledgeSurfaceSourceUnitPort(Protocol):
+    async def save_surface_source_units(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        source_units: tuple[RetrievalSurfaceSourceUnit, ...],
+    ) -> None: ...
+
+    async def list_surface_source_units_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceSourceUnit, ...]: ...
+
+
+class KnowledgeSurfaceDraftPort(Protocol):
+    async def save_surfaces(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        surfaces: tuple[RetrievalSurfaceDraft, ...],
+    ) -> None: ...
+
+    async def update_surface_answer(
+        self, *, surface_id: str, answer: str, short_answer: str
+    ) -> None: ...
+    async def list_surfaces_for_document(
+        self, *, project_id: str, document_id: str
+    ) -> tuple[RetrievalSurfaceDraft, ...]: ...
+    async def list_surfaces_for_run(
+        self, *, run_id: str
+    ) -> tuple[RetrievalSurfaceDraft, ...]: ...
+    async def get_surface_by_id(
+        self, *, surface_id: str
+    ) -> RetrievalSurfaceDraft | None: ...
+    async def update_surface_publication_status(
+        self, *, surface_id: str, publication_status: SurfacePublicationStatus
+    ) -> None: ...
+    async def link_surface_to_answer_candidate(
+        self, *, surface_id: str, candidate_id: str
+    ) -> None: ...
+    async def link_surface_to_canonical_entry(
+        self, *, surface_id: str, canonical_entry_id: str
+    ) -> None: ...
+    async def link_surface_to_runtime_entry(
+        self, *, surface_id: str, runtime_entry_id: str
+    ) -> None: ...
+
+
+class KnowledgeSurfaceRelationPort(Protocol):
+    async def save_surface_relations(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        relations: tuple[RetrievalSurfaceRelation, ...],
+    ) -> None: ...
+    async def list_surface_relations_for_document(
+        self, *, project_id: str, document_id: str
+    ) -> tuple[RetrievalSurfaceRelation, ...]: ...
+    async def list_surface_relations_for_run(
+        self, *, run_id: str
+    ) -> tuple[RetrievalSurfaceRelation, ...]: ...
+
+
+class KnowledgeSurfaceQuestionOwnershipPort(Protocol):
+    async def save_surface_question_ownership(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        ownership: tuple[SurfaceQuestionOwnership, ...],
+    ) -> None: ...
+    async def save_surface_question_reassignments(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        reassignments: tuple[SurfaceQuestionReassignment, ...],
+    ) -> None: ...
+    async def list_surface_ownership_for_document(
+        self, *, project_id: str, document_id: str
+    ) -> tuple[SurfaceQuestionOwnership, ...]: ...
+    async def list_surface_ownership_for_run(
+        self, *, run_id: str
+    ) -> tuple[SurfaceQuestionOwnership, ...]: ...
+    async def list_surface_reassignments_for_document(
+        self, *, project_id: str, document_id: str
+    ) -> tuple[SurfaceQuestionReassignment, ...]: ...
+    async def list_surface_reassignments_for_run(
+        self, *, run_id: str
+    ) -> tuple[SurfaceQuestionReassignment, ...]: ...
+
+
+class KnowledgeSurfaceMergeDecisionPort(Protocol):
+    async def save_surface_merge_decisions(
+        self,
+        *,
+        run_id: str,
+        document_id: str,
+        merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+    ) -> None: ...
+    async def list_surface_merge_decisions_for_run(
+        self, *, run_id: str
+    ) -> tuple[RetrievalSurfaceMergeDecision, ...]: ...

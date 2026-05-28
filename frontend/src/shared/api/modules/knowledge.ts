@@ -1,7 +1,7 @@
 import { t } from '../../i18n';
 import { authedJsonRequest, authedMultipartRequest } from '../core/http';
 
-export type KnowledgePreprocessingMode = 'plain' | 'faq' | 'price_list' | 'instruction';
+export type KnowledgePreprocessingMode = 'faq' | 'price_list';
 
 export type KnowledgePreprocessingModeOption = {
   value: KnowledgePreprocessingMode;
@@ -19,16 +19,6 @@ export const KNOWLEDGE_PREPROCESSING_MODE_OPTIONS: KnowledgePreprocessingModeOpt
     value: 'price_list',
     label: t('knowledge.preprocessing.priceList.label'),
     description: t('knowledge.preprocessing.priceList.description'),
-  },
-  {
-    value: 'instruction',
-    label: t('knowledge.preprocessing.instruction.label'),
-    description: t('knowledge.preprocessing.instruction.description'),
-  },
-  {
-    value: 'plain',
-    label: t('knowledge.preprocessing.plain.label'),
-    description: t('knowledge.preprocessing.plain.description'),
   },
 ];
 

@@ -1,0 +1,62 @@
+Ты судья отношений между answer slots после локальной компиляции.
+
+Вход:
+- small cluster of surfaces, максимум 5-8;
+- existing local relations;
+- candidate similarity reasons.
+
+Задача:
+Уточнить отношения по пользовательскому интенту:
+- duplicates;
+- near_duplicate;
+- umbrella_contains;
+- sibling;
+- overlaps;
+- contradicts;
+- needs_new_parent;
+- reparent_needed;
+- split_needed;
+- unrelated.
+
+Смысловые правила:
+- duplicates: surfaces конкурируют за один и тот же реалистичный вопрос клиента. Если один ответ является краткой версией другого для того же вопроса, это duplicate, а recommended_action=merge_same_surface.
+- umbrella_contains: широкая surface обзорно покрывает область узкой surface. Не объединяй их как duplicate: узкий вопрос должен остаться у child.
+- sibling: surfaces относятся к одной области, но отвечают на разные вопросы.
+- overlaps: пересекаются фактами, но не один answer slot.
+- contradicts: конфликтуют факты, условия или обещания.
+- needs_new_parent: несколько surfaces требуют общего обзорного parent, но ни одна из них им не является.
+- reparent_needed: surface привязана к неверному parent.
+- split_needed: surface смешивает несколько answer slots.
+
+Запрещено:
+- Не считай same domain причиной для merge.
+- Не объединяй parent и child как duplicate.
+- Не удаляй child только потому, что parent шире.
+- Не оставляй standalone summary, если рядом есть более полный ответ на тот же вопрос.
+
+Верни JSON:
+{
+  "judgements": [
+    {
+      "surface_a_key": "...",
+      "surface_b_key": "...",
+      "relation_type": "duplicates|near_duplicate|umbrella_contains|sibling|overlaps|contradicts|needs_new_parent|reparent_needed|split_needed|unrelated",
+      "parent_key": "...|null",
+      "child_key": "...|null",
+      "confidence": 0.0,
+      "reason": "...",
+      "recommended_action": "keep|merge_same_surface|create_parent|reparent|split|review"
+    }
+  ],
+  "new_parent_candidates": [
+    {
+      "local_surface_key": "...",
+      "title": "...",
+      "answer_scope": "...",
+      "question_scope": "...",
+      "exclusion_scope": "...",
+      "children": []
+    }
+  ],
+  "warnings": []
+}

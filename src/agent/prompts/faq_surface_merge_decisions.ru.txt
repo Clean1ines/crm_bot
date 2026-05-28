@@ -1,0 +1,13 @@
+STAGE E — Merge decisions.
+
+Верни merge_decisions[] с полями:
+survivor_surface_key, merged_surface_keys, keep_separate_surface_keys, decision_type, reason, confidence.
+
+Правила:
+- duplicates -> decision_type merge.
+- umbrella_contains и specializes -> keep_separate.
+- overlaps -> keep_separate, кроме случая полностью одинакового user intent.
+- Telegram и web-widget keep_separate.
+- manual merge и hide/archive keep_separate.
+- product overview и поисковая поверхность keep_separate.
+- Не удаляй source refs и не теряй ownership при merge decision.

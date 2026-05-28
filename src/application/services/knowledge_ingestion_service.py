@@ -58,11 +58,10 @@ from src.domain.project_plane.knowledge_semantic_builder import (
     canonicalize_knowledge_chunk_drafts,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
-    MODE_PLAIN,
+    MODE_FAQ,
     MODE_PRICE_LIST,
     PREPROCESSING_STATUS_COMPLETED,
     PREPROCESSING_STATUS_FAILED,
-    PREPROCESSING_STATUS_NOT_REQUESTED,
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
@@ -783,8 +782,7 @@ def _compiler_source_chunks_for_preprocessing(
     chunks: list[JsonObject],
     mode: KnowledgePreprocessingMode,
 ) -> list[JsonObject]:
-    if mode == MODE_PLAIN:
-        return chunks
+    del mode
     if not _is_markdown_file(file_name):
         return chunks
     return _markdown_semantic_source_chunks(file_name=file_name, chunks=chunks)
@@ -3830,9 +3828,7 @@ def _stage_e_compiler_run(
         project_id=project_id,
         document_id=document_id,
         mode=str(mode),
-        compiler_version=KCD_STAGE_E_COMPILER_VERSION
-        if mode == MODE_PLAIN
-        else KCD_STAGE_K_COMPILER_VERSION,
+        compiler_version=KCD_STAGE_K_COMPILER_VERSION,
         status=CompilerRunStatus.RUNNING,
         metrics=CompilationMetrics(source_chunk_count=source_chunk_count),
     )
@@ -4201,7 +4197,7 @@ class KnowledgeIngestionService:
         usage_event_count = 0
         try:
             first_execution = await preprocessor.resolve_answer_cases(
-                mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
+                mode=MODE_PRICE_LIST,
                 file_name=file_name,
                 cases=(groups[0],),
                 existing_project_titles=existing_project_titles,
@@ -4226,7 +4222,7 @@ class KnowledgeIngestionService:
 
             for group in groups[1:]:
                 execution = await preprocessor.resolve_answer_cases(
-                    mode=cast(KnowledgePreprocessingMode, MODE_PLAIN),
+                    mode=MODE_PRICE_LIST,
                     file_name=file_name,
                     cases=(group,),
                     existing_project_titles=existing_project_titles,
@@ -4409,8 +4405,11 @@ class KnowledgeIngestionService:
             raise ValidationError("Knowledge document not found")
 
         mode = normalize_preprocessing_mode(document.preprocessing_mode)
-        if mode == MODE_PLAIN:
-            raise ValidationError("Plain knowledge documents do not have answer drafts")
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy knowledge ingestion preprocessor path is forbidden for mode=faq. "
+                "Use Retrieval Surface Compilation pipeline."
+            )
         if document.status in {"pending", "processing"} or (
             document.preprocessing_status == PREPROCESSING_STATUS_PROCESSING
         ):
@@ -4534,9 +4533,10 @@ class KnowledgeIngestionService:
             raise ValidationError("Knowledge document not found")
 
         mode = normalize_preprocessing_mode(document.preprocessing_mode)
-        if mode == MODE_PLAIN:
-            raise ValidationError(
-                "Plain knowledge documents do not have compiler batches"
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy knowledge ingestion retry path is forbidden for mode=faq. "
+                "Use Retrieval Surface Compilation pipeline."
             )
 
         source_chunks = await repo.list_document_source_chunks(
@@ -4763,6 +4763,17 @@ class KnowledgeIngestionService:
             "usage_event_count": usage_event_count,
         }
 
+    async def _process_document_faq_surface(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> KnowledgeDocumentProcessingResult:
+        raise KnowledgePreprocessingValidationError(
+            "Bootstrap FAQ surface path was removed from the primary pipeline. "
+            "FAQ uploads must use KnowledgeSurfaceCompilerPort.compile_surfaces via "
+            "KnowledgeFaqSurfaceIngestionService."
+        )
+
     async def process_document(
         self,
         *,
@@ -4839,38 +4850,9 @@ class KnowledgeIngestionService:
             )
         )
 
-        if mode == MODE_PLAIN:
-            await repo.add_source_chunks(
-                project_id=project_id,
-                document_id=document_id,
-                chunks=source_chunks,
-            )
-            await self._persist_plain_chunks(
-                repo=repo,
-                project_id=project_id,
-                document_id=document_id,
-                file_name=file_name,
-                chunks=indexable_chunks,
-                source_chunks=source_chunks,
-                compiler_run_id=compiler_run_id,
-                logger=logger,
-                context="plain_upload",
-            )
-            await repo.update_document_preprocessing_status(
-                document_id,
-                mode=mode,
-                status=PREPROCESSING_STATUS_NOT_REQUESTED,
-            )
-            await repo.update_document_status(document_id, "processed")
-            return KnowledgeDocumentProcessingResult(
-                document_id=document_id,
-                preprocessing_status=PREPROCESSING_STATUS_NOT_REQUESTED,
-                structured_entries=0,
-            )
-
         if preprocessor_factory is None:
             raise ValidationError(
-                "Knowledge preprocessing adapter is required for non-plain upload modes"
+                "Knowledge preprocessing adapter is required for price_list uploads"
             )
 
         await repo.add_source_chunks(
@@ -4878,6 +4860,15 @@ class KnowledgeIngestionService:
             document_id=document_id,
             chunks=source_chunks,
         )
+
+        if mode == MODE_FAQ:
+            return await self._process_document_faq_surface(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+                chunks=indexable_chunks,
+                source_chunks=source_chunks,
+            )
 
         await repo.update_document_preprocessing_status(
             document_id,
@@ -5020,6 +5011,21 @@ class KnowledgeIngestionService:
                                 )
                             )
 
+                        if await repo.is_document_processing_cancelled(document_id):
+                            logger.info(
+                                "Knowledge answer compiler batch result dropped after cancellation",
+                                extra={
+                                    "project_id": project_id,
+                                    "document_id": document_id,
+                                    "batch_index": batch_index,
+                                    "batch_count": len(technical_batches),
+                                    "model": execution.result.model,
+                                    "requested_model": active_model,
+                                },
+                            )
+                            raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
+
+                        actual_model = execution.result.model
                         safe_entries = list(execution.result.entries)
 
                         raw_candidates = (
@@ -5051,6 +5057,11 @@ class KnowledgeIngestionService:
                             tokens_total=usage.tokens_total if usage is not None else 0,
                         )
                     except Exception as exc:
+                        if str(exc) == KCD_STAGE_K_CANCELLED_ERROR or (
+                            await repo.is_document_processing_cancelled(document_id)
+                        ):
+                            raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR) from exc
+
                         await repo.fail_compiler_batch(
                             compiler_batch.id,
                             error_type=type(exc).__name__,
@@ -5126,7 +5137,9 @@ class KnowledgeIngestionService:
                                 "Документ разбирается. Черновики сохраняются "
                                 "после каждого шага."
                             ),
-                            "model": active_model,
+                            "model": actual_model,
+                            "requested_model": active_model,
+                            "actual_model": actual_model,
                             "prompt_version": active_prompt_version,
                             "source_chunk_count": len(compiler_source_chunks),
                             "raw_source_chunk_count": len(indexable_chunks),
@@ -5183,14 +5196,16 @@ class KnowledgeIngestionService:
                                 if execution.usage is not None
                                 else 0,
                                 "elapsed_seconds": progress_metrics["elapsed_seconds"],
-                                "model": active_model,
+                                "model": actual_model,
+                                "requested_model": active_model,
+                                "actual_model": actual_model,
                             },
                         )
                         await repo.update_document_preprocessing_status(
                             document_id,
                             mode=mode,
                             status=PREPROCESSING_STATUS_PROCESSING,
-                            model=active_model,
+                            model=actual_model,
                             prompt_version=active_prompt_version,
                             metrics=progress_metrics,
                         )
@@ -5461,7 +5476,9 @@ class KnowledgeIngestionService:
             )
             preprocessing_metrics["semantic_answer_count"] = len(canonical_entries)
             preprocessing_metrics["published_entry_count"] = len(canonical_entries)
-            preprocessing_metrics["model"] = active_model
+            preprocessing_metrics["model"] = result.model
+            preprocessing_metrics["requested_model"] = active_model
+            preprocessing_metrics["actual_model"] = result.model
             preprocessing_metrics["prompt_version"] = active_prompt_version
             preprocessing_metrics["stage"] = "completed"
             preprocessing_metrics["status_message"] = (

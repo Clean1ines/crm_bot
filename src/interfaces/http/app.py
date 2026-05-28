@@ -23,6 +23,7 @@ from src.interfaces.http.knowledge import (
     router as knowledge_router,
 )
 from src.interfaces.http.knowledge_curation import router as knowledge_curation_router
+from src.interfaces.http.knowledge_surface import router as knowledge_surface_router
 from src.interfaces.http.rag_eval import router as rag_eval_router
 from src.interfaces.http.limits import router as limits_router
 from src.interfaces.http.logs import router as logs_router
@@ -180,6 +181,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(webhooks_router)
+app.include_router(knowledge_surface_router)
 app.include_router(knowledge_router)
 app.include_router(knowledge_curation_router)
 app.include_router(rag_eval_router)

@@ -68,8 +68,6 @@ from src.domain.project_plane.knowledge_views import (
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.knowledge_views import KnowledgeDocumentDetailView
 from src.domain.project_plane.knowledge_preprocessing import (
-    MODE_PLAIN,
-    PREPROCESSING_STATUS_NOT_REQUESTED,
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
 )
@@ -273,10 +271,10 @@ class KnowledgeService:
         except KnowledgePreprocessingValidationError as exc:
             raise ValidationError(str(exc)) from None
 
-        if mode != MODE_PLAIN and preprocessor_factory is None:
-            raise ValidationError(
-                "Knowledge preprocessing adapter is required for non-plain upload modes"
-            )
+        # Upload only extracts chunks, persists the document, and enqueues processing.
+        # Price-list compilation adapter is required by the worker ingestion path,
+        # not by this queueing entrypoint.
+        del preprocessor_factory
 
         uploaded_by = await self._uploaded_by_user_id(
             project_id,
@@ -314,12 +312,11 @@ class KnowledgeService:
 
         await repo.update_document_status(document_id, "processing")
 
-        if mode != MODE_PLAIN:
-            await repo.update_document_preprocessing_status(
-                document_id,
-                mode=mode,
-                status=PREPROCESSING_STATUS_PROCESSING,
-            )
+        await repo.update_document_preprocessing_status(
+            document_id,
+            mode=mode,
+            status=PREPROCESSING_STATUS_PROCESSING,
+        )
 
         job_payload = KnowledgeUploadJobPayloadDto(
             project_id=project_id,
@@ -342,11 +339,7 @@ class KnowledgeService:
             await repo.update_document_status(document_id, "error", str(exc))
             raise
 
-        preprocessing_status = (
-            PREPROCESSING_STATUS_NOT_REQUESTED
-            if mode == MODE_PLAIN
-            else PREPROCESSING_STATUS_PROCESSING
-        )
+        preprocessing_status = PREPROCESSING_STATUS_PROCESSING
         logger.info("Knowledge upload queued", extra={"document_id": document_id})
         return KnowledgeUploadResultDto.create(
             message=f"Queued {len(chunks)} chunks for processing",

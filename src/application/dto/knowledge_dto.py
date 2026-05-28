@@ -128,7 +128,7 @@ class KnowledgeUploadJobPayloadDto:
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeUploadRequestDto:
-    preprocessing_mode: str = "plain"
+    preprocessing_mode: str = "faq"
 
     def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
         return normalize_preprocessing_mode(self.preprocessing_mode)
@@ -939,3 +939,120 @@ class KnowledgePriceFactsResponseDto:
             "items": [fact.to_dict() for fact in self.facts],
             "is_empty": not self.facts,
         }
+
+
+@dataclass(slots=True)
+class SurfaceCompilationRunDto:
+    id: str
+    project_id: str
+    document_id: str
+    status: str
+    compiler_kind: str
+    model: str
+    prompt_version: str
+    started_at: str | None
+    completed_at: str | None
+    error_type: str | None
+    error_message: str | None
+    metrics: JsonObject
+
+
+@dataclass(slots=True)
+class SurfaceCompilationStageDto:
+    id: str
+    run_id: str
+    stage_kind: str
+    status: str
+    model: str
+    prompt_version: str
+    input_summary: str
+    output_summary: str
+    tokens_input: int
+    tokens_output: int
+    tokens_total: int
+    error_type: str | None
+    error_message: str | None
+    started_at: str | None
+    completed_at: str | None
+    metrics: JsonObject
+
+
+@dataclass(slots=True)
+class SurfaceCompilationResponseDto:
+    run: SurfaceCompilationRunDto | None
+    stages: list[SurfaceCompilationStageDto]
+
+
+@dataclass(slots=True)
+class RetrievalSurfaceDto:
+    id: str
+    run_id: str
+    surface_key: str
+    surface_kind: str
+    title: str
+    canonical_question: str
+    answer: str
+    short_answer: str
+    answer_scope: str
+    question_scope: str
+    exclusion_scope: str
+    status: str
+    publication_status: str
+    source_refs: list[str]
+    source_chunk_indexes: list[int]
+    confidence: float
+    warnings: list[str]
+    linked_candidate_id: str | None
+    linked_canonical_entry_id: str | None
+    linked_runtime_entry_id: str | None
+
+
+@dataclass(slots=True)
+class SurfacesResponseDto:
+    surfaces: list[RetrievalSurfaceDto]
+
+
+@dataclass(slots=True)
+class RelationDto:
+    parent_surface_key: str
+    child_surface_key: str
+    relation_type: str
+    reason: str
+    confidence: float
+
+
+@dataclass(slots=True)
+class SurfaceRelationsResponseDto:
+    relations: list[RelationDto]
+
+
+@dataclass(slots=True)
+class OwnershipDto:
+    question: str
+    owner_surface_key: str
+    question_kind: str
+    confidence: float
+    reason: str
+    rejected_from_surface_keys: list[str]
+
+
+@dataclass(slots=True)
+class ReassignmentDto:
+    question: str
+    from_surface_key: str
+    to_surface_key: str
+    reason: str
+    confidence: float
+
+
+@dataclass(slots=True)
+class SurfaceOwnershipResponseDto:
+    ownership: list[OwnershipDto]
+    reassignments: list[ReassignmentDto]
+
+
+@dataclass(slots=True)
+class SurfacePublishResponseDto:
+    surface_id: str
+    publication_status: str
+    linked_runtime_entry_id: str | None

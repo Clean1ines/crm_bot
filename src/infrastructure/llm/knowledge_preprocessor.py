@@ -20,7 +20,6 @@ from src.domain.project_plane.json_types import JsonObject, json_value_from_unkn
 from src.domain.project_plane.knowledge_preprocessing import (
     ANSWER_RESOLUTION_PROMPT_VERSION,
     MODE_FAQ,
-    MODE_INSTRUCTION,
     MODE_PRICE_LIST,
     KnowledgeAnswerResolutionCase,
     KnowledgeAnswerResolutionResult,
@@ -276,6 +275,10 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         chunks: list[JsonObject],
         file_name: str,
     ) -> KnowledgePreprocessingExecutionResult:
+        if mode == MODE_FAQ:
+            raise KnowledgePreprocessingValidationError(
+                "Legacy GroqKnowledgePreprocessor.preprocess is forbidden for mode=faq"
+            )
         prompt_version = prompt_version_for_mode(mode)
         prompt = self._build_prompt(
             mode=mode,
@@ -673,9 +676,9 @@ def _log_llm_response(
 
 
 def _load_mode_prompt(mode: KnowledgePreprocessingMode) -> str:
-    if mode not in {MODE_FAQ, MODE_PRICE_LIST, MODE_INSTRUCTION}:
+    if mode != MODE_PRICE_LIST:
         raise KnowledgePreprocessingValidationError(
-            f"Knowledge answer compiler is unavailable for mode: {mode}"
+            f"Legacy knowledge preprocessor is unavailable for mode: {mode}"
         )
     return (PROMPTS_DIR / FAQ_COMPILER_PROMPT_FILE).read_text(encoding="utf-8")
 

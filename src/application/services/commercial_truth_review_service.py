@@ -252,9 +252,6 @@ def commercial_source_kind_from_price_document(
         return CommercialSourceKind.STRUCTURED_PRICE_LIST
     if preprocessing_mode == "faq":
         return CommercialSourceKind.FAQ
-    if preprocessing_mode in {"instruction", "plain"}:
-        return CommercialSourceKind.DOCUMENT
-
     if document.source_format in {
         PriceDocumentSourceFormat.CSV,
         PriceDocumentSourceFormat.XLSX,
