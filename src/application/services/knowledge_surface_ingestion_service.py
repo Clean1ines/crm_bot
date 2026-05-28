@@ -65,6 +65,25 @@ class KnowledgeSurfaceProgressAwareCompilerPort(Protocol):
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
     async def delete_document_chunks(self, document_id: str) -> None: ...
 
+    async def get_latest_surface_run_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> RetrievalSurfaceCompilerRun | None: ...
+
+    async def list_surface_source_units_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceSourceUnit, ...]: ...
+
+    async def list_surfaces_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceDraft, ...]: ...
+
     async def add_source_chunks(
         self,
         *,
@@ -438,8 +457,21 @@ class KnowledgeFaqSurfaceIngestionService:
             knowledge_repo_factory(self.pool),
         )
         compiler = surface_compiler_factory()
-        run_id = str(uuid.uuid4())
-        await repo.delete_document_chunks(document_id)
+        latest_run = await repo.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        resume_run = (
+            latest_run
+            if latest_run is not None
+            and latest_run.compiler_kind == "faq_retrieval_surface_compiler"
+            and latest_run.prompt_version == GRAPH_PROMPT_VERSION
+            and latest_run.status in {"running", "failed"}
+            else None
+        )
+        run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
+        if resume_run is None:
+            await repo.delete_document_chunks(document_id)
 
         indexable_chunks = _indexable_chunks(chunks)
         if not indexable_chunks:
@@ -462,41 +494,59 @@ class KnowledgeFaqSurfaceIngestionService:
             document_id=document_id,
             chunks=compiler_source_chunks,
         )
+        existing_source_units: tuple[RetrievalSurfaceSourceUnit, ...] = ()
+        if resume_run is not None:
+            existing_source_units = await repo.list_surface_source_units_for_run(
+                run_id=run_id,
+            )
+            if existing_source_units:
+                source_units = existing_source_units
+
         if not source_units:
             message = "FAQ surface compiler requires source units"
             await repo.update_document_status(document_id, "error", message)
             raise ValidationError(message)
 
         started_at = datetime.now(timezone.utc)
-        await repo.create_surface_compiler_run(
-            RetrievalSurfaceCompilerRun(
-                id=run_id,
+        if resume_run is None:
+            await repo.create_surface_compiler_run(
+                RetrievalSurfaceCompilerRun(
+                    id=run_id,
+                    project_id=project_id,
+                    document_id=document_id,
+                    mode=FAQ_MODE,
+                    status="running",
+                    compiler_kind="faq_retrieval_surface_compiler",
+                    model=compiler.model_name,
+                    prompt_version=GRAPH_PROMPT_VERSION,
+                    started_at=started_at,
+                    metrics={
+                        "source_unit_count": len(source_units),
+                        "source_chunk_count": len(source_chunks),
+                        "bootstrap_forbidden": True,
+                        "resume_reused_run": False,
+                    },
+                )
+            )
+        else:
+            await repo.update_surface_compiler_run_status(
+                run_id=run_id,
+                status="running",
+                error_type=None,
+                error_message=None,
+            )
+
+        if resume_run is None or not existing_source_units:
+            await repo.add_source_chunks(
                 project_id=project_id,
                 document_id=document_id,
-                mode=FAQ_MODE,
-                status="running",
-                compiler_kind="faq_retrieval_surface_compiler",
-                model=compiler.model_name,
-                prompt_version=GRAPH_PROMPT_VERSION,
-                started_at=started_at,
-                metrics={
-                    "source_unit_count": len(source_units),
-                    "source_chunk_count": len(source_chunks),
-                    "bootstrap_forbidden": True,
-                },
+                chunks=source_chunks,
             )
-        )
-
-        await repo.add_source_chunks(
-            project_id=project_id,
-            document_id=document_id,
-            chunks=source_chunks,
-        )
-        await repo.save_surface_source_units(
-            run_id=run_id,
-            document_id=document_id,
-            source_units=source_units,
-        )
+            await repo.save_surface_source_units(
+                run_id=run_id,
+                document_id=document_id,
+                source_units=source_units,
+            )
         await repo.create_surface_compiler_stage(
             _stage(
                 run_id=run_id,
@@ -506,7 +556,11 @@ class KnowledgeFaqSurfaceIngestionService:
                 model=compiler.model_name,
                 input_summary=f"chunks={len(indexable_chunks)}",
                 output_summary=f"source_units={len(source_units)}",
-                metrics={"source_unit_count": len(source_units)},
+                metrics={
+                    "source_unit_count": len(source_units),
+                    "resume_reused_run": resume_run is not None,
+                    "resume_existing_source_unit_count": len(existing_source_units),
+                },
             )
         )
         await repo.update_document_preprocessing_status(
@@ -523,7 +577,12 @@ class KnowledgeFaqSurfaceIngestionService:
             },
         )
 
-        persisted_surface_ids: set[str] = set()
+        existing_surfaces = (
+            await repo.list_surfaces_for_run(run_id=run_id)
+            if resume_run is not None
+            else ()
+        )
+        persisted_surface_ids: set[str] = {surface.id for surface in existing_surfaces}
 
         async def record_surface_progress(event: Mapping[str, object]) -> None:
             stage_kind = (
