@@ -16,11 +16,38 @@ from src.infrastructure.db.repositories.knowledge_db_codecs import jsonb_object_
 from src.utils.uuid_utils import ensure_uuid
 
 
+CANCELLED_DOCUMENT_STATUSES: frozenset[str] = frozenset({"error"})
+CANCELLED_PREPROCESSING_STATUSES: frozenset[str] = frozenset({"failed", "cancelled"})
+
+
 def affected_row_count(command_result: str) -> int:
     try:
         return int(str(command_result).split()[-1])
     except (IndexError, ValueError):
         return 0
+
+
+async def _document_allows_candidate_writes(
+    conn: asyncpg.Connection,
+    *,
+    document_id: str,
+) -> bool:
+    row = await conn.fetchrow(
+        """
+        SELECT status, preprocessing_status
+        FROM knowledge_documents
+        WHERE id = $1
+        """,
+        ensure_uuid(document_id),
+    )
+    if row is None:
+        return False
+    status = str(row["status"] or "")
+    preprocessing_status = str(row["preprocessing_status"] or "")
+    return (
+        status not in CANCELLED_DOCUMENT_STATUSES
+        and preprocessing_status not in CANCELLED_PREPROCESSING_STATUSES
+    )
 
 
 async def delete_raw_answer_candidates_for_batch(
@@ -115,14 +142,21 @@ async def upsert_answer_candidates(
     document_id: str,
     candidates: Sequence[AnswerCandidate],
 ) -> int:
+    if not await _document_allows_candidate_writes(conn, document_id=document_id):
+        return 0
+
+    written_count = 0
     for candidate in candidates:
+        if not await _document_allows_candidate_writes(conn, document_id=document_id):
+            return written_count
         await upsert_answer_candidate(
             conn,
             project_id=project_id,
             document_id=document_id,
             candidate=candidate,
         )
-    return len(candidates)
+        written_count += 1
+    return written_count
 
 
 async def upsert_candidate_cluster(
@@ -213,11 +247,18 @@ async def upsert_candidate_clusters(
     document_id: str,
     clusters: Sequence[CandidateCluster],
 ) -> int:
+    if not await _document_allows_candidate_writes(conn, document_id=document_id):
+        return 0
+
+    written_count = 0
     for cluster in clusters:
+        if not await _document_allows_candidate_writes(conn, document_id=document_id):
+            return written_count
         await upsert_candidate_cluster(
             conn,
             project_id=project_id,
             document_id=document_id,
             cluster=cluster,
         )
-    return len(clusters)
+        written_count += 1
+    return written_count
