@@ -252,7 +252,10 @@ class GroqModelRouter:
         if _is_large_request(kwargs):
             chain_name = GroqRouteChain.LARGE_REQUEST
             chain = self._policy.large_request_chain
-        elif requested_model in self._policy.cheap_small_chain:
+            requested_prefix = (requested_model,) if requested_model in chain else ()
+            return chain_name, _dedupe_models((*requested_prefix, *chain))
+
+        if requested_model in self._policy.cheap_small_chain:
             chain_name = GroqRouteChain.CHEAP_SMALL
             chain = self._policy.cheap_small_chain
         elif requested_model in self._policy.large_request_chain:
