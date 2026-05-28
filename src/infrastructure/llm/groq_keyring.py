@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
@@ -54,10 +54,6 @@ class GroqKeySelection:
     key: str
     index: int
     key_count: int
-
-
-class GroqDocumentBudgetExceededError(RuntimeError):
-    """Raised when one RotatingAsyncGroq instance exceeds its call/token budget."""
 
 
 class GroqApiKeyRing:
@@ -213,26 +209,6 @@ def _routed_model_text(routed_kwargs: dict[str, object]) -> str:
     return model if isinstance(model, str) and model.strip() else "unknown"
 
 
-def _content_text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        return " ".join(_content_text(item) for item in value)
-    if isinstance(value, Mapping):
-        return " ".join(_content_text(item) for item in value.values())
-    if value is None or isinstance(value, bool):
-        return ""
-    return str(value)
-
-
-def _estimate_request_tokens(routed_kwargs: Mapping[str, object]) -> int:
-    messages = routed_kwargs.get("messages")
-    prompt_text = _content_text(messages)
-    max_tokens = routed_kwargs.get("max_tokens")
-    output_budget = max_tokens if isinstance(max_tokens, int) and max_tokens > 0 else 0
-    return max(1, len(prompt_text) // 3) + output_budget
-
-
 class GroqClientRotator:
     def __init__(self, *, client: AsyncGroq | None = None) -> None:
         self._injected_client = client is not None
@@ -306,26 +282,6 @@ class _RotatingChatCompletionsProxy:
     def __init__(self, rotator: GroqClientRotator) -> None:
         self._rotator = rotator
         self._router = GroqModelRouter()
-        self._call_count = 0
-        self._estimated_token_count = 0
-
-    def _reserve_budget(self, routed_kwargs: Mapping[str, object]) -> None:
-        max_calls = settings.GROQ_KNOWLEDGE_MAX_CALLS_PER_DOCUMENT
-        max_tokens = settings.GROQ_KNOWLEDGE_MAX_TOKENS_PER_DOCUMENT
-        estimated_tokens = _estimate_request_tokens(routed_kwargs)
-        next_call_count = self._call_count + 1
-        next_token_count = self._estimated_token_count + estimated_tokens
-
-        if next_call_count > max_calls or next_token_count > max_tokens:
-            raise GroqDocumentBudgetExceededError(
-                "all_fallbacks_exhausted: llm_document_budget_exhausted; "
-                f"calls={self._call_count}/{max_calls}; "
-                f"estimated_tokens={self._estimated_token_count}/{max_tokens}; "
-                f"next_estimated_tokens={estimated_tokens}"
-            )
-
-        self._call_count = next_call_count
-        self._estimated_token_count = next_token_count
 
     async def create(self, *args: object, **kwargs: object):
         if self._rotator._injected_client:
@@ -349,7 +305,6 @@ class _RotatingChatCompletionsProxy:
             attempted_indices.add(selection.index)
 
             async def routed_create(routed_kwargs: dict[str, object]):
-                self._reserve_budget(routed_kwargs)
                 model = _routed_model_text(routed_kwargs)
                 identity = groq_route_quota_identity(
                     api_key=selection.key,
