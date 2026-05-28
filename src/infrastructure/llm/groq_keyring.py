@@ -9,7 +9,6 @@ from groq import AsyncGroq
 
 from src.infrastructure.config.settings import settings
 from src.infrastructure.llm.groq_router import (
-    GroqLimitKind,
     GroqModelRouter,
     classify_groq_exception,
     is_daily_groq_quota,

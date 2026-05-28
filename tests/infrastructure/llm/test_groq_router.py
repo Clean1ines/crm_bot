@@ -37,7 +37,10 @@ def test_classify_groq_exception_distinguishes_limit_types(
     status_code: int,
     expected: GroqLimitKind,
 ) -> None:
-    assert classify_groq_exception(ProviderError(message, status_code=status_code)) == expected
+    assert (
+        classify_groq_exception(ProviderError(message, status_code=status_code))
+        == expected
+    )
 
 
 def test_select_chain_uses_primary_models_by_default() -> None:
@@ -100,7 +103,10 @@ async def test_router_falls_back_to_next_model_on_request_too_large() -> None:
 
     result = await router.run_chat_completion(
         create_call=create_call,
-        kwargs={"model": "small-model", "messages": [{"role": "user", "content": "short"}]},
+        kwargs={
+            "model": "small-model",
+            "messages": [{"role": "user", "content": "short"}],
+        },
         operation_name="test",
     )
 
@@ -128,7 +134,10 @@ async def test_router_raises_quota_exhausted_after_all_daily_routes_fail() -> No
     with pytest.raises(GroqFallbackExhaustedError) as exc_info:
         await router.run_chat_completion(
             create_call=create_call,
-            kwargs={"model": "first", "messages": [{"role": "user", "content": "short"}]},
+            kwargs={
+                "model": "first",
+                "messages": [{"role": "user", "content": "short"}],
+            },
             operation_name="test",
         )
 
@@ -158,7 +167,7 @@ async def test_router_hard_caps_transient_retries() -> None:
     with pytest.raises(GroqFallbackExhaustedError) as exc_info:
         await router.run_chat_completion(
             create_call=create_call,
-            kwargs={"model": "first", "messages": [{"role": "user", "content": "short"}]},
+            kwargs={"messages": [{"role": "user", "content": "short"}]},
             operation_name="test",
         )
 

@@ -277,11 +277,14 @@ class GroqModelRouter:
         operation_name: str,
     ) -> ResultT:
         requested_model = kwargs.get("model")
-        requested_model_text = requested_model if isinstance(requested_model, str) else None
-        chain_name, models = self.select_chain(
+        requested_model_text = (
+            requested_model if isinstance(requested_model, str) else None
+        )
+        chain_name, selected_models = self.select_chain(
             requested_model=requested_model_text,
             kwargs=kwargs,
         )
+        models = list(selected_models)
         if not models:
             raise GroqFallbackExhaustedError(
                 failure_type=GroqRouteFailureType.ALL_FALLBACKS_EXHAUSTED,
@@ -334,6 +337,10 @@ class GroqModelRouter:
                         raise
 
                     if is_groq_input_too_large(last_limit_kind):
+                        if chain_name != GroqRouteChain.LARGE_REQUEST:
+                            for fallback_model in self._policy.large_request_chain:
+                                if fallback_model not in models:
+                                    models.append(fallback_model)
                         logger.warning(
                             "Groq model rejected request size; trying next fallback model",
                             extra={
