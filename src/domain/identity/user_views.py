@@ -6,14 +6,18 @@ def _optional_str(value: object) -> str | None:
 
 
 def _optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
+    if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, str | bytes | bytearray):
+        text = value.strip() if isinstance(value, str) else value
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
     return None
 
 
