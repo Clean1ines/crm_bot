@@ -160,6 +160,23 @@ const groqRouteRows = (
         `Last Groq tokens: prompt ${formatNumber(promptTokens ?? 0)}, completion ${formatNumber(completionTokens ?? 0)}, total ${formatNumber(totalTokens ?? 0)}`,
       );
     }
+
+    const quotaState = metricObject(lastRoute.quota_state);
+    if (quotaState) {
+      const remainingRequests = metricNumber(quotaState, 'remaining_requests');
+      const remainingTokens = metricNumber(quotaState, 'remaining_tokens');
+      const cooldown = metricNumber(quotaState, 'cooldown_remaining_seconds');
+      const resetRequestsEpoch = metricNumber(quotaState, 'reset_requests_epoch');
+      const resetTokensEpoch = metricNumber(quotaState, 'reset_tokens_epoch');
+      const quotaParts = [
+        remainingRequests !== null ? `requests left ${formatNumber(remainingRequests)}` : null,
+        remainingTokens !== null ? `tokens left ${formatNumber(remainingTokens)}` : null,
+        cooldown !== null && cooldown > 0 ? `cooldown ${Math.ceil(cooldown)}s` : null,
+        resetRequestsEpoch !== null ? `requests reset ${new Date(resetRequestsEpoch * 1000).toLocaleTimeString()}` : null,
+        resetTokensEpoch !== null ? `tokens reset ${new Date(resetTokensEpoch * 1000).toLocaleTimeString()}` : null,
+      ].filter(Boolean);
+      if (quotaParts.length > 0) rows.push(`Groq quota: ${quotaParts.join(', ')}`);
+    }
   }
 
   return rows;

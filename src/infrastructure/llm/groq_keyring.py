@@ -9,6 +9,7 @@ from groq import AsyncGroq
 
 from src.infrastructure.config.settings import settings
 from src.infrastructure.llm.groq_quota_state import (
+    get_groq_route_observability,
     groq_route_quota_identity,
     record_groq_route_failure,
     record_groq_route_success,
@@ -72,6 +73,7 @@ class GroqRouteEvent:
     total_tokens: int
     error_type: str
     error: str
+    quota_state: Mapping[str, object]
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -91,6 +93,7 @@ class GroqRouteEvent:
             "total_tokens": self.total_tokens,
             "error_type": self.error_type,
             "error": self.error,
+            "quota_state": dict(self.quota_state),
         }
 
 
@@ -366,6 +369,7 @@ class _RotatingChatCompletionsProxy:
         total_tokens: int = 0,
         error_type: str = "",
         error: str = "",
+        quota_state: Mapping[str, object] | None = None,
     ) -> None:
         self._route_event_sequence += 1
         self._route_events.append(
@@ -388,16 +392,25 @@ class _RotatingChatCompletionsProxy:
                 total_tokens=total_tokens,
                 error_type=error_type,
                 error=error[:300],
+                quota_state=dict(quota_state or {}),
             )
         )
         self._route_events = self._route_events[-50:]
 
     def route_observability_snapshot(self) -> dict[str, object]:
         events = [event.to_dict() for event in self._route_events]
-        successful_events = [event for event in self._route_events if event.status == "success"]
-        fallback_events = [event for event in self._route_events if event.fallback_reason]
-        cooldown_events = [event for event in self._route_events if event.status == "cooldown_blocked"]
-        failed_events = [event for event in self._route_events if event.status == "failed"]
+        successful_events = [
+            event for event in self._route_events if event.status == "success"
+        ]
+        fallback_events = [
+            event for event in self._route_events if event.fallback_reason
+        ]
+        cooldown_events = [
+            event for event in self._route_events if event.status == "cooldown_blocked"
+        ]
+        failed_events = [
+            event for event in self._route_events if event.status == "failed"
+        ]
         key_slot_counts: dict[str, int] = {}
         actual_model_counts: dict[str, int] = {}
         fallback_reason_counts: dict[str, int] = {}
@@ -468,7 +481,9 @@ class _RotatingChatCompletionsProxy:
                         limit_kind=limit_kind,
                         retry_after_seconds=retry_after,
                         error=str(exc),
+                        headers_source=exc,
                     )
+                    quota_state = await get_groq_route_observability(identity)
                     self._append_route_event(
                         status="cooldown_blocked"
                         if "groq_quota_exhausted" in str(exc).lower()
@@ -481,6 +496,7 @@ class _RotatingChatCompletionsProxy:
                         retry_after_seconds=retry_after,
                         error_type=type(exc).__name__,
                         error=str(exc),
+                        quota_state=quota_state,
                     )
                     raise
 
@@ -488,6 +504,8 @@ class _RotatingChatCompletionsProxy:
                 prompt_tokens = _int_attr(usage, "prompt_tokens")
                 completion_tokens = _int_attr(usage, "completion_tokens")
                 total_tokens = _int_attr(usage, "total_tokens")
+                await record_groq_route_success(identity, headers_source=response)
+                quota_state = await get_groq_route_observability(identity)
                 self._append_route_event(
                     status="success",
                     requested_model=requested_model,
@@ -497,8 +515,8 @@ class _RotatingChatCompletionsProxy:
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    quota_state=quota_state,
                 )
-                await record_groq_route_success(identity)
                 return response
 
             try:
