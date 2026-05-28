@@ -9,7 +9,9 @@ from groq import AsyncGroq
 
 from src.infrastructure.config.settings import settings
 from src.infrastructure.llm.groq_router import (
+    GroqFallbackExhaustedError,
     GroqModelRouter,
+    GroqRouteFailureType,
     classify_groq_exception,
     is_daily_groq_quota,
     is_transient_groq_limit,
@@ -241,22 +243,73 @@ class _RotatingChatCompletionsProxy:
         self._router = GroqModelRouter()
 
     async def create(self, *args: object, **kwargs: object):
-        async def routed_create(routed_kwargs: dict[str, object]):
-            async def operation(client: AsyncGroq):
-                create = getattr(client.chat.completions, "create")
-                result = await create(*args, **routed_kwargs)
-                return result
+        if self._rotator._injected_client:
 
-            return await self._rotator.run(
-                operation,
+            async def routed_create_with_injected_client(
+                routed_kwargs: dict[str, object],
+            ):
+                create = getattr(self._rotator._client.chat.completions, "create")
+                return await create(*args, **routed_kwargs)
+
+            return await self._router.run_chat_completion(
+                create_call=routed_create_with_injected_client,
+                kwargs=kwargs,
                 operation_name="chat.completions.create",
             )
 
-        return await self._router.run_chat_completion(
-            create_call=routed_create,
-            kwargs=kwargs,
-            operation_name="chat.completions.create",
-        )
+        attempted_indices: set[int] = set()
+
+        while True:
+            selection = _GLOBAL_GROQ_KEYRING.current()
+            attempted_indices.add(selection.index)
+
+            async def routed_create(routed_kwargs: dict[str, object]):
+                client = AsyncGroq(api_key=selection.key)
+                create = getattr(client.chat.completions, "create")
+                return await create(*args, **routed_kwargs)
+
+            try:
+                return await self._router.run_chat_completion(
+                    create_call=routed_create,
+                    kwargs=kwargs,
+                    operation_name="chat.completions.create",
+                )
+            except GroqFallbackExhaustedError as exc:
+                if exc.failure_type == GroqRouteFailureType.INPUT_TOO_LARGE:
+                    raise
+
+                last_error = exc.last_error or exc
+                if not is_groq_rate_limit_error(last_error):
+                    raise
+
+                next_selection = await _GLOBAL_GROQ_KEYRING.rotate_after_rate_limit(
+                    failed_index=selection.index,
+                    attempted_indices=attempted_indices,
+                )
+                if next_selection is None:
+                    logger.warning(
+                        "Groq API key rotation exhausted after model fallback chain",
+                        extra={
+                            "operation": "chat.completions.create",
+                            "key_count": len(configured_groq_api_keys()),
+                            "failure_type": exc.failure_type.value,
+                            "error_type": type(last_error).__name__,
+                            "error": str(last_error)[:300],
+                        },
+                    )
+                    raise
+
+                logger.warning(
+                    "Groq model fallback chain exhausted for key; rotating to next key",
+                    extra={
+                        "operation": "chat.completions.create",
+                        "from_key_index": selection.index + 1,
+                        "to_key_index": next_selection.index + 1,
+                        "key_count": next_selection.key_count,
+                        "failure_type": exc.failure_type.value,
+                        "error_type": type(last_error).__name__,
+                    },
+                )
 
 
 class _RotatingChatProxy:
