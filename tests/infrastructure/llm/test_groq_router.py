@@ -56,7 +56,7 @@ def test_select_chain_uses_large_request_chain_for_big_prompt() -> None:
     router = GroqModelRouter()
 
     chain_name, models = router.select_chain(
-        requested_model="llama-3.1-8b-instant",
+        requested_model=None,
         kwargs={"messages": [{"role": "user", "content": "x" * 13_000}]},
     )
 
