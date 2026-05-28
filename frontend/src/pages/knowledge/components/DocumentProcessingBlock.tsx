@@ -91,14 +91,21 @@ export const DocumentProcessingBlock: React.FC<{
             {processingReport.steps.map((step) => (
               <div
                 key={step.id}
-                className={`flex items-start justify-between gap-3 ${step.id === answerResolutionStepId ? 'rounded-lg bg-[var(--control-bg)] px-2 py-1' : ''}`}
+                className={`rounded-lg ${step.id === answerResolutionStepId ? 'bg-[var(--control-bg)] px-2 py-1' : ''}`}
               >
-                <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
-                <span className="text-right">
-                  {step.total > 0
-                    ? `${formatNumber(step.current)} / ${formatNumber(step.total)}`
-                    : step.status}
-                </span>
+                <div className="flex items-start justify-between gap-3">
+                  <span className="font-medium text-[var(--text-primary)]">{step.label}</span>
+                  <span className="text-right">
+                    {step.total > 0
+                      ? `${formatNumber(step.current)} / ${formatNumber(step.total)}`
+                      : step.status}
+                  </span>
+                </div>
+                {step.message && (
+                  <div className="mt-0.5 leading-relaxed text-[var(--text-muted)]">
+                    {step.message}
+                  </div>
+                )}
               </div>
             ))}
           </div>
