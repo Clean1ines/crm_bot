@@ -6,18 +6,26 @@ ROOT = Path(__file__).resolve().parents[4]
 PERSISTENCE = ROOT / "src/infrastructure/db/repositories/knowledge_document_persistence.py"
 
 
-def test_cancelled_documents_are_not_marked_processed_by_late_success() -> None:
+def test_cancelled_documents_are_not_marked_processing_or_processed_by_late_status() -> None:
     source = PERSISTENCE.read_text(encoding="utf-8")
 
     assert "PROCESSING_CANCELLED_REASON" in source
-    assert "$1 = 'processed'" in source
+    assert "$1 IN ('processing', 'processed')" in source
     assert "preprocessing_status = 'failed'" in source
     assert "preprocessing_error = $4" in source
 
 
-def test_cancelled_documents_are_not_marked_preprocessing_completed_by_late_success() -> None:
+def test_cancelled_documents_are_not_marked_preprocessing_processing_or_completed() -> None:
     source = PERSISTENCE.read_text(encoding="utf-8")
 
-    assert "$2 = 'completed'" in source
+    assert "$2 IN ('processing', 'completed')" in source
     assert "preprocessing_status = 'failed'" in source
     assert "preprocessing_error = $8" in source
+
+
+def test_cancelled_documents_do_not_accept_late_preprocessing_metric_merges() -> None:
+    source = PERSISTENCE.read_text(encoding="utf-8")
+
+    assert "SET preprocessing_metrics = COALESCE(preprocessing_metrics" in source
+    assert "preprocessing_error = $4" in source
+    assert "PROCESSING_CANCELLED_REASON" in source
