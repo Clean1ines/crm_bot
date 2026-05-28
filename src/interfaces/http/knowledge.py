@@ -29,6 +29,9 @@ from src.application.ports.knowledge_port import (
     KnowledgePreprocessorPort,
     ModelUsageRepositoryPort,
 )
+from src.application.services.knowledge_processing_report_builder import (
+    build_knowledge_processing_report,
+)
 from src.application.services.knowledge_service import (
     KnowledgeService,
     KnowledgeServiceConfig,
@@ -143,6 +146,87 @@ async def _read_upload_bytes(file: UploadFile) -> bytearray:
             raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
 
 
+def _json_int(value: object) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
+
+def _json_dict(value: object) -> JsonObject:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _overview_is_reportable_document(document: object) -> bool:
+    status = str(getattr(document, "status", "") or "")
+    preprocessing_status = str(getattr(document, "preprocessing_status", "") or "")
+    structured_entries = getattr(document, "structured_entries", 0) or 0
+    return (
+        status in {"pending", "processing", "error", "cancelled"}
+        or preprocessing_status in {"processing", "failed", "cancelled"}
+        or int(structured_entries) > 0
+    )
+
+
+def _overview_source_unit_summary(document: object, metrics: JsonObject) -> JsonObject:
+    source_unit_count = (
+        _json_int(metrics.get("source_unit_count"))
+        or _json_int(metrics.get("source_chunk_count"))
+        or _json_int(metrics.get("raw_source_chunk_count"))
+        or int(getattr(document, "chunk_count", 0) or 0)
+    )
+    return {
+        "source_unit_count": source_unit_count,
+        "source_chunk_count": _json_int(metrics.get("source_chunk_count")),
+        "raw_source_chunk_count": _json_int(metrics.get("raw_source_chunk_count")),
+    }
+
+
+def _overview_groq_route_summary(metrics: JsonObject) -> JsonObject:
+    return {
+        key: value
+        for key, value in metrics.items()
+        if key.startswith("groq_")
+        or key
+        in {
+            "key_slot",
+            "actual_model",
+            "requested_model",
+            "fallback_reason",
+            "limit_kind",
+            "retry_after_seconds",
+            "cooldown_until_epoch",
+            "remaining_requests",
+            "remaining_tokens",
+            "reset_requests_epoch",
+            "reset_tokens_epoch",
+        }
+    }
+
+
+def _overview_economy_summary(metrics: JsonObject) -> JsonObject:
+    return {
+        key: metrics.get(key)
+        for key in (
+            "economy_mode",
+            "economy_reason",
+            "economy_source_unit_count",
+            "economy_source_unit_split_count",
+            "economy_subunit_count",
+            "economy_completed_subunit_count",
+            "economy_quality_warning",
+            "quality_mode",
+            "quality_warning",
+        )
+        if key in metrics
+    }
+
+
 @router.get("")
 async def list_knowledge_documents(
     project_id: str,
@@ -175,6 +259,88 @@ async def list_knowledge_documents(
     repo = KnowledgeRepository(pool)
     documents = await repo.get_documents(project_id, limit=limit, offset=offset)
     return {"documents": documents, "items": documents}
+
+
+@router.get("/processing-overview")
+async def knowledge_processing_overview(
+    project_id: str,
+    authorization: str | None = Header(default=None),
+    limit: int = Query(200, ge=1, le=200),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns one lightweight polling payload for processing knowledge documents."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    await service.require_access(project_id, authorization)
+
+    repo = KnowledgeRepository(pool)
+    documents = await repo.get_documents(project_id, limit=limit, offset=0)
+
+    processing_reports: dict[str, JsonObject] = {}
+    partial_surface_count: dict[str, int] = {}
+    source_unit_summary: dict[str, JsonObject] = {}
+    groq_route_summary: dict[str, JsonObject] = {}
+    economy_mode_summary: dict[str, JsonObject] = {}
+
+    for document in documents:
+        document_id = str(getattr(document, "id", ""))
+        if not document_id or not _overview_is_reportable_document(document):
+            continue
+
+        batches = await repo.list_document_compiler_batches(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        candidate_summary = await repo.get_document_answer_candidate_summary(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        report = build_knowledge_processing_report(
+            document_id=document_id,
+            document=document,
+            batches=batches,
+            candidate_summary=candidate_summary,
+        )
+        report_payload = _json_dict(report.to_dict())
+        processing_reports[document_id] = report_payload
+
+        metrics = _json_dict(report_payload.get("metrics"))
+        partial_surface_count[document_id] = (
+            _json_int(metrics.get("retrieval_surface_entry_count"))
+            or _json_int(metrics.get("published_answer_count"))
+            or _json_int(metrics.get("draft_answer_count"))
+            or _json_int(metrics.get("answer_candidate_count"))
+        )
+        source_unit_summary[document_id] = _overview_source_unit_summary(
+            document,
+            metrics,
+        )
+        groq_route_summary[document_id] = _overview_groq_route_summary(metrics)
+        economy_mode_summary[document_id] = _overview_economy_summary(metrics)
+
+    return {
+        "documents": documents,
+        "processing_reports": processing_reports,
+        "reports": processing_reports,
+        "partial_surface_count": partial_surface_count,
+        "source_unit_summary": source_unit_summary,
+        "groq_route_summary": groq_route_summary,
+        "economy_mode_summary": economy_mode_summary,
+    }
 
 
 @router.post("/preview")

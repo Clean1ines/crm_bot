@@ -88,6 +88,18 @@ export type KnowledgeProcessingReport = {
   metrics: Record<string, unknown>;
 };
 
+export type KnowledgeProcessingOverviewDocument = Record<string, unknown>;
+
+export type KnowledgeProcessingOverviewResponse = {
+  documents: KnowledgeProcessingOverviewDocument[];
+  processing_reports: Record<string, KnowledgeProcessingReport>;
+  reports: Record<string, KnowledgeProcessingReport>;
+  partial_surface_count: Record<string, number>;
+  source_unit_summary: Record<string, Record<string, unknown>>;
+  groq_route_summary: Record<string, Record<string, unknown>>;
+  economy_mode_summary: Record<string, Record<string, unknown>>;
+};
+
 export type KnowledgeAnswerDraft = {
   id: string;
   title: string;
@@ -347,6 +359,14 @@ export const knowledgeApi = {
   progress: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeProcessingReport>(
       `/api/projects/${projectId}/knowledge/${documentId}/progress`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  processingOverview: (projectId: string) =>
+    authedJsonRequest<KnowledgeProcessingOverviewResponse>(
+      `/api/projects/${projectId}/knowledge/processing-overview`,
       {
         method: 'GET',
       },
