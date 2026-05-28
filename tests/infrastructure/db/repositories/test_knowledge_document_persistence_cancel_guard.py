@@ -3,10 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-PERSISTENCE = ROOT / "src/infrastructure/db/repositories/knowledge_document_persistence.py"
+PERSISTENCE = (
+    ROOT / "src/infrastructure/db/repositories/knowledge_document_persistence.py"
+)
 
 
-def test_cancelled_documents_are_not_marked_processing_or_processed_by_late_status() -> None:
+def test_cancelled_documents_are_not_marked_processing_or_processed_by_late_status() -> (
+    None
+):
     source = PERSISTENCE.read_text(encoding="utf-8")
 
     assert "PROCESSING_CANCELLED_REASON" in source
@@ -15,7 +19,9 @@ def test_cancelled_documents_are_not_marked_processing_or_processed_by_late_stat
     assert "preprocessing_error = $4" in source
 
 
-def test_cancelled_documents_are_not_marked_preprocessing_processing_or_completed() -> None:
+def test_cancelled_documents_are_not_marked_preprocessing_processing_or_completed() -> (
+    None
+):
     source = PERSISTENCE.read_text(encoding="utf-8")
 
     assert "$2 IN ('processing', 'completed')" in source

@@ -779,7 +779,7 @@ class KnowledgeRepository:
                     status = $2,
                     error_type = $3,
                     error_message = $4,
-                    completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE completed_at END,
+                    completed_at = CASE WHEN $2 IN ('completed', 'failed', 'cancelled') THEN now() ELSE NULL END,
                     updated_at = now()
                 WHERE id = $1::uuid
                 """,
@@ -951,6 +951,7 @@ class KnowledgeRepository:
                             $6, $7, $8::jsonb, $9, $10::text[], $11::jsonb,
                             $12, $13::jsonb
                         )
+                        ON CONFLICT (id) DO NOTHING
                         """,
                         ensure_uuid(unit.id),
                         ensure_uuid(run_id),
@@ -1059,6 +1060,7 @@ class KnowledgeRepository:
                             $21::uuid, $22::uuid,
                             $23::uuid
                         )
+                        ON CONFLICT (id) DO NOTHING
                         """,
                         ensure_uuid(surface.id),
                         ensure_uuid(run_id),
@@ -1276,6 +1278,7 @@ class KnowledgeRepository:
                             $5, $6, $7,
                             $8, $9::jsonb
                         )
+                        ON CONFLICT (id) DO NOTHING
                         """,
                         ensure_uuid(rel.id),
                         ensure_uuid(run_id),
@@ -1345,6 +1348,7 @@ class KnowledgeRepository:
                             $6, $7, $8,
                             $9::jsonb
                         )
+                        ON CONFLICT (id) DO NOTHING
                         """,
                         ensure_uuid(item.id),
                         ensure_uuid(run_id),
@@ -1414,6 +1418,7 @@ class KnowledgeRepository:
                             $1::uuid, $2::uuid, $3::uuid, $4,
                             $5, $6, $7, $8
                         )
+                        ON CONFLICT (id) DO NOTHING
                         """,
                         ensure_uuid(item.id),
                         ensure_uuid(run_id),
@@ -1478,6 +1483,7 @@ class KnowledgeRepository:
                             $5::jsonb, $6::jsonb,
                             $7, $8, $9
                         )
+                        ON CONFLICT (id) DO NOTHING
                         """,
                         ensure_uuid(item.id),
                         ensure_uuid(run_id),
