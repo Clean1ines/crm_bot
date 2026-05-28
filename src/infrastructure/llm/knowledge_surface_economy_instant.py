@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 
 from src.domain.project_plane.json_types import json_value_from_unknown
@@ -168,13 +168,187 @@ def split_source_unit_for_instant(
     return tuple(result)
 
 
-def _dedupe(values: Sequence[str]) -> tuple[str, ...]:
+def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
     result: list[str] = []
     for value in values:
         text = " ".join(value.strip().split())
         if text and text not in result:
             result.append(text)
     return tuple(result)
+
+
+def _economy_fingerprint(value: str) -> str:
+    return " ".join(
+        re.sub(r"[^0-9a-zа-яё]+", " ", value.casefold().replace("ё", "е")).split()
+    )
+
+
+def _economy_draft_merge_key(draft: SurfaceAnswerDraft) -> str:
+    question_key = _economy_fingerprint(draft.canonical_question)
+    if question_key:
+        return f"question:{question_key}"
+    title_key = _economy_fingerprint(draft.title)
+    if title_key:
+        return f"title:{title_key}"
+    return f"surface:{draft.candidate_key}"
+
+
+def _join_distinct_text(values: Sequence[str], *, separator: str) -> str:
+    result: list[str] = []
+    for value in values:
+        text = " ".join(value.strip().split())
+        if text and text not in result:
+            result.append(text)
+    return separator.join(result)
+
+
+def _merge_economy_subunit_outputs(
+    *,
+    run_id: str,
+    document_id: str,
+    candidates: tuple[RetrievalSurfaceCandidate, ...],
+    drafts: tuple[SurfaceAnswerDraft, ...],
+    ownership: tuple[SurfaceQuestionOwnershipDecision, ...],
+) -> tuple[
+    tuple[RetrievalSurfaceCandidate, ...],
+    tuple[SurfaceAnswerDraft, ...],
+    tuple[SurfaceQuestionOwnershipDecision, ...],
+    int,
+]:
+    """Deterministically collapses duplicate instant subunit surfaces.
+
+    Economy mode cannot rely on a large global judge. Duplicate answer slots that
+    have the same canonical question/title are merged locally while preserving
+    order, source refs, warnings, and ownership.
+    """
+    if len(drafts) <= 1:
+        return candidates, drafts, ownership, 0
+
+    candidate_by_key = {
+        candidate.local_surface_key: candidate for candidate in candidates
+    }
+    groups: dict[str, list[SurfaceAnswerDraft]] = {}
+    for draft in drafts:
+        groups.setdefault(_economy_draft_merge_key(draft), []).append(draft)
+
+    if all(len(group) == 1 for group in groups.values()):
+        return candidates, drafts, ownership, 0
+
+    remap: dict[str, str] = {}
+    merged_candidates: list[RetrievalSurfaceCandidate] = []
+    merged_drafts: list[SurfaceAnswerDraft] = []
+    merge_count = 0
+
+    for group in groups.values():
+        survivor = group[0]
+        survivor_key = survivor.candidate_key
+        merged_keys = tuple(draft.candidate_key for draft in group[1:])
+        merge_count += len(merged_keys)
+        for draft in group:
+            remap[draft.candidate_key] = survivor_key
+
+        group_candidates = tuple(
+            candidate_by_key[draft.candidate_key]
+            for draft in group
+            if draft.candidate_key in candidate_by_key
+        )
+        if not group_candidates:
+            continue
+
+        survivor_candidate = group_candidates[0]
+        merged_candidates.append(
+            replace(
+                survivor_candidate,
+                source_refs=_dedupe(
+                    ref
+                    for candidate in group_candidates
+                    for ref in candidate.source_refs
+                ),
+                metadata={
+                    **survivor_candidate.metadata,
+                    "economy_mode": True,
+                    "economy_deterministic_merge": bool(merged_keys),
+                    "economy_deterministic_merged_surface_keys": list(merged_keys),
+                    "economy_deterministic_merge_count": len(merged_keys),
+                },
+            )
+        )
+        merged_drafts.append(
+            replace(
+                survivor,
+                source_refs=_dedupe(
+                    ref for draft in group for ref in draft.source_refs
+                ),
+                warnings=_dedupe(
+                    warning for draft in group for warning in draft.warnings
+                ),
+                answer=_join_distinct_text(
+                    tuple(draft.answer for draft in group),
+                    separator="\n\n",
+                ),
+                short_answer=_join_distinct_text(
+                    tuple(draft.short_answer for draft in group),
+                    separator=" ",
+                )
+                or survivor.short_answer,
+                answer_scope=_join_distinct_text(
+                    tuple(draft.answer_scope for draft in group),
+                    separator="; ",
+                )
+                or survivor.answer_scope,
+                question_scope=_join_distinct_text(
+                    tuple(draft.question_scope for draft in group),
+                    separator="; ",
+                )
+                or survivor.question_scope,
+                exclusion_scope=_join_distinct_text(
+                    tuple(draft.exclusion_scope for draft in group),
+                    separator="; ",
+                ),
+                metadata={
+                    **survivor.metadata,
+                    "economy_mode": True,
+                    "quality_mode": "economy_instant",
+                    "economy_deterministic_merge": bool(merged_keys),
+                    "economy_deterministic_merged_surface_keys": list(merged_keys),
+                    "economy_deterministic_merge_count": len(merged_keys),
+                },
+            )
+        )
+
+    merged_candidate_keys = frozenset(
+        candidate.local_surface_key for candidate in merged_candidates
+    )
+    merged_ownership: list[SurfaceQuestionOwnershipDecision] = []
+    seen_ownership: set[tuple[str, str]] = set()
+    for decision in ownership:
+        surface_key = remap.get(decision.surface_key, decision.surface_key)
+        if surface_key not in merged_candidate_keys:
+            continue
+        key = (surface_key, decision.question)
+        if key in seen_ownership:
+            continue
+        seen_ownership.add(key)
+        merged_ownership.append(
+            replace(
+                decision,
+                id=str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"{run_id}:{surface_key}:{decision.question}",
+                    )
+                ),
+                surface_key=surface_key,
+                source="economy_instant_deterministic_merge",
+            )
+        )
+
+    return (
+        tuple(merged_candidates),
+        tuple(merged_drafts),
+        tuple(merged_ownership),
+        merge_count,
+    )
 
 
 class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
@@ -216,6 +390,7 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
         self._economy_reason = ""
         self._economy_subunits = 0
         self._economy_completed_subunits = 0
+        self._economy_deterministic_merge_count = 0
         await self._ensure_not_cancelled()
         result = await super().compile_surfaces(
             mode=mode,
@@ -232,6 +407,9 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
             "economy_subunit_count": int(getattr(self, "_economy_subunits", 0)),
             "economy_completed_subunit_count": int(
                 getattr(self, "_economy_completed_subunits", 0)
+            ),
+            "economy_deterministic_merge_count": int(
+                getattr(self, "_economy_deterministic_merge_count", 0)
             ),
             "economy_quality_warning": ECONOMY_INSTANT_QUALITY_WARNING,
             "quality_mode": "economy_instant",
@@ -443,17 +621,56 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
                 )
         finally:
             self._model = previous_model
-        if not candidates or not drafts:
+
+        (
+            merged_candidates,
+            merged_drafts,
+            merged_ownership,
+            deterministic_merge_count,
+        ) = _merge_economy_subunit_outputs(
+            run_id=run_id,
+            document_id=unit.document_id,
+            candidates=tuple(candidates),
+            drafts=tuple(drafts),
+            ownership=tuple(ownership),
+        )
+        if deterministic_merge_count > 0:
+            self._economy_deterministic_merge_count = (
+                int(getattr(self, "_economy_deterministic_merge_count", 0))
+                + deterministic_merge_count
+            )
+            await self._emit_progress(
+                stage_kind="economy_instant_deterministic_merge",
+                status="completed",
+                input_summary=f"source_unit={unit_index}/{source_unit_count}",
+                output_summary=(
+                    f"merged={deterministic_merge_count} surfaces={len(merged_drafts)}"
+                ),
+                metrics={
+                    "source_unit_index": unit_index,
+                    "source_unit_count": source_unit_count,
+                    "source_unit_key": unit.source_unit_key,
+                    "economy_mode": True,
+                    "economy_reason": reason,
+                    "economy_deterministic_merge_count": deterministic_merge_count,
+                    "actual_model": GROQ_INSTANT_MODEL_ID,
+                    **self._runtime_metrics_snapshot(
+                        started_monotonic=started_monotonic
+                    ),
+                },
+            )
+
+        if not merged_candidates or not merged_drafts:
             raise GroqFallbackExhaustedError(
                 failure_type=GroqRouteFailureType.ALL_FALLBACKS_EXHAUSTED,
                 message="economy instant compiler produced no publishable surfaces",
             )
         result = _UnitCompilationResult(
             unit_index=unit_index,
-            candidates=tuple(candidates),
+            candidates=merged_candidates,
             local_relations=(),
-            drafts=tuple(drafts),
-            ownership_decisions=tuple(ownership),
+            drafts=merged_drafts,
+            ownership_decisions=merged_ownership,
             reassignments=(),
             warnings=(ECONOMY_INSTANT_QUALITY_WARNING,),
         )
