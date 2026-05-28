@@ -241,7 +241,10 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
             result.graph,
             metrics={
                 **result.graph.metrics,
-                **{key: json_value_from_unknown(value) for key, value in metrics.items()},
+                **{
+                    key: json_value_from_unknown(value)
+                    for key, value in metrics.items()
+                },
             },
             surfaces=tuple(
                 replace(
@@ -262,7 +265,8 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
             result,
             graph=graph,
             metrics={
-                str(key): json_value_from_unknown(value) for key, value in metrics.items()
+                str(key): json_value_from_unknown(value)
+                for key, value in metrics.items()
             },
             model=GROQ_INSTANT_MODEL_ID,
         )
@@ -365,7 +369,9 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
                         candidate,
                         source_unit_id=unit.id,
                         local_surface_key=candidate_key,
-                        source_refs=_dedupe((*unit.source_refs, *candidate.source_refs)),
+                        source_refs=_dedupe(
+                            (*unit.source_refs, *candidate.source_refs)
+                        ),
                         metadata={
                             **candidate.metadata,
                             "economy_mode": True,
@@ -411,9 +417,9 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
                             status="owned",
                         )
                     )
-                self._economy_completed_subunits = int(
-                    getattr(self, "_economy_completed_subunits", 0)
-                ) + 1
+                self._economy_completed_subunits = (
+                    int(getattr(self, "_economy_completed_subunits", 0)) + 1
+                )
                 await self._emit_progress(
                     stage_kind="economy_instant_subunit",
                     status="completed",

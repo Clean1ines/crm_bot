@@ -24,3 +24,4 @@ def test_economy_compiler_contract_markers() -> None:
     assert "GroqFallbackExhaustedError" in source
     assert "GROQ_INSTANT_MODEL_ID" in source
     assert "ECONOMY_INSTANT_QUALITY_WARNING" in source
+    assert "RetrievalSurfaceMergeDecision" in source

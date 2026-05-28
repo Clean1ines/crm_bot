@@ -54,6 +54,10 @@ from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
 FAQ_MODE: KnowledgePreprocessingMode = MODE_FAQ
 
 
+class KnowledgeSurfaceIngestionCancelled(RuntimeError):
+    """Raised when cooperative runtime cancellation stops FAQ compilation."""
+
+
 @runtime_checkable
 class KnowledgeSurfaceProgressAwareCompilerPort(Protocol):
     def set_progress_callback(
@@ -73,8 +77,18 @@ class KnowledgeSurfaceCheckpointAwareCompilerPort(
     ) -> None: ...
 
 
+@runtime_checkable
+class KnowledgeSurfaceCancelAwareCompilerPort(Protocol):
+    def set_cancel_check(
+        self,
+        callback: Callable[[], Awaitable[None]] | None,
+    ) -> None: ...
+
+
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
     async def delete_document_chunks(self, document_id: str) -> None: ...
+
+    async def is_document_processing_cancelled(self, document_id: str) -> bool: ...
 
     async def get_latest_surface_run_for_document(
         self,
@@ -622,7 +636,63 @@ class KnowledgeFaqSurfaceIngestionService:
         ):
             compiler.set_source_unit_result_checkpoints(existing_unit_checkpoints)
 
+        cancel_stage_recorded = False
+
+        async def ensure_not_cancelled() -> None:
+            nonlocal cancel_stage_recorded
+            is_cancelled = getattr(repo, "is_document_processing_cancelled", None)
+            if not callable(is_cancelled):
+                return
+            if not await is_cancelled(document_id):
+                return
+
+            reason = "Knowledge document processing was cancelled"
+            if not cancel_stage_recorded:
+                cancel_stage_recorded = True
+                await repo.create_surface_compiler_stage(
+                    _stage(
+                        run_id=run_id,
+                        document_id=document_id,
+                        stage_kind="faq_surface_compilation",
+                        status="cancelled",
+                        model=compiler.model_name,
+                        input_summary=f"source_units={len(source_units)}",
+                        output_summary="cancelled_before_next_llm_work",
+                        error_type="processing_cancelled",
+                        error_message=reason,
+                        metrics={
+                            "stage": "faq_retrieval_surface_compilation_cancelled",
+                            "cancelled": True,
+                            "surface_compiler_run_id": run_id,
+                        },
+                    )
+                )
+                await repo.update_surface_compiler_run_status(
+                    run_id=run_id,
+                    status="cancelled",
+                    error_type="processing_cancelled",
+                    error_message=reason,
+                )
+                await repo.update_document_preprocessing_status(
+                    document_id,
+                    mode=FAQ_MODE,
+                    status=PREPROCESSING_STATUS_FAILED,
+                    error=reason,
+                    model=compiler.model_name,
+                    prompt_version=GRAPH_PROMPT_VERSION,
+                    metrics={
+                        "stage": "faq_retrieval_surface_compilation_cancelled",
+                        "status": "cancelled",
+                        "status_message": reason,
+                        "cancelled": True,
+                        "surface_compiler_run_id": run_id,
+                    },
+                )
+
+            raise KnowledgeSurfaceIngestionCancelled(reason)
+
         async def record_surface_progress(event: Mapping[str, object]) -> None:
+            await ensure_not_cancelled()
             stage_kind = (
                 _compact_text(event.get("stage_kind")) or "faq_surface_compilation"
             )
@@ -698,7 +768,11 @@ class KnowledgeFaqSurfaceIngestionService:
         if isinstance(compiler, KnowledgeSurfaceProgressAwareCompilerPort):
             compiler.set_progress_callback(record_surface_progress)
 
+        if isinstance(compiler, KnowledgeSurfaceCancelAwareCompilerPort):
+            compiler.set_cancel_check(ensure_not_cancelled)
+
         try:
+            await ensure_not_cancelled()
             result = await compiler.compile_surfaces(
                 mode=FAQ_MODE,
                 source_units=source_units,
@@ -706,6 +780,7 @@ class KnowledgeFaqSurfaceIngestionService:
                 run_id=run_id,
             )
             graph = result.graph
+            await ensure_not_cancelled()
             final_surfaces_to_save = tuple(
                 surface
                 for surface in graph.surfaces
@@ -735,6 +810,21 @@ class KnowledgeFaqSurfaceIngestionService:
                 run_id=run_id,
                 document_id=document_id,
                 merge_decisions=graph.merge_decisions,
+            )
+        except KnowledgeSurfaceIngestionCancelled as exc:
+            error_message = str(exc)[:500] or type(exc).__name__
+            logger.info(
+                "FAQ retrieval surface compilation cancelled",
+                extra={
+                    "project_id": project_id,
+                    "document_id": document_id,
+                    "surface_compiler_run_id": run_id,
+                },
+            )
+            return KnowledgeDocumentProcessingResult(
+                document_id=document_id,
+                preprocessing_status=PREPROCESSING_STATUS_FAILED,
+                structured_entries=0,
             )
         except Exception as exc:
             error_message = str(exc)[:500] or type(exc).__name__
