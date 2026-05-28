@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
+from groq import AsyncGroq
 
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_keyring import (
+    GroqClientRotator,
+    GroqKeySelection,
+    _RotatingChatCompletionsProxy,
+    configured_groq_api_keys,
+    reset_groq_keyring_for_tests,
+)
 from src.infrastructure.llm.groq_quota_state import (
     GroqRouteQuotaBlockedError,
     clear_groq_route_quota_state,
@@ -77,3 +87,100 @@ async def test_groq_quota_state_ignores_non_limit_failures(
     )
 
     assert await get_groq_route_quota_state(identity) is None
+
+
+@pytest.mark.asyncio
+async def test_groq_keyring_acquire_next_round_robins_configured_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "unit-key-a")
+    monkeypatch.setattr(settings, "GROQ_API_KEY2", "unit-key-b")
+    monkeypatch.setattr(settings, "GROQ_API_KEY3", "unit-key-c")
+    reset_groq_keyring_for_tests()
+
+    from src.infrastructure.llm.groq_keyring import _GLOBAL_GROQ_KEYRING
+
+    assert configured_groq_api_keys() == ("unit-key-a", "unit-key-b", "unit-key-c")
+    selections = [await _GLOBAL_GROQ_KEYRING.acquire_next() for _ in range(4)]
+
+    assert [selection.key for selection in selections] == [
+        "unit-key-a",
+        "unit-key-b",
+        "unit-key-c",
+        "unit-key-a",
+    ]
+    assert [selection.index for selection in selections] == [0, 1, 2, 0]
+    assert all(selection.key_count == 3 for selection in selections)
+
+
+@pytest.mark.asyncio
+async def test_groq_keyring_deduplicates_configured_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "unit-key-a")
+    monkeypatch.setattr(settings, "GROQ_API_KEY2", "unit-key-a")
+    monkeypatch.setattr(settings, "GROQ_API_KEY3", "unit-key-b")
+    reset_groq_keyring_for_tests()
+
+    assert configured_groq_api_keys() == ("unit-key-a", "unit-key-b")
+
+
+def test_groq_route_observability_snapshot_aggregates_route_events() -> None:
+    proxy = _RotatingChatCompletionsProxy(
+        GroqClientRotator(client=cast(AsyncGroq, object()))
+    )
+    first_selection = GroqKeySelection(key="unit-key-a", index=0, key_count=2)
+    second_selection = GroqKeySelection(key="unit-key-b", index=1, key_count=2)
+
+    proxy._append_route_event(
+        status="success",
+        requested_model="llama-3.1-8b-instant",
+        routed_model="llama-3.1-8b-instant",
+        selection=first_selection,
+        attempted_key_count=1,
+        prompt_tokens=11,
+        completion_tokens=7,
+        total_tokens=18,
+    )
+    proxy._append_route_event(
+        status="success",
+        requested_model="llama-3.1-8b-instant",
+        routed_model="qwen/qwen3-32b",
+        selection=second_selection,
+        attempted_key_count=2,
+        prompt_tokens=13,
+        completion_tokens=5,
+        total_tokens=18,
+    )
+
+    snapshot = proxy.route_observability_snapshot()
+
+    assert snapshot["groq_route_event_count"] == 2
+    assert snapshot["groq_route_success_count"] == 2
+    assert snapshot["groq_route_fallback_count"] == 1
+    assert snapshot["groq_key_slot_counts"] == {"1/2": 1, "2/2": 1}
+    assert snapshot["groq_actual_model_counts"] == {
+        "llama-3.1-8b-instant": 1,
+        "qwen/qwen3-32b": 1,
+    }
+    assert snapshot["groq_fallback_reason_counts"] == {
+        "model_fallback,key_rotation": 1,
+    }
+    assert snapshot["groq_last_route_event"] == {
+        "sequence": 2,
+        "status": "success",
+        "requested_model": "llama-3.1-8b-instant",
+        "routed_model": "qwen/qwen3-32b",
+        "key_index": 1,
+        "key_slot": 2,
+        "key_count": 2,
+        "key_slot_label": "2/2",
+        "fallback_reason": "model_fallback,key_rotation",
+        "limit_kind": "",
+        "retry_after_seconds": None,
+        "prompt_tokens": 13,
+        "completion_tokens": 5,
+        "total_tokens": 18,
+        "error_type": "",
+        "error": "",
+    }
