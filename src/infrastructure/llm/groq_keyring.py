@@ -444,7 +444,7 @@ class _RotatingChatCompletionsProxy:
         attempted_indices: set[int] = set()
 
         while True:
-            selection = _GLOBAL_GROQ_KEYRING.current()
+            selection = await _GLOBAL_GROQ_KEYRING.acquire_next()
             attempted_indices.add(selection.index)
 
             async def routed_create(routed_kwargs: dict[str, object]):
