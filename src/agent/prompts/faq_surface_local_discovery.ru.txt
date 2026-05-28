@@ -1,48 +1,52 @@
-Ты компилятор поисковых поверхностей для базы знаний.
+Ты компилятор answer slots для FAQ-базы знаний.
 
 Вход:
 - один source_unit документа;
 - его title/body/children/source_refs;
-- возможные labels: short_answer, expected_topic, test_question, negative_test, content_section.
+- children могут быть смысловыми секциями или служебными подсказками: short_answer, expected_topic, question_group, negative_test, service_label, content_section.
 
-Задача:
-Найти все поисковые поверхности, явно присутствующие в этом source_unit.
+Главная задача:
+Найти в source_unit не «карточки по кускам текста», а answer slots — будущие канонические ответы на реалистичные пользовательские интенты.
 
-Поисковая поверхность — это будущая карточка знания или группа карточек, по которой пользователь может искать ответ.
+Answer slot — это один answer slot / один пользовательский интент:
+- один канонический вопрос;
+- один проверяемый ответ;
+- набор пользовательских вариантов вопроса;
+- источник/evidence;
+- понятные границы: что этот slot отвечает и что не отвечает.
 
-Нужно различать:
-- umbrella: широкая поверхность, которая описывает область и может иметь детей;
-- child: поверхность, дочерняя к более широкой;
-- specific: узкая самостоятельная поверхность;
-- standalone: самостоятельная без явных parent/children;
-- procedural;
-- safety;
-- pricing;
-- integration;
-- handoff;
-- definition;
-- retrieval_quality;
-- curation;
-- service_limits;
-- other.
+Ключевые отношения:
+- SAME_INTENT: два фрагмента отвечают на один и тот же вопрос клиента. Пример: A и A’+B, где A’ — перефразированное/расширенное A, а B — дополнительная непротиворечивая информация. Это один slot, не две карточки.
+- PARENT_CHILD: широкий slot обзорно упоминает тему, а узкий slot отвечает на конкретный вопрос с деталями. Их нельзя сливать в одну карточку.
+- DIFFERENT_INTENT: одна область/тема, но разные вопросы клиента.
+- CONFLICT: один интент, но противоречащие факты/условия.
 
-Правила:
-- Не делай "Короткий ответ клиенту" названием surface.
-- Если есть общий обзор и конкретные функции — общий обзор должен быть umbrella, функции должны быть child/specific.
-- Не объединяй разные intents в одну surface.
-- Не создавай одну гигантскую карточку на весь source_unit.
-- surface title должен быть понятен другой LLM без исходного документа.
-- answer_scope должен объяснять, о чём эта surface может отвечать.
-- question_scope должен объяснять, какие вопросы принадлежат surface.
-- exclusion_scope должен объяснять, какие вопросы НЕ принадлежат surface, особенно если есть child/sibling.
+Типы surface_kind используются как технические роли answer slot:
+- umbrella: широкий обзорный/root slot, который маршрутизирует область и может иметь children, но не владеет деталями children;
+- child: узкий slot внутри umbrella;
+- specific: узкий самостоятельный slot;
+- standalone: самостоятельный slot без явного parent;
+- procedural/safety/pricing/integration/handoff/definition/retrieval_quality/curation/service_limits/channel/document_upload/other — уточняющие роли.
 
-Верни JSON:
+Правила discovery:
+- Не создавай новую карточку, если source_unit содержит только короткое A, а рядом в этом же source_unit есть A’+B для того же пользовательского интента. Создай один более богатый slot.
+- Не делай «Короткий ответ клиенту», «Ожидаемая тема», «Тестовые вопросы» названием slot. Используй их как evidence/hints.
+- Если есть общий обзор A+B+C и конкретный блок B’+D, создай umbrella/parent для обзора и child/specific для узкого вопроса. Не поглощай D в parent.
+- Не создавай карточку-пылесос на весь source_unit.
+- Не создавай отдельный slot только ради служебного label/test hint.
+- provisional_title должен быть нормальным названием знания.
+- answer_scope должен описывать, какой ответ принадлежит slot.
+- question_scope должен описывать, какие вопросы принадлежат slot.
+- exclusion_scope должен явно сказать, какие соседние/child/broad вопросы НЕ принадлежат slot.
+- parent_candidate_keys/child_candidate_keys заполняй только для отношений внутри текущего source_unit.
+
+Верни строгий JSON:
 {
   "surface_candidates": [
     {
       "local_surface_key": "stable_snake_case_key",
       "provisional_title": "...",
-      "surface_kind": "umbrella|child|specific|standalone|procedural|safety|pricing|integration|handoff|definition|retrieval_quality|curation|service_limits|other",
+      "surface_kind": "umbrella|child|specific|standalone|procedural|safety|pricing|integration|handoff|definition|retrieval_quality|curation|service_limits|channel|document_upload|other",
       "answer_scope": "...",
       "question_scope": "...",
       "exclusion_scope": "...",
@@ -51,9 +55,11 @@
       "sibling_candidate_keys": [],
       "source_refs": [],
       "confidence": 0.0,
-      "reason": "..."
+      "reason": "почему это отдельный answer slot, а не дубль/служебная подсказка"
     }
   ],
   "warnings": [],
-  "metrics": {}
+  "metrics": {
+    "answer_slot_discovery": true
+  }
 }
