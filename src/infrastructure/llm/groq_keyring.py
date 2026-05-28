@@ -8,6 +8,13 @@ from typing import Protocol, TypeVar
 from groq import AsyncGroq
 
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_router import (
+    GroqLimitKind,
+    GroqModelRouter,
+    classify_groq_exception,
+    is_daily_groq_quota,
+    is_transient_groq_limit,
+)
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -150,34 +157,14 @@ def current_groq_api_key() -> str:
 
 
 def is_groq_rate_limit_error(exc: BaseException) -> bool:
-    """Return true only for Groq quota/rate-limit style failures."""
+    """Return true only for Groq quota/rate-limit style failures.
 
-    status_code = getattr(exc, "status_code", None)
-    if status_code == 429:
-        return True
+    Request-size/context errors are deliberately excluded so model fallback can
+    move to the large-request chain instead of burning API-key rotations.
+    """
 
-    response = getattr(exc, "response", None)
-    response_status_code = getattr(response, "status_code", None)
-    if response_status_code == 429:
-        return True
-
-    type_name = type(exc).__name__.lower()
-    message = str(exc).lower()
-
-    markers = (
-        "ratelimit",
-        "rate limit",
-        "rate_limit",
-        "too many requests",
-        "tokens per minute",
-        "requests per minute",
-        "tpm",
-        "rpm",
-        "please try again in",
-        "quota exceeded",
-    )
-
-    return "ratelimit" in type_name or any(marker in message for marker in markers)
+    limit_kind = classify_groq_exception(exc)
+    return is_daily_groq_quota(limit_kind) or is_transient_groq_limit(limit_kind)
 
 
 class GroqClientRotator:
@@ -212,6 +199,7 @@ class GroqClientRotator:
             try:
                 return await operation(self._client)
             except Exception as exc:
+                limit_kind = classify_groq_exception(exc)
                 if failed_index is None or not is_groq_rate_limit_error(exc):
                     raise
 
@@ -226,6 +214,7 @@ class GroqClientRotator:
                             "operation": operation_name,
                             "key_count": len(configured_groq_api_keys()),
                             "error_type": type(exc).__name__,
+                            "limit_kind": limit_kind.value,
                             "error": str(exc)[:300],
                         },
                     )
@@ -239,6 +228,7 @@ class GroqClientRotator:
                         "to_key_index": selection.index + 1,
                         "key_count": selection.key_count,
                         "error_type": type(exc).__name__,
+                        "limit_kind": limit_kind.value,
                     },
                 )
 
@@ -249,15 +239,23 @@ class GroqClientRotator:
 class _RotatingChatCompletionsProxy:
     def __init__(self, rotator: GroqClientRotator) -> None:
         self._rotator = rotator
+        self._router = GroqModelRouter()
 
     async def create(self, *args: object, **kwargs: object):
-        async def operation(client: AsyncGroq):
-            create = getattr(client.chat.completions, "create")
-            result = await create(*args, **kwargs)
-            return result
+        async def routed_create(routed_kwargs: dict[str, object]):
+            async def operation(client: AsyncGroq):
+                create = getattr(client.chat.completions, "create")
+                result = await create(*args, **routed_kwargs)
+                return result
 
-        return await self._rotator.run(
-            operation,
+            return await self._rotator.run(
+                operation,
+                operation_name="chat.completions.create",
+            )
+
+        return await self._router.run_chat_completion(
+            create_call=routed_create,
+            kwargs=kwargs,
             operation_name="chat.completions.create",
         )
 
@@ -299,6 +297,7 @@ async def ainvoke_chat_with_rotation(
         try:
             return await client.ainvoke(messages)
         except Exception as exc:
+            limit_kind = classify_groq_exception(exc)
             if not is_groq_rate_limit_error(exc):
                 raise
 
@@ -313,6 +312,7 @@ async def ainvoke_chat_with_rotation(
                         "operation": operation_name,
                         "key_count": len(configured_groq_api_keys()),
                         "error_type": type(exc).__name__,
+                        "limit_kind": limit_kind.value,
                         "error": str(exc)[:300],
                     },
                 )
@@ -326,6 +326,7 @@ async def ainvoke_chat_with_rotation(
                     "to_key_index": next_selection.index + 1,
                     "key_count": next_selection.key_count,
                     "error_type": type(exc).__name__,
+                    "limit_kind": limit_kind.value,
                 },
             )
             selection = next_selection
