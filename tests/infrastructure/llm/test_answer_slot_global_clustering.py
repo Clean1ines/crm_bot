@@ -84,7 +84,9 @@ def test_answer_slot_clusters_group_summary_with_richer_same_intent_answer() -> 
         source_refs=("chunk:9",),
     )
 
-    clusters = _answer_slot_clusters((short, unrelated, rich), local_relations=(), size=8)
+    clusters = _answer_slot_clusters(
+        (short, unrelated, rich), local_relations=(), size=8
+    )
 
     assert any(
         {item.candidate_key for item in cluster} >= {"short_product", "rich_product"}
@@ -92,7 +94,9 @@ def test_answer_slot_clusters_group_summary_with_richer_same_intent_answer() -> 
     )
 
 
-def test_answer_slot_clusters_use_local_duplicate_relations_without_text_overlap() -> None:
+def test_answer_slot_clusters_use_local_duplicate_relations_without_text_overlap() -> (
+    None
+):
     left = _draft(
         "left",
         title="A",

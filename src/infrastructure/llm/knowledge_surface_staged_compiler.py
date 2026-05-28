@@ -26,6 +26,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceQuestionOwnership,
     SurfaceQuestionOwnershipDecision,
     SurfaceQuestionReassignment,
+    SurfaceRelationType,
 )
 from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
     GRAPH_PROMPT_VERSION,
@@ -340,7 +341,7 @@ def _relation(
     document_id: str,
     parent: str,
     child: str,
-    relation_type: str,
+    relation_type: SurfaceRelationType,
 ) -> RetrievalSurfaceRelation:
     return RetrievalSurfaceRelation(
         id=_stable_id(run_id, relation_type, parent, child),
@@ -348,7 +349,7 @@ def _relation(
         document_id=document_id,
         parent_surface_key=parent,
         child_surface_key=child,
-        relation_type=relation_type,  # type: ignore[arg-type]
+        relation_type=relation_type,
         reason="Deterministic global graph reconciliation.",
         confidence=0.6,
     )
