@@ -522,6 +522,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/{document_id}/resume-processing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Knowledge Processing
+         * @description Queues explicit resume for a cancelled recoverable FAQ processing run.
+         */
+        post: operations["resume_knowledge_processing_api_projects__project_id__knowledge__document_id__resume_processing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}/cancel": {
         parameters: {
             query?: never;
@@ -3543,6 +3563,40 @@ export interface operations {
         };
     };
     retry_knowledge_failed_batches_api_projects__project_id__knowledge__document_id__retry_failed_batches_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_knowledge_processing_api_projects__project_id__knowledge__document_id__resume_processing_post: {
         parameters: {
             query?: never;
             header?: {

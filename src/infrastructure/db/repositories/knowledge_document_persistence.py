@@ -124,6 +124,49 @@ async def mark_document_processing_cancelled(
     return row is not None
 
 
+async def resume_document_processing(
+    conn: asyncpg.Connection,
+    *,
+    project_id: str,
+    document_id: str,
+    mode: KnowledgePreprocessingMode,
+    model: str | None = None,
+    prompt_version: str | None = None,
+    metrics: JsonObject | None = None,
+) -> bool:
+    """Explicit user-driven resume path that clears the cancellation guard.
+
+    Normal late writes must still be blocked by update_document_status /
+    update_document_preprocessing_status. This function is deliberately separate
+    so only the resume button can move a cancelled document back to processing.
+    """
+    row = await conn.fetchrow(
+        """
+        UPDATE knowledge_documents
+        SET status = 'processing',
+            error = NULL,
+            preprocessing_mode = $3,
+            preprocessing_status = 'processing',
+            preprocessing_error = NULL,
+            preprocessing_model = COALESCE($4, preprocessing_model),
+            preprocessing_prompt_version = COALESCE($5, preprocessing_prompt_version),
+            preprocessing_metrics = COALESCE(preprocessing_metrics, '{}'::jsonb)
+                || COALESCE($6::jsonb, '{}'::jsonb),
+            updated_at = NOW()
+        WHERE project_id = $1
+          AND id = $2
+        RETURNING id
+        """,
+        ensure_uuid(project_id),
+        ensure_uuid(document_id),
+        mode,
+        model,
+        prompt_version,
+        json.dumps(metrics, ensure_ascii=False) if metrics is not None else None,
+    )
+    return row is not None
+
+
 async def merge_document_preprocessing_metrics(
     conn: asyncpg.Connection,
     *,

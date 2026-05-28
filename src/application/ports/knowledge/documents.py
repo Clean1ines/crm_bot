@@ -60,6 +60,17 @@ class KnowledgeDocumentPort(Protocol):
         reason: str,
     ) -> bool: ...
 
+    async def resume_document_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        mode: KnowledgePreprocessingMode,
+        model: str | None = None,
+        prompt_version: str | None = None,
+        metrics: JsonObject | None = None,
+    ) -> bool: ...
+
     async def is_document_processing_cancelled(self, document_id: str) -> bool: ...
 
     async def clear_project_knowledge(self, project_id: str) -> None: ...

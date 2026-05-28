@@ -478,23 +478,26 @@ const formatDurationSeconds = (seconds: number): string => {
 
 const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
   const metricElapsed = metricNumber(doc.preprocessing_metrics, 'elapsed_seconds') ?? 0;
+  const elapsedBeforeResume = metricNumber(doc.preprocessing_metrics, 'elapsed_before_resume_seconds') ?? metricElapsed;
+  const processingStartedAtEpoch = metricNumber(doc.preprocessing_metrics, 'processing_started_at_epoch');
   const startedAt = Date.parse(doc.created_at || '');
   const updatedAt = Date.parse(doc.updated_at || '');
 
-  if (!Number.isFinite(startedAt)) {
-    return metricElapsed;
-  }
-
-  if (!isDocumentProcessing(doc)) {
-    if (metricElapsed > 0) return metricElapsed;
-    if (Number.isFinite(updatedAt) && updatedAt >= startedAt) {
-      return Math.max(0, (updatedAt - startedAt) / 1000);
+  if (isDocumentProcessing(doc)) {
+    if (processingStartedAtEpoch !== null && processingStartedAtEpoch > 0) {
+      return Math.max(0, elapsedBeforeResume + ((nowMs / 1000) - processingStartedAtEpoch));
+    }
+    if (Number.isFinite(startedAt)) {
+      return Math.max(metricElapsed, Math.max(0, (nowMs - startedAt) / 1000));
     }
     return metricElapsed;
   }
 
-  const localElapsed = Math.max(0, (nowMs - startedAt) / 1000);
-  return Math.max(metricElapsed, localElapsed);
+  if (metricElapsed > 0) return metricElapsed;
+  if (Number.isFinite(startedAt) && Number.isFinite(updatedAt) && updatedAt >= startedAt) {
+    return Math.max(0, (updatedAt - startedAt) / 1000);
+  }
+  return metricElapsed;
 };
 
 const PreviewResultCard: React.FC<{
@@ -913,6 +916,7 @@ export const KnowledgePage: React.FC = () => {
     onSuccess: async () => {
       toast.success(t('knowledge.feedback.documentQueued'));
       await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-overview', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
       await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
     },
@@ -965,6 +969,23 @@ export const KnowledgePage: React.FC = () => {
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t('knowledge.feedback.stopFailed')));
+    },
+  });
+
+  const resumeProcessingMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      await knowledgeApi.resumeProcessing(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success('Обработка документа возобновлена');
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-overview', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, 'Не удалось возобновить обработку документа'));
     },
   });
 
@@ -1479,10 +1500,13 @@ export const KnowledgePage: React.FC = () => {
                     onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
                     onRetryFailedBatches={() => retryFailedBatchesMutation.mutate(doc.id)}
                     onPublishReady={() => publishReadyMutation.mutate(doc.id)}
+                     onResumeProcessing={() => resumeProcessingMutation.mutate(doc.id)}
                     retryPending={retryFailedBatchesMutation.isPending}
                     retryTarget={retryFailedBatchesMutation.variables}
                     publishReadyPending={publishReadyMutation.isPending}
                     publishReadyTarget={publishReadyMutation.variables}
+                     resumePending={resumeProcessingMutation.isPending}
+                     resumeTarget={resumeProcessingMutation.variables}
                     formatNumber={formatNumber}
                     answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
                     renderDraftsSummary={({ response, isLoading, onOpen }) => (

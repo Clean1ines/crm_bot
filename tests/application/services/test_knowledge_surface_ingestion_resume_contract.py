@@ -11,7 +11,7 @@ def test_faq_surface_ingestion_reuses_recoverable_run_id() -> None:
 
     assert "get_latest_surface_run_for_document" in source
     assert "resume_run =" in source
-    assert 'latest_run.status in {"running", "failed"}' in source
+    assert 'latest_run.status in {"running", "failed", "cancelled"}' in source
     assert (
         "run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())"
         in source

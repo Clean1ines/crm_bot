@@ -45,6 +45,7 @@ from src.infrastructure.llm.knowledge_surface_full_graph_compiler import (
     _related_relations,
     _reassign_rejected,
 )
+from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
 from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
     GRAPH_PROMPT_VERSION,
     _is_large_request_error,
@@ -402,15 +403,22 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
         )
         return model, content
 
+    def _configured_key_count(self) -> int:
+        try:
+            return len(configured_groq_api_keys())
+        except Exception:
+            return 0
+
     def _concurrency(self) -> int:
+        key_count = self._configured_key_count()
         raw_value = os.getenv("FAQ_SURFACE_GRAPH_CONCURRENCY", "").strip()
-        if not raw_value:
-            return DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY
+        if not raw_value or raw_value.lower() == "auto":
+            return max(1, min(key_count or DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY, 8))
         try:
             parsed = int(raw_value)
         except ValueError:
-            return DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY
-        return max(1, min(parsed, 8))
+            return max(1, min(key_count or DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY, 8))
+        return max(1, min(max(parsed, key_count), 8))
 
     async def compile_surfaces(
         self,
@@ -429,6 +437,7 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
         self._reset_runtime_metrics()
         started_monotonic = time.monotonic()
         concurrency = self._concurrency()
+        configured_key_count = self._configured_key_count()
         semaphore = asyncio.Semaphore(concurrency)
 
         await self._emit_progress(
@@ -438,6 +447,8 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             metrics={
                 "source_unit_count": len(units),
                 "concurrency": concurrency,
+                "configured_groq_key_count": configured_key_count,
+                "parallel_source_unit_slots": concurrency,
                 **self._runtime_metrics_snapshot(started_monotonic=started_monotonic),
             },
         )
