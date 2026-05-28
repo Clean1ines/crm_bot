@@ -43,6 +43,9 @@ from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
 SURFACE_KEY_PATTERN = re.compile(r"[^0-9A-Za-z_]+")
 GLOBAL_JUDGE_PROMPT = "faq_surface_global_relation_judge.ru.txt"
 QUESTION_REASSIGNMENT_PROMPT = "faq_surface_question_reassignment.ru.txt"
+GLOBAL_RELATION_CLUSTER_SIZE = 8
+GLOBAL_RELATION_MAX_CLUSTERS = 64
+ANSWER_SLOT_CLUSTER_MIN_SCORE = 0.24
 
 
 class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2):
@@ -132,7 +135,10 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 await self._emit_progress(
                     stage_kind="answer_synthesis",
                     status="completed",
-                    input_summary=f"source_unit={unit_index}/{len(units)} candidate={candidate_index}/{len(unit_candidates)}",
+                    input_summary=(
+                        f"source_unit={unit_index}/{len(units)} "
+                        f"candidate={candidate_index}/{len(unit_candidates)}"
+                    ),
                     output_summary=f"surface={candidate.local_surface_key}",
                     metrics={
                         "source_unit_index": unit_index,
@@ -157,7 +163,10 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 await self._emit_progress(
                     stage_kind="question_ownership",
                     status="completed",
-                    input_summary=f"source_unit={unit_index}/{len(units)} candidate={candidate_index}/{len(unit_candidates)}",
+                    input_summary=(
+                        f"source_unit={unit_index}/{len(units)} "
+                        f"candidate={candidate_index}/{len(unit_candidates)}"
+                    ),
                     output_summary=(
                         f"owned={len(ownership_result.owned_questions)} "
                         f"rejected={len(ownership_result.rejected_questions)}"
@@ -291,13 +300,21 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
         relations: list[RetrievalSurfaceRelation] = []
         merges: list[RetrievalSurfaceMergeDecision] = []
         warnings: list[str] = []
-        for cluster_index, cluster in enumerate(_clusters(drafts, size=8)):
+        clusters = _answer_slot_clusters(
+            drafts,
+            local_relations=local_relations,
+            size=GLOBAL_RELATION_CLUSTER_SIZE,
+        )
+        for cluster_index, cluster in enumerate(clusters[:GLOBAL_RELATION_MAX_CLUSTERS]):
             payload = {
                 "run_id": run_id,
                 "cluster_context": asdict(
                     SurfaceRelationClusterContext(
-                        cluster_key=f"cluster_{cluster_index}",
-                        reason="deterministic title/source proximity cluster",
+                        cluster_key=f"answer_slot_cluster_{cluster_index}",
+                        reason=(
+                            "deterministic answer-slot candidate cluster: shared "
+                            "question/title/source/summary evidence"
+                        ),
                     )
                 ),
                 "surfaces": [asdict(item) for item in cluster],
@@ -672,6 +689,121 @@ def _dedupe_reassignments(
     return tuple(result)
 
 
+def _answer_slot_clusters(
+    drafts: tuple[SurfaceAnswerDraft, ...],
+    *,
+    local_relations: tuple[LocalSurfaceRelation, ...],
+    size: int,
+) -> tuple[tuple[SurfaceAnswerDraft, ...], ...]:
+    if len(drafts) <= size:
+        return (drafts,) if drafts else ()
+
+    by_key = {draft.candidate_key: draft for draft in drafts}
+    scored_neighbors: dict[str, list[tuple[float, str]]] = {
+        draft.candidate_key: [] for draft in drafts
+    }
+
+    for relation in local_relations:
+        if relation.source_surface_key not in by_key or relation.target_surface_key not in by_key:
+            continue
+        score = _local_relation_cluster_score(relation.relation_type, relation.confidence)
+        if score <= 0:
+            continue
+        scored_neighbors[relation.source_surface_key].append(
+            (score, relation.target_surface_key)
+        )
+        scored_neighbors[relation.target_surface_key].append(
+            (score, relation.source_surface_key)
+        )
+
+    for left_index, left in enumerate(drafts):
+        for right in drafts[left_index + 1 :]:
+            score = _answer_slot_similarity_score(left, right)
+            if score < ANSWER_SLOT_CLUSTER_MIN_SCORE:
+                continue
+            scored_neighbors[left.candidate_key].append((score, right.candidate_key))
+            scored_neighbors[right.candidate_key].append((score, left.candidate_key))
+
+    clusters: list[tuple[SurfaceAnswerDraft, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for draft in drafts:
+        neighbors = sorted(
+            scored_neighbors[draft.candidate_key], key=lambda item: item[0], reverse=True
+        )
+        keys = [draft.candidate_key]
+        for _, key in neighbors:
+            if key not in keys:
+                keys.append(key)
+            if len(keys) >= size:
+                break
+        if len(keys) < 2:
+            continue
+        cluster_key = tuple(sorted(keys))
+        if cluster_key in seen:
+            continue
+        seen.add(cluster_key)
+        clusters.append(tuple(by_key[key] for key in keys))
+
+    if clusters:
+        return tuple(clusters)
+    return _clusters(drafts, size=size)
+
+
+def _local_relation_cluster_score(relation_type: str, confidence: float) -> float:
+    base_scores = {
+        "duplicates": 1.0,
+        "near_duplicate": 0.9,
+        "umbrella_contains": 0.72,
+        "specializes": 0.72,
+        "overlaps": 0.55,
+        "split_needed": 0.5,
+        "sibling": 0.35,
+        "contradicts": 0.5,
+    }
+    return base_scores.get(relation_type, 0.0) * max(0.0, min(confidence, 1.0))
+
+
+def _answer_slot_similarity_score(
+    left: SurfaceAnswerDraft, right: SurfaceAnswerDraft
+) -> float:
+    left_question_tokens = _slot_question_tokens(left)
+    right_question_tokens = _slot_question_tokens(right)
+    left_answer_tokens = _tokens(left.answer)
+    right_answer_tokens = _tokens(right.answer)
+    left_title_tokens = _tokens(f"{left.title} {left.canonical_question}")
+    right_title_tokens = _tokens(f"{right.title} {right.canonical_question}")
+
+    question_score = _jaccard(left_question_tokens, right_question_tokens)
+    title_score = _jaccard(left_title_tokens, right_title_tokens)
+    answer_score = _jaccard(left_answer_tokens, right_answer_tokens)
+    summary_score = max(
+        _coverage(left_answer_tokens, right_answer_tokens),
+        _coverage(right_answer_tokens, left_answer_tokens),
+    )
+    source_score = 1.0 if set(left.source_refs) & set(right.source_refs) else 0.0
+
+    return max(
+        question_score * 0.9,
+        title_score * 0.7,
+        answer_score * 0.55,
+        summary_score * 0.6,
+        source_score * 0.45,
+    )
+
+
+def _slot_question_tokens(draft: SurfaceAnswerDraft) -> set[str]:
+    return _tokens(
+        " ".join(
+            (
+                draft.title,
+                draft.canonical_question,
+                draft.question_scope,
+                draft.answer_scope,
+            )
+        )
+    )
+
+
 def _clusters(
     items: tuple[SurfaceAnswerDraft, ...], *, size: int
 ) -> tuple[tuple[SurfaceAnswerDraft, ...], ...]:
@@ -737,6 +869,48 @@ def _float(value: object, default: float) -> float:
 
 def _norm(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.sub(r"[^0-9a-zа-яё]+", " ", value.casefold()).split()
+        if len(token) >= 3 and token not in _STOP_WORDS
+    }
+
+
+def _jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _coverage(needle: set[str], haystack: set[str]) -> float:
+    if not needle or not haystack:
+        return 0.0
+    return len(needle & haystack) / len(needle)
+
+
+_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "это",
+        "как",
+        "что",
+        "для",
+        "или",
+        "если",
+        "при",
+        "про",
+        "над",
+        "под",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "into",
+    }
+)
 
 
 def _stable_id(*parts: object) -> str:
