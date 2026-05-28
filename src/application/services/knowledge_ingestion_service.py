@@ -27,6 +27,7 @@ from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
+    KnowledgeSurfaceCompilerFactoryPort,
     KnowledgePreprocessorPort,
 )
 from src.application.ports.logger_port import LoggerPort
@@ -104,6 +105,18 @@ from src.domain.project_plane.knowledge_acquisition import (
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
 )
+from src.application.services.retrieval_surface_compiler import (
+    DeterministicKnowledgeSurfaceCompiler,
+    RetrievalSurfaceSourceUnit,
+    assign_retrieval_surface_questions,
+    discover_retrieval_surfaces_from_source_unit,
+    extract_questions_from_source_unit,
+    merge_same_surface_drafts,
+    plan_retrieval_surface_relations,
+    project_surfaces_to_preprocessing_entries,
+    synthesize_retrieval_surface_answers,
+)
+from src.domain.project_plane.retrieval_surface_compilation import RetrievalSurfaceSourceChild
 
 
 class KnowledgeIngestionRepositoryPort(
@@ -788,6 +801,38 @@ def _compiler_source_chunks_for_preprocessing(
     if not _is_markdown_file(file_name):
         return chunks
     return _markdown_semantic_source_chunks(file_name=file_name, chunks=chunks)
+
+
+def _surface_source_unit_from_chunk(
+    chunk: JsonObject,
+    *,
+    chunk_index: int,
+    mode: KnowledgePreprocessingMode,
+) -> RetrievalSurfaceSourceUnit:
+    raw_children = chunk.get("children") or []
+    children: tuple[RetrievalSurfaceSourceChild, ...] = tuple(
+        RetrievalSurfaceSourceChild(
+            title=str(item.get("title") or item.get("heading") or ""),
+            body=str(item.get("body") or item.get("content") or ""),
+            raw_text=str(item.get("raw_text") or item.get("content") or ""),
+            label_kind="content_section",
+        )
+        for item in raw_children
+        if isinstance(item, dict)
+    )
+    return RetrievalSurfaceSourceUnit(
+        source_unit_key=str(chunk.get("id") or f"chunk-{chunk_index}"),
+        document_id=None,
+        source_chunk_indexes=(chunk_index,),
+        title=str(chunk.get("section_title") or chunk.get("title") or f"Раздел {chunk_index}"),
+        body=str(chunk.get("section_body") or chunk.get("content") or ""),
+        children=children,
+        raw_text=str(chunk.get("content") or ""),
+        section_path=tuple(str(i) for i in (chunk.get("section_path") or [])),
+        source_refs=(str(chunk.get("id") or f"chunk-{chunk_index}"),),
+        preprocessing_mode=mode,
+        metadata=dict(chunk.get("metadata") or {}),
+    )
 
 
 KCD_STAGE_CD_COMPILER_VERSION = "kcd_v1_stage_cd"
@@ -4774,6 +4819,7 @@ class KnowledgeIngestionService:
         knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
+        surface_compiler_factory: KnowledgeSurfaceCompilerFactoryPort | None = None,
         logger: LoggerPort,
         commercial_price_repo_factory: CommercialPriceRepositoryFactoryPort
         | None = None,
@@ -4891,7 +4937,16 @@ class KnowledgeIngestionService:
 
         try:
             preprocessor = preprocessor_factory()
-            active_model = preprocessor.model_name
+            surface_compiler = (
+                surface_compiler_factory()
+                if surface_compiler_factory is not None
+                else DeterministicKnowledgeSurfaceCompiler()
+            )
+            active_model = (
+                surface_compiler.model_name
+                if mode in {"faq", "price_list"}
+                else preprocessor.model_name
+            )
             technical_batches = tuple(
                 _technical_chunk_batches_for_answer_compiler(compiler_source_chunks)
             )
@@ -5005,12 +5060,53 @@ class KnowledgeIngestionService:
                     )
 
                     try:
-                        execution = await preprocessor.preprocess(
-                            mode=mode,
-                            chunks=technical_chunks,
-                            file_name=file_name,
-                        )
-                        if execution.usage is not None:
+                        if mode in {"faq", "price_list"}:
+                            source_units = tuple(
+                                _surface_source_unit_from_chunk(
+                                    technical_chunk,
+                                    chunk_index=local_idx,
+                                    mode=mode,
+                                )
+                                for local_idx, technical_chunk in enumerate(technical_chunks)
+                            )
+                            surface_execution = await surface_compiler.compile_surfaces(
+                                mode=mode,
+                                source_units=source_units,
+                                file_name=file_name,
+                            )
+                            safe_entries = list(surface_execution.result.projected_entries)
+                            if surface_execution.usage is not None:
+                                await usage_repo.record_event(
+                                    ModelUsageEventCreate.from_measurement(
+                                        project_id=project_id,
+                                        source="knowledge_preprocessing",
+                                        measurement=surface_execution.usage,
+                                        document_id=document_id,
+                                    )
+                                )
+                            if surface_execution.usage is not None:
+                                usage_event_count += 1
+                            latest_result = _preprocessing_result_from_entries(
+                                mode=mode,
+                                template=KnowledgePreprocessingResult(
+                                    mode=mode,
+                                    model=surface_execution.result.model,
+                                    prompt_version=surface_execution.result.prompt_version,
+                                    entries=tuple(safe_entries),
+                                    metrics=dict(surface_execution.result.metrics),
+                                ),
+                                entries=tuple(safe_entries),
+                                metrics=dict(surface_execution.result.metrics),
+                            )
+                            execution = None
+                        else:
+                            execution = await preprocessor.preprocess(
+                                mode=mode,
+                                chunks=technical_chunks,
+                                file_name=file_name,
+                            )
+                            safe_entries = list(execution.result.entries)
+                        if execution is not None and execution.usage is not None:
                             await usage_repo.record_event(
                                 ModelUsageEventCreate.from_measurement(
                                     project_id=project_id,
@@ -5020,7 +5116,8 @@ class KnowledgeIngestionService:
                                 )
                             )
 
-                        safe_entries = list(execution.result.entries)
+                        if execution is not None and execution.usage is not None:
+                            usage_event_count += 1
 
                         raw_candidates = (
                             _raw_answer_candidates_from_preprocessing_entries(
@@ -5039,11 +5136,19 @@ class KnowledgeIngestionService:
                             document_id=document_id,
                             candidates=raw_candidates,
                         )
-                        usage = execution.usage
+                        usage = execution.usage if execution is not None else None
                         await repo.complete_compiler_batch(
                             compiler_batch.id,
-                            model=execution.result.model,
-                            prompt_version=execution.result.prompt_version,
+                            model=(
+                                execution.result.model
+                                if execution is not None
+                                else surface_compiler.model_name
+                            ),
+                            prompt_version=(
+                                execution.result.prompt_version
+                                if execution is not None
+                                else "retrieval_surface_compiler_v1"
+                            ),
                             tokens_input=usage.tokens_input if usage is not None else 0,
                             tokens_output=usage.tokens_output
                             if usage is not None and usage.tokens_output is not None
@@ -5110,11 +5215,17 @@ class KnowledgeIngestionService:
                     async with progress_lock:
                         completed_batch_count += 1
                         raw_candidate_count += len(raw_candidates)
-                        if execution.usage is not None:
+                        if execution is not None and execution.usage is not None:
                             usage_event_count += 1
-                        latest_result = execution.result
-                        preprocessing_results.append(execution.result)
-                        results_by_batch_index[batch_index] = execution.result
+                        batch_result = (
+                            execution.result
+                            if execution is not None
+                            else latest_result
+                        )
+                        if batch_result is not None:
+                            latest_result = batch_result
+                            preprocessing_results.append(batch_result)
+                            results_by_batch_index[batch_index] = batch_result
                         entries_by_batch_index[batch_index] = tuple(safe_entries)
                         compiled_count = sum(
                             len(entries) for entries in entries_by_batch_index.values()
@@ -5150,7 +5261,11 @@ class KnowledgeIngestionService:
                             "raw_draft_count": raw_candidate_count,
                             "compiled_entry_count": compiled_count,
                             "semantic_answer_count": compiled_count,
-                            "incoming_entry_count": len(execution.result.entries),
+                            "incoming_entry_count": (
+                                len(execution.result.entries)
+                                if execution is not None
+                                else len(safe_entries)
+                            ),
                             "llm_answer_resolution_call_count": llm_answer_resolution_call_count,
                             "semantic_answer_resolution_count": llm_answer_resolution_call_count,
                             "answer_resolution_call_count": llm_answer_resolution_call_count,
@@ -5180,7 +5295,7 @@ class KnowledgeIngestionService:
                                 "raw_candidates_count": len(raw_candidates),
                                 "compiled_entry_count": compiled_count,
                                 "tokens": execution.usage.tokens_total
-                                if execution.usage is not None
+                                if execution is not None and execution.usage is not None
                                 else 0,
                                 "elapsed_seconds": progress_metrics["elapsed_seconds"],
                                 "model": active_model,

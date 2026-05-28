@@ -314,7 +314,7 @@ async def test_process_document_records_preprocessing_usage():
         document_id="doc-usage",
         file_name="faq.txt",
         chunks=[{"content": "Useful knowledge paragraph with enough content."}],
-        mode="faq",
+        mode="instruction",
         knowledge_repo_factory=Mock(return_value=repo),
         model_usage_repo_factory=Mock(return_value=usage_repo),
         preprocessor_factory=Mock(return_value=preprocessor),
@@ -506,7 +506,7 @@ async def test_structured_preprocessing_persists_only_answer_entries():
             },
             {"content": "Raw technical chunk that must not become a runtime row."},
         ],
-        mode="faq",
+        mode="instruction",
         knowledge_repo_factory=Mock(return_value=repo),
         model_usage_repo_factory=Mock(return_value=_usage_repo()),
         preprocessor_factory=Mock(return_value=preprocessor),
@@ -532,7 +532,6 @@ async def test_structured_preprocessing_persists_only_answer_entries():
         entry.compiler_version == "kcd_v1_stage_k_answer_compiler" for entry in entries
     )
     assert all(entry.has_source_refs for entry in entries)
-    assert all(entry.entry_kind.value == "faq_answer" for entry in entries)
     assert all(
         "Raw technical chunk that must not become a runtime row." not in entry.answer
         for entry in entries
@@ -744,7 +743,7 @@ async def test_structured_preprocessing_does_not_pass_known_question_intents_bet
                 )
             },
         ],
-        mode="faq",
+        mode="instruction",
         knowledge_repo_factory=Mock(return_value=repo),
         model_usage_repo_factory=Mock(return_value=_usage_repo()),
         preprocessor_factory=Mock(return_value=preprocessor),
@@ -878,7 +877,7 @@ async def test_structured_preprocessing_failure_marks_document_error():
             document_id="doc-json-failure",
             file_name="faq.txt",
             chunks=[{"content": "Useful knowledge paragraph with enough content."}],
-            mode="faq",
+            mode="instruction",
             knowledge_repo_factory=Mock(return_value=repo),
             model_usage_repo_factory=Mock(return_value=_usage_repo()),
             preprocessor_factory=Mock(return_value=preprocessor),

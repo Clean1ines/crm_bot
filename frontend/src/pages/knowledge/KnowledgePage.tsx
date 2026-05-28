@@ -422,6 +422,15 @@ const processingDetailRows = (doc: Document): string[] => {
   const invalidResolverOutputs = metricNumber(answerResolution, 'invalid_resolution_output_count');
   const publishedEntries = metricNumber(metrics, 'canonical_entry_count')
     ?? metricNumber(metrics, 'published_entry_count');
+  const retrievalSurfaceEnabled = metrics?.["retrieval_surface_pipeline_enabled"];
+  const legacyFlatUsed = metrics?.["legacy_flat_preprocessor_used"];
+  const surfaceCount = metricNumber(metrics, 'surface_count');
+  const relationCount = metricNumber(metrics, 'relation_count');
+  const questionOwnershipCount = metricNumber(metrics, 'question_ownership_count');
+  const movedQuestionCount = metricNumber(metrics, 'moved_question_count');
+  const shortAnswerAbsorbedCount = metricNumber(metrics, 'short_answer_absorbed_count');
+  const commercialSurfaceCount = metricNumber(metrics, 'commercial_surface_count');
+  const projectionEntryCount = metricNumber(metrics, 'projection_entry_count');
 
   if (totalParts !== null) rows.push(t('knowledge.document.technicalPartsTotal', { total: formatNumber(totalParts) }));
   if (completedParts !== null && totalParts !== null) {
@@ -436,6 +445,15 @@ const processingDetailRows = (doc: Document): string[] => {
   if (keptSeparate !== null) rows.push(t('knowledge.document.keptSeparateByResolver', { count: formatNumber(keptSeparate) }));
   if (invalidResolverOutputs !== null) rows.push(t('knowledge.document.rejectedInvalidResolverOutputs', { count: formatNumber(invalidResolverOutputs) }));
   if (publishedEntries !== null) rows.push(t('knowledge.document.publishedEntries', { count: formatNumber(publishedEntries) }));
+  if (retrievalSurfaceEnabled !== undefined) rows.push(`Компиляция поисковых поверхностей: ${retrievalSurfaceEnabled ? 'включена' : 'выключена'}`);
+  if (legacyFlatUsed !== undefined) rows.push(`Старый flat-препроцессор: ${legacyFlatUsed ? 'да' : 'нет'}`);
+  if (surfaceCount !== null) rows.push(`Поисковые поверхности: ${formatNumber(surfaceCount)}`);
+  if (relationCount !== null) rows.push(`Связи поверхностей: ${formatNumber(relationCount)}`);
+  if (questionOwnershipCount !== null) rows.push(`Назначенные вопросы: ${formatNumber(questionOwnershipCount)}`);
+  if (movedQuestionCount !== null) rows.push(`Переназначенные вопросы: ${formatNumber(movedQuestionCount)}`);
+  if (shortAnswerAbsorbedCount !== null) rows.push(`Поглощённые короткие ответы: ${formatNumber(shortAnswerAbsorbedCount)}`);
+  if (commercialSurfaceCount !== null) rows.push(`Коммерческие поверхности: ${formatNumber(commercialSurfaceCount)}`);
+  if (projectionEntryCount !== null) rows.push(`Спроецированные карточки: ${formatNumber(projectionEntryCount)}`);
 
   return rows;
 };
