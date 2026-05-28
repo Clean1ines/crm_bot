@@ -46,9 +46,9 @@ async def update_document_status(
         SET status = $1, error = $2, updated_at = NOW()
         WHERE id = $3
           AND NOT (
-              $1 = 'processed'
-              AND preprocessing_status = 'failed'
+              preprocessing_status = 'failed'
               AND preprocessing_error = $4
+              AND $1 IN ('processing', 'processed')
           )
         """,
         status,
@@ -81,9 +81,9 @@ async def update_document_preprocessing_status(
             updated_at = NOW()
         WHERE id = $7
           AND NOT (
-              $2 = 'completed'
-              AND preprocessing_status = 'failed'
+              preprocessing_status = 'failed'
               AND preprocessing_error = $8
+              AND $2 IN ('processing', 'completed')
           )
         """,
         mode,
@@ -139,8 +139,13 @@ async def merge_document_preprocessing_metrics(
             updated_at = now()
         WHERE project_id = $1
           AND id = $2
+          AND NOT (
+              preprocessing_status = 'failed'
+              AND preprocessing_error = $4
+          )
         """,
         ensure_uuid(project_id),
         ensure_uuid(document_id),
         json.dumps(metrics, ensure_ascii=False),
+        PROCESSING_CANCELLED_REASON,
     )
