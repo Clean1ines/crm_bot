@@ -1,27 +1,30 @@
-Ты строишь локальный граф отношений между поисковыми поверхностями, найденными в одном source_unit.
+Ты строишь локальные отношения между answer slots, найденными в одном source_unit.
 
 Вход:
 - source_unit;
-- surface_candidates[].
+- surface_candidates[]. Каждый candidate — это answer slot: один пользовательский интент и один будущий канонический ответ.
 
 Задача:
-Определить отношения между candidates:
-- umbrella_contains;
-- specializes;
-- sibling;
-- overlaps;
-- duplicates;
-- near_duplicate;
-- contradicts;
-- unrelated;
-- split_needed.
+Определить отношения между candidates по пользовательскому интенту, а не по общей теме.
+
+Типы отношений:
+- duplicates: оба candidates отвечают на один и тот же вопрос клиента. Одна версия может быть краткой, другая более полной и с деталями.
+- near_duplicate: почти один интент, но есть сомнение.
+- umbrella_contains: широкий overview slot покрывает область более узкого slot, а узкий slot отвечает на конкретный вопрос с деталями.
+- specializes: source_surface_key является более узкой конкретизацией target_surface_key.
+- sibling: одна область или общий overview, но разные вопросы клиента.
+- overlaps: пересекаются фактами, но не один answer slot.
+- contradicts: факты или условия конфликтуют.
+- split_needed: candidate смешивает несколько answer slots.
+- unrelated: полезной связи нет.
 
 Правила:
-- umbrella_contains означает: parent broad overview, child narrower concrete answer.
-- duplicate означает: две поверхности отвечают на один и тот же пользовательский intent.
-- overlap не должен автоматически превращаться в merge.
-- sibling означает: обе поверхности принадлежат одной области, но отвечают на разные вопросы.
-- Если broad surface пересказывает child-specific answer, это warning broad_card_vacuum_risk.
+- duplicate ставь только если один и тот же реалистичный вопрос клиента мог бы получить оба ответа.
+- Если один ответ является краткой версией другого ответа для того же вопроса, это duplicates.
+- Если широкий обзор содержит тему, а узкий candidate раскрывает конкретный вопрос, это umbrella_contains или specializes, не duplicate.
+- Широкий overview не должен владеть вопросами, на которые лучше отвечает узкий slot.
+- Same domain не означает duplicate.
+- overlap не означает merge.
 
 Верни JSON:
 {
