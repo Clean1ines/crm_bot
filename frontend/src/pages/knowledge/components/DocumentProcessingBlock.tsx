@@ -4,8 +4,107 @@ import { Loader2 } from 'lucide-react';
 import { type KnowledgeAnswerDraftsResponse, type KnowledgeProcessingReport, type KnowledgeSourceUnitsResponse } from '@shared/api/modules/knowledge';
 import { t } from '@shared/i18n';
 
+type MetricsRecord = Record<string, unknown>;
+
 type DocumentLite = {
   id: string;
+  preprocessing_metrics?: unknown;
+};
+
+const metricObject = (value: unknown): MetricsRecord | null => (
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as MetricsRecord
+    : null
+);
+
+const metricNumber = (metrics: MetricsRecord | null | undefined, key: string): number | null => {
+  const value = metrics?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return null;
+};
+
+const metricText = (metrics: MetricsRecord | null | undefined, key: string): string | null => {
+  const value = metrics?.[key];
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+};
+
+const formatCounts = (value: unknown): string | null => {
+  const record = metricObject(value);
+  if (!record) return null;
+  const parts = Object.entries(record)
+    .filter(([, item]) => typeof item === 'number' && Number.isFinite(item) && item > 0)
+    .map(([key, item]) => `${key}: ${item}`);
+  return parts.length > 0 ? parts.join(', ') : null;
+};
+
+const groqRouteRows = (
+  doc: DocumentLite,
+  processingReport: KnowledgeProcessingReport | undefined,
+  formatNumber: (value: number) => string,
+): string[] => {
+  const docMetrics = metricObject(doc.preprocessing_metrics);
+  const reportMetrics = metricObject(processingReport?.metrics);
+  const metrics = docMetrics ?? reportMetrics;
+  if (!metrics) return [];
+
+  const rows: string[] = [];
+  const routeEvents = metricNumber(metrics, 'groq_route_event_count');
+  const successes = metricNumber(metrics, 'groq_route_success_count');
+  const failures = metricNumber(metrics, 'groq_route_failure_count');
+  const cooldowns = metricNumber(metrics, 'groq_route_cooldown_block_count');
+  const fallbacks = metricNumber(metrics, 'groq_route_fallback_count');
+  const modelCounts = formatCounts(metrics.groq_actual_model_counts);
+  const keySlotCounts = formatCounts(metrics.groq_key_slot_counts);
+  const fallbackCounts = formatCounts(metrics.groq_fallback_reason_counts);
+  const lastRoute = metricObject(metrics.groq_last_route_event);
+
+  if (routeEvents !== null && routeEvents > 0) {
+    rows.push(`Groq route events: ${formatNumber(routeEvents)}`);
+  }
+  if (successes !== null || failures !== null || cooldowns !== null || fallbacks !== null) {
+    rows.push(
+      `Groq routes: ok ${formatNumber(successes ?? 0)}, failed ${formatNumber(failures ?? 0)}, cooldown ${formatNumber(cooldowns ?? 0)}, fallback ${formatNumber(fallbacks ?? 0)}`,
+    );
+  }
+  if (modelCounts) rows.push(`Groq actual models: ${modelCounts}`);
+  if (keySlotCounts) rows.push(`Groq key slots: ${keySlotCounts}`);
+  if (fallbackCounts) rows.push(`Groq fallback reasons: ${fallbackCounts}`);
+
+  if (lastRoute) {
+    const status = metricText(lastRoute, 'status');
+    const keySlot = metricText(lastRoute, 'key_slot_label');
+    const requestedModel = metricText(lastRoute, 'requested_model');
+    const routedModel = metricText(lastRoute, 'routed_model');
+    const fallbackReason = metricText(lastRoute, 'fallback_reason');
+    const limitKind = metricText(lastRoute, 'limit_kind');
+    const retryAfter = metricNumber(lastRoute, 'retry_after_seconds');
+    const promptTokens = metricNumber(lastRoute, 'prompt_tokens');
+    const completionTokens = metricNumber(lastRoute, 'completion_tokens');
+    const totalTokens = metricNumber(lastRoute, 'total_tokens');
+
+    const modelText = requestedModel && routedModel && requestedModel !== routedModel
+      ? `${requestedModel} → ${routedModel}`
+      : routedModel || requestedModel;
+    const parts = [
+      status ? `status ${status}` : null,
+      keySlot ? `key ${keySlot}` : null,
+      modelText ? `model ${modelText}` : null,
+      fallbackReason ? `fallback ${fallbackReason}` : null,
+      limitKind ? `limit ${limitKind}` : null,
+      retryAfter !== null && retryAfter > 0 ? `retry after ${Math.ceil(retryAfter)}s` : null,
+    ].filter(Boolean);
+    if (parts.length > 0) rows.push(`Last Groq route: ${parts.join(', ')}`);
+    if ((promptTokens ?? 0) > 0 || (completionTokens ?? 0) > 0 || (totalTokens ?? 0) > 0) {
+      rows.push(
+        `Last Groq tokens: prompt ${formatNumber(promptTokens ?? 0)}, completion ${formatNumber(completionTokens ?? 0)}, total ${formatNumber(totalTokens ?? 0)}`,
+      );
+    }
+  }
+
+  return rows;
 };
 
 export const DocumentProcessingBlock: React.FC<{
@@ -181,6 +280,9 @@ export const DocumentProcessingBlock: React.FC<{
           <div>{t('knowledge.document.processingModelPrefix')} {processingModelLabel}</div>
           <div>{t('knowledge.document.elapsedPrefix')} {processingElapsedLabel}</div>
           {processingDetailRows.map((row) => (
+            <div key={row}>{row}</div>
+          ))}
+          {groqRouteRows(doc, processingReport, formatNumber).map((row) => (
             <div key={row}>{row}</div>
           ))}
           {sourceChunkCount !== null && (
