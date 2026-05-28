@@ -5011,6 +5011,21 @@ class KnowledgeIngestionService:
                                 )
                             )
 
+                        if await repo.is_document_processing_cancelled(document_id):
+                            logger.info(
+                                "Knowledge answer compiler batch result dropped after cancellation",
+                                extra={
+                                    "project_id": project_id,
+                                    "document_id": document_id,
+                                    "batch_index": batch_index,
+                                    "batch_count": len(technical_batches),
+                                    "model": execution.result.model,
+                                    "requested_model": active_model,
+                                },
+                            )
+                            raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR)
+
+                        actual_model = execution.result.model
                         safe_entries = list(execution.result.entries)
 
                         raw_candidates = (
@@ -5042,6 +5057,11 @@ class KnowledgeIngestionService:
                             tokens_total=usage.tokens_total if usage is not None else 0,
                         )
                     except Exception as exc:
+                        if str(exc) == KCD_STAGE_K_CANCELLED_ERROR or (
+                            await repo.is_document_processing_cancelled(document_id)
+                        ):
+                            raise RuntimeError(KCD_STAGE_K_CANCELLED_ERROR) from exc
+
                         await repo.fail_compiler_batch(
                             compiler_batch.id,
                             error_type=type(exc).__name__,
@@ -5117,7 +5137,9 @@ class KnowledgeIngestionService:
                                 "Документ разбирается. Черновики сохраняются "
                                 "после каждого шага."
                             ),
-                            "model": active_model,
+                            "model": actual_model,
+                            "requested_model": active_model,
+                            "actual_model": actual_model,
                             "prompt_version": active_prompt_version,
                             "source_chunk_count": len(compiler_source_chunks),
                             "raw_source_chunk_count": len(indexable_chunks),
@@ -5174,14 +5196,16 @@ class KnowledgeIngestionService:
                                 if execution.usage is not None
                                 else 0,
                                 "elapsed_seconds": progress_metrics["elapsed_seconds"],
-                                "model": active_model,
+                                "model": actual_model,
+                                "requested_model": active_model,
+                                "actual_model": actual_model,
                             },
                         )
                         await repo.update_document_preprocessing_status(
                             document_id,
                             mode=mode,
                             status=PREPROCESSING_STATUS_PROCESSING,
-                            model=active_model,
+                            model=actual_model,
                             prompt_version=active_prompt_version,
                             metrics=progress_metrics,
                         )
@@ -5452,7 +5476,9 @@ class KnowledgeIngestionService:
             )
             preprocessing_metrics["semantic_answer_count"] = len(canonical_entries)
             preprocessing_metrics["published_entry_count"] = len(canonical_entries)
-            preprocessing_metrics["model"] = active_model
+            preprocessing_metrics["model"] = result.model
+            preprocessing_metrics["requested_model"] = active_model
+            preprocessing_metrics["actual_model"] = result.model
             preprocessing_metrics["prompt_version"] = active_prompt_version
             preprocessing_metrics["stage"] = "completed"
             preprocessing_metrics["status_message"] = (
