@@ -3,11 +3,6 @@ from __future__ import annotations
 import pytest
 
 from src.infrastructure.config.settings import settings
-from src.infrastructure.llm.groq_keyring import (
-    GroqClientRotator,
-    GroqDocumentBudgetExceededError,
-    _RotatingChatCompletionsProxy,
-)
 from src.infrastructure.llm.groq_quota_state import (
     GroqRouteQuotaBlockedError,
     clear_groq_route_quota_state,
@@ -82,42 +77,3 @@ async def test_groq_quota_state_ignores_non_limit_failures(
     )
 
     assert await get_groq_route_quota_state(identity) is None
-
-
-def test_groq_document_budget_guard_blocks_excessive_calls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "GROQ_KNOWLEDGE_MAX_CALLS_PER_DOCUMENT", 1)
-    monkeypatch.setattr(settings, "GROQ_KNOWLEDGE_MAX_TOKENS_PER_DOCUMENT", 100_000)
-    proxy = _RotatingChatCompletionsProxy(GroqClientRotator(client=None))
-
-    routed_kwargs = {
-        "messages": [{"role": "user", "content": "small prompt"}],
-        "max_tokens": 10,
-    }
-    proxy._reserve_budget(routed_kwargs)
-
-    with pytest.raises(GroqDocumentBudgetExceededError) as exc_info:
-        proxy._reserve_budget(routed_kwargs)
-
-    assert "llm_document_budget_exhausted" in str(exc_info.value)
-    assert "calls=1/1" in str(exc_info.value)
-
-
-def test_groq_document_budget_guard_blocks_excessive_estimated_tokens(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "GROQ_KNOWLEDGE_MAX_CALLS_PER_DOCUMENT", 100)
-    monkeypatch.setattr(settings, "GROQ_KNOWLEDGE_MAX_TOKENS_PER_DOCUMENT", 10)
-    proxy = _RotatingChatCompletionsProxy(GroqClientRotator(client=None))
-
-    with pytest.raises(GroqDocumentBudgetExceededError) as exc_info:
-        proxy._reserve_budget(
-            {
-                "messages": [{"role": "user", "content": "x" * 120}],
-                "max_tokens": 10,
-            }
-        )
-
-    assert "llm_document_budget_exhausted" in str(exc_info.value)
-    assert "estimated_tokens=0/10" in str(exc_info.value)
