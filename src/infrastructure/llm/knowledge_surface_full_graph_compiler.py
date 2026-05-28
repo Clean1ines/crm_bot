@@ -305,7 +305,9 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             local_relations=local_relations,
             size=GLOBAL_RELATION_CLUSTER_SIZE,
         )
-        for cluster_index, cluster in enumerate(clusters[:GLOBAL_RELATION_MAX_CLUSTERS]):
+        for cluster_index, cluster in enumerate(
+            clusters[:GLOBAL_RELATION_MAX_CLUSTERS]
+        ):
             payload = {
                 "run_id": run_id,
                 "cluster_context": asdict(
@@ -704,9 +706,14 @@ def _answer_slot_clusters(
     }
 
     for relation in local_relations:
-        if relation.source_surface_key not in by_key or relation.target_surface_key not in by_key:
+        if (
+            relation.source_surface_key not in by_key
+            or relation.target_surface_key not in by_key
+        ):
             continue
-        score = _local_relation_cluster_score(relation.relation_type, relation.confidence)
+        score = _local_relation_cluster_score(
+            relation.relation_type, relation.confidence
+        )
         if score <= 0:
             continue
         scored_neighbors[relation.source_surface_key].append(
@@ -728,7 +735,9 @@ def _answer_slot_clusters(
     seen: set[tuple[str, ...]] = set()
     for draft in drafts:
         neighbors = sorted(
-            scored_neighbors[draft.candidate_key], key=lambda item: item[0], reverse=True
+            scored_neighbors[draft.candidate_key],
+            key=lambda item: item[0],
+            reverse=True,
         )
         keys = [draft.candidate_key]
         for _, key in neighbors:

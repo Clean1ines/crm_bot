@@ -13,7 +13,6 @@ import {
   type SurfaceOwnership,
   type SurfaceReassignment,
   type SurfaceRelation,
-  type SurfaceSourceUnit,
 } from '@shared/api/modules/knowledgeSurface';
 
 import { buildSurfacePipelineContract, type SurfacePipelineContract } from './surfacePipelineContract';
