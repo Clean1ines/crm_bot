@@ -57,6 +57,15 @@ from src.domain.project_plane.knowledge_semantic_builder import (
     build_knowledge_chunk_drafts,
     canonicalize_knowledge_chunk_drafts,
 )
+
+
+from src.domain.project_plane.retrieval_surface_graph import (
+    RetrievalSurfaceCandidate,
+    RetrievalSurfaceGraph,
+    RetrievalSurfaceRelation,
+    SurfaceQuestionOwnership,
+)
+
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_PLAIN,
     MODE_PRICE_LIST,
@@ -2346,6 +2355,192 @@ def _cleanup_answer_resolution_text(value: str) -> str:
     return _clean_optional_text(" ".join(kept))
 
 
+
+
+_CHILD_SURFACE_MARKERS: tuple[str, ...] = (
+    "компиляц", "курац", "pdf", "widget", "виджет", "crm", "интеграц", "telegram", "телеграм", "сли", "дубл", "архив", "скры", "скрыт", "скрыть", "удал", "отклон"
+)
+
+_UMBRELLA_MARKERS: tuple[str, ...] = ("что это за продукт", "о продукте", "сервис", "платформа")
+
+
+def _surface_kind_for_entry(entry: KnowledgePreprocessingEntry) -> str:
+    text = " ".join((entry.title, entry.canonical_question, " ".join(_text_tuple(entry.questions)))).lower()
+    if any(m in text for m in _UMBRELLA_MARKERS):
+        return "umbrella"
+    if any(m in text for m in _CHILD_SURFACE_MARKERS):
+        return "child"
+    return "standalone"
+
+
+def _question_is_child_specific(question: str) -> bool:
+    normalized = _clean_optional_text(question).lower()
+    return any(m in normalized for m in _CHILD_SURFACE_MARKERS)
+
+
+def _reassign_umbrella_questions(entries: Sequence[KnowledgePreprocessingEntry]) -> tuple[KnowledgePreprocessingEntry, ...]:
+    result = list(entries)
+    child_indexes = [i for i,e in enumerate(entries) if _surface_kind_for_entry(e) == "child"]
+    if not child_indexes:
+        return tuple(entries)
+    for index, entry in enumerate(entries):
+        if _surface_kind_for_entry(entry) != "umbrella":
+            continue
+        keep: list[str] = []
+        moved: list[str] = []
+        for q in _text_tuple(entry.questions):
+            (moved if _question_is_child_specific(q) else keep).append(q)
+        if moved and child_indexes:
+            tgt = child_indexes[0]
+            child = result[tgt]
+            result[tgt] = replace(child, questions=_merge_text_tuple_values(child.questions, tuple(moved)))
+        result[index] = replace(entry, questions=tuple(keep))
+    return tuple(result)
+
+
+
+SERVICE_LABEL_TITLES: tuple[str, ...] = (
+    "короткий ответ клиенту", "короткий ответ", "ожидаемая тема", "о продукте", "о знаниях"
+)
+
+
+def _local_surface_key(entry: KnowledgePreprocessingEntry, index: int) -> str:
+    base = _answer_resolution_text_fingerprint(entry.title or entry.canonical_question) or f"surface-{index}"
+    return f"{base}-{index}"
+
+
+def _discover_local_surface_candidates(entries: Sequence[KnowledgePreprocessingEntry]) -> tuple[RetrievalSurfaceCandidate, ...]:
+    out: list[RetrievalSurfaceCandidate] = []
+    for idx, entry in enumerate(entries):
+        kind = _surface_kind_for_entry(entry)
+        answer_scope = _clean_optional_text(entry.title or entry.canonical_question or entry.answer[:120])
+        question_scope = answer_scope
+        exclusion_scope = "детальные дочерние темы" if kind == "umbrella" else "общие обзорные вопросы" if kind == "child" else ""
+        out.append(RetrievalSurfaceCandidate(
+            local_surface_key=_local_surface_key(entry, idx),
+            title=entry.title,
+            canonical_question=entry.canonical_question or _question_intent_primary_question(entry),
+            surface_kind=kind if kind in {"umbrella","child","standalone"} else "other",
+            answer_scope=answer_scope,
+            question_scope=question_scope,
+            exclusion_scope=exclusion_scope,
+            source_refs=(),
+            confidence=0.7,
+        ))
+    return tuple(out)
+
+
+def _plan_local_surface_relations(surfaces: Sequence[RetrievalSurfaceCandidate]) -> tuple[RetrievalSurfaceRelation, ...]:
+    rels: list[RetrievalSurfaceRelation] = []
+    umbrellas = [s for s in surfaces if s.surface_kind == "umbrella"]
+    childs = [s for s in surfaces if s.surface_kind == "child"]
+    for u in umbrellas:
+        for c in childs:
+            rels.append(RetrievalSurfaceRelation(parent_key=u.local_surface_key, child_key=c.local_surface_key, relation_type="umbrella_contains", confidence=0.7, reason="local_scope_hierarchy"))
+    return tuple(rels)
+
+
+def _surface_question_ownership(entries: Sequence[KnowledgePreprocessingEntry], surfaces: Sequence[RetrievalSurfaceCandidate], relations: Sequence[RetrievalSurfaceRelation]) -> tuple[tuple[KnowledgePreprocessingEntry,...], tuple[SurfaceQuestionOwnership,...], JsonObject]:
+    updated=[replace(e, questions=tuple(e.questions)) for e in entries]
+    ownership:list[SurfaceQuestionOwnership]=[]
+    moved=0
+    bucket=[[] for _ in updated]
+
+    def score(question: str, entry: KnowledgePreprocessingEntry, kind: str) -> float:
+        q=question.lower(); title=(entry.title+" "+entry.canonical_question).lower()
+        v=0.0
+        for token in q.split():
+            if token and token in title:
+                v += 1.0
+        if _question_is_child_specific(question) and kind=="child":
+            v += 3.0
+        if ("скры" in q or "архив" in q or "удал" in q) and ("скры" in title or "архив" in title or "отклон" in title):
+            v += 4.0
+        if ("слить" in q or "дубл" in q) and ("слия" in title or "дубл" in title):
+            v += 4.0
+        if kind=="umbrella" and _question_is_child_specific(question):
+            v -= 2.0
+        return v
+
+    for src_i, entry in enumerate(entries):
+        for q in _text_tuple(entry.questions):
+            best_i=src_i; best=-999.0
+            for i,cand in enumerate(entries):
+                kind=_surface_kind_for_entry(cand)
+                sc=score(q,cand,kind)
+                if sc>best:
+                    best=sc; best_i=i
+            source_score = score(q, entries[src_i], _surface_kind_for_entry(entries[src_i]))
+            allow_move = _question_is_child_specific(q) or (best_i != src_i and best >= source_score + 2.0)
+            final_i = best_i if allow_move else src_i
+            bucket[final_i].append(q)
+            if final_i!=src_i:
+                moved += 1
+            ownership.append(SurfaceQuestionOwnership(question=q, owner_surface_key=surfaces[final_i].local_surface_key, confidence=0.75, reason='best_surface_score', rejected_from_surface_keys=(surfaces[src_i].local_surface_key,) if final_i!=src_i else ()))
+    for i,e in enumerate(updated):
+        updated[i]=replace(e, questions=_merge_text_tuple_values(tuple(bucket[i])))
+    metrics={"moved_question_count":moved,"question_reassignment_count":moved}
+    return tuple(updated), tuple(ownership), metrics
+
+
+def _absorb_service_surface_labels(entries: Sequence[KnowledgePreprocessingEntry], surfaces: Sequence[RetrievalSurfaceCandidate]) -> tuple[tuple[KnowledgePreprocessingEntry,...], int]:
+    updated=list(entries)
+    absorbed=0
+    if not updated:
+        return tuple(updated), absorbed
+    primary=0
+    for i,e in enumerate(updated):
+        title=_clean_optional_text(e.title).lower()
+        if title and title not in SERVICE_LABEL_TITLES:
+            primary=i; break
+    remove=[]
+    for i,e in enumerate(updated):
+        if i==primary: continue
+        title=_clean_optional_text(e.title).lower()
+        if title in SERVICE_LABEL_TITLES:
+            base=updated[primary]
+            merged_answer=_merge_answer_text(base.answer, e.answer)
+            updated[primary]=replace(base, answer=merged_answer, source_excerpt=_merge_source_excerpt_text(base,e), questions=_merge_text_tuple_values(base.questions,e.questions))
+            remove.append(i); absorbed+=1
+    return tuple(e for j,e in enumerate(updated) if j not in set(remove)), absorbed
+
+
+def _build_local_surface_graph_from_entries(entries: Sequence[KnowledgePreprocessingEntry]) -> tuple[RetrievalSurfaceGraph, tuple[KnowledgePreprocessingEntry,...], JsonObject]:
+    discovered=_discover_local_surface_candidates(entries)
+    relations=_plan_local_surface_relations(discovered)
+    normalized, short_absorbed = _absorb_service_surface_labels(entries, discovered)
+    discovered=_discover_local_surface_candidates(normalized)
+    relations=_plan_local_surface_relations(discovered)
+    ownership_updated, ownership, ownership_metrics = _surface_question_ownership(normalized, discovered, relations)
+    metrics: JsonObject = {
+        "surface_count": len(discovered),
+        "relation_count": len(relations),
+        "short_answer_absorbed_count": short_absorbed,
+        "umbrella_surface_count": sum(1 for s in discovered if s.surface_kind=="umbrella"),
+        "child_surface_count": sum(1 for s in discovered if s.surface_kind=="child"),
+        "standalone_surface_count": sum(1 for s in discovered if s.surface_kind=="standalone"),
+        "duplicate_surface_count": 0,
+        "same_surface_merge_count": 0,
+        "relation_boundary_keep_separate_count": len(relations),
+        **ownership_metrics,
+        "surface_graph": {
+            "surfaces": [
+                {"key": s.local_surface_key, "title": s.title, "kind": s.surface_kind, "answer_scope": s.answer_scope, "question_scope": s.question_scope, "exclusion_scope": s.exclusion_scope}
+                for s in discovered
+            ],
+            "relations": [
+                {"parent": r.parent_key, "child": r.child_key, "type": r.relation_type}
+                for r in relations
+            ],
+            "question_ownership": [
+                {"question": o.question, "owner": o.owner_surface_key, "reason": o.reason}
+                for o in ownership
+            ],
+        },
+    }
+    graph=RetrievalSurfaceGraph(surfaces=tuple(discovered), relations=tuple(relations), question_ownership=tuple(ownership))
+    return graph, ownership_updated, metrics
+
 KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
 
 
@@ -2521,6 +2716,9 @@ def _apply_answer_resolution_decisions(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
+        kinds = {_surface_kind_for_entry(updated_entries[i]) for i in ordered_indexes}
+        if "umbrella" in kinds and "child" in kinds:
+            continue
         survivor_index = _answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
@@ -2549,12 +2747,12 @@ def _apply_answer_resolution_decisions(
             index for index in ordered_indexes if index != survivor_index
         )
 
+    projected_entries = tuple(
+        entry for index, entry in enumerate(updated_entries) if index not in removed_indexes
+    )
+    projected_entries = _reassign_umbrella_questions(projected_entries)
     return (
-        tuple(
-            entry
-            for index, entry in enumerate(updated_entries)
-            if index not in removed_indexes
-        ),
+        projected_entries,
         tuple(
             source_excerpts
             for index, source_excerpts in enumerate(updated_source_excerpts)
@@ -3299,6 +3497,9 @@ def _retighten_existing_document_plan(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
+        kinds = {_surface_kind_for_entry(updated_entries[i]) for i in ordered_indexes}
+        if "umbrella" in kinds and "child" in kinds:
+            continue
         survivor_index = _answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
@@ -5339,6 +5540,7 @@ class KnowledgeIngestionService:
                 regenerated_entries.append(repaired_entry)
                 generated_entry_repair_warnings.append(repair_warnings)
             tightened_entries = tuple(regenerated_entries)
+            local_surface_graph, tightened_entries, local_surface_metrics = _build_local_surface_graph_from_entries(tightened_entries)
             answer_resolution_fallback_published = (
                 answer_resolution_metrics.get("fallback_published") is True
             )
@@ -5385,6 +5587,7 @@ class KnowledgeIngestionService:
                     "generated_entry_repair_warnings": [
                         list(item) for item in generated_entry_repair_warnings if item
                     ],
+                    "local_surface_graph": local_surface_metrics,
                 },
             )
             canonical_entries = _canonical_entries_from_preprocessing_result(
