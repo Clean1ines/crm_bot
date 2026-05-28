@@ -15,7 +15,8 @@ Axole helps businesses turn documents into verified AI support knowledge bases a
 
 ## Why this is not just a chatbot
 
-Most AI chatbot tools say: upload documents and the bot will answer. Axole treats that as unsafe.
+Most AI chatbot tools say: upload documents and the bot will answer.
+Axole treats that as unsafe.
 
 The product exists because customer-facing AI needs a quality loop:
 
@@ -89,32 +90,34 @@ A typical client conversation looks like this:
 1. Telegram sends a webhook to the HTTP interface layer.
 2. The conversation orchestrator loads project, thread, memory, and knowledge context.
 3. The agent graph runs runtime nodes:
-   - load state
-   - rules check
-   - intent extraction
-   - policy decision
-   - knowledge search
-   - tool execution
-   - escalation
-   - response generation
-   - response delivery
-   - persistence
+
+   * load state
+   * rules check
+   * intent extraction
+   * policy decision
+   * knowledge search
+   * tool execution
+   * escalation
+   * response generation
+   * response delivery
+   * persistence
 4. The response is delivered to Telegram or escalated to a manager.
 5. Events, messages, runtime state, and analytics side effects are persisted where appropriate.
 
 The graph contract lives in `src/domain/runtime/graph_contract.py`.
+
 The concrete LangGraph adapter lives in `src/agent/graph.py`.
 
 ## Architecture boundaries
 
 The project is intentionally layered:
 
-- `domain/` must stay pure and must not depend on FastAPI, DB clients, Redis, Telegram, or LLM runtime packages.
-- `application/` coordinates use cases through DTOs and ports.
-- `infrastructure/` implements repositories, queue workers, Redis, LLM, embedding, and external adapters.
-- `interfaces/` owns HTTP and Telegram request handling.
-- `agent/` wires the runtime graph and graph nodes.
-- Runtime wiring happens at composition boundaries.
+* `domain/` must stay pure and must not depend on FastAPI, DB clients, Redis, Telegram, or LLM runtime packages.
+* `application/` coordinates use cases through DTOs and ports.
+* `infrastructure/` implements repositories, queue workers, Redis, LLM, embedding, and external adapters.
+* `interfaces/` owns HTTP and Telegram request handling.
+* `agent/` wires the runtime graph and graph nodes.
+* Runtime wiring happens at composition boundaries.
 
 Boundary checks are enforced by tests under `tests/architecture/`.
 
@@ -122,21 +125,34 @@ Boundary checks are enforced by tests under `tests/architecture/`.
 
 The runtime is expected to degrade deterministically:
 
-- If Groq/LLM calls fail, graph nodes use safe fallbacks or user-safe error text.
-- If RAG finds no chunks, prompts receive an explicit no-knowledge marker.
-- If Telegram delivery fails, operational details are logged internally.
-- If queue jobs fail transiently, retry policy handles retries.
-- If a queue payload is malformed, it should fail permanently instead of retrying forever.
-- If a PDF or document is empty or unreadable, ingestion should return a safe user-facing failure.
-- Duplicate webhook handling should avoid duplicate irreversible side effects where stable IDs are available.
+* If Groq/LLM calls fail, graph nodes use safe fallbacks or user-safe error text.
+* If RAG finds no chunks, prompts receive an explicit no-knowledge marker.
+* If Telegram delivery fails, operational details are logged internally.
+* If queue jobs fail transiently, retry policy handles retries.
+* If a queue payload is malformed, it should fail permanently instead of retrying forever.
+* If a PDF or document is empty or unreadable, ingestion should return a safe user-facing failure.
+* Duplicate webhook handling should avoid duplicate irreversible side effects where stable IDs are available.
 
 ## Observability and logging rules
 
 The codebase uses structured logging and request correlation.
 
-Logging should include stable operational identifiers where useful: project ID, thread ID, event type, job type, and error type.
+Logging should include stable operational identifiers where useful:
 
-Logging must not include raw secrets, authorization headers, webhook secrets, decrypted credentials, passwords, or raw private user data unless explicitly needed and safe.
+* project ID
+* thread ID
+* event type
+* job type
+* error type
+
+Logging must not include raw secrets:
+
+* bot tokens
+* authorization headers
+* webhook secrets
+* decrypted credentials
+* passwords
+* raw private user data unless explicitly needed and safe
 
 External errors should remain safe for users. Detailed operational errors belong in internal logs.
 
@@ -144,24 +160,29 @@ External errors should remain safe for users. Detailed operational errors belong
 
 Security findings should be triaged, not silently ignored.
 
-The repository includes `.bandit`, security audit scripts under `scripts/`, and generated local audit output under `reports/`.
+The repository includes:
+
+* `.bandit`
+* security audit scripts under `scripts/`
+* generated local audit output under `reports/`
 
 ## Requirements
 
 ### Backend
 
-- Python 3.12+
-- PostgreSQL with pgvector
-- Redis
-- Telegram bot credentials
-- Groq API key for LLM-backed runtime behavior
+* Python 3.12+
+* PostgreSQL with pgvector
+* Redis
+* Telegram bot tokens
+* Groq API key for LLM-backed runtime behavior
 
 ### Frontend
 
-- Node.js
-- npm
+* Node.js
+* npm
 
 Python runtime dependencies are pinned in `requirements.txt`.
+
 Development and test dependencies are listed in `requirements-dev.txt`.
 
 ## Environment
@@ -172,9 +193,11 @@ Start from the example file:
 cp .env.example .env
 ```
 
-Important backend environment variables are documented in `.env.example`. Project-specific client and manager bot credentials are stored through project configuration and repository flows, not as separate global client/manager bot variables.
+Important environment variables used by the backend are documented in `.env.example`, including database, Redis, Groq, default model, admin bot/chat, platform webhook, owner bootstrap, Google OAuth, JWT, encryption, Render, public URL, and frontend URL settings.
 
-Never commit real environment files, bot credentials, webhook credentials, JWT credentials, or encryption credentials.
+Project-specific client and manager bot tokens are stored through project configuration and repository flows, not as separate global `CLIENT_BOT_TOKEN` or `MANAGER_BOT_TOKEN` variables.
+
+Never commit real `.env`, `.env.test`, `.env.prod`, bot tokens, webhook secrets, JWT secrets, or encryption keys.
 
 ## Local setup
 
@@ -198,7 +221,13 @@ Start local infrastructure:
 docker compose up -d db_dev db_test redis_test
 ```
 
-The current `docker-compose.yml` starts infrastructure only: `db_dev`, `db_test`, and `redis_test`.
+The current `docker-compose.yml` starts infrastructure only:
+
+* `db_dev`
+* `db_test`
+* `redis_test`
+
+It does not start the FastAPI application container.
 
 Apply database migrations:
 
@@ -206,7 +235,7 @@ Apply database migrations:
 python migrations/run_all.py
 ```
 
-Important: the migration runner scans allowed env files in the project root and asks for explicit confirmation before applying production migrations.
+Important: the migration runner scans allowed env files in the project root: `.env`, `.env.test`, and `.env.prod`. For `.env.prod` it asks for explicit confirmation before applying migrations.
 
 Run the backend locally:
 
@@ -272,7 +301,11 @@ Build the backend image:
 docker build -t crm-bot-runtime .
 ```
 
-The current `Dockerfile` uses `python:3.12-slim`, `supervisord`, and application source copied from `src/`, `migrations/`, and `scripts/`.
+The current `Dockerfile` uses:
+
+* `python:3.12-slim`
+* `supervisord`
+* application source copied from `src/`, `migrations/`, and `scripts/`
 
 ## Migrations
 
@@ -284,11 +317,20 @@ The migration runner is:
 migrations/run_all.py
 ```
 
-It creates and uses `public.schema_migrations` to track applied SQL files and applies all SQL migrations in sorted order for each allowed environment file.
+It creates and uses `public.schema_migrations` to track applied SQL files and applies all `*.sql` migrations in sorted order for each allowed environment file.
 
 ## Testing
 
-The project includes a large automated test suite covering agent nodes, API routes, application services, database repositories, domain logic, infrastructure contracts, Telegram interface behavior, and architecture boundary checks.
+The project includes a large automated test suite covering:
+
+* agent nodes
+* API routes
+* application services
+* database repositories
+* domain logic
+* infrastructure contracts
+* Telegram interface behavior
+* architecture boundary checks
 
 Run the full suite with:
 
