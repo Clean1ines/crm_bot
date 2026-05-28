@@ -3,3 +3,295 @@
 Axole helps businesses turn documents into verified AI support knowledge bases and run Telegram assistants with human handoff.
 
 ## What Axole does
+
+1. Imports business knowledge documents.
+2. Extracts source units and draft knowledge entries.
+3. Builds canonical knowledge entries with source references.
+4. Shows what needs review: duplicates, weak entries, missing sources, unsafe answers.
+5. Tests retrieval quality before the assistant talks to customers.
+6. Lets humans edit, merge, hide, reject, publish, and rebuild knowledge.
+7. Connects published knowledge to a Telegram assistant.
+8. Escalates risky or unresolved customer questions to a manager.
+
+## Why this is not just a chatbot
+
+Most AI chatbot tools say: upload documents and the bot will answer. Axole treats that as unsafe.
+
+The product exists because customer-facing AI needs a quality loop:
+
+Document → source units → draft answers → canonical entries → review → retrieval testing → publication → assistant runtime → real conversation feedback.
+
+## Main product workflow
+
+Upload document
+→ Import / extraction
+→ Knowledge compilation
+→ Human curation
+→ Retrieval review
+→ Publish retrieval surface
+→ Telegram assistant
+→ Manager handoff
+→ Improve knowledge from real questions
+
+## Current product scope
+
+Ready / implemented:
+- Telegram client assistant
+- Web panel for owners/admins/managers
+- Knowledge upload and preprocessing modes
+- Canonical knowledge entries
+- Source units / source references
+- RAG preview
+- RAG evaluation/review console
+- Human curation actions
+- Manager handoff
+- Client/thread/message/event persistence
+- Multi-project administration
+
+Not positioned as ready universal features:
+- full CRM replacement
+- website chat widget
+- WhatsApp/Instagram/email channels
+- universal CRM integrations
+- perfect OCR for scanned PDFs
+- automatic legal/financial decisions
+
+## Who it is for
+
+- service businesses
+- online schools
+- consultants and expert businesses
+- support teams
+- AI automation agencies
+- teams preparing customer-facing AI assistants
+
+## Repository layout
+
+```text
+src/
+  domain/          Pure domain contracts, runtime state models, policies, value parsing
+  application/     Use-case services, DTOs, orchestration ports
+  infrastructure/  DB, Redis, queue, LLM, embedding, repository adapters
+  interfaces/      FastAPI and Telegram entrypoints
+  agent/           LangGraph runtime adapter and graph nodes
+  tools/           Tool registry and builtin tool implementations
+
+migrations/        SQL migrations and the migration runner
+frontend/          Frontend application and generated OpenAPI client inputs
+tests/             Unit, integration, architecture, and runtime contract tests
+scripts/           Audit, generation, maintenance, and local utility scripts
+```
+
+## Main runtime flow
+
+A typical client conversation looks like this:
+
+1. Telegram sends a webhook to the HTTP interface layer.
+2. The conversation orchestrator loads project, thread, memory, and knowledge context.
+3. The agent graph runs runtime nodes:
+   - load state
+   - rules check
+   - intent extraction
+   - policy decision
+   - knowledge search
+   - tool execution
+   - escalation
+   - response generation
+   - response delivery
+   - persistence
+4. The response is delivered to Telegram or escalated to a manager.
+5. Events, messages, runtime state, and analytics side effects are persisted where appropriate.
+
+The graph contract lives in `src/domain/runtime/graph_contract.py`.
+The concrete LangGraph adapter lives in `src/agent/graph.py`.
+
+## Architecture boundaries
+
+The project is intentionally layered:
+
+- `domain/` must stay pure and must not depend on FastAPI, DB clients, Redis, Telegram, or LLM runtime packages.
+- `application/` coordinates use cases through DTOs and ports.
+- `infrastructure/` implements repositories, queue workers, Redis, LLM, embedding, and external adapters.
+- `interfaces/` owns HTTP and Telegram request handling.
+- `agent/` wires the runtime graph and graph nodes.
+- Runtime wiring happens at composition boundaries.
+
+Boundary checks are enforced by tests under `tests/architecture/`.
+
+## Failure behavior
+
+The runtime is expected to degrade deterministically:
+
+- If Groq/LLM calls fail, graph nodes use safe fallbacks or user-safe error text.
+- If RAG finds no chunks, prompts receive an explicit no-knowledge marker.
+- If Telegram delivery fails, operational details are logged internally.
+- If queue jobs fail transiently, retry policy handles retries.
+- If a queue payload is malformed, it should fail permanently instead of retrying forever.
+- If a PDF or document is empty or unreadable, ingestion should return a safe user-facing failure.
+- Duplicate webhook handling should avoid duplicate irreversible side effects where stable IDs are available.
+
+## Observability and logging rules
+
+The codebase uses structured logging and request correlation.
+
+Logging should include stable operational identifiers where useful: project ID, thread ID, event type, job type, and error type.
+
+Logging must not include raw secrets, authorization headers, webhook secrets, decrypted credentials, passwords, or raw private user data unless explicitly needed and safe.
+
+External errors should remain safe for users. Detailed operational errors belong in internal logs.
+
+## Security triage
+
+Security findings should be triaged, not silently ignored.
+
+The repository includes `.bandit`, security audit scripts under `scripts/`, and generated local audit output under `reports/`.
+
+## Requirements
+
+### Backend
+
+- Python 3.12+
+- PostgreSQL with pgvector
+- Redis
+- Telegram bot credentials
+- Groq API key for LLM-backed runtime behavior
+
+### Frontend
+
+- Node.js
+- npm
+
+Python runtime dependencies are pinned in `requirements.txt`.
+Development and test dependencies are listed in `requirements-dev.txt`.
+
+## Environment
+
+Start from the example file:
+
+```bash
+cp .env.example .env
+```
+
+Important backend environment variables are documented in `.env.example`. Project-specific client and manager bot credentials are stored through project configuration and repository flows, not as separate global client/manager bot variables.
+
+Never commit real environment files, bot credentials, webhook credentials, JWT credentials, or encryption credentials.
+
+## Local setup
+
+Create and activate a virtual environment:
+
+```bash
+python -m venv venv
+. venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+Start local infrastructure:
+
+```bash
+docker compose up -d db_dev db_test redis_test
+```
+
+The current `docker-compose.yml` starts infrastructure only: `db_dev`, `db_test`, and `redis_test`.
+
+Apply database migrations:
+
+```bash
+python migrations/run_all.py
+```
+
+Important: the migration runner scans allowed env files in the project root and asks for explicit confirmation before applying production migrations.
+
+Run the backend locally:
+
+```bash
+uvicorn src.interfaces.http.app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+## Make targets
+
+The repository includes a `Makefile` with these targets:
+
+```bash
+make install
+make infra-up
+make migrate
+make format
+make lint
+make typecheck
+make test
+make check
+make run
+make openapi
+```
+
+## Quality gate
+
+Before committing backend changes, run:
+
+```bash
+ruff format src tests
+ruff check src tests
+mypy src
+pytest -q
+```
+
+## OpenAPI
+
+Generate the backend OpenAPI schema with:
+
+```bash
+python scripts/generate_openapi.py
+```
+
+The frontend consumes the generated API contract.
+
+## Frontend
+
+The frontend lives in `frontend/`.
+
+Typical local commands:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+## Docker
+
+Build the backend image:
+
+```bash
+docker build -t crm-bot-runtime .
+```
+
+The current `Dockerfile` uses `python:3.12-slim`, `supervisord`, and application source copied from `src/`, `migrations/`, and `scripts/`.
+
+## Migrations
+
+SQL migrations live in `migrations/`.
+
+The migration runner is:
+
+```text
+migrations/run_all.py
+```
+
+It creates and uses `public.schema_migrations` to track applied SQL files and applies all SQL migrations in sorted order for each allowed environment file.
+
+## Testing
+
+The project includes a large automated test suite covering agent nodes, API routes, application services, database repositories, domain logic, infrastructure contracts, Telegram interface behavior, and architecture boundary checks.
+
+Run the full suite with:
+
+```bash
+pytest -q
+```
