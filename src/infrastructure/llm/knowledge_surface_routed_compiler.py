@@ -4,6 +4,7 @@ from typing import cast
 
 from groq import AsyncGroq
 
+from src.domain.project_plane.json_types import JsonObject
 from src.infrastructure.llm.groq_model_router import (
     GroqAllFallbacksExhaustedError,
     GroqClient,
@@ -38,7 +39,7 @@ class GroqRoutedKnowledgeSurfaceCompiler(GroqQualityGatedKnowledgeSurfaceCompile
         )
         router_client = cast(GroqClient, client) if client is not None else None
         self._model_router = model_router or GroqModelRouter(client=router_client)
-        self._last_route_metrics = {}
+        self._last_route_metrics: JsonObject = {}
 
     async def _request_json_with_large_request_fallback(
         self,

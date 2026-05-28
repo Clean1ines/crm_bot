@@ -156,7 +156,9 @@ class GroqAllFallbacksExhaustedError(GroqRouterError):
     pass
 
 
-def estimate_groq_request_tokens(*, system_message: str, prompt: str, max_tokens: int) -> int:
+def estimate_groq_request_tokens(
+    *, system_message: str, prompt: str, max_tokens: int
+) -> int:
     return max(1, (len(system_message) + len(prompt) + 2) // 3) + max_tokens
 
 
@@ -198,7 +200,9 @@ def classify_groq_limit_error(exc: BaseException) -> GroqLimitKind:
 
 
 def retry_after_seconds_from_error(exc: BaseException) -> int | None:
-    match = re.search(r"try again in\s+(?P<seconds>[0-9]+(?:\.[0-9]+)?)s", _error_text(exc))
+    match = re.search(
+        r"try again in\s+(?P<seconds>[0-9]+(?:\.[0-9]+)?)s", _error_text(exc)
+    )
     if match is None:
         return None
     return max(1, int(float(match.group("seconds")) + 0.999))
@@ -252,12 +256,20 @@ class GroqModelRouter:
                     if model_attempt_count >= self._policy.max_attempts_per_model:
                         break
                     if len(attempts) >= self._policy.max_attempts_per_call:
-                        raise self._final_error(attempts, last_error, only_daily_quota, request_too_large)
+                        raise self._final_error(
+                            attempts, last_error, only_daily_quota, request_too_large
+                        )
                     model_attempt_count += 1
                     attempt_index = len(attempts) + 1
-                    key_alias = "injected" if self._client is not None else f"groq_key_{key_index + 1}"
+                    key_alias = (
+                        "injected"
+                        if self._client is not None
+                        else f"groq_key_{key_index + 1}"
+                    )
                     try:
-                        response = await self._client_for_key(key).chat.completions.create(
+                        response = await self._client_for_key(
+                            key
+                        ).chat.completions.create(
                             model=model,
                             messages=[
                                 {"role": "system", "content": system_message},
@@ -267,7 +279,15 @@ class GroqModelRouter:
                             max_tokens=max_tokens,
                             response_format={"type": "json_object"},
                         )
-                        attempts.append(GroqRouteAttempt(attempt_index, active_chain, model, key_alias, fallback_reason=fallback_reason))
+                        attempts.append(
+                            GroqRouteAttempt(
+                                attempt_index,
+                                active_chain,
+                                model,
+                                key_alias,
+                                fallback_reason=fallback_reason,
+                            )
+                        )
                         return GroqRouteResult(
                             model=model,
                             key_alias=key_alias,
@@ -283,9 +303,23 @@ class GroqModelRouter:
                     except Exception as exc:
                         last_error = exc
                         limit_kind = classify_groq_limit_error(exc)
-                        only_daily_quota = only_daily_quota and limit_kind == "daily_quota_exhausted"
-                        request_too_large = request_too_large or limit_kind == "request_too_large"
-                        attempts.append(GroqRouteAttempt(attempt_index, active_chain, model, key_alias, limit_kind, type(exc).__name__, fallback_reason))
+                        only_daily_quota = (
+                            only_daily_quota and limit_kind == "daily_quota_exhausted"
+                        )
+                        request_too_large = (
+                            request_too_large or limit_kind == "request_too_large"
+                        )
+                        attempts.append(
+                            GroqRouteAttempt(
+                                attempt_index,
+                                active_chain,
+                                model,
+                                key_alias,
+                                limit_kind,
+                                type(exc).__name__,
+                                fallback_reason,
+                            )
+                        )
                         if limit_kind == "request_too_large":
                             break
                         if limit_kind == "daily_quota_exhausted":
@@ -300,9 +334,13 @@ class GroqModelRouter:
                 visited_large_chain = True
                 request_too_large = False
                 continue
-            raise self._final_error(attempts, last_error, only_daily_quota, request_too_large)
+            raise self._final_error(
+                attempts, last_error, only_daily_quota, request_too_large
+            )
 
-    def _initial_chain(self, *, chain_name: GroqRouteChainName, estimated_tokens: int) -> tuple[GroqRouteChainName, str]:
+    def _initial_chain(
+        self, *, chain_name: GroqRouteChainName, estimated_tokens: int
+    ) -> tuple[GroqRouteChainName, str]:
         if chain_name == "primary" and estimated_tokens > GROQ_INSTANT_FREE_TPM_LIMIT:
             return "large_request", "estimated_request_token_budget"
         return chain_name, ""
@@ -317,9 +355,13 @@ class GroqModelRouter:
     def _keys(self) -> tuple[str, ...]:
         if self._client is not None:
             return ("injected",)
-        keys = self._api_keys if self._api_keys is not None else configured_groq_api_keys()
+        keys = (
+            self._api_keys if self._api_keys is not None else configured_groq_api_keys()
+        )
         if not keys:
-            raise GroqAllFallbacksExhaustedError("No Groq API keys configured", "groq_keys_not_configured")
+            raise GroqAllFallbacksExhaustedError(
+                "No Groq API keys configured", "groq_keys_not_configured"
+            )
         return keys
 
     def _client_for_key(self, key: str) -> GroqClient:
@@ -328,7 +370,10 @@ class GroqModelRouter:
         return cast(GroqClient, AsyncGroq(api_key=key))
 
     async def _backoff(self, attempt_index: int) -> None:
-        delay = min(self._policy.retry_max_seconds, self._policy.retry_base_seconds * max(1, attempt_index))
+        delay = min(
+            self._policy.retry_max_seconds,
+            self._policy.retry_base_seconds * max(1, attempt_index),
+        )
         if delay > 0:
             await asyncio.sleep(delay)
 
@@ -340,19 +385,40 @@ class GroqModelRouter:
         request_too_large: bool,
     ) -> GroqRouterError:
         frozen_attempts = tuple(attempts)
-        retry_after = retry_after_seconds_from_error(last_error) if last_error is not None else None
+        retry_after = (
+            retry_after_seconds_from_error(last_error)
+            if last_error is not None
+            else None
+        )
         if request_too_large:
-            return GroqInputTooLargeError("All large-request Groq compiler models rejected the input size", "input_too_large", retry_after, frozen_attempts)
+            return GroqInputTooLargeError(
+                "All large-request Groq compiler models rejected the input size",
+                "input_too_large",
+                retry_after,
+                frozen_attempts,
+            )
         if frozen_attempts and only_daily_quota:
-            return GroqQuotaExhaustedError("All Groq compiler routes are exhausted for the current quota window", "groq_quota_exhausted", retry_after, frozen_attempts)
-        return GroqAllFallbacksExhaustedError("All Groq compiler fallback routes were exhausted", "all_fallbacks_exhausted", retry_after, frozen_attempts)
+            return GroqQuotaExhaustedError(
+                "All Groq compiler routes are exhausted for the current quota window",
+                "groq_quota_exhausted",
+                retry_after,
+                frozen_attempts,
+            )
+        return GroqAllFallbacksExhaustedError(
+            "All Groq compiler fallback routes were exhausted",
+            "all_fallbacks_exhausted",
+            retry_after,
+            frozen_attempts,
+        )
 
 
 def route_error_metrics(exc: GroqRouterError) -> JsonObject:
     return {
         **exc.to_metrics(),
         "partial_surfaces_available": json_value_from_unknown(True),
-        "recoverable_quota_pause": json_value_from_unknown(isinstance(exc, GroqQuotaExhaustedError)),
+        "recoverable_quota_pause": json_value_from_unknown(
+            isinstance(exc, GroqQuotaExhaustedError)
+        ),
     }
 
 

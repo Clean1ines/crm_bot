@@ -21,6 +21,7 @@ from src.application.services.knowledge_surface_ingestion_service import (
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
+    KnowledgePreprocessingMode,
     KnowledgePreprocessingValidationError,
 )
 from src.infrastructure.db.repositories.commercial_price_repository import (
@@ -75,7 +76,7 @@ async def _mark_recoverable_llm_upload_failure(
     *,
     db_pool: asyncpg.Pool,
     dto: KnowledgeUploadJobPayloadDto,
-    mode: str,
+    mode: KnowledgePreprocessingMode,
     error_type: str,
     error_message: str,
 ) -> None:

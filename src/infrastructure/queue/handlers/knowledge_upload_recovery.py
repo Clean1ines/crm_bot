@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.domain.project_plane.json_types import JsonValue
 from src.infrastructure.llm.groq_router import (
     GroqFallbackExhaustedError,
     GroqRouteFailureType,
@@ -75,8 +76,8 @@ def recovery_decision_for_error_type(
     )
 
 
-def recovery_metrics(decision: KnowledgeUploadRecoveryDecision) -> dict[str, object]:
-    metrics: dict[str, object] = {
+def recovery_metrics(decision: KnowledgeUploadRecoveryDecision) -> dict[str, JsonValue]:
+    metrics: dict[str, JsonValue] = {
         "stage": decision.document_status,
         "status_message": decision.status_message,
         "error_type": decision.error_type,
