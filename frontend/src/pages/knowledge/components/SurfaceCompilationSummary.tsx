@@ -16,6 +16,8 @@ import {
   type SurfaceSourceUnit,
 } from '@shared/api/modules/knowledgeSurface';
 
+import { buildSurfacePipelineContract, type SurfacePipelineContract } from './surfacePipelineContract';
+
 const FILTERS = [
   ['all', 'Все карточки'],
   ['umbrella', 'Зонтики'],
@@ -52,9 +54,8 @@ type LiveProgress = {
 type RelationNode = {
   surface: RetrievalSurface;
   children: SurfaceRelation[];
-  parents: SurfaceRelation[];
-  siblings: SurfaceRelation[];
   duplicates: SurfaceRelation[];
+  siblings: SurfaceRelation[];
 };
 
 const LIVE_STAGE_LABELS: Record<string, string> = {
@@ -64,10 +65,10 @@ const LIVE_STAGE_LABELS: Record<string, string> = {
   answer_synthesis: 'Пишем ответы',
   question_ownership: 'Назначаем вопросы',
   partial_surface_cards: 'Сохраняем промежуточные карточки',
-  global_reconciliation: 'Собираем глобальный граф',
+  global_reconciliation: 'Собираем глобальную карту',
   global_relation_judge: 'Проверяем связи и дубликаты',
   question_reassignment: 'Переносим вопросы между карточками',
-  faq_surface_compilation: 'Компилируем FAQ graph',
+  faq_surface_compilation: 'Компилируем FAQ Answer Slots',
 };
 
 const SURFACE_KIND_LABELS: Record<string, string> = {
@@ -103,24 +104,13 @@ const RELATION_LABELS: Record<string, string> = {
   reparent_needed: 'нужно переподчинить',
 };
 
-const metricNumber = (
-  metrics: Record<string, unknown> | undefined,
-  key: string,
-): number | null => {
-  const value = metrics?.[key];
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-};
-
-const formatMetric = (value: unknown): string => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value.toLocaleString('ru-RU');
-  if (typeof value === 'string' && value.trim() !== '') return value;
-  if (typeof value === 'boolean') return value ? 'да' : 'нет';
-  return '';
+const CONTRACT_STATUS_LABELS: Record<SurfacePipelineContract['status'], string> = {
+  not_started: 'не стартовал',
+  processing: 'обрабатывается',
+  ready_for_curation: 'готово к курации',
+  completed_with_warnings: 'готово с предупреждениями',
+  failed: 'ошибка',
+  stopped: 'остановлено',
 };
 
 const statusLabel = (status: string): string => {
@@ -144,6 +134,23 @@ const statusLabel = (status: string): string => {
   return labels[status] || status;
 };
 
+const metricNumber = (metrics: Record<string, unknown> | undefined, key: string): number | null => {
+  const value = metrics?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const formatMetric = (value: unknown): string => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value.toLocaleString('ru-RU');
+  if (typeof value === 'string' && value.trim() !== '') return value;
+  if (typeof value === 'boolean') return value ? 'да' : 'нет';
+  return '';
+};
+
 const stepBadgeClass = (status: StepStatus): string => {
   if (status === 'completed') return 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]';
   if (status === 'active') return 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]';
@@ -151,22 +158,14 @@ const stepBadgeClass = (status: StepStatus): string => {
   return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
 };
 
-const stageStatusFromRun = (
-  run: SurfaceCompilationRun | null,
-  isDocumentProcessing: boolean,
-): StepStatus => {
-  if (!run) return 'pending';
-  if (run.status === 'failed') return 'failed';
-  if (run.status === 'cancelled' || run.status === 'canceled') return 'stopped';
-  if (run.status === 'completed') return 'completed';
-  if (run.status === 'running' && !isDocumentProcessing) return 'stopped';
-  if (run.status === 'running') return 'active';
-  return 'pending';
+const contractBadgeClass = (status: SurfacePipelineContract['status']): string => {
+  if (status === 'ready_for_curation') return 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]';
+  if (status === 'completed_with_warnings') return 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning-text)]';
+  if (status === 'failed' || status === 'stopped') return 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]';
+  return 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]';
 };
 
-const latestMeaningfulStage = (
-  stages: SurfaceCompilationStage[],
-): SurfaceCompilationStage | null => {
+const latestMeaningfulStage = (stages: SurfaceCompilationStage[]): SurfaceCompilationStage | null => {
   for (let index = stages.length - 1; index >= 0; index -= 1) {
     const stage = stages[index];
     if (stage.stage_kind !== 'source_units') return stage;
@@ -174,10 +173,7 @@ const latestMeaningfulStage = (
   return stages.length > 0 ? stages[stages.length - 1] : null;
 };
 
-const liveProgressFromStages = (
-  stages: SurfaceCompilationStage[],
-  run: SurfaceCompilationRun | null,
-): LiveProgress | null => {
+const liveProgressFromStages = (stages: SurfaceCompilationStage[], run: SurfaceCompilationRun | null): LiveProgress | null => {
   const stage = latestMeaningfulStage(stages);
   if (!stage) return null;
 
@@ -218,54 +214,10 @@ const liveProgressFromStages = (
   };
 };
 
-const surfaceTitle = (
-  surfaceKey: string,
-  surfaceByKey: Map<string, RetrievalSurface>,
-): string => {
+const surfaceTitle = (surfaceKey: string, surfaceByKey: Map<string, RetrievalSurface>): string => {
   const surface = surfaceByKey.get(surfaceKey);
   return surface ? `${surface.title} (${surfaceKey})` : surfaceKey;
 };
-
-const ownedQuestionsForSurface = (
-  surface: RetrievalSurface,
-  ownership: SurfaceOwnership[],
-): SurfaceOwnership[] => (
-  surface.owned_questions || ownership.filter((item) => item.owner_surface_key === surface.surface_key)
-);
-
-const rejectedQuestionsForSurface = (
-  surface: RetrievalSurface,
-  ownership: SurfaceOwnership[],
-): SurfaceOwnership[] => (
-  surface.rejected_questions || ownership.filter((item) => item.rejected_from_surface_keys.includes(surface.surface_key))
-);
-
-const relationsForSurface = (
-  surface: RetrievalSurface,
-  relations: SurfaceRelation[],
-): SurfaceRelation[] => (
-  surface.relations || relations.filter((item) => item.parent_surface_key === surface.surface_key || item.child_surface_key === surface.surface_key)
-);
-
-const reassignmentsForSurface = (
-  surface: RetrievalSurface,
-  reassignments: SurfaceReassignment[],
-): SurfaceReassignment[] => [
-  ...(surface.incoming_reassignments || []),
-  ...(surface.outgoing_reassignments || []),
-  ...reassignments.filter((item) => item.from_surface_key === surface.surface_key || item.to_surface_key === surface.surface_key),
-];
-
-const mergeDecisionsForSurface = (
-  surface: RetrievalSurface,
-  mergeDecisions: SurfaceMergeDecision[],
-): SurfaceMergeDecision[] => (
-  surface.merge_decisions || mergeDecisions.filter((item) => (
-    item.survivor_surface_key === surface.surface_key
-    || item.merged_surface_keys.includes(surface.surface_key)
-    || item.keep_separate_surface_keys.includes(surface.surface_key)
-  ))
-);
 
 const matchesFilter = (surface: RetrievalSurface, filter: SurfaceFilter): boolean => {
   if (filter === 'all') return true;
@@ -287,121 +239,105 @@ const matchesFilter = (surface: RetrievalSurface, filter: SurfaceFilter): boolea
   return surface.surface_kind === filter;
 };
 
-const compilePipelineSteps = (
-  run: SurfaceCompilationRun | null,
-  stages: SurfaceCompilationStage[],
-  sourceUnits: SurfaceSourceUnit[],
-  surfaces: RetrievalSurface[],
-  relations: SurfaceRelation[],
-  ownership: SurfaceOwnership[],
-  reassignments: SurfaceReassignment[],
-  mergeDecisions: SurfaceMergeDecision[],
-  isDocumentProcessing: boolean,
-): PipelineStep[] => {
-  const sourceUnitCount = sourceUnits.length || Number(run?.metrics?.source_unit_count || 0);
-  const surfaceCount = surfaces.length || Number(run?.metrics?.surface_count || 0);
-  const relationCount = relations.length || Number(run?.metrics?.relation_count || 0);
-  const ownershipCount = ownership.length || Number(run?.metrics?.ownership_count || 0);
-  const reassignmentCount = reassignments.length || Number(run?.metrics?.reassignment_count || 0);
-  const mergeCount = mergeDecisions.length || Number(run?.metrics?.merge_decision_count || 0);
-  const baseStatus = stageStatusFromRun(run, isDocumentProcessing);
-  const hasStage = (needle: string): boolean => stages.some((stage) => stage.stage_kind.includes(needle) && stage.status === 'completed');
+const ownedQuestionsForSurface = (surface: RetrievalSurface, ownership: SurfaceOwnership[]): SurfaceOwnership[] => (
+  surface.owned_questions || ownership.filter((item) => item.owner_surface_key === surface.surface_key)
+);
 
-  const sourceStatus: StepStatus = sourceUnitCount > 0 ? 'completed' : baseStatus === 'active' ? 'active' : baseStatus;
-  const discoveryDone = surfaceCount > 0 || hasStage('discovery');
-  const relationDone = relationCount > 0 || hasStage('relation');
-  const answerDone = surfaces.some((surface) => surface.answer || surface.short_answer) || hasStage('answer');
-  const ownershipDone = ownershipCount > 0 || reassignmentCount > 0 || hasStage('ownership');
-  const reconciliationDone = relationCount > 0 || mergeCount > 0 || hasStage('reconciliation');
+const rejectedQuestionsForSurface = (surface: RetrievalSurface, ownership: SurfaceOwnership[]): SurfaceOwnership[] => (
+  surface.rejected_questions || ownership.filter((item) => item.rejected_from_surface_keys.includes(surface.surface_key))
+);
+
+const relationsForSurface = (surface: RetrievalSurface, relations: SurfaceRelation[]): SurfaceRelation[] => (
+  surface.relations || relations.filter((item) => item.parent_surface_key === surface.surface_key || item.child_surface_key === surface.surface_key)
+);
+
+const reassignmentsForSurface = (surface: RetrievalSurface, reassignments: SurfaceReassignment[]): SurfaceReassignment[] => [
+  ...(surface.incoming_reassignments || []),
+  ...(surface.outgoing_reassignments || []),
+  ...reassignments.filter((item) => item.from_surface_key === surface.surface_key || item.to_surface_key === surface.surface_key),
+];
+
+const mergeDecisionsForSurface = (surface: RetrievalSurface, mergeDecisions: SurfaceMergeDecision[]): SurfaceMergeDecision[] => (
+  surface.merge_decisions || mergeDecisions.filter((item) => (
+    item.survivor_surface_key === surface.surface_key
+    || item.merged_surface_keys.includes(surface.surface_key)
+    || item.keep_separate_surface_keys.includes(surface.surface_key)
+  ))
+);
+
+const buildPipelineSteps = (contract: SurfacePipelineContract): PipelineStep[] => {
+  const activeOrPending: StepStatus = contract.status === 'failed'
+    ? 'failed'
+    : contract.status === 'stopped'
+      ? 'stopped'
+      : contract.status === 'processing'
+        ? 'active'
+        : 'pending';
+  const completedWhen = (condition: boolean): StepStatus => (condition ? 'completed' : activeOrPending);
 
   return [
     {
       id: 'source_units',
       title: '1. Исходные блоки',
-      status: sourceStatus,
-      description: 'Файл разобран на source units — смысловые блоки, из которых рождаются answer slots.',
-      detail: sourceUnitCount > 0 ? `${formatMetric(sourceUnitCount)} исходных блоков` : 'Ждём извлечение исходных блоков',
+      status: completedWhen(contract.counters.sourceUnits > 0),
+      description: 'Файл разобран на source units — смысловые блоки для answer slots.',
+      detail: `${contract.counters.sourceUnits} source units`,
     },
     {
-      id: 'local_discovery',
-      title: '2. Answer slot discovery',
-      status: discoveryDone ? 'completed' : sourceStatus === 'completed' && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
-      description: 'LLM находит будущие answer slots: broad overview, child, narrow и standalone.',
-      detail: surfaceCount > 0 ? `${formatMetric(surfaceCount)} карточек сохранено` : 'Карточки ещё не сохранены',
+      id: 'surfaces',
+      title: '2. Answer slots',
+      status: completedWhen(contract.counters.surfaces > 0),
+      description: 'Материализованы карточки для курации, а не только raw candidates.',
+      detail: `${contract.counters.surfaces} surfaces`,
     },
     {
-      id: 'local_relations',
-      title: '3. Связи и кандидаты на merge',
-      status: relationDone ? 'completed' : discoveryDone && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
-      description: 'Система связывает parent/child/sibling и ищет дубликаты одного intent.',
-      detail: relationCount > 0 ? `${formatMetric(relationCount)} связей найдено` : 'Связей пока нет',
+      id: 'relations',
+      title: '3. Карта связей',
+      status: completedWhen(contract.counters.relations > 0 || contract.counters.surfaces <= 1),
+      description: 'Построены parent/child, sibling и duplicate/same-intent связи.',
+      detail: `${contract.counters.parentChildRelations} parent/child · ${contract.counters.duplicateRelations} duplicates`,
     },
     {
-      id: 'answers',
-      title: '4. Ответы и ownership вопросов',
-      status: answerDone && ownershipDone ? 'completed' : discoveryDone && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
-      description: 'Для каждого answer slot формируются answer/short answer и список вопросов, которыми он владеет.',
-      detail: `${formatMetric(ownershipCount)} owned questions · ${formatMetric(reassignmentCount)} переносов`,
+      id: 'ownership',
+      title: '4. Ownership вопросов',
+      status: completedWhen(contract.counters.ownership > 0 || contract.counters.surfaces === 0),
+      description: 'Вопросы закреплены за тем answer slot, который должен отвечать.',
+      detail: `${contract.counters.ownership} owned · ${contract.counters.reassignments} moved`,
     },
     {
-      id: 'global_reconciliation',
-      title: '5. Глобальная сборка',
-      status: reconciliationDone ? 'completed' : ownershipDone && baseStatus === 'active' ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
-      description: 'После всех блоков judge проверяет relation clusters, merge decisions и переносы вопросов.',
-      detail: `${formatMetric(mergeCount)} merge decisions`,
+      id: 'merge_audit',
+      title: '5. Merge / audit',
+      status: completedWhen(contract.counters.mergeDecisions > 0 || contract.counters.surfaces <= 1),
+      description: 'Видно, какие same-intent карточки слиты или оставлены раздельно.',
+      detail: `${contract.counters.mergeDecisions} decisions`,
     },
     {
       id: 'curation',
-      title: '6. Курация / публикация',
-      status: surfaces.length > 0 ? 'active' : baseStatus === 'failed' ? 'failed' : baseStatus === 'stopped' ? 'stopped' : 'pending',
-      description: 'Куратор видит карточки, связи, источники, переносы вопросов и публикацию в runtime retrieval.',
-      detail: surfaces.length > 0 ? 'Карточки доступны ниже' : 'Кураторские карточки пока не появились',
+      title: '6. Курация / runtime publish',
+      status: contract.readyForCuration ? 'completed' : activeOrPending,
+      description: 'UI может безопасно показывать карточки, связи, source evidence и publish buttons.',
+      detail: `${contract.counters.runtimeLinkedSurfaces} already linked to runtime`,
     },
   ];
 };
 
-const pipelineSummaryText = (
-  run: SurfaceCompilationRun | null,
-  steps: PipelineStep[],
-  isDocumentProcessing: boolean,
-): string => {
-  if (!run) return 'FAQ Graph pipeline ещё не стартовал.';
-  if (run.status === 'failed') return run.error_message || 'Pipeline завершился ошибкой. Открой технические стадии ниже.';
-  if (run.status === 'running' && !isDocumentProcessing) return 'Документ уже не обрабатывается, но последний compiler run остался в running. Обычно это значит, что обработку остановили вручную.';
-  const active = steps.find((step) => step.status === 'active');
-  if (active) return active.description;
-  const completedCount = steps.filter((step) => step.status === 'completed').length;
-  if (completedCount === steps.length) return 'FAQ Graph pipeline завершён. Можно проверять связи и публиковать карточки.';
-  return 'Pipeline ожидает следующую стадию.';
-};
-
-const buildRelationNodes = (
-  surfaces: RetrievalSurface[],
-  relations: SurfaceRelation[],
-): RelationNode[] => {
+const buildRelationNodes = (surfaces: RetrievalSurface[], relations: SurfaceRelation[]): RelationNode[] => {
   const nodes = new Map<string, RelationNode>();
   for (const surface of surfaces) {
-    nodes.set(surface.surface_key, {
-      surface,
-      children: [],
-      parents: [],
-      siblings: [],
-      duplicates: [],
-    });
+    nodes.set(surface.surface_key, { surface, children: [], duplicates: [], siblings: [] });
   }
 
   for (const relation of relations) {
     const parent = nodes.get(relation.parent_surface_key);
     const child = nodes.get(relation.child_surface_key);
-    if (relation.relation_type === 'umbrella_contains') {
+    if (relation.relation_type === 'umbrella_contains' || relation.relation_type === 'specializes') {
       parent?.children.push(relation);
-      child?.parents.push(relation);
-    } else if (relation.relation_type === 'sibling') {
-      parent?.siblings.push(relation);
-      child?.siblings.push(relation);
     } else if (relation.relation_type === 'duplicates' || relation.relation_type === 'near_duplicate') {
       parent?.duplicates.push(relation);
       child?.duplicates.push(relation);
+    } else if (relation.relation_type === 'sibling') {
+      parent?.siblings.push(relation);
+      child?.siblings.push(relation);
     }
   }
 
@@ -419,11 +355,7 @@ const QuestionChips: React.FC<{ title: string; items: SurfaceOwnership[] }> = ({
       <div className="mb-1 text-xs font-medium text-[var(--text-secondary)]">{title}</div>
       <div className="flex flex-wrap gap-1">
         {items.slice(0, 10).map((item) => (
-          <span
-            key={`${title}-${item.owner_surface_key}-${item.question}`}
-            className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-xs text-[var(--text-secondary)]"
-            title={item.reason}
-          >
+          <span key={`${title}-${item.owner_surface_key}-${item.question}`} className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-xs text-[var(--text-secondary)]" title={item.reason}>
             {item.question}
           </span>
         ))}
@@ -432,33 +364,70 @@ const QuestionChips: React.FC<{ title: string; items: SurfaceOwnership[] }> = ({
   );
 };
 
+const ContractPanel: React.FC<{ contract: SurfacePipelineContract }> = ({ contract }) => (
+  <div className={`mb-3 rounded-xl border p-3 text-xs ${contract.readyForCuration ? 'border-[var(--accent-success-bg)] bg-[var(--accent-success-bg)]/40' : 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]'}`}>
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div>
+        <div className="font-semibold text-[var(--text-primary)]">Контракт данных FAQ Answer Slot Pipeline</div>
+        <p className="mt-1 text-[var(--text-secondary)]">{contract.statusReason}</p>
+      </div>
+      <span className={`rounded-full px-2 py-0.5 font-medium ${contractBadgeClass(contract.status)}`}>
+        {CONTRACT_STATUS_LABELS[contract.status]}
+      </span>
+    </div>
+
+    <div className="mt-2 flex flex-wrap gap-1">
+      {Object.entries(contract.counters).map(([key, value]) => (
+        <span key={key} className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+          {key}: {value}
+        </span>
+      ))}
+    </div>
+
+    {contract.blockingReasons.length > 0 && (
+      <div className="mt-2 rounded-lg bg-[var(--accent-danger-bg)] p-2 text-[var(--accent-danger-text)]">
+        <div className="font-medium">Блокирует курацию</div>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          {contract.blockingReasons.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      </div>
+    )}
+
+    {contract.warnings.length > 0 && (
+      <div className="mt-2 rounded-lg bg-[var(--accent-warning-bg)] p-2 text-[var(--accent-warning-text)]">
+        <div className="font-medium">Предупреждения</div>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          {contract.warnings.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      </div>
+    )}
+  </div>
+);
+
 const RelationMap: React.FC<{
   surfaces: RetrievalSurface[];
   relations: SurfaceRelation[];
   mergeDecisions: SurfaceMergeDecision[];
   reassignments: SurfaceReassignment[];
 }> = ({ surfaces, relations, mergeDecisions, reassignments }) => {
-  const surfaceByKey = React.useMemo(
-    () => new Map(surfaces.map((surface) => [surface.surface_key, surface])),
-    [surfaces],
-  );
+  const surfaceByKey = React.useMemo(() => new Map(surfaces.map((surface) => [surface.surface_key, surface])), [surfaces]);
   const nodes = React.useMemo(() => buildRelationNodes(surfaces, relations), [surfaces, relations]);
-  const roots = nodes.filter((node) => node.children.length > 0 || node.duplicates.length > 0).slice(0, 24);
+  const importantNodes = nodes.filter((node) => node.children.length > 0 || node.duplicates.length > 0 || node.siblings.length > 0).slice(0, 32);
 
   if (surfaces.length === 0) return null;
 
   return (
     <details className="mb-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]" open>
       <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-        Карта связей answer slots: parent → children / merge / переносы вопросов
+        Карта связей answer slots: parent → children / same-intent / переносы вопросов
       </summary>
 
       <div className="mt-3 grid gap-3 xl:grid-cols-2">
-        {roots.length === 0 ? (
+        {importantNodes.length === 0 ? (
           <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3 text-[var(--text-muted)]">
-            Связей parent/child или duplicate пока нет. Смотри стадии relation_planning и global_relation_judge.
+            Связей пока нет. Если run уже completed и карточек много, это проблема контракта relation map.
           </div>
-        ) : roots.map((node) => (
+        ) : importantNodes.map((node) => (
           <div key={node.surface.surface_key} className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3">
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="font-semibold text-[var(--text-primary)]">{node.surface.title}</span>
@@ -466,41 +435,35 @@ const RelationMap: React.FC<{
                 {SURFACE_KIND_LABELS[node.surface.surface_kind] || node.surface.surface_kind}
               </span>
               <span className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-0.5 text-[10px] text-[var(--accent-primary)]">
-                {node.children.length} children · {node.duplicates.length} dupes
+                {node.children.length} children · {node.duplicates.length} same-intent · {node.siblings.length} siblings
               </span>
             </div>
 
             {node.children.length > 0 && (
-              <div className="mt-2">
-                <div className="mb-1 font-medium text-[var(--text-primary)]">Дочерние карточки</div>
-                <div className="space-y-1">
-                  {node.children.map((relation) => (
-                    <div key={relation.id || `${relation.parent_surface_key}-${relation.child_surface_key}`} className="rounded bg-[var(--control-bg)] px-2 py-1">
-                      <span className="font-medium text-[var(--text-primary)]">→ {surfaceTitle(relation.child_surface_key, surfaceByKey)}</span>
-                      <span className="ml-1 text-[var(--text-muted)]">{RELATION_LABELS[relation.relation_type] || relation.relation_type}</span>
-                      {relation.reason && <div className="mt-0.5 text-[var(--text-muted)]">{relation.reason}</div>}
-                    </div>
-                  ))}
-                </div>
+              <div className="mt-2 space-y-1">
+                <div className="font-medium text-[var(--text-primary)]">Дочерние карточки</div>
+                {node.children.map((relation) => (
+                  <div key={relation.id || `${relation.parent_surface_key}-${relation.child_surface_key}`} className="rounded bg-[var(--control-bg)] px-2 py-1">
+                    <span className="font-medium text-[var(--text-primary)]">→ {surfaceTitle(relation.child_surface_key, surfaceByKey)}</span>
+                    <span className="ml-1 text-[var(--text-muted)]">{RELATION_LABELS[relation.relation_type] || relation.relation_type}</span>
+                    {relation.reason && <div className="mt-0.5 text-[var(--text-muted)]">{relation.reason}</div>}
+                  </div>
+                ))}
               </div>
             )}
 
             {node.duplicates.length > 0 && (
-              <div className="mt-2">
-                <div className="mb-1 font-medium text-[var(--text-primary)]">Кандидаты на merge / same intent</div>
-                <div className="space-y-1">
-                  {node.duplicates.map((relation) => {
-                    const otherKey = relation.parent_surface_key === node.surface.surface_key
-                      ? relation.child_surface_key
-                      : relation.parent_surface_key;
-                    return (
-                      <div key={relation.id || `${relation.parent_surface_key}-${relation.child_surface_key}`} className="rounded bg-[var(--control-bg)] px-2 py-1">
-                        <span className="font-medium text-[var(--text-primary)]">↔ {surfaceTitle(otherKey, surfaceByKey)}</span>
-                        {relation.reason && <div className="mt-0.5 text-[var(--text-muted)]">{relation.reason}</div>}
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="mt-2 space-y-1">
+                <div className="font-medium text-[var(--text-primary)]">Same-intent / merge candidates</div>
+                {node.duplicates.map((relation) => {
+                  const otherKey = relation.parent_surface_key === node.surface.surface_key ? relation.child_surface_key : relation.parent_surface_key;
+                  return (
+                    <div key={relation.id || `${relation.parent_surface_key}-${relation.child_surface_key}`} className="rounded bg-[var(--control-bg)] px-2 py-1">
+                      <span className="font-medium text-[var(--text-primary)]">↔ {surfaceTitle(otherKey, surfaceByKey)}</span>
+                      {relation.reason && <div className="mt-0.5 text-[var(--text-muted)]">{relation.reason}</div>}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -645,14 +608,24 @@ export const SurfaceCompilationSummary: React.FC<{
   const ownership = ownershipQuery.data?.ownership || [];
   const reassignments = ownershipQuery.data?.reassignments || [];
   const mergeDecisions = mergeDecisionsQuery.data?.merge_decisions || [];
-  const filteredSurfaces = surfaces.filter((surface) => matchesFilter(surface, filter));
-  const isLoading = compilationQuery.isLoading || surfacesQuery.isLoading;
-  const pipelineSteps = compilePipelineSteps(run, stages, sourceUnits, surfaces, relations, ownership, reassignments, mergeDecisions, isDocumentProcessing);
+  const contract = buildSurfacePipelineContract({
+    run,
+    stages,
+    sourceUnits,
+    surfaces,
+    relations,
+    ownership,
+    reassignments,
+    mergeDecisions,
+    isDocumentProcessing,
+  });
+  const pipelineSteps = buildPipelineSteps(contract);
   const completedSteps = pipelineSteps.filter((step) => step.status === 'completed').length;
   const progressPercent = Math.round((completedSteps / pipelineSteps.length) * 100);
-  const summaryText = pipelineSummaryText(run, pipelineSteps, isDocumentProcessing);
   const liveProgress = liveProgressFromStages(stages, run);
   const visibleProgressPercent = liveProgress?.percent ?? progressPercent;
+  const filteredSurfaces = surfaces.filter((surface) => matchesFilter(surface, filter));
+  const isLoading = compilationQuery.isLoading || surfacesQuery.isLoading;
   const surfaceByKey = new Map(surfaces.map((surface) => [surface.surface_key, surface]));
 
   return (
@@ -660,7 +633,9 @@ export const SurfaceCompilationSummary: React.FC<{
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h5 className="font-semibold text-[var(--text-primary)]">FAQ Answer Slot Pipeline</h5>
-          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-[var(--text-muted)]">{summaryText}</p>
+          <p className="mt-1 max-w-3xl text-xs leading-relaxed text-[var(--text-muted)]">
+            {contract.statusReason}
+          </p>
           {run && (
             <p className="mt-1 text-xs text-[var(--text-muted)]">
               run: {statusLabel(run.status)} · {run.compiler_kind || 'compiler'} · {run.prompt_version}
@@ -668,13 +643,15 @@ export const SurfaceCompilationSummary: React.FC<{
           )}
         </div>
 
-        <div className="min-w-[160px] text-right text-xs text-[var(--text-secondary)]">
+        <div className="min-w-[180px] text-right text-xs text-[var(--text-secondary)]">
           <div>{liveProgress?.percent ? `${liveProgress.percent}%` : `${completedSteps}/${pipelineSteps.length} стадий`}</div>
           <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--control-bg)]">
             <div className="h-full rounded-full bg-[var(--accent-primary)] transition-all" style={{ width: `${visibleProgressPercent}%` }} />
           </div>
         </div>
       </div>
+
+      <ContractPanel contract={contract} />
 
       {liveProgress && (
         <div className="mb-3 rounded-xl border border-[var(--accent-primary)]/20 bg-[var(--accent-primary)]/10 p-3">
@@ -692,7 +669,7 @@ export const SurfaceCompilationSummary: React.FC<{
         </div>
       )}
 
-      <details className="mb-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">
+      <details className="mb-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]" open={!contract.readyForCuration}>
         <summary className="cursor-pointer font-medium text-[var(--text-primary)]">Карта стадий FAQ Answer Slot Pipeline</summary>
         <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {pipelineSteps.map((step) => (
@@ -736,12 +713,7 @@ export const SurfaceCompilationSummary: React.FC<{
       {surfaces.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-1 text-xs">
           {FILTERS.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setFilter(value)}
-              className={`rounded-full px-2 py-0.5 transition-colors ${filter === value ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-secondary)]'}`}
-            >
+            <button key={value} type="button" onClick={() => setFilter(value)} className={`rounded-full px-2 py-0.5 transition-colors ${filter === value ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]' : 'bg-[var(--control-bg)] text-[var(--text-secondary)]'}`}>
               {label}
             </button>
           ))}
@@ -761,9 +733,9 @@ export const SurfaceCompilationSummary: React.FC<{
         </details>
       )}
 
-      {surfaces.length === 0 ? (
+      {!contract.readyForCuration && surfaces.length === 0 ? (
         <div className="rounded-lg bg-[var(--surface-elevated)] p-3 text-xs leading-relaxed text-[var(--text-muted)]">
-          {isLoading ? 'Загружаю состояние graph pipeline…' : run?.status === 'failed' ? 'Карточки не появились, потому что graph compiler завершился ошибкой. Исправь ошибку модели/лимита и загрузи документ заново.' : run?.status === 'running' && !isDocumentProcessing ? 'Карточек нет, потому что документ уже не обрабатывается, а последний compiler run остался в running. Вероятнее всего, обработку остановили до сохранения карточек.' : run ? 'Карточки ещё не сохранены. Смотри стадии выше: если active стоит на discovery/answer synthesis, LLM ещё собирает graph context.' : 'FAQ graph run ещё не создан.'}
+          {isLoading ? 'Загружаю состояние pipeline…' : contract.statusReason}
         </div>
       ) : filteredSurfaces.length === 0 ? (
         <p className="text-xs text-[var(--text-muted)]">Нет карточек под выбранный фильтр.</p>
@@ -791,12 +763,7 @@ export const SurfaceCompilationSummary: React.FC<{
                     <p className="mt-1 text-[10px] text-[var(--text-muted)]">key: {surface.surface_key}</p>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={isPublished || publishMutation.isPending}
-                    onClick={() => publishMutation.mutate(surface.id)}
-                    className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+                  <button type="button" disabled={isPublished || publishMutation.isPending || !contract.canPublishRuntime} onClick={() => publishMutation.mutate(surface.id)} className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-not-allowed disabled:opacity-50">
                     {isPublished ? 'Опубликовано' : 'Опубликовать'}
                   </button>
                 </div>
@@ -811,7 +778,6 @@ export const SurfaceCompilationSummary: React.FC<{
                 )}
 
                 {surface.warnings.length > 0 && <div className="mt-2 rounded-lg bg-[var(--accent-warning-bg)] p-2 text-xs text-[var(--accent-warning-text)]">{surface.warnings.join(' · ')}</div>}
-
                 <QuestionChips title="Вопросы, которыми карточка владеет" items={ownedQuestions} />
                 <QuestionChips title="Вопросы, которые перенесены к другим карточкам" items={rejectedQuestions} />
 
@@ -821,8 +787,7 @@ export const SurfaceCompilationSummary: React.FC<{
                     <div className="mt-1 space-y-1">
                       {surfaceRelations.map((item) => (
                         <p key={item.id || `${item.parent_surface_key}-${item.child_surface_key}-${item.relation_type}`}>
-                          {surfaceTitle(item.parent_surface_key, surfaceByKey)} {RELATION_LABELS[item.relation_type] || item.relation_type} {surfaceTitle(item.child_surface_key, surfaceByKey)}
-                          {item.reason ? ` — ${item.reason}` : ''}
+                          {surfaceTitle(item.parent_surface_key, surfaceByKey)} {RELATION_LABELS[item.relation_type] || item.relation_type} {surfaceTitle(item.child_surface_key, surfaceByKey)}{item.reason ? ` — ${item.reason}` : ''}
                         </p>
                       ))}
                     </div>
