@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+import re
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TypeVar
 
@@ -20,12 +21,12 @@ GROQ_MODEL_GPT_OSS_20B = "openai/gpt-oss-20b"
 GROQ_MODEL_LLAMA_31_8B = "llama-3.1-8b-instant"
 
 PRIMARY_CHAIN: tuple[str, ...] = (
+    GROQ_MODEL_LLAMA_31_8B,
+    GROQ_MODEL_QWEN3_32B,
+    GROQ_MODEL_GPT_OSS_20B,
     GROQ_MODEL_LLAMA_4_SCOUT,
     GROQ_MODEL_LLAMA_33_70B,
-    GROQ_MODEL_QWEN3_32B,
     GROQ_MODEL_GPT_OSS_120B,
-    GROQ_MODEL_GPT_OSS_20B,
-    GROQ_MODEL_LLAMA_31_8B,
 )
 
 LARGE_REQUEST_CHAIN: tuple[str, ...] = (
@@ -60,6 +61,7 @@ class GroqLimitKind(StrEnum):
     TPM = "tpm"
     RPM = "rpm"
     TPD = "tpd"
+    RPD = "rpd"
     RATE_LIMIT = "rate_limit"
     TEMPORARY_PROVIDER_ERROR = "temporary_provider_error"
 
@@ -81,10 +83,12 @@ class GroqFallbackPolicy:
     primary_chain: tuple[str, ...] = PRIMARY_CHAIN
     large_request_chain: tuple[str, ...] = LARGE_REQUEST_CHAIN
     cheap_small_chain: tuple[str, ...] = CHEAP_SMALL_CHAIN
-    max_attempts_per_call: int = 8
-    max_attempts_per_model: int = 2
-    max_elapsed_seconds_per_call: float = 120.0
+    max_attempts_per_call: int = 24
+    max_attempts_per_model: int = 1
+    max_elapsed_seconds_per_call: float = 240.0
     base_backoff_seconds: float = 0.25
+    default_rate_limit_cooldown_seconds: float = 60.0
+    max_rate_limit_sleep_seconds: float = 65.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +98,24 @@ class GroqRouteAttempt:
     attempt_index: int
     total_attempt_index: int
     fallback_reason: GroqLimitKind
+
+
+@dataclass(frozen=True, slots=True)
+class GroqRouteState:
+    model: str
+    cooldown_until: float | None = None
+    daily_exhausted: bool = False
+    unsuitable_for_payload: bool = False
+
+    def is_cooling_down(self, *, now: float) -> bool:
+        return self.cooldown_until is not None and self.cooldown_until > now
+
+    def is_available(self, *, now: float) -> bool:
+        return (
+            not self.daily_exhausted
+            and not self.unsuitable_for_payload
+            and not self.is_cooling_down(now=now)
+        )
 
 
 class GroqFallbackExhaustedError(RuntimeError):
@@ -151,18 +173,12 @@ def classify_groq_exception(exc: BaseException) -> GroqLimitKind:
         return GroqLimitKind.REQUEST_TOO_LARGE
 
     if status_code == 429 or "ratelimit" in type_name:
-        daily_markers = (
-            "tokens per day",
-            "requests per day",
-            "daily",
-            "tpd",
-            "rpd",
-            "quota exhausted",
-            "daily quota",
-        )
-        if any(marker in text for marker in daily_markers):
+        if "tokens per day" in text or "tpd" in text or "daily token" in text:
             return GroqLimitKind.TPD
-
+        if "requests per day" in text or "rpd" in text or "daily request" in text:
+            return GroqLimitKind.RPD
+        if "quota exhausted" in text or "daily quota" in text:
+            return GroqLimitKind.TPD
         if "tokens per minute" in text or "tpm" in text:
             return GroqLimitKind.TPM
         if "requests per minute" in text or "rpm" in text:
@@ -184,6 +200,10 @@ def classify_groq_exception(exc: BaseException) -> GroqLimitKind:
     return GroqLimitKind.NONE
 
 
+def is_minute_groq_limit(kind: GroqLimitKind) -> bool:
+    return kind in {GroqLimitKind.TPM, GroqLimitKind.RPM, GroqLimitKind.RATE_LIMIT}
+
+
 def is_transient_groq_limit(kind: GroqLimitKind) -> bool:
     return kind in {
         GroqLimitKind.TPM,
@@ -194,7 +214,7 @@ def is_transient_groq_limit(kind: GroqLimitKind) -> bool:
 
 
 def is_daily_groq_quota(kind: GroqLimitKind) -> bool:
-    return kind == GroqLimitKind.TPD
+    return kind in {GroqLimitKind.TPD, GroqLimitKind.RPD}
 
 
 def is_groq_input_too_large(kind: GroqLimitKind) -> bool:
@@ -212,28 +232,127 @@ def _dedupe_models(models: Iterable[str]) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _message_chars(kwargs: Mapping[str, object]) -> int:
-    messages = kwargs.get("messages")
-    if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
-        return 0
-
-    total = 0
-    for message in messages:
-        if not isinstance(message, Mapping):
-            continue
-        content = message.get("content")
-        if isinstance(content, str):
-            total += len(content)
-        elif isinstance(content, Sequence):
-            total += sum(len(str(item)) for item in content)
-    return total
-
-
 def _is_large_request(kwargs: Mapping[str, object]) -> bool:
-    max_tokens = kwargs.get("max_tokens")
-    if isinstance(max_tokens, int) and max_tokens >= 2_000:
-        return True
-    return _message_chars(kwargs) >= 12_000
+    # Provider response is the source of truth.
+    # Every compiler request starts with llama-3.1-8b-instant.
+    return False
+
+
+_RETRY_AFTER_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"retry(?:\s|-)?after\D+(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"try again in\D+(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"please try again in\D+(\d+(?:\.\d+)?)", re.IGNORECASE),
+)
+
+
+def retry_after_seconds_from_exception(exc: BaseException) -> float | None:
+    retry_after = getattr(exc, "retry_after", None)
+    if isinstance(retry_after, int | float) and retry_after > 0:
+        return float(retry_after)
+
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        header_value = None
+        get_header = getattr(headers, "get", None)
+        if callable(get_header):
+            header_value = get_header("retry-after") or get_header("Retry-After")
+        if header_value is not None:
+            try:
+                parsed = float(str(header_value))
+            except ValueError:
+                parsed = 0.0
+            if parsed > 0:
+                return parsed
+
+    text = _exception_text(exc)
+    for pattern in _RETRY_AFTER_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            try:
+                parsed = float(match.group(1))
+            except ValueError:
+                continue
+            if parsed > 0:
+                return parsed
+    return None
+
+
+@dataclass(slots=True)
+class _RouteStateStore:
+    models: list[str]
+    states: dict[str, GroqRouteState] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for model in self.models:
+            self.states.setdefault(model, GroqRouteState(model=model))
+
+    def append_models(self, models: Iterable[str]) -> None:
+        for model in models:
+            if model in self.states or model in DISALLOWED_COMPILER_MODELS:
+                continue
+            self.models.append(model)
+            self.states[model] = GroqRouteState(model=model)
+
+    def next_available_model(self, *, now: float) -> str | None:
+        for model in self.models:
+            state = self.states[model]
+            if state.is_available(now=now):
+                return model
+        return None
+
+    def nearest_cooldown_until(self, *, now: float) -> float | None:
+        cooldowns = [
+            state.cooldown_until
+            for state in self.states.values()
+            if state.cooldown_until is not None
+            and state.cooldown_until > now
+            and not state.daily_exhausted
+            and not state.unsuitable_for_payload
+        ]
+        if not cooldowns:
+            return None
+        return min(cooldowns)
+
+    def has_non_daily_routes(self) -> bool:
+        return any(not state.daily_exhausted for state in self.states.values())
+
+    def mark_unsuitable_for_payload(self, model: str) -> None:
+        state = self.states[model]
+        self.states[model] = GroqRouteState(
+            model=model,
+            cooldown_until=state.cooldown_until,
+            daily_exhausted=state.daily_exhausted,
+            unsuitable_for_payload=True,
+        )
+
+    def mark_daily_exhausted(self, model: str) -> None:
+        state = self.states[model]
+        self.states[model] = GroqRouteState(
+            model=model,
+            cooldown_until=state.cooldown_until,
+            daily_exhausted=True,
+            unsuitable_for_payload=state.unsuitable_for_payload,
+        )
+
+    def mark_cooldown(self, model: str, *, cooldown_until: float) -> None:
+        state = self.states[model]
+        self.states[model] = GroqRouteState(
+            model=model,
+            cooldown_until=cooldown_until,
+            daily_exhausted=state.daily_exhausted,
+            unsuitable_for_payload=state.unsuitable_for_payload,
+        )
+
+    def clear_expired_cooldowns(self, *, now: float) -> None:
+        for model, state in list(self.states.items()):
+            if state.cooldown_until is not None and state.cooldown_until <= now:
+                self.states[model] = GroqRouteState(
+                    model=model,
+                    cooldown_until=None,
+                    daily_exhausted=state.daily_exhausted,
+                    unsuitable_for_payload=state.unsuitable_for_payload,
+                )
 
 
 class GroqModelRouter:
@@ -246,28 +365,18 @@ class GroqModelRouter:
         requested_model: str | None,
         kwargs: Mapping[str, object],
     ) -> tuple[GroqRouteChain, tuple[str, ...]]:
+        # Hard invariant: every compiler request starts with the weak/cheap
+        # instant-first chain. requested_model is never allowed to jump ahead.
         if requested_model in DISALLOWED_COMPILER_MODELS:
             requested_model = None
 
-        if _is_large_request(kwargs):
-            chain_name = GroqRouteChain.LARGE_REQUEST
-            chain = self._policy.large_request_chain
-            requested_prefix = (requested_model,) if requested_model in chain else ()
-            return chain_name, _dedupe_models((*requested_prefix, *chain))
-
-        if requested_model in self._policy.cheap_small_chain:
-            chain_name = GroqRouteChain.CHEAP_SMALL
-            chain = self._policy.cheap_small_chain
-        elif requested_model in self._policy.large_request_chain:
-            chain_name = GroqRouteChain.LARGE_REQUEST
-            chain = self._policy.large_request_chain
-        else:
-            chain_name = GroqRouteChain.PRIMARY
-            chain = self._policy.primary_chain
-
-        if requested_model:
-            return chain_name, _dedupe_models((requested_model, *chain))
-        return chain_name, _dedupe_models(chain)
+        chain_name = GroqRouteChain.CHEAP_SMALL
+        chain = self._policy.cheap_small_chain
+        if requested_model and requested_model not in chain:
+            return chain_name, _dedupe_models(
+                (*chain, requested_model, *self._policy.primary_chain)
+            )
+        return chain_name, _dedupe_models((*chain, *self._policy.primary_chain))
 
     async def run_chat_completion(
         self,
@@ -284,109 +393,150 @@ class GroqModelRouter:
             requested_model=requested_model_text,
             kwargs=kwargs,
         )
-        models = list(selected_models)
-        if not models:
+        store = _RouteStateStore(models=list(selected_models))
+        if not store.models:
             raise GroqFallbackExhaustedError(
                 failure_type=GroqRouteFailureType.ALL_FALLBACKS_EXHAUSTED,
                 message="No Groq fallback models are available for this call",
             )
 
-        started_at = asyncio.get_running_loop().time()
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
         total_attempts = 0
+        per_model_attempts: dict[str, int] = {}
         last_error: BaseException | None = None
         last_limit_kind = GroqLimitKind.NONE
 
-        for model in models:
-            model_attempts = 0
-            fallback_reason = last_limit_kind
-            while model_attempts < self._policy.max_attempts_per_model:
-                elapsed = asyncio.get_running_loop().time() - started_at
-                if total_attempts >= self._policy.max_attempts_per_call:
-                    raise self._exhausted_error(
-                        last_limit_kind=last_limit_kind,
-                        last_error=last_error,
-                        reason="max attempts per call exhausted",
-                    )
-                if elapsed >= self._policy.max_elapsed_seconds_per_call:
-                    raise self._exhausted_error(
-                        last_limit_kind=last_limit_kind,
-                        last_error=last_error,
-                        reason="max elapsed seconds per call exhausted",
-                    )
+        while True:
+            now = loop.time()
+            elapsed = now - started_at
+            store.clear_expired_cooldowns(now=now)
 
-                routed_kwargs = dict(kwargs)
-                routed_kwargs["model"] = model
-                model_attempts += 1
-                total_attempts += 1
-                attempt = GroqRouteAttempt(
-                    model=model,
-                    chain=chain_name,
-                    attempt_index=model_attempts,
-                    total_attempt_index=total_attempts,
-                    fallback_reason=fallback_reason,
+            if total_attempts >= self._policy.max_attempts_per_call:
+                raise self._exhausted_error(
+                    last_limit_kind=last_limit_kind,
+                    last_error=last_error,
+                    reason="max attempts per call exhausted",
+                )
+            if elapsed >= self._policy.max_elapsed_seconds_per_call:
+                raise self._exhausted_error(
+                    last_limit_kind=last_limit_kind,
+                    last_error=last_error,
+                    reason="max elapsed seconds per call exhausted",
                 )
 
-                try:
-                    self._log_attempt(operation_name=operation_name, attempt=attempt)
-                    return await create_call(routed_kwargs)
-                except Exception as exc:
-                    last_error = exc
-                    last_limit_kind = classify_groq_exception(exc)
-                    fallback_reason = last_limit_kind
-                    if last_limit_kind == GroqLimitKind.NONE:
-                        raise
-
-                    if is_groq_input_too_large(last_limit_kind):
-                        if chain_name != GroqRouteChain.LARGE_REQUEST:
-                            for fallback_model in self._policy.large_request_chain:
-                                if fallback_model not in models:
-                                    models.append(fallback_model)
+            model = store.next_available_model(now=now)
+            if model is None:
+                cooldown_until = store.nearest_cooldown_until(now=now)
+                if cooldown_until is not None and store.has_non_daily_routes():
+                    sleep_seconds = min(
+                        max(cooldown_until - now, 0.0),
+                        self._policy.max_rate_limit_sleep_seconds,
+                    )
+                    if sleep_seconds > 0:
                         logger.warning(
-                            "Groq model rejected request size; trying next fallback model",
+                            "All Groq routes are cooling down; waiting for rate-limit reset",
                             extra={
                                 "operation": operation_name,
-                                "model": model,
-                                "limit_kind": last_limit_kind.value,
-                                "chain": chain_name.value,
+                                "sleep_seconds": round(sleep_seconds, 3),
+                                "last_limit_kind": last_limit_kind.value,
                             },
                         )
-                        break
+                        await asyncio.sleep(sleep_seconds)
+                        continue
 
-                    if is_daily_groq_quota(last_limit_kind):
-                        logger.warning(
-                            "Groq daily quota exhausted for route; trying next fallback model",
-                            extra={
-                                "operation": operation_name,
-                                "model": model,
-                                "limit_kind": last_limit_kind.value,
-                                "chain": chain_name.value,
-                            },
-                        )
-                        break
+                raise self._exhausted_error(
+                    last_limit_kind=last_limit_kind,
+                    last_error=last_error,
+                    reason="all fallback models exhausted",
+                )
 
-                    if is_transient_groq_limit(last_limit_kind):
-                        await self._bounded_backoff(total_attempts=total_attempts)
-                        if model_attempts < self._policy.max_attempts_per_model:
-                            continue
-                        logger.warning(
-                            "Groq transient limit exhausted for model; trying fallback model",
-                            extra={
-                                "operation": operation_name,
-                                "model": model,
-                                "limit_kind": last_limit_kind.value,
-                                "chain": chain_name.value,
-                                "attempts_for_model": model_attempts,
-                            },
-                        )
-                        break
+            per_model_attempts[model] = per_model_attempts.get(model, 0) + 1
+            model_attempts = per_model_attempts[model]
 
+            total_attempts += 1
+            attempt = GroqRouteAttempt(
+                model=model,
+                chain=chain_name,
+                attempt_index=model_attempts,
+                total_attempt_index=total_attempts,
+                fallback_reason=last_limit_kind,
+            )
+
+            routed_kwargs = dict(kwargs)
+            routed_kwargs["model"] = model
+
+            try:
+                self._log_attempt(operation_name=operation_name, attempt=attempt)
+                return await create_call(routed_kwargs)
+            except Exception as exc:
+                last_error = exc
+                last_limit_kind = classify_groq_exception(exc)
+
+                if last_limit_kind == GroqLimitKind.NONE:
                     raise
 
-        raise self._exhausted_error(
-            last_limit_kind=last_limit_kind,
-            last_error=last_error,
-            reason="all fallback models exhausted",
-        )
+                if is_groq_input_too_large(last_limit_kind):
+                    store.mark_unsuitable_for_payload(model)
+                    store.append_models(self._policy.large_request_chain)
+                    logger.warning(
+                        "Groq model rejected request size; trying large-capable fallback models",
+                        extra={
+                            "operation": operation_name,
+                            "model": model,
+                            "limit_kind": last_limit_kind.value,
+                            "chain": chain_name.value,
+                        },
+                    )
+                    continue
+
+                if is_daily_groq_quota(last_limit_kind):
+                    store.mark_daily_exhausted(model)
+                    logger.warning(
+                        "Groq daily quota exhausted for route; disabling route for this call",
+                        extra={
+                            "operation": operation_name,
+                            "model": model,
+                            "limit_kind": last_limit_kind.value,
+                            "chain": chain_name.value,
+                        },
+                    )
+                    continue
+
+                if is_minute_groq_limit(last_limit_kind):
+                    retry_after = retry_after_seconds_from_exception(exc)
+                    cooldown_seconds = (
+                        retry_after
+                        if retry_after is not None
+                        else self._policy.default_rate_limit_cooldown_seconds
+                    )
+                    store.mark_cooldown(
+                        model,
+                        cooldown_until=loop.time() + max(cooldown_seconds, 0.0),
+                    )
+                    logger.warning(
+                        "Groq minute rate limit hit for route; cooling route and trying another model",
+                        extra={
+                            "operation": operation_name,
+                            "model": model,
+                            "limit_kind": last_limit_kind.value,
+                            "chain": chain_name.value,
+                            "cooldown_seconds": round(cooldown_seconds, 3),
+                        },
+                    )
+                    continue
+
+                if last_limit_kind == GroqLimitKind.TEMPORARY_PROVIDER_ERROR:
+                    if model_attempts < self._policy.max_attempts_per_model:
+                        await self._bounded_backoff(total_attempts=total_attempts)
+                        continue
+                    store.mark_cooldown(
+                        model,
+                        cooldown_until=loop.time() + self._policy.base_backoff_seconds,
+                    )
+                    continue
+
+                raise
 
     async def _bounded_backoff(self, *, total_attempts: int) -> None:
         delay = min(
