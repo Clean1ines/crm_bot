@@ -38,6 +38,13 @@ const metricText = (metrics: MetricsRecord | null | undefined, key: string): str
   return trimmed || null;
 };
 
+const metricBoolean = (metrics: MetricsRecord | null | undefined, key: string): boolean => {
+  const value = metrics?.[key];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
+  return false;
+};
+
 const formatCounts = (value: unknown): string | null => {
   const record = metricObject(value);
   if (!record) return null;
@@ -98,6 +105,33 @@ const faqProgressLabel = (
   }
   if (stage.startsWith('global_') || stage === 'question_reassignment') return `global stage: ${stage}`;
   return null;
+};
+
+
+const economyModeRows = (
+  doc: DocumentLite,
+  processingReport: KnowledgeProcessingReport | undefined,
+  formatNumber: (value: number) => string,
+): string[] => {
+  const metrics = activeMetrics(doc, processingReport);
+  if (!metrics || !metricBoolean(metrics, 'economy_mode')) return [];
+
+  const rows: string[] = ['Economy mode: enabled'];
+  const reason = metricText(metrics, 'economy_reason');
+  const splitCount = metricNumber(metrics, 'economy_source_unit_split_count')
+    ?? metricNumber(metrics, 'economy_subunit_count');
+  const completedSubunits = metricNumber(metrics, 'economy_completed_subunit_count');
+  const warning = metricText(metrics, 'economy_quality_warning')
+    ?? metricText(metrics, 'quality_warning');
+
+  if (reason) rows.push(`Economy reason: ${reason}`);
+  if (splitCount !== null) rows.push(`Source unit split count: ${formatNumber(splitCount)}`);
+  if (completedSubunits !== null) {
+    rows.push(`Instant subunits completed: ${formatNumber(completedSubunits)}`);
+  }
+  if (warning) rows.push(`Quality warning: ${warning}`);
+
+  return rows;
 };
 
 const groqRouteRows = (
@@ -363,6 +397,9 @@ export const DocumentProcessingBlock: React.FC<{
               <div key={row}>{row}</div>
             ))}
             {groqRouteRows(doc, processingReport, formatNumber).map((row) => (
+              <div key={row}>{row}</div>
+            ))}
+            {economyModeRows(doc, processingReport, formatNumber).map((row) => (
               <div key={row}>{row}</div>
             ))}
             {sourceChunkCount !== null && (

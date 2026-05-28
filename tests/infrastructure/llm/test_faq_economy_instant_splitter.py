@@ -48,8 +48,7 @@ def test_split_source_unit_for_instant_prefers_markdown_sections() -> None:
     assert len(subunits) == 3
     assert [item.metadata["subunit_index"] for item in subunits] == [1, 2, 3]
     assert all(
-        item.metadata["original_source_unit_key"] == "unit:key"
-        for item in subunits
+        item.metadata["original_source_unit_key"] == "unit:key" for item in subunits
     )
     assert all(item.source_refs == ("chunk:0",) for item in subunits)
     assert "# Alpha" in subunits[0].body
