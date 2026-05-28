@@ -75,18 +75,6 @@ class Settings(BaseSettings):
         "llama-3.1-8b-instant",
         description="Groq model used by knowledge document preprocessing/compiler jobs",
     )
-    GROQ_KNOWLEDGE_MAX_CALLS_PER_DOCUMENT: int = Field(
-        96,
-        ge=1,
-        le=10_000,
-        description="Maximum Groq compiler calls allowed for one knowledge document",
-    )
-    GROQ_KNOWLEDGE_MAX_TOKENS_PER_DOCUMENT: int = Field(
-        350_000,
-        ge=1,
-        le=50_000_000,
-        description="Maximum Groq compiler tokens allowed for one knowledge document",
-    )
 
     # Optional Redis (for future use)
     REDIS_URL: str = Field("", description="Redis connection string (optional)")
