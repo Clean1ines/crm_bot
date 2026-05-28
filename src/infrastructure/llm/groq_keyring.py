@@ -79,6 +79,33 @@ class GroqApiKeyRing:
             key_count=len(keys),
         )
 
+    async def acquire_next(self) -> GroqKeySelection:
+        """Return the next key for a top-level LLM call.
+
+        This spreads concurrent compiler batches across configured keys before
+        any model-level fallback happens. Model fallback still runs inside the
+        selected key first; key rotation is only a second-level fallback.
+        """
+        async with self._lock:
+            keys = configured_groq_api_keys()
+            if not keys:
+                raise RuntimeError("No Groq API keys are configured")
+
+            if keys != self._keys:
+                self._keys = keys
+                self._index = 0
+
+            if self._index >= len(keys):
+                self._index = 0
+
+            selection = GroqKeySelection(
+                key=keys[self._index],
+                index=self._index,
+                key_count=len(keys),
+            )
+            self._index = (self._index + 1) % len(keys)
+            return selection
+
     async def rotate_after_rate_limit(
         self,
         *,
