@@ -930,10 +930,47 @@ class KnowledgeFaqSurfaceIngestionService:
         )
         await repo.update_document_status(document_id, "processed")
         logger.info(
-            "FAQ retrieval surface compilation completed",
+            "Knowledge document completed",
             extra={
                 "project_id": project_id,
                 "document_id": document_id,
+                "run_id": run_id,
+                "job_id": None,
+                "stage_kind": "faq_retrieval_surface_compilation_completed",
+                "source_unit_count": len(graph.source_units),
+                "source_unit_key": None,
+                "source_unit_index": None,
+                "candidate_index": None,
+                "requested_model": compiler.model_name,
+                "actual_model": result.model,
+                "key_slot": preprocessing_metrics.get("groq_key_slot_counts"),
+                "limit_kind": preprocessing_metrics.get("limit_kind"),
+                "fallback_reason": preprocessing_metrics.get("fallback_reason"),
+                "tokens_prompt": preprocessing_metrics.get("tokens_input")
+                or preprocessing_metrics.get("llm_tokens_input"),
+                "tokens_completion": preprocessing_metrics.get("tokens_output")
+                or preprocessing_metrics.get("llm_tokens_output"),
+                "tokens_total": preprocessing_metrics.get("tokens_total")
+                or preprocessing_metrics.get("llm_tokens_total"),
+                "duration_ms": preprocessing_metrics.get("duration_ms"),
+                "checkpoint_reused": preprocessing_metrics.get("checkpoint_reused"),
+                "economy_mode": preprocessing_metrics.get("economy_mode", False),
+                "total_calls": preprocessing_metrics.get("llm_call_count")
+                or preprocessing_metrics.get("groq_route_event_count"),
+                "total_tokens": preprocessing_metrics.get("tokens_total")
+                or preprocessing_metrics.get("llm_tokens_total"),
+                "models": preprocessing_metrics.get("model_counts")
+                or preprocessing_metrics.get("groq_actual_model_counts")
+                or result.model,
+                "key_slots": preprocessing_metrics.get("groq_key_slot_counts"),
+                "fallback_counts": preprocessing_metrics.get("fallback_counts"),
+                "cooldown_counts": preprocessing_metrics.get(
+                    "groq_route_cooldown_block_count"
+                ),
+                "checkpoint_reused_count": preprocessing_metrics.get(
+                    "source_unit_checkpoint_reused_count",
+                    preprocessing_metrics.get("checkpoint_reused_count"),
+                ),
                 "surface_count": len(graph.surfaces),
                 "ownership_count": len(graph.ownership),
             },

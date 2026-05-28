@@ -590,13 +590,26 @@ export const KnowledgePage: React.FC = () => {
       return list as Document[];
     },
     enabled: !!projectId,
-    refetchInterval: (query) => {
-      const docs = Array.isArray(query.state.data) ? query.state.data as Document[] : [];
-      return docs.some(isDocumentProcessing) ? 3000 : false;
-    },
+    retry: false,
   });
 
-  const documents = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
+  const baseDocuments = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
+  const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
+  const processingOverviewQuery = useQuery({
+    queryKey: ['knowledge-processing-overview', projectId],
+    queryFn: async () => {
+      if (!projectId) return undefined;
+      const { data } = await knowledgeApi.processingOverview(projectId);
+      return data;
+    },
+    enabled: !!projectId && baseHasProcessingDocuments,
+    retry: false,
+    refetchInterval: baseHasProcessingDocuments ? 3000 : false,
+  });
+  const overviewDocuments = Array.isArray(processingOverviewQuery.data?.documents)
+    ? processingOverviewQuery.data.documents as unknown as Document[]
+    : [];
+  const documents = overviewDocuments.length > 0 ? overviewDocuments : baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
   const reportableDocuments = documents.filter((doc) => (
     isDocumentProcessing(doc) || isDocumentFailed(doc) || isDocumentCancelled(doc) || Boolean(doc.structured_entries)
@@ -625,12 +638,15 @@ export const KnowledgePage: React.FC = () => {
         return acc;
       }, {});
     },
-    enabled: !!projectId && reportableDocumentIds.length > 0,
+    enabled: !!projectId && reportableDocumentIds.length > 0 && !baseHasProcessingDocuments,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
-  const processingReports = processingReportsQuery.data || {};
-  const importQualityDocumentIds = documents.map((doc) => doc.id).sort();
+  const processingReports = (
+    processingOverviewQuery.data?.processing_reports
+    || processingReportsQuery.data
+    || {}
+  );
+  const importQualityDocumentIds = hasProcessingDocuments ? [] : documents.map((doc) => doc.id).sort();
   const importQualityReportsQuery = useQuery({
     queryKey: ['knowledge-import-quality-reports', projectId, importQualityDocumentIds.join(',')],
     queryFn: async () => {
@@ -656,20 +672,24 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId && importQualityDocumentIds.length > 0,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const importQualityReports = importQualityReportsQuery.data || {};
-  const draftPreviewDocumentIds = Object.values(processingReports)
-    .filter((report) => {
-      const document = documents.find((doc) => doc.id === report.document_id);
-      const draftCount = metricNumber(report.metrics, 'raw_draft_count')
-        ?? metricNumber(report.metrics, 'draft_answer_count')
-        ?? 0;
-      const publishedCount = metricNumber(report.metrics, 'published_answer_count') ?? 0;
-      return Boolean(document && isDocumentProcessing(document)) || draftCount > publishedCount;
-    })
-    .map((report) => report.document_id)
-    .sort();
+  const draftPreviewDocumentIds = (
+    draftsDocumentId
+      ? [draftsDocumentId]
+      : hasProcessingDocuments
+        ? []
+        : Object.values(processingReports)
+          .filter((report) => {
+            const document = documents.find((doc) => doc.id === report.document_id);
+            const draftCount = metricNumber(report.metrics, 'raw_draft_count')
+              ?? metricNumber(report.metrics, 'draft_answer_count')
+              ?? 0;
+            const publishedCount = metricNumber(report.metrics, 'published_answer_count') ?? 0;
+            return Boolean(document && isDocumentProcessing(document)) || draftCount > publishedCount;
+          })
+          .map((report) => report.document_id)
+  ).sort();
   const answerDraftsQuery = useQuery({
     queryKey: ['knowledge-answer-drafts', projectId, draftPreviewDocumentIds.join(','), DRAFT_FETCH_LIMIT],
     queryFn: async () => {
@@ -695,19 +715,23 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId && draftPreviewDocumentIds.length > 0,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const answerDrafts = answerDraftsQuery.data || {};
-  const sourceUnitDocumentIds = Object.values(processingReports)
-    .filter((report) => {
-      const document = documents.find((doc) => doc.id === report.document_id);
-      const sourceCount = metricNumber(report.metrics, 'raw_source_chunk_count')
-        ?? metricNumber(report.metrics, 'source_chunk_count')
-        ?? (document && Number.isFinite(document.chunk_count) ? document.chunk_count : 0);
-      return Boolean(document && isDocumentProcessing(document)) || sourceCount > 0;
-    })
-    .map((report) => report.document_id)
-    .sort();
+  const sourceUnitDocumentIds = (
+    sourceUnitsDocumentId
+      ? [sourceUnitsDocumentId]
+      : hasProcessingDocuments
+        ? []
+        : Object.values(processingReports)
+          .filter((report) => {
+            const document = documents.find((doc) => doc.id === report.document_id);
+            const sourceCount = metricNumber(report.metrics, 'raw_source_chunk_count')
+              ?? metricNumber(report.metrics, 'source_chunk_count')
+              ?? (document && Number.isFinite(document.chunk_count) ? document.chunk_count : 0);
+            return Boolean(document && isDocumentProcessing(document)) || sourceCount > 0;
+          })
+          .map((report) => report.document_id)
+  ).sort();
   const sourceUnitsQuery = useQuery({
     queryKey: ['knowledge-source-units', projectId, sourceUnitDocumentIds.join(','), SOURCE_UNIT_FETCH_LIMIT],
     queryFn: async () => {
@@ -733,13 +757,14 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId && sourceUnitDocumentIds.length > 0,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const sourceUnits = sourceUnitsQuery.data || {};
-  const priceFactDocumentIds = documents
-    .filter((doc) => shouldFetchPriceFactsForDocument(doc, processingReports[doc.id]))
-    .map((doc) => doc.id)
-    .sort();
+  const priceFactDocumentIds = hasProcessingDocuments
+    ? []
+    : documents
+      .filter((doc) => shouldFetchPriceFactsForDocument(doc, processingReports[doc.id]))
+      .map((doc) => doc.id)
+      .sort();
   const priceFactsQuery = useQuery({
     queryKey: ['knowledge-price-facts', projectId, priceFactDocumentIds.join(',')],
     queryFn: async () => {
@@ -765,7 +790,6 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId && priceFactDocumentIds.length > 0,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const priceFacts = priceFactsQuery.data || {};
   const [commercialTruthReviewPolicy, setCommercialTruthReviewPolicy] = useState<KnowledgeCommercialTruthReviewPolicy>('manual_review');
@@ -780,9 +804,8 @@ export const KnowledgePage: React.FC = () => {
       );
       return data;
     },
-    enabled: !!projectId,
+    enabled: !!projectId && !hasProcessingDocuments,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const commercialTruthReviewQuery = useQuery({
     queryKey: ['knowledge-commercial-truth-review', projectId, priceFactDocumentIds.join(','), commercialTruthReviewPolicy],
@@ -807,9 +830,8 @@ export const KnowledgePage: React.FC = () => {
         return acc;
       }, {});
     },
-    enabled: !!projectId && priceFactDocumentIds.length > 0,
+    enabled: !!projectId && priceFactDocumentIds.length > 0 && !hasProcessingDocuments,
     retry: false,
-    refetchInterval: hasProcessingDocuments ? 3000 : false,
   });
   const commercialTruthReviews = commercialTruthReviewQuery.data || {};
   const draftsDocument = draftsDocumentId
