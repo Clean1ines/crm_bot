@@ -29,6 +29,12 @@ _STATE_TTL_SECONDS: Final[int] = 3 * 24 * 60 * 60
 class GroqRouteQuotaBlockedError(RuntimeError):
     """Raised when a Groq key/model route is known to be cooling down."""
 
+    status_code = 429
+
+    def __init__(self, message: str, *, retry_after: float) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 @dataclass(frozen=True, slots=True)
 class GroqRouteQuotaIdentity:
@@ -258,7 +264,8 @@ async def wait_or_block_groq_route(identity: GroqRouteQuotaIdentity) -> None:
         "groq_quota_exhausted: route is cooling down for "
         f"{round(remaining, 1)}s; model={identity.model}; "
         f"key_slot={identity.key_index + 1}/{identity.key_count}; "
-        f"limit_kind={state.limit_kind}"
+        f"limit_kind={state.limit_kind}; try again in {round(remaining, 1)}s",
+        retry_after=remaining,
     )
 
 
