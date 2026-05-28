@@ -125,7 +125,9 @@ def _state_from_payload(payload: str) -> GroqRouteQuotaState | None:
     limit_kind = data.get("limit_kind")
     last_error = data.get("last_error")
     updated_at_epoch = data.get("updated_at_epoch")
-    if isinstance(updated_at_epoch, bool) or not isinstance(updated_at_epoch, int | float):
+    if isinstance(updated_at_epoch, bool) or not isinstance(
+        updated_at_epoch, int | float
+    ):
         updated_at_epoch = time.time()
 
     return GroqRouteQuotaState(
@@ -182,7 +184,11 @@ async def _redis_set(
         return
     try:
         client = await get_redis_client()
-        await client.set(identity.redis_key, _state_to_payload(state), ex=_STATE_TTL_SECONDS)
+        await client.set(
+            identity.redis_key,
+            _state_to_payload(state),
+            ex=_STATE_TTL_SECONDS,
+        )
     except Exception as exc:
         logger.warning(
             "Groq quota Redis write failed; using process-local quota state only",
