@@ -835,6 +835,42 @@ async def retry_knowledge_failed_batches(
     )
 
 
+@router.post("/{document_id}/resume-processing")
+async def resume_knowledge_processing(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    queue_repo=Depends(get_queue_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Queues explicit resume for a cancelled recoverable FAQ processing run."""
+    service = KnowledgeService(
+        project_repo,
+        user_repo,
+        pool,
+        settings.JWT_SECRET_KEY,
+        jwt_decoder,
+        service_config=KnowledgeServiceConfig(
+            model_usage_monthly_token_budget=int(
+                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
+            ),
+            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
+            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
+        ),
+    )
+    return await service.resume_document_processing(
+        project_id,
+        document_id,
+        authorization,
+        knowledge_repo_factory=make_knowledge_repo,
+        queue_repo=queue_repo,
+        knowledge_upload_task_type=TASK_PROCESS_KNOWLEDGE_UPLOAD,
+        logger=logger,
+    )
+
+
 @router.post("/{document_id}/cancel")
 async def cancel_knowledge_processing(
     project_id: str,

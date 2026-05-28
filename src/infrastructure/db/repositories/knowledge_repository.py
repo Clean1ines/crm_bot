@@ -142,6 +142,7 @@ from src.infrastructure.db.repositories.knowledge_document_persistence import (
     create_document as persist_create_document,
     mark_document_processing_cancelled,
     merge_document_preprocessing_metrics,
+    resume_document_processing as persist_resume_document_processing,
     update_document_preprocessing_status as persist_update_document_preprocessing_status,
     update_document_status as persist_update_document_status,
 )
@@ -296,6 +297,28 @@ class KnowledgeRepository:
                 )
 
         return True
+
+    async def resume_document_processing(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        mode: KnowledgePreprocessingMode,
+        model: str | None = None,
+        prompt_version: str | None = None,
+        metrics: JsonObject | None = None,
+    ) -> bool:
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                return await persist_resume_document_processing(
+                    conn,
+                    project_id=project_id,
+                    document_id=document_id,
+                    mode=mode,
+                    model=model,
+                    prompt_version=prompt_version,
+                    metrics=metrics,
+                )
 
     async def is_document_processing_cancelled(self, document_id: str) -> bool:
         async with self.pool.acquire() as conn:

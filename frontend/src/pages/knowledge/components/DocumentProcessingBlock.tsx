@@ -242,10 +242,13 @@ export const DocumentProcessingBlock: React.FC<{
   onOpenSourceUnits: () => void;
   onRetryFailedBatches: () => void;
   onPublishReady: () => void;
+  onResumeProcessing: () => void;
   retryPending: boolean;
   retryTarget?: string;
   publishReadyPending: boolean;
   publishReadyTarget?: string;
+  resumePending: boolean;
+  resumeTarget?: string;
   formatNumber: (value: number) => string;
   answerResolutionStepId: string;
   renderDraftsSummary: (params: { response: KnowledgeAnswerDraftsResponse | undefined; isLoading: boolean; onOpen: () => void; }) => React.ReactNode;
@@ -277,10 +280,13 @@ export const DocumentProcessingBlock: React.FC<{
   onOpenSourceUnits,
   onRetryFailedBatches,
   onPublishReady,
+  onResumeProcessing,
   retryPending,
   retryTarget,
   publishReadyPending,
   publishReadyTarget,
+  resumePending,
+  resumeTarget,
   formatNumber,
   answerResolutionStepId,
   renderDraftsSummary,
@@ -346,17 +352,32 @@ export const DocumentProcessingBlock: React.FC<{
                 {processingReport.actions.map((action) => {
                   const canRetry = action.id === 'retry_failed_batches' && action.enabled;
                   const canPublishReady = action.id === 'publish_ready' && action.enabled;
+                  const canResume = action.id === 'resume_processing' && action.enabled;
                   const isRetryingThisDoc = retryPending && retryTarget === doc.id;
                   const isPublishingThisDoc = publishReadyPending && publishReadyTarget === doc.id;
+                  const isResumingThisDoc = resumePending && resumeTarget === doc.id;
 
-                  if (canRetry || canPublishReady) {
-                    const isPending = canRetry ? isRetryingThisDoc : isPublishingThisDoc;
-                    const mutationPending = canRetry ? retryPending : publishReadyPending;
+                  if (canRetry || canPublishReady || canResume) {
+                    const isPending = canRetry
+                      ? isRetryingThisDoc
+                      : canPublishReady
+                        ? isPublishingThisDoc
+                        : isResumingThisDoc;
+                    const mutationPending = canRetry
+                      ? retryPending
+                      : canPublishReady
+                        ? publishReadyPending
+                        : resumePending;
+                    const onClick = canRetry
+                      ? onRetryFailedBatches
+                      : canPublishReady
+                        ? onPublishReady
+                        : onResumeProcessing;
                     return (
                       <button
                         key={action.id}
                         type="button"
-                        onClick={canRetry ? onRetryFailedBatches : onPublishReady}
+                        onClick={onClick}
                         disabled={mutationPending}
                         className="rounded-full bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
                       >

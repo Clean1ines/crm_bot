@@ -341,6 +341,11 @@ export const knowledgeApi = {
       method: 'POST',
     }),
 
+  resumeProcessing: (projectId: string, documentId: string) =>
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/resume-processing`, {
+      method: 'POST',
+    }),
+
   retighten: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retighten`, {
       method: 'POST',

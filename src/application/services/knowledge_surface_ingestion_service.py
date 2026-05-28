@@ -86,6 +86,8 @@ class KnowledgeSurfaceCancelAwareCompilerPort(Protocol):
 
 
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
+    async def get_document(self, document_id: str) -> object | None: ...
+
     async def delete_document_chunks(self, document_id: str) -> None: ...
 
     async def is_document_processing_cancelled(self, document_id: str) -> bool: ...
@@ -221,6 +223,35 @@ SOURCE_CHILD_LABEL_VALUES: frozenset[str] = frozenset(
         "other",
     }
 )
+
+
+def _number_metric(metrics: object, key: str) -> float | None:
+    if not isinstance(metrics, Mapping):
+        return None
+    value = metrics.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _document_elapsed_before_resume(document: object | None) -> float:
+    if document is None:
+        return 0.0
+    metrics = getattr(document, "preprocessing_metrics", None)
+    explicit = _number_metric(metrics, "elapsed_before_resume_seconds")
+    if explicit is not None and explicit > 0:
+        return explicit
+    elapsed = _number_metric(metrics, "elapsed_seconds")
+    if elapsed is not None and elapsed > 0:
+        return elapsed
+    return 0.0
 
 
 def _compact_text(value: object) -> str:
@@ -488,6 +519,7 @@ class KnowledgeFaqSurfaceIngestionService:
             knowledge_repo_factory(self.pool),
         )
         compiler = surface_compiler_factory()
+        existing_document = await repo.get_document(document_id)
         latest_run = await repo.get_latest_surface_run_for_document(
             project_id=project_id,
             document_id=document_id,
@@ -497,7 +529,7 @@ class KnowledgeFaqSurfaceIngestionService:
             if latest_run is not None
             and latest_run.compiler_kind == "faq_retrieval_surface_compiler"
             and latest_run.prompt_version == GRAPH_PROMPT_VERSION
-            and latest_run.status in {"running", "failed"}
+            and latest_run.status in {"running", "failed", "cancelled"}
             else None
         )
         run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
@@ -539,6 +571,12 @@ class KnowledgeFaqSurfaceIngestionService:
             raise ValidationError(message)
 
         started_at = datetime.now(timezone.utc)
+        elapsed_before_resume = (
+            _document_elapsed_before_resume(existing_document)
+            if resume_run is not None
+            else 0.0
+        )
+        processing_started_at_epoch = started_at.timestamp()
         if resume_run is None:
             await repo.create_surface_compiler_run(
                 RetrievalSurfaceCompilerRun(
@@ -603,8 +641,12 @@ class KnowledgeFaqSurfaceIngestionService:
             metrics={
                 "stage": "faq_retrieval_surface_compilation",
                 "status_message": "Компилируем FAQ в поисковые поверхности",
+                "status": "processing",
                 "source_unit_count": len(source_units),
                 "bootstrap_forbidden": True,
+                "resume_reused_run": resume_run is not None,
+                "elapsed_before_resume_seconds": round(elapsed_before_resume, 1),
+                "processing_started_at_epoch": round(processing_started_at_epoch, 3),
             },
         )
 
@@ -646,6 +688,10 @@ class KnowledgeFaqSurfaceIngestionService:
             if not await is_cancelled(document_id):
                 return
 
+            elapsed_seconds = elapsed_before_resume + max(
+                0.0,
+                (datetime.now(timezone.utc) - started_at).total_seconds(),
+            )
             reason = "Knowledge document processing was cancelled"
             if not cancel_stage_recorded:
                 cancel_stage_recorded = True
@@ -664,6 +710,8 @@ class KnowledgeFaqSurfaceIngestionService:
                             "stage": "faq_retrieval_surface_compilation_cancelled",
                             "cancelled": True,
                             "surface_compiler_run_id": run_id,
+                            "elapsed_seconds": round(elapsed_seconds, 1),
+                            "elapsed_before_resume_seconds": round(elapsed_seconds, 1),
                         },
                     )
                 )
@@ -686,6 +734,8 @@ class KnowledgeFaqSurfaceIngestionService:
                         "status_message": reason,
                         "cancelled": True,
                         "surface_compiler_run_id": run_id,
+                        "elapsed_seconds": round(elapsed_seconds, 1),
+                        "elapsed_before_resume_seconds": round(elapsed_seconds, 1),
                     },
                 )
 

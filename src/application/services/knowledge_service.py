@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from src.application.dto.knowledge_dto import (
     KnowledgeAnswerDraftDto,
@@ -56,7 +56,7 @@ from src.application.services.knowledge_chunk_normalizer import (
 from src.application.services.knowledge_processing_report_builder import (
     build_knowledge_processing_report,
 )
-from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.json_types import JsonObject, JsonValue
 from src.domain.project_plane.knowledge_compilation import AnswerCandidate
 from src.domain.project_plane.knowledge_import_quality import (
     ImportQualitySourceUnit,
@@ -68,8 +68,13 @@ from src.domain.project_plane.knowledge_views import (
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.knowledge_views import KnowledgeDocumentDetailView
 from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
     PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
+)
+from src.domain.project_plane.retrieval_surface_compilation import (
+    RetrievalSurfaceCompilerRun,
+    RetrievalSurfaceSourceUnit,
 )
 
 
@@ -92,9 +97,80 @@ class KnowledgeServiceRepositoryFactoryPort(Protocol):
     def __call__(self, pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort: ...
 
 
+class KnowledgeSurfaceResumeRepositoryPort(KnowledgeServiceRepositoryPort, Protocol):
+    async def get_latest_surface_run_for_document(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> RetrievalSurfaceCompilerRun | None: ...
+
+    async def list_surface_source_units_for_run(
+        self,
+        *,
+        run_id: str,
+    ) -> tuple[RetrievalSurfaceSourceUnit, ...]: ...
+
+
 BEARER_PREFIX = "Bearer "
 UPLOAD_FALLBACK_NAME = "upload"
 KNOWLEDGE_PROCESSING_CANCELLED_MESSAGE = "Остановлено пользователем"
+
+
+def _metric_number(metrics: object, key: str) -> float | None:
+    if not isinstance(metrics, Mapping):
+        return None
+    value = metrics.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _document_resume_elapsed_seconds(document: object) -> float:
+    metrics = getattr(document, "preprocessing_metrics", None)
+    metric_elapsed = _metric_number(metrics, "elapsed_seconds")
+    if metric_elapsed is not None and metric_elapsed > 0:
+        return metric_elapsed
+
+    created_at = getattr(document, "created_at", None)
+    updated_at = getattr(document, "updated_at", None)
+    if isinstance(created_at, datetime) and isinstance(updated_at, datetime):
+        return max(0.0, (updated_at - created_at).total_seconds())
+    return 0.0
+
+
+def _resume_chunks_from_source_units(
+    source_units: Sequence[RetrievalSurfaceSourceUnit],
+) -> list[JsonValue]:
+    chunks: list[JsonValue] = []
+    for index, unit in enumerate(source_units):
+        body = " ".join((unit.body or unit.raw_text or "").strip().split())
+        if not body:
+            continue
+        chunks.append(
+            {
+                "id": unit.source_unit_key,
+                "source_unit_key": unit.source_unit_key,
+                "index": unit.source_chunk_indexes[0]
+                if unit.source_chunk_indexes
+                else index,
+                "title": unit.title,
+                "section_title": unit.title,
+                "section_body": body,
+                "content": body,
+                "section_path": list(unit.section_path),
+                "source_refs": list(unit.source_refs),
+                "source_format": "resumed_surface_source_unit",
+            }
+        )
+    return chunks
 
 
 def _exact_answer_fingerprint(value: str) -> str:
@@ -794,6 +870,107 @@ class KnowledgeService:
             "Knowledge document processing cancelled",
             extra={"project_id": project_id, "document_id": document_id},
         )
+
+    async def resume_document_processing(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
+        queue_repo: KnowledgeQueuePort,
+        knowledge_upload_task_type: str,
+        logger: LoggerPort,
+    ) -> JsonObject:
+        user_id = await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = cast(
+            KnowledgeSurfaceResumeRepositoryPort,
+            knowledge_repo_factory(self.pool),
+        )
+        document = await repo.get_document(document_id)
+        if document is None or document.project_id != project_id:
+            raise NotFoundError("Knowledge document not found")
+
+        latest_run = await repo.get_latest_surface_run_for_document(
+            project_id=project_id,
+            document_id=document_id,
+        )
+        if (
+            latest_run is None
+            or latest_run.compiler_kind != "faq_retrieval_surface_compiler"
+            or latest_run.status not in {"cancelled", "failed", "running"}
+        ):
+            raise ValidationError(
+                "No recoverable FAQ compiler run found for this document"
+            )
+
+        source_units = await repo.list_surface_source_units_for_run(
+            run_id=latest_run.id
+        )
+        resume_chunks = _resume_chunks_from_source_units(source_units)
+        if not resume_chunks:
+            raise ValidationError("No saved FAQ source units found for resume")
+
+        elapsed_before_resume = _document_resume_elapsed_seconds(document)
+        now_epoch = datetime.now(UTC).timestamp()
+        resume_metrics: JsonObject = {
+            "stage": "faq_retrieval_surface_compilation",
+            "status": "processing",
+            "status_message": "Возобновляем обработку документа с сохранённых checkpoint",
+            "surface_compiler_run_id": latest_run.id,
+            "resume_requested": True,
+            "resume_reused_run": True,
+            "source_unit_count": len(source_units),
+            "elapsed_before_resume_seconds": round(elapsed_before_resume, 1),
+            "processing_started_at_epoch": round(now_epoch, 3),
+        }
+
+        resumed = await repo.resume_document_processing(
+            project_id=project_id,
+            document_id=document_id,
+            mode=MODE_FAQ,
+            model=document.preprocessing_model,
+            prompt_version=document.preprocessing_prompt_version,
+            metrics=resume_metrics,
+        )
+        if not resumed:
+            raise NotFoundError("Knowledge document not found")
+
+        job_id = await queue_repo.enqueue(
+            knowledge_upload_task_type,
+            payload={
+                "project_id": project_id,
+                "document_id": document_id,
+                "file_name": document.file_name,
+                "preprocessing_mode": MODE_FAQ,
+                "chunks": resume_chunks,
+                "requested_by": user_id,
+                "source": "knowledge_document_resume",
+                "resume_run_id": latest_run.id,
+            },
+            max_attempts=3,
+        )
+
+        logger.info(
+            "Knowledge document resume queued",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "run_id": latest_run.id,
+                "job_id": job_id,
+                "source_unit_count": len(source_units),
+                "elapsed_before_resume_seconds": round(elapsed_before_resume, 1),
+            },
+        )
+        return {
+            "status": "queued",
+            "job_id": job_id,
+            "document_id": document_id,
+            "run_id": latest_run.id,
+            "source_unit_count": len(source_units),
+        }
 
     async def publish_document_ready_answers(
         self,
