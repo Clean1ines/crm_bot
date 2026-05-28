@@ -8,6 +8,8 @@ from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.utils.uuid_utils import ensure_uuid
 
+PROCESSING_CANCELLED_REASON = "Остановлено пользователем"
+
 
 async def create_document(
     conn: asyncpg.Connection,
@@ -43,10 +45,16 @@ async def update_document_status(
         UPDATE knowledge_documents
         SET status = $1, error = $2, updated_at = NOW()
         WHERE id = $3
+          AND NOT (
+              $1 = 'processed'
+              AND preprocessing_status = 'failed'
+              AND preprocessing_error = $4
+          )
         """,
         status,
         error,
         ensure_uuid(document_id),
+        PROCESSING_CANCELLED_REASON,
     )
 
 
@@ -72,6 +80,11 @@ async def update_document_preprocessing_status(
             preprocessing_metrics = COALESCE($6::jsonb, preprocessing_metrics),
             updated_at = NOW()
         WHERE id = $7
+          AND NOT (
+              $2 = 'completed'
+              AND preprocessing_status = 'failed'
+              AND preprocessing_error = $8
+          )
         """,
         mode,
         status,
@@ -80,6 +93,7 @@ async def update_document_preprocessing_status(
         prompt_version,
         json.dumps(metrics, ensure_ascii=False) if metrics is not None else None,
         ensure_uuid(document_id),
+        PROCESSING_CANCELLED_REASON,
     )
 
 
