@@ -262,11 +262,13 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
         if usable_models:
             return tuple(usable_models)
 
-        return _dedupe_models((
-            "groq/compound-mini",
-            "groq/compound",
-            GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
-        ))
+        return _dedupe_models(
+            (
+                "groq/compound-mini",
+                "groq/compound",
+                GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
+            )
+        )
 
     async def preprocess(
         self,
@@ -316,7 +318,10 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                     response=response,
                 )
                 result = parse_preprocessing_payload(
-                    content, mode=mode, model=request_model, prompt_version=prompt_version
+                    content,
+                    mode=mode,
+                    model=request_model,
+                    prompt_version=prompt_version,
                 )
                 result = _cleanup_faq_preprocessing_result(result)
                 return KnowledgePreprocessingExecutionResult(
@@ -335,7 +340,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                     extra={
                         "mode": mode,
                         "model": request_model,
-                        "fallback_models_remaining": len(request_models) - model_index - 1,
+                        "fallback_models_remaining": len(request_models)
+                        - model_index
+                        - 1,
                         "error_type": type(exc).__name__,
                         "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
                     },
@@ -369,7 +376,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 model=request_models[-1],
             ) from last_rate_limit
 
-        raise KnowledgePreprocessingValidationError("No Groq preprocessing model candidates available")
+        raise KnowledgePreprocessingValidationError(
+            "No Groq preprocessing model candidates available"
+        )
 
     async def resolve_answer_cases(
         self,
@@ -454,7 +463,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                         "mode": mode,
                         "model": request_model,
                         "group_count": len(cases),
-                        "fallback_models_remaining": len(request_models) - model_index - 1,
+                        "fallback_models_remaining": len(request_models)
+                        - model_index
+                        - 1,
                         "error_type": type(exc).__name__,
                         "retry_after_seconds": _rate_limit_retry_after_seconds(exc),
                     },
@@ -489,7 +500,9 @@ class GroqKnowledgePreprocessor(KnowledgePreprocessorPort):
                 model=request_models[-1],
             ) from last_rate_limit
 
-        raise KnowledgePreprocessingValidationError("No Groq answer resolution model candidates available")
+        raise KnowledgePreprocessingValidationError(
+            "No Groq answer resolution model candidates available"
+        )
 
     def _build_answer_resolution_prompt(
         self,
