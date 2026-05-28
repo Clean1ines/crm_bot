@@ -8,6 +8,10 @@ from hashlib import sha256
 from typing import Final
 
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_rate_limit_headers import (
+    GroqRateLimitHeaders,
+    groq_rate_limit_headers_from_source,
+)
 from src.infrastructure.llm.groq_router import (
     GroqLimitKind,
     is_daily_groq_quota,
@@ -57,6 +61,13 @@ class GroqRouteQuotaState:
     failure_count: int
     last_error: str
     updated_at_epoch: float
+    limit_requests: int | None = None
+    remaining_requests: int | None = None
+    reset_requests_epoch: float | None = None
+    limit_tokens: int | None = None
+    remaining_tokens: int | None = None
+    reset_tokens_epoch: float | None = None
+    retry_after_seconds: float | None = None
 
     @property
     def is_blocking_now(self) -> bool:
@@ -74,6 +85,22 @@ class GroqRouteQuotaState:
             return max(0.0, self.cooldown_until_epoch - time.time())
         return 0.0
 
+    def observability_snapshot(self) -> dict[str, object]:
+        return {
+            "limit_kind": self.limit_kind,
+            "cooldown_until_epoch": self.cooldown_until_epoch,
+            "cooldown_remaining_seconds": round(self.remaining_seconds, 3),
+            "failure_count": self.failure_count,
+            "limit_requests": self.limit_requests,
+            "remaining_requests": self.remaining_requests,
+            "reset_requests_epoch": self.reset_requests_epoch,
+            "limit_tokens": self.limit_tokens,
+            "remaining_tokens": self.remaining_tokens,
+            "reset_tokens_epoch": self.reset_tokens_epoch,
+            "retry_after_seconds": self.retry_after_seconds,
+            "updated_at_epoch": self.updated_at_epoch,
+        }
+
 
 @dataclass(slots=True)
 class _InMemoryQuotaStateStore:
@@ -86,6 +113,31 @@ _MEMORY_STORE = _InMemoryQuotaStateStore(states={}, lock=asyncio.Lock())
 
 def _key_hash(raw_key: str) -> str:
     return sha256(raw_key.encode("utf-8")).hexdigest()[:16]
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
 
 
 def groq_route_quota_identity(
@@ -112,33 +164,20 @@ def _state_from_payload(payload: str) -> GroqRouteQuotaState | None:
     if not isinstance(data, dict):
         return None
 
-    cooldown_until_epoch = data.get("cooldown_until_epoch")
-    if isinstance(cooldown_until_epoch, bool) or not isinstance(
-        cooldown_until_epoch, int | float
-    ):
-        cooldown_until_epoch = None
-
-    failure_count = data.get("failure_count")
-    if isinstance(failure_count, bool) or not isinstance(failure_count, int):
-        failure_count = 0
-
-    limit_kind = data.get("limit_kind")
-    last_error = data.get("last_error")
-    updated_at_epoch = data.get("updated_at_epoch")
-    if isinstance(updated_at_epoch, bool) or not isinstance(
-        updated_at_epoch, int | float
-    ):
-        updated_at_epoch = time.time()
-
     return GroqRouteQuotaState(
         cooldown_until_monotonic=None,
-        cooldown_until_epoch=float(cooldown_until_epoch)
-        if cooldown_until_epoch is not None
-        else None,
-        limit_kind=str(limit_kind or GroqLimitKind.NONE.value),
-        failure_count=max(0, failure_count),
-        last_error=str(last_error or ""),
-        updated_at_epoch=float(updated_at_epoch),
+        cooldown_until_epoch=_float_or_none(data.get("cooldown_until_epoch")),
+        limit_kind=str(data.get("limit_kind") or GroqLimitKind.NONE.value),
+        failure_count=max(0, _int_or_none(data.get("failure_count")) or 0),
+        last_error=str(data.get("last_error") or ""),
+        updated_at_epoch=_float_or_none(data.get("updated_at_epoch")) or time.time(),
+        limit_requests=_int_or_none(data.get("limit_requests")),
+        remaining_requests=_int_or_none(data.get("remaining_requests")),
+        reset_requests_epoch=_float_or_none(data.get("reset_requests_epoch")),
+        limit_tokens=_int_or_none(data.get("limit_tokens")),
+        remaining_tokens=_int_or_none(data.get("remaining_tokens")),
+        reset_tokens_epoch=_float_or_none(data.get("reset_tokens_epoch")),
+        retry_after_seconds=_float_or_none(data.get("retry_after_seconds")),
     )
 
 
@@ -154,6 +193,13 @@ def _state_to_payload(state: GroqRouteQuotaState) -> str:
             "failure_count": state.failure_count,
             "last_error": state.last_error,
             "updated_at_epoch": state.updated_at_epoch,
+            "limit_requests": state.limit_requests,
+            "remaining_requests": state.remaining_requests,
+            "reset_requests_epoch": state.reset_requests_epoch,
+            "limit_tokens": state.limit_tokens,
+            "remaining_tokens": state.remaining_tokens,
+            "reset_tokens_epoch": state.reset_tokens_epoch,
+            "retry_after_seconds": state.retry_after_seconds,
         },
         ensure_ascii=False,
     )
@@ -211,13 +257,7 @@ async def _redis_delete(identity: GroqRouteQuotaIdentity) -> None:
 
 async def _memory_get(identity: GroqRouteQuotaIdentity) -> GroqRouteQuotaState | None:
     async with _MEMORY_STORE.lock:
-        state = _MEMORY_STORE.states.get(identity.redis_key)
-        if state is None:
-            return None
-        if not state.is_blocking_now:
-            _MEMORY_STORE.states.pop(identity.redis_key, None)
-            return None
-        return state
+        return _MEMORY_STORE.states.get(identity.redis_key)
 
 
 async def _memory_set(
@@ -237,21 +277,17 @@ async def get_groq_route_quota_state(
     identity: GroqRouteQuotaIdentity,
 ) -> GroqRouteQuotaState | None:
     redis_state = await _redis_get(identity)
-    if redis_state is not None and redis_state.is_blocking_now:
+    if redis_state is not None:
         return redis_state
     return await _memory_get(identity)
 
 
 async def wait_or_block_groq_route(identity: GroqRouteQuotaIdentity) -> None:
     state = await get_groq_route_quota_state(identity)
-    if state is None:
+    if state is None or not state.is_blocking_now:
         return
 
     remaining = state.remaining_seconds
-    if remaining <= 0:
-        await clear_groq_route_quota_state(identity)
-        return
-
     if remaining <= _MAX_PREFLIGHT_SLEEP_SECONDS:
         logger.info(
             "Waiting for Groq route cooldown before request",
@@ -261,6 +297,8 @@ async def wait_or_block_groq_route(identity: GroqRouteQuotaIdentity) -> None:
                 "model": identity.model,
                 "limit_kind": state.limit_kind,
                 "sleep_seconds": round(remaining, 3),
+                "remaining_requests": state.remaining_requests,
+                "remaining_tokens": state.remaining_tokens,
             },
         )
         await asyncio.sleep(remaining)
@@ -294,29 +332,69 @@ def _cooldown_seconds_for_limit(
     return None
 
 
+def _state_from_headers(
+    *,
+    headers: GroqRateLimitHeaders,
+    limit_kind: GroqLimitKind,
+    cooldown_seconds: float | None,
+    failure_count: int,
+    error: str,
+) -> GroqRouteQuotaState:
+    header_block_seconds = headers.blocking_reset_seconds
+    effective_cooldown_seconds = max(
+        cooldown_seconds or 0.0,
+        header_block_seconds or 0.0,
+    )
+    cooldown_until_epoch = (
+        time.time() + effective_cooldown_seconds
+        if effective_cooldown_seconds > 0
+        else None
+    )
+    return GroqRouteQuotaState(
+        cooldown_until_monotonic=(
+            time.monotonic() + effective_cooldown_seconds
+            if effective_cooldown_seconds > 0
+            else None
+        ),
+        cooldown_until_epoch=cooldown_until_epoch,
+        limit_kind=limit_kind.value,
+        failure_count=failure_count,
+        last_error=error[:300],
+        updated_at_epoch=time.time(),
+        limit_requests=headers.limit_requests,
+        remaining_requests=headers.remaining_requests,
+        reset_requests_epoch=headers.reset_requests_epoch,
+        limit_tokens=headers.limit_tokens,
+        remaining_tokens=headers.remaining_tokens,
+        reset_tokens_epoch=headers.reset_tokens_epoch,
+        retry_after_seconds=headers.retry_after_seconds,
+    )
+
+
 async def record_groq_route_failure(
     *,
     identity: GroqRouteQuotaIdentity,
     limit_kind: GroqLimitKind,
     retry_after_seconds: float | None,
     error: str,
+    headers_source: object | None = None,
 ) -> None:
+    headers = groq_rate_limit_headers_from_source(headers_source or {})
     cooldown_seconds = _cooldown_seconds_for_limit(
         limit_kind=limit_kind,
-        retry_after_seconds=retry_after_seconds,
+        retry_after_seconds=retry_after_seconds or headers.retry_after_seconds,
     )
-    if cooldown_seconds is None:
+    if cooldown_seconds is None and headers.blocking_reset_seconds is None:
         return
 
     previous = await get_groq_route_quota_state(identity)
     failure_count = 1 if previous is None else previous.failure_count + 1
-    state = GroqRouteQuotaState(
-        cooldown_until_monotonic=time.monotonic() + cooldown_seconds,
-        cooldown_until_epoch=time.time() + cooldown_seconds,
-        limit_kind=limit_kind.value,
+    state = _state_from_headers(
+        headers=headers,
+        limit_kind=limit_kind,
+        cooldown_seconds=cooldown_seconds,
         failure_count=failure_count,
-        last_error=error[:300],
-        updated_at_epoch=time.time(),
+        error=error,
     )
     await _memory_set(identity, state)
     await _redis_set(identity, state)
@@ -327,11 +405,37 @@ async def record_groq_route_failure(
             "key_count": identity.key_count,
             "model": identity.model,
             "limit_kind": limit_kind.value,
-            "cooldown_seconds": round(cooldown_seconds, 3),
+            "cooldown_seconds": round(state.remaining_seconds, 3),
             "failure_count": failure_count,
+            "remaining_requests": state.remaining_requests,
+            "remaining_tokens": state.remaining_tokens,
         },
     )
 
 
-async def record_groq_route_success(identity: GroqRouteQuotaIdentity) -> None:
-    await clear_groq_route_quota_state(identity)
+async def record_groq_route_success(
+    identity: GroqRouteQuotaIdentity,
+    *,
+    headers_source: object | None = None,
+) -> None:
+    headers = groq_rate_limit_headers_from_source(headers_source or {})
+    if not headers.has_values:
+        await clear_groq_route_quota_state(identity)
+        return
+
+    state = _state_from_headers(
+        headers=headers,
+        limit_kind=GroqLimitKind.NONE,
+        cooldown_seconds=None,
+        failure_count=0,
+        error="",
+    )
+    await _memory_set(identity, state)
+    await _redis_set(identity, state)
+
+
+async def get_groq_route_observability(
+    identity: GroqRouteQuotaIdentity,
+) -> dict[str, object]:
+    state = await get_groq_route_quota_state(identity)
+    return state.observability_snapshot() if state is not None else {}

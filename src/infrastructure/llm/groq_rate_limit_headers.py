@@ -59,17 +59,6 @@ class GroqRateLimitHeaders:
             )
         )
 
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "limit_requests": self.limit_requests,
-            "remaining_requests": self.remaining_requests,
-            "reset_requests_seconds": self.reset_requests_seconds,
-            "limit_tokens": self.limit_tokens,
-            "remaining_tokens": self.remaining_tokens,
-            "reset_tokens_seconds": self.reset_tokens_seconds,
-            "retry_after_seconds": self.retry_after_seconds,
-        }
-
 
 def _int_or_none(value: object) -> int | None:
     if isinstance(value, bool) or value is None:
@@ -100,6 +89,12 @@ def _float_or_none(value: object) -> float | None:
 
 
 def parse_groq_reset_seconds(value: object) -> float | None:
+    """Parse Groq reset/retry header values into seconds.
+
+    Groq may return plain seconds or compact duration strings like
+    ``2m59.56s``. Epoch timestamps are also accepted and converted to a delta.
+    """
+
     numeric = _float_or_none(value)
     if numeric is not None:
         if numeric > 1_000_000_000:
@@ -145,9 +140,11 @@ def _header_value(headers: Mapping[str, object], name: str) -> object | None:
 def _headers_mapping_from_source(source: object) -> Mapping[str, object] | None:
     if isinstance(source, Mapping):
         return source
+
     value = getattr(source, "headers", None)
     if isinstance(value, Mapping):
         return value
+
     for parent_attr in ("response", "http_response", "_response"):
         parent = getattr(source, parent_attr, None)
         if parent is None:
@@ -155,6 +152,7 @@ def _headers_mapping_from_source(source: object) -> Mapping[str, object] | None:
         value = getattr(parent, "headers", None)
         if isinstance(value, Mapping):
             return value
+
     return None
 
 
@@ -164,11 +162,23 @@ def groq_rate_limit_headers_from_source(source: object) -> GroqRateLimitHeaders:
         return GroqRateLimitHeaders()
 
     return GroqRateLimitHeaders(
-        limit_requests=_int_or_none(_header_value(headers, "x-ratelimit-limit-requests")),
-        remaining_requests=_int_or_none(_header_value(headers, "x-ratelimit-remaining-requests")),
-        reset_requests_seconds=parse_groq_reset_seconds(_header_value(headers, "x-ratelimit-reset-requests")),
+        limit_requests=_int_or_none(
+            _header_value(headers, "x-ratelimit-limit-requests")
+        ),
+        remaining_requests=_int_or_none(
+            _header_value(headers, "x-ratelimit-remaining-requests")
+        ),
+        reset_requests_seconds=parse_groq_reset_seconds(
+            _header_value(headers, "x-ratelimit-reset-requests")
+        ),
         limit_tokens=_int_or_none(_header_value(headers, "x-ratelimit-limit-tokens")),
-        remaining_tokens=_int_or_none(_header_value(headers, "x-ratelimit-remaining-tokens")),
-        reset_tokens_seconds=parse_groq_reset_seconds(_header_value(headers, "x-ratelimit-reset-tokens")),
-        retry_after_seconds=parse_groq_reset_seconds(_header_value(headers, "retry-after")),
+        remaining_tokens=_int_or_none(
+            _header_value(headers, "x-ratelimit-remaining-tokens")
+        ),
+        reset_tokens_seconds=parse_groq_reset_seconds(
+            _header_value(headers, "x-ratelimit-reset-tokens")
+        ),
+        retry_after_seconds=parse_groq_reset_seconds(
+            _header_value(headers, "retry-after")
+        ),
     )

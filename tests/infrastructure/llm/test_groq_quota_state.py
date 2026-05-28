@@ -183,4 +183,5 @@ def test_groq_route_observability_snapshot_aggregates_route_events() -> None:
         "total_tokens": 18,
         "error_type": "",
         "error": "",
+        "quota_state": {},
     }
