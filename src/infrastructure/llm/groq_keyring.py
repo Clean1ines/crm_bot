@@ -8,6 +8,12 @@ from typing import Protocol, TypeVar
 from groq import AsyncGroq
 
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.groq_quota_state import (
+    groq_route_quota_identity,
+    record_groq_route_failure,
+    record_groq_route_success,
+    wait_or_block_groq_route,
+)
 from src.infrastructure.llm.groq_router import (
     GroqFallbackExhaustedError,
     GroqModelRouter,
@@ -15,6 +21,7 @@ from src.infrastructure.llm.groq_router import (
     classify_groq_exception,
     is_daily_groq_quota,
     is_transient_groq_limit,
+    retry_after_seconds_from_exception,
 )
 from src.infrastructure.logging.logger import get_logger
 
@@ -54,6 +61,8 @@ class GroqApiKeyRing:
 
     The ring rotates only after provider rate-limit/quota exhaustion errors.
     It intentionally does not rotate on auth/config/network/schema errors.
+    Persistent route cooldowns live in Redis when REDIS_URL is configured and
+    fall back to process-local memory otherwise.
     """
 
     def __init__(self) -> None:
@@ -195,6 +204,11 @@ def is_groq_rate_limit_error(exc: BaseException) -> bool:
     return is_daily_groq_quota(limit_kind) or is_transient_groq_limit(limit_kind)
 
 
+def _routed_model_text(routed_kwargs: dict[str, object]) -> str:
+    model = routed_kwargs.get("model")
+    return model if isinstance(model, str) and model.strip() else "unknown"
+
+
 class GroqClientRotator:
     def __init__(self, *, client: AsyncGroq | None = None) -> None:
         self._injected_client = client is not None
@@ -291,9 +305,30 @@ class _RotatingChatCompletionsProxy:
             attempted_indices.add(selection.index)
 
             async def routed_create(routed_kwargs: dict[str, object]):
+                model = _routed_model_text(routed_kwargs)
+                identity = groq_route_quota_identity(
+                    api_key=selection.key,
+                    key_index=selection.index,
+                    key_count=selection.key_count,
+                    model=model,
+                )
+                await wait_or_block_groq_route(identity)
                 client = AsyncGroq(api_key=selection.key)
                 create = getattr(client.chat.completions, "create")
-                return await create(*args, **routed_kwargs)
+                try:
+                    response = await create(*args, **routed_kwargs)
+                except Exception as exc:
+                    limit_kind = classify_groq_exception(exc)
+                    retry_after = retry_after_seconds_from_exception(exc)
+                    await record_groq_route_failure(
+                        identity=identity,
+                        limit_kind=limit_kind,
+                        retry_after_seconds=retry_after,
+                        error=str(exc),
+                    )
+                    raise
+                await record_groq_route_success(identity)
+                return response
 
             try:
                 return await self._router.run_chat_completion(
