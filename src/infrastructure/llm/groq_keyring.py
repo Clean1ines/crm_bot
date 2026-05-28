@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
@@ -54,6 +54,44 @@ class GroqKeySelection:
     key: str
     index: int
     key_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class GroqRouteEvent:
+    sequence: int
+    status: str
+    requested_model: str
+    routed_model: str
+    key_index: int
+    key_count: int
+    fallback_reason: str
+    limit_kind: str
+    retry_after_seconds: float | None
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    error_type: str
+    error: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "sequence": self.sequence,
+            "status": self.status,
+            "requested_model": self.requested_model,
+            "routed_model": self.routed_model,
+            "key_index": self.key_index,
+            "key_slot": self.key_index + 1,
+            "key_count": self.key_count,
+            "key_slot_label": f"{self.key_index + 1}/{self.key_count}",
+            "fallback_reason": self.fallback_reason,
+            "limit_kind": self.limit_kind,
+            "retry_after_seconds": self.retry_after_seconds,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "error_type": self.error_type,
+            "error": self.error,
+        }
 
 
 class GroqApiKeyRing:
@@ -209,6 +247,34 @@ def _routed_model_text(routed_kwargs: dict[str, object]) -> str:
     return model if isinstance(model, str) and model.strip() else "unknown"
 
 
+def _requested_model_text(kwargs: Mapping[str, object]) -> str:
+    model = kwargs.get("model")
+    return model if isinstance(model, str) and model.strip() else "unknown"
+
+
+def _fallback_reason(
+    *,
+    requested_model: str,
+    routed_model: str,
+    attempted_key_count: int,
+) -> str:
+    reasons: list[str] = []
+    if requested_model != "unknown" and routed_model != requested_model:
+        reasons.append("model_fallback")
+    if attempted_key_count > 1:
+        reasons.append("key_rotation")
+    return ",".join(reasons)
+
+
+def _int_attr(value: object, name: str) -> int:
+    raw_value = getattr(value, name, 0)
+    if isinstance(raw_value, int) and not isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str) and raw_value.strip().isdigit():
+        return int(raw_value)
+    return 0
+
+
 class GroqClientRotator:
     def __init__(self, *, client: AsyncGroq | None = None) -> None:
         self._injected_client = client is not None
@@ -282,8 +348,85 @@ class _RotatingChatCompletionsProxy:
     def __init__(self, rotator: GroqClientRotator) -> None:
         self._rotator = rotator
         self._router = GroqModelRouter()
+        self._route_events: list[GroqRouteEvent] = []
+        self._route_event_sequence = 0
+
+    def _append_route_event(
+        self,
+        *,
+        status: str,
+        requested_model: str,
+        routed_model: str,
+        selection: GroqKeySelection,
+        attempted_key_count: int,
+        limit_kind: str = "",
+        retry_after_seconds: float | None = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        error_type: str = "",
+        error: str = "",
+    ) -> None:
+        self._route_event_sequence += 1
+        self._route_events.append(
+            GroqRouteEvent(
+                sequence=self._route_event_sequence,
+                status=status,
+                requested_model=requested_model,
+                routed_model=routed_model,
+                key_index=selection.index,
+                key_count=selection.key_count,
+                fallback_reason=_fallback_reason(
+                    requested_model=requested_model,
+                    routed_model=routed_model,
+                    attempted_key_count=attempted_key_count,
+                ),
+                limit_kind=limit_kind,
+                retry_after_seconds=retry_after_seconds,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                error_type=error_type,
+                error=error[:300],
+            )
+        )
+        self._route_events = self._route_events[-50:]
+
+    def route_observability_snapshot(self) -> dict[str, object]:
+        events = [event.to_dict() for event in self._route_events]
+        successful_events = [event for event in self._route_events if event.status == "success"]
+        fallback_events = [event for event in self._route_events if event.fallback_reason]
+        cooldown_events = [event for event in self._route_events if event.status == "cooldown_blocked"]
+        failed_events = [event for event in self._route_events if event.status == "failed"]
+        key_slot_counts: dict[str, int] = {}
+        actual_model_counts: dict[str, int] = {}
+        fallback_reason_counts: dict[str, int] = {}
+        for event in successful_events:
+            key = f"{event.key_index + 1}/{event.key_count}"
+            key_slot_counts[key] = key_slot_counts.get(key, 0) + 1
+            actual_model_counts[event.routed_model] = (
+                actual_model_counts.get(event.routed_model, 0) + 1
+            )
+        for event in fallback_events:
+            fallback_reason_counts[event.fallback_reason] = (
+                fallback_reason_counts.get(event.fallback_reason, 0) + 1
+            )
+
+        return {
+            "groq_route_event_count": len(self._route_events),
+            "groq_route_success_count": len(successful_events),
+            "groq_route_failure_count": len(failed_events),
+            "groq_route_cooldown_block_count": len(cooldown_events),
+            "groq_route_fallback_count": len(fallback_events),
+            "groq_key_slot_counts": key_slot_counts,
+            "groq_actual_model_counts": actual_model_counts,
+            "groq_fallback_reason_counts": fallback_reason_counts,
+            "groq_last_route_event": events[-1] if events else {},
+            "groq_route_events": events[-20:],
+        }
 
     async def create(self, *args: object, **kwargs: object):
+        requested_model = _requested_model_text(kwargs)
         if self._rotator._injected_client:
 
             async def routed_create_with_injected_client(
@@ -305,17 +448,17 @@ class _RotatingChatCompletionsProxy:
             attempted_indices.add(selection.index)
 
             async def routed_create(routed_kwargs: dict[str, object]):
-                model = _routed_model_text(routed_kwargs)
+                routed_model = _routed_model_text(routed_kwargs)
                 identity = groq_route_quota_identity(
                     api_key=selection.key,
                     key_index=selection.index,
                     key_count=selection.key_count,
-                    model=model,
+                    model=routed_model,
                 )
-                await wait_or_block_groq_route(identity)
-                client = AsyncGroq(api_key=selection.key)
-                create = getattr(client.chat.completions, "create")
                 try:
+                    await wait_or_block_groq_route(identity)
+                    client = AsyncGroq(api_key=selection.key)
+                    create = getattr(client.chat.completions, "create")
                     response = await create(*args, **routed_kwargs)
                 except Exception as exc:
                     limit_kind = classify_groq_exception(exc)
@@ -326,7 +469,35 @@ class _RotatingChatCompletionsProxy:
                         retry_after_seconds=retry_after,
                         error=str(exc),
                     )
+                    self._append_route_event(
+                        status="cooldown_blocked"
+                        if "groq_quota_exhausted" in str(exc).lower()
+                        else "failed",
+                        requested_model=requested_model,
+                        routed_model=routed_model,
+                        selection=selection,
+                        attempted_key_count=len(attempted_indices),
+                        limit_kind=limit_kind.value,
+                        retry_after_seconds=retry_after,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
                     raise
+
+                usage = getattr(response, "usage", None)
+                prompt_tokens = _int_attr(usage, "prompt_tokens")
+                completion_tokens = _int_attr(usage, "completion_tokens")
+                total_tokens = _int_attr(usage, "total_tokens")
+                self._append_route_event(
+                    status="success",
+                    requested_model=requested_model,
+                    routed_model=routed_model,
+                    selection=selection,
+                    attempted_key_count=len(attempted_indices),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                )
                 await record_groq_route_success(identity)
                 return response
 
@@ -385,6 +556,9 @@ class RotatingAsyncGroq:
     def __init__(self) -> None:
         self._rotator = GroqClientRotator()
         self.chat = _RotatingChatProxy(self._rotator)
+
+    def route_observability_snapshot(self) -> dict[str, object]:
+        return self.chat.completions.route_observability_snapshot()
 
 
 async def ainvoke_chat_with_rotation(
