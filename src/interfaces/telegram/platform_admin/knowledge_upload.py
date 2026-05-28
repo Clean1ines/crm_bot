@@ -57,7 +57,7 @@ async def _upload_context_for_upload(chat_id: str) -> tuple[str | None, str]:
             data.get("preprocessing_mode")
         )
     except KnowledgePreprocessingValidationError:
-        preprocessing_mode = "plain"
+        preprocessing_mode = "faq"
 
     if project_id is None:
         return None, preprocessing_mode

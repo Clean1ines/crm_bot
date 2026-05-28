@@ -96,7 +96,7 @@ class SourceDocument:
     uploaded_by: str | None = None
     status: str = "uploaded"
     processing_stage: str = "uploaded"
-    preprocessing_mode: str = "plain"
+    preprocessing_mode: str = "faq"
     compiler_version: str = ""
     preprocessing_metrics: Metadata = field(default_factory=dict)
     error: str = ""

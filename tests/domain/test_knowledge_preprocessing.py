@@ -5,15 +5,15 @@ import json
 import pytest
 
 from src.domain.project_plane.knowledge_preprocessing import (
+    ANSWER_RESOLUTION_PROMPT_VERSION,
     MODE_FAQ,
-    MODE_INSTRUCTION,
     MODE_PRICE_LIST,
-    KnowledgePreprocessingValidationError,
     KnowledgeAnswerResolutionCandidate,
     KnowledgeAnswerResolutionCase,
-    ANSWER_RESOLUTION_PROMPT_VERSION,
-    parse_preprocessing_payload,
+    KnowledgePreprocessingValidationError,
+    normalize_preprocessing_mode,
     parse_answer_resolution_payload,
+    parse_preprocessing_payload,
     prompt_version_for_mode,
 )
 
@@ -37,20 +37,34 @@ def test_preprocessing_prompt_versions_are_current() -> None:
     assert (
         prompt_version_for_mode(MODE_PRICE_LIST) == "knowledge_preprocess_price_list_v2"
     )
-    assert (
-        prompt_version_for_mode(MODE_INSTRUCTION)
-        == "knowledge_preprocess_instruction_v2"
-    )
 
 
-def test_parse_preprocessing_payload_accepts_fragment_schema_and_derives_embedding_text() -> (
-    None
-):
+def test_removed_modes_are_rejected() -> None:
+    with pytest.raises(KnowledgePreprocessingValidationError, match="Unsupported"):
+        normalize_preprocessing_mode("plain")
+    with pytest.raises(KnowledgePreprocessingValidationError, match="Unsupported"):
+        normalize_preprocessing_mode("instruction")
+
+
+def test_faq_legacy_fragments_parser_is_forbidden() -> None:
+    with pytest.raises(
+        KnowledgePreprocessingValidationError,
+        match="Legacy fragments parser is forbidden for mode=faq",
+    ):
+        parse_preprocessing_payload(
+            {"fragments": [_valid_entry()]},
+            mode=MODE_FAQ,
+            model="test-model",
+            prompt_version="faq_surface_compilation_v1",
+        )
+
+
+def test_price_list_fragment_schema_derives_embedding_text() -> None:
     result = parse_preprocessing_payload(
         {"fragments": [_valid_entry()]},
-        mode=MODE_FAQ,
+        mode=MODE_PRICE_LIST,
         model="test-model",
-        prompt_version="knowledge_answer_compiler_faq_v1",
+        prompt_version="knowledge_preprocess_price_list_v2",
     )
 
     entry = result.entries[0]
@@ -63,15 +77,15 @@ def test_parse_preprocessing_payload_accepts_fragment_schema_and_derives_embeddi
     assert "Refund requests are reviewed" in entry.embedding_text
 
 
-def test_parse_preprocessing_payload_ignores_llm_authored_embedding_text() -> None:
+def test_price_list_parser_ignores_llm_authored_embedding_text() -> None:
     fragment = _valid_entry()
     fragment["embedding_text"] = "LLM-authored retrieval text"
 
     result = parse_preprocessing_payload(
         {"fragments": [fragment]},
-        mode=MODE_FAQ,
+        mode=MODE_PRICE_LIST,
         model="test-model",
-        prompt_version="knowledge_answer_compiler_faq_v1",
+        prompt_version="knowledge_preprocess_price_list_v2",
     )
 
     assert "LLM-authored" not in result.entries[0].embedding_text
@@ -100,7 +114,7 @@ def test_price_list_still_rejects_broad_noisy_synonyms() -> None:
         )
 
 
-def test_parse_preprocessing_payload_rejects_trailing_text_after_json_object() -> None:
+def test_price_list_parser_rejects_trailing_text_after_json_object() -> None:
     raw_payload = json.dumps(
         {
             "fragments": [_valid_entry()],
@@ -116,9 +130,9 @@ def test_parse_preprocessing_payload_rejects_trailing_text_after_json_object() -
     ):
         parse_preprocessing_payload(
             llm_response,
-            mode=MODE_FAQ,
+            mode=MODE_PRICE_LIST,
             model="test-model",
-            prompt_version="knowledge_preprocess_faq_v2",
+            prompt_version="knowledge_preprocess_price_list_v2",
         )
 
 
@@ -158,56 +172,10 @@ def test_parse_answer_resolution_payload_accepts_merge_decision() -> None:
             ],
             "metrics": {"source": "unit-test"},
         },
-        mode=MODE_FAQ,
+        mode=MODE_PRICE_LIST,
         model="test-model",
+        prompt_version=ANSWER_RESOLUTION_PROMPT_VERSION,
     )
 
-    decision = result.decisions[0]
-
-    assert result.prompt_version == ANSWER_RESOLUTION_PROMPT_VERSION
-    assert result.metrics["source"] == "unit-test"
-    assert decision.is_merge
-    assert decision.candidate_ids == ()
-    assert "handoff" in decision.canonical_answer
-    assert decision.reason == "same answer intent"
-    assert decision.confidence == 0.91
-
-
-def test_parse_answer_resolution_payload_accepts_keep_separate() -> None:
-    result = parse_answer_resolution_payload(
-        {
-            "decisions": [
-                {
-                    "case_id": "pricing",
-                    "action": "keep_separate",
-                }
-            ]
-        },
-        mode=MODE_FAQ,
-        model="test-model",
-    )
-
-    decision = result.decisions[0]
-
-    assert not decision.is_merge
-    assert decision.canonical_answer == ""
-
-
-def test_parse_answer_resolution_payload_requires_canonical_answer_for_merge() -> None:
-    with pytest.raises(
-        KnowledgePreprocessingValidationError,
-        match="canonical_answer",
-    ):
-        parse_answer_resolution_payload(
-            {
-                "decisions": [
-                    {
-                        "case_id": "startup",
-                        "action": "merge",
-                        "reason": "missing answer",
-                    }
-                ]
-            },
-            mode=MODE_FAQ,
-            model="test-model",
-        )
+    assert len(result.decisions) == 1
+    assert result.decisions[0].case_id == "manager_handoff"

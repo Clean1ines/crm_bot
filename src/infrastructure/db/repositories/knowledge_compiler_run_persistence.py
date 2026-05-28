@@ -176,7 +176,7 @@ async def mark_compiler_batch_processing(
 ) -> None:
     await conn.execute(
         """
-        UPDATE knowledge_compiler_batches
+        UPDATE knowledge_compiler_batches AS batch
         SET status = 'processing',
             attempt_count = $2,
             started_at = COALESCE(started_at, now()),
@@ -184,7 +184,11 @@ async def mark_compiler_batch_processing(
             error_type = '',
             error_message = '',
             updated_at = now()
-        WHERE id = $1
+        FROM knowledge_documents AS doc
+        WHERE batch.id = $1
+          AND doc.id = batch.document_id
+          AND doc.status <> 'error'
+          AND COALESCE(doc.preprocessing_status, '') NOT IN ('failed', 'cancelled')
         """,
         batch_id,
         attempt_count,
@@ -203,7 +207,7 @@ async def complete_compiler_batch(
 ) -> None:
     await conn.execute(
         """
-        UPDATE knowledge_compiler_batches
+        UPDATE knowledge_compiler_batches AS batch
         SET status = 'completed',
             model = $2,
             prompt_version = $3,
@@ -214,7 +218,11 @@ async def complete_compiler_batch(
             error_message = '',
             finished_at = now(),
             updated_at = now()
-        WHERE id = $1
+        FROM knowledge_documents AS doc
+        WHERE batch.id = $1
+          AND doc.id = batch.document_id
+          AND doc.status <> 'error'
+          AND COALESCE(doc.preprocessing_status, '') NOT IN ('failed', 'cancelled')
         """,
         batch_id,
         model,
@@ -318,10 +326,11 @@ async def upsert_compilation_metrics(
             canonical_entry_count,
             enriched_entry_count,
             embedded_entry_count,
-            published_entry_count,
-            fallback_row_count,
-            dropped_forbidden_count,
-            entries_without_source_refs_count,
+            retrieval_surface_count,
+            retrieval_question_count,
+            runtime_entry_count,
+            qa_eval_pass_rate,
+            latency_ms,
             metrics
         )
         VALUES (
@@ -338,7 +347,8 @@ async def upsert_compilation_metrics(
             $11,
             $12,
             $13,
-            $14::jsonb
+            $14,
+            $15::jsonb
         )
         ON CONFLICT (compiler_run_id)
         DO UPDATE SET
@@ -350,14 +360,14 @@ async def upsert_compilation_metrics(
             canonical_entry_count = EXCLUDED.canonical_entry_count,
             enriched_entry_count = EXCLUDED.enriched_entry_count,
             embedded_entry_count = EXCLUDED.embedded_entry_count,
-            published_entry_count = EXCLUDED.published_entry_count,
-            fallback_row_count = EXCLUDED.fallback_row_count,
-            dropped_forbidden_count = EXCLUDED.dropped_forbidden_count,
-            entries_without_source_refs_count = EXCLUDED.entries_without_source_refs_count,
-            metrics = EXCLUDED.metrics,
-            updated_at = now()
+            retrieval_surface_count = EXCLUDED.retrieval_surface_count,
+            retrieval_question_count = EXCLUDED.retrieval_question_count,
+            runtime_entry_count = EXCLUDED.runtime_entry_count,
+            qa_eval_pass_rate = EXCLUDED.qa_eval_pass_rate,
+            latency_ms = EXCLUDED.latency_ms,
+            metrics = EXCLUDED.metrics
         """,
-        compiler_run_id,
+        ensure_uuid(compiler_run_id),
         metrics.source_chunk_count,
         metrics.answer_candidate_count,
         metrics.grounded_candidate_count,
@@ -366,9 +376,10 @@ async def upsert_compilation_metrics(
         metrics.canonical_entry_count,
         metrics.enriched_entry_count,
         metrics.embedded_entry_count,
-        metrics.published_entry_count,
-        metrics.fallback_row_count,
-        metrics.dropped_forbidden_count,
-        metrics.entries_without_source_refs_count,
-        jsonb_object_payload(payload),
+        getattr(metrics, "retrieval_surface_count", 0),
+        getattr(metrics, "retrieval_question_count", 0),
+        getattr(metrics, "runtime_entry_count", 0),
+        getattr(metrics, "qa_eval_pass_rate", None),
+        getattr(metrics, "latency_ms", None),
+        json.dumps(payload, ensure_ascii=False),
     )

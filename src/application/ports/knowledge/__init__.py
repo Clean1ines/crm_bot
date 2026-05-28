@@ -19,6 +19,30 @@ from src.application.ports.knowledge.runtime_retrieval import (
     KnowledgeRuntimeRetrievalPort,
 )
 from src.application.ports.knowledge.source_material import KnowledgeSourceMaterialPort
+from src.application.ports.knowledge.surface_compiler_runs import (
+    KnowledgeSurfaceCompilerRunPort,
+)
+from src.application.ports.knowledge.surface_compiler_stages import (
+    KnowledgeSurfaceCompilerStagePort,
+)
+from src.application.ports.knowledge.surface_entities import (
+    KnowledgeSurfaceDraftPort,
+    KnowledgeSurfaceMergeDecisionPort,
+    KnowledgeSurfaceQuestionOwnershipPort,
+    KnowledgeSurfaceRelationPort,
+    KnowledgeSurfaceSourceUnitPort,
+)
+from src.application.ports.knowledge.surface_graph_entities import (
+    KnowledgeSurfaceAnswerDraftPort,
+    KnowledgeSurfaceCandidatePort,
+    KnowledgeSurfaceCurationCardPort,
+    KnowledgeSurfaceGraphQuestionPort,
+    KnowledgeSurfaceGraphRelationPort,
+    KnowledgeSurfaceReconciliationPort,
+)
+from src.application.ports.knowledge.surface_publication import (
+    KnowledgeSurfacePublicationPort,
+)
 
 __all__ = [
     "KnowledgeAnswerCandidatePort",
@@ -30,4 +54,18 @@ __all__ = [
     "KnowledgeDocumentRuntimeEntries",
     "KnowledgeRuntimeRetrievalPort",
     "KnowledgeSourceMaterialPort",
+    "KnowledgeSurfaceAnswerDraftPort",
+    "KnowledgeSurfaceCandidatePort",
+    "KnowledgeSurfaceCompilerRunPort",
+    "KnowledgeSurfaceCompilerStagePort",
+    "KnowledgeSurfaceCurationCardPort",
+    "KnowledgeSurfaceDraftPort",
+    "KnowledgeSurfaceGraphQuestionPort",
+    "KnowledgeSurfaceGraphRelationPort",
+    "KnowledgeSurfaceMergeDecisionPort",
+    "KnowledgeSurfacePublicationPort",
+    "KnowledgeSurfaceQuestionOwnershipPort",
+    "KnowledgeSurfaceReconciliationPort",
+    "KnowledgeSurfaceRelationPort",
+    "KnowledgeSurfaceSourceUnitPort",
 ]

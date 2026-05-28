@@ -64,8 +64,8 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
         "message": "Queued 2 chunks for processing",
         "chunks": 2,
         "document_id": "doc-1",
-        "preprocessing_mode": "plain",
-        "preprocessing_status": "not_requested",
+        "preprocessing_mode": "faq",
+        "preprocessing_status": "processing",
         "structured_entries": 0,
     }
     knowledge_repo_factory.assert_called_once_with(pool)
@@ -76,14 +76,18 @@ async def test_upload_accepts_real_chunker_string_chunks_and_uses_pool_repo():
         uploaded_by="user-1",
     )
     repo.update_document_status.assert_awaited_once_with("doc-1", "processing")
-    repo.update_document_preprocessing_status.assert_not_called()
+    repo.update_document_preprocessing_status.assert_awaited_once_with(
+        "doc-1",
+        mode="faq",
+        status="processing",
+    )
     queue_repo.enqueue.assert_awaited_once_with(
         TASK_PROCESS_KNOWLEDGE_UPLOAD,
         payload={
             "project_id": "project-1",
             "document_id": "doc-1",
             "file_name": "test.txt",
-            "preprocessing_mode": "plain",
+            "preprocessing_mode": "faq",
             "chunks": [{"content": "first chunk"}, {"content": "second chunk"}],
         },
     )

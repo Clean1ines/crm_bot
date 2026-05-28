@@ -13,9 +13,9 @@ def _preprocessor() -> GroqKnowledgePreprocessor:
 
 def test_extractor_prompt_omits_known_intents_from_source_payload() -> None:
     prompt = _preprocessor()._build_prompt(
-        mode="faq",
+        mode="price_list",
         chunks=[{"content": "Refund policy: manager checks the order."}],
-        file_name="faq.txt",
+        file_name="price_list.txt",
     )
 
     payload = json.loads(
@@ -26,19 +26,19 @@ def test_extractor_prompt_omits_known_intents_from_source_payload() -> None:
     assert "previous_answer_titles" not in payload
     assert "previous_entry_titles" not in payload
     assert payload == {
-        "file_name": "faq.txt",
-        "mode": "faq",
+        "file_name": "price_list.txt",
+        "mode": "price_list",
         "chunks": [{"index": 0, "content": "Refund policy: manager checks the order."}],
     }
 
 
-def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text() -> (
+def test_price_list_prompt_requires_split_replacement_answer_and_compact_embedding_text() -> (
     None
 ):
     prompt = _preprocessor()._build_prompt(
-        mode="faq",
+        mode="price_list",
         chunks=[{"content": "Цена: 100. Подключение: заявка менеджеру."}],
-        file_name="faq.txt",
+        file_name="price_list.txt",
     )
 
     assert "Один fragment отвечает на один конкретный клиентский вопрос" in prompt
@@ -48,12 +48,14 @@ def test_faq_prompt_requires_split_replacement_answer_and_compact_embedding_text
     assert "answer_fragment" in prompt
 
 
-def test_markdown_semantic_section_is_not_silently_truncated_to_900_chars() -> None:
+def test_price_list_markdown_semantic_section_is_not_silently_truncated_to_900_chars() -> (
+    None
+):
     long_section = "A" * 1300
     long_excerpt = "B" * 1400
     long_child_body = "C" * 1250
     prompt = _preprocessor()._build_prompt(
-        mode="faq",
+        mode="price_list",
         chunks=[
             {
                 "content": long_section,
@@ -61,7 +63,11 @@ def test_markdown_semantic_section_is_not_silently_truncated_to_900_chars() -> N
                 "section_body": long_section,
                 "source_excerpt": long_excerpt,
                 "children": [
-                    {"title": "Child 1", "body": long_child_body, "source_excerpt": long_child_body}
+                    {
+                        "title": "Child 1",
+                        "body": long_child_body,
+                        "source_excerpt": long_child_body,
+                    }
                 ],
             }
         ],
