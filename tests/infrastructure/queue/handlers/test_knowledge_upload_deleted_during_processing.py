@@ -32,7 +32,7 @@ async def test_deleted_during_processing_is_permanent_job_error(
 
     monkeypatch.setattr(
         knowledge_upload,
-        "KnowledgeIngestionService",
+        "KnowledgeStructuredIngestionService",
         FakeIngestionService,
     )
     monkeypatch.setattr(
