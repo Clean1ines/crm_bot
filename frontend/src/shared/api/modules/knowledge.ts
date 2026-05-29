@@ -325,6 +325,11 @@ export type KnowledgeUsageResponse = {
   daily: KnowledgeUsageDaily[];
 };
 
+export type KnowledgeDocumentDeleteResponse = {
+  status: string;
+  document_id: string;
+};
+
 export const knowledgeApi = {
   list: (projectId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge`, {
@@ -335,6 +340,14 @@ export const knowledgeApi = {
     authedJsonRequest(`/api/projects/${projectId}/knowledge`, {
       method: 'DELETE',
     }),
+
+  deleteDocument: (projectId: string, documentId: string) =>
+    authedJsonRequest<KnowledgeDocumentDeleteResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}`,
+      {
+        method: 'DELETE',
+      },
+    ),
 
   cancel: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/cancel`, {

@@ -92,6 +92,8 @@ class KnowledgeServiceRepositoryPort(
 ):
     """Repository subset required by knowledge management workflows."""
 
+    async def delete_document(self, document_id: str) -> None: ...
+
 
 class KnowledgeServiceRepositoryFactoryPort(Protocol):
     def __call__(self, pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort: ...
@@ -1116,6 +1118,30 @@ class KnowledgeService:
             extra={"project_id": project_id, "result_count": len(results)},
         )
         return KnowledgePreviewResponseDto.from_results(query=query, results=results)
+
+    async def delete_document(
+        self,
+        project_id: str,
+        document_id: str,
+        authorization: str | None,
+        *,
+        knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
+        logger: LoggerPort,
+    ) -> None:
+        await self.require_access(project_id, authorization)
+        await self._ensure_project_exists(project_id, logger)
+
+        repo = knowledge_repo_factory(self.pool)
+        document = await repo.get_document(document_id)
+        if document is None or str(document.project_id) != project_id:
+            raise NotFoundError("Knowledge document not found")
+
+        await repo.delete_document(document_id)
+
+        logger.info(
+            "Knowledge document deleted",
+            extra={"project_id": project_id, "document_id": document_id},
+        )
 
     async def clear_project_knowledge(
         self,
