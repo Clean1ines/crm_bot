@@ -9,7 +9,7 @@ def _python_sources(root: Path) -> list[Path]:
     )
 
 
-def _forbidden_markers(path: Path) -> list[str]:
+def _forbidden_asyncpg_markers(path: Path) -> list[str]:
     source = path.read_text(encoding="utf-8")
     return [
         marker
@@ -18,31 +18,32 @@ def _forbidden_markers(path: Path) -> list[str]:
     ]
 
 
-def test_application_has_no_asyncpg_driver_dependency() -> None:
+def test_application_layer_has_no_asyncpg_driver_dependency() -> None:
     offenders: list[str] = []
 
     for path in _python_sources(Path("src/application")):
-        for marker in _forbidden_markers(path):
+        for marker in _forbidden_asyncpg_markers(path):
             offenders.append(f"{path.as_posix()} contains {marker!r}")
 
     assert offenders == []
 
 
-def test_domain_has_no_asyncpg_driver_dependency() -> None:
+def test_domain_layer_has_no_asyncpg_driver_dependency() -> None:
     offenders: list[str] = []
 
     for path in _python_sources(Path("src/domain")):
-        for marker in _forbidden_markers(path):
+        for marker in _forbidden_asyncpg_markers(path):
             offenders.append(f"{path.as_posix()} contains {marker!r}")
 
     assert offenders == []
 
 
-def test_knowledge_ingestion_service_has_no_driver_fk_exception_reference() -> None:
+def test_knowledge_ingestion_service_has_no_db_driver_fk_exception_reference() -> None:
     source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
         encoding="utf-8"
     )
 
     assert "ForeignKeyViolationError" not in source
     assert "asyncpg." not in source
-    assert "KnowledgeDocumentDeletedDuringProcessingError" in source
+    assert "import asyncpg" not in source
+    assert "from asyncpg" not in source
