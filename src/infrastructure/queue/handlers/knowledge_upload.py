@@ -6,7 +6,11 @@ from typing import cast
 import asyncpg
 
 from src.application.dto.knowledge_dto import KnowledgeUploadJobPayloadDto
-from src.application.errors import EmbeddingProviderError, ValidationError
+from src.application.errors import (
+    EmbeddingProviderError,
+    KnowledgeDocumentDeletedDuringProcessingError,
+    ValidationError,
+)
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
@@ -171,6 +175,17 @@ async def handle_process_knowledge_upload(
             commercial_price_repo_factory=make_commercial_price_repository,
             commercial_price_acquisition_service_factory=make_commercial_price_acquisition_service,
         )
+    except KnowledgeDocumentDeletedDuringProcessingError as exc:
+        logger.info(
+            "Knowledge upload stopped because document was deleted or reset during processing",
+            extra={
+                "project_id": dto.project_id,
+                "document_id": dto.document_id,
+                "mode": mode,
+                "error_type": type(exc).__name__,
+            },
+        )
+        raise PermanentJobError(str(exc)) from exc
     except (KnowledgePreprocessingValidationError, ValidationError) as exc:
         error_type = recoverable_llm_error_type(exc)
         if error_type is not None:
