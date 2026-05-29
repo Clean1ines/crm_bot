@@ -38,11 +38,14 @@ from src.infrastructure.llm.knowledge_surface_compiler import (
 from src.infrastructure.llm.knowledge_surface_full_graph_compiler import (
     GroqFullKnowledgeSurfaceGraphCompiler,
     _dedupe_reassignments,
+    _filter_merged_relations,
     _final_ownership,
     _final_surfaces,
+    _intent_ledger_context,
     _merge_relations,
     _related_candidates,
     _related_relations,
+    _reassign_merged_surface_questions,
     _reassign_rejected,
 )
 from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
@@ -582,7 +585,19 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             existing_reassignments=reassignments,
         )
         warnings = warnings + reassignment_warnings
-        reassignments = _dedupe_reassignments(reassignments + final_reassignments)
+        merge_reassignments = _reassign_merged_surface_questions(
+            run_id=run_id,
+            document_id=units[0].document_id,
+            ownership_decisions=ownership_decisions,
+            merge_decisions=merge_decisions,
+        )
+        reassignments = _dedupe_reassignments(
+            reassignments + final_reassignments + merge_reassignments
+        )
+        final_relations = _filter_merged_relations(
+            final_relations,
+            merge_decisions=merge_decisions,
+        )
 
         await self._emit_progress(
             stage_kind="question_reassignment",
@@ -607,6 +622,7 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             candidates=candidates,
             drafts=drafts,
             warnings=warnings,
+            merge_decisions=merge_decisions,
         )
 
         graph = RetrievalSurfaceGraph(
@@ -627,6 +643,12 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
                 "ownership_count": len(final_ownership),
                 "reassignment_count": len(reassignments),
                 "merge_decision_count": len(merge_decisions),
+                "merged_surface_count": sum(
+                    len(item.merged_surface_keys)
+                    for item in merge_decisions
+                    if item.decision_type == "merge"
+                ),
+                "visible_surface_count": len(surfaces),
                 "warning_count": len(warnings),
                 "concurrency": concurrency,
                 **self._runtime_metrics_snapshot(started_monotonic=started_monotonic),
@@ -674,6 +696,13 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             source_unit=unit,
             file_name=file_name,
             run_id=run_id,
+            compilation_context=_intent_ledger_context(
+                stage="discovery",
+                candidates=(),
+                drafts=(),
+                local_relations=(),
+                merge_decisions=(),
+            ),
         )
         unit_candidates = discovered.surface_candidates
         warnings.extend(discovered.warnings)
@@ -718,6 +747,14 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
                 candidates=unit_candidates,
                 file_name=file_name,
                 run_id=run_id,
+                compilation_context=_intent_ledger_context(
+                    stage="relations",
+                    candidates=unit_candidates,
+                    drafts=(),
+                    local_relations=(),
+                    merge_decisions=(),
+                    current_candidates=unit_candidates,
+                ),
             )
             unit_relations = planned.relations
             warnings.extend(planned.warnings)
@@ -758,6 +795,14 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
                 related_candidates=related_candidates,
                 file_name=file_name,
                 run_id=run_id,
+                compilation_context=_intent_ledger_context(
+                    stage="answer",
+                    candidates=unit_candidates,
+                    drafts=tuple(unit_drafts),
+                    local_relations=unit_relations,
+                    merge_decisions=(),
+                    current_candidates=unit_candidates,
+                ),
             )
             unit_drafts.append(draft)
             warnings.extend(draft.warnings)
@@ -790,6 +835,14 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
                 related_candidates=related_candidates,
                 file_name=file_name,
                 run_id=run_id,
+                compilation_context=_intent_ledger_context(
+                    stage="ownership",
+                    candidates=unit_candidates,
+                    drafts=tuple(unit_drafts),
+                    local_relations=unit_relations,
+                    merge_decisions=(),
+                    current_candidates=unit_candidates,
+                ),
             )
             unit_ownership.extend(ownership_result.owned_questions)
             warnings.extend(ownership_result.warnings)
@@ -842,6 +895,7 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             candidates=unit_candidates,
             drafts=tuple(unit_drafts),
             warnings=tuple(warnings),
+            merge_decisions=(),
         )
         await self._emit_partial_surfaces(
             unit_index=unit_index,

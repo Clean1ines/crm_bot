@@ -107,14 +107,18 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         source_unit: RetrievalSurfaceSourceUnit,
         file_name: str,
         run_id: str,
+        compilation_context: Mapping[str, object] | None = None,
     ) -> SurfaceDiscoveryResult:
+        payload: dict[str, object] = {
+            "file_name": file_name,
+            "run_id": run_id,
+            "source_unit": _source_unit_payload(source_unit),
+        }
+        if compilation_context is not None:
+            payload["compilation_context"] = dict(compilation_context)
         data = await self._stage(
             "discover",
-            {
-                "file_name": file_name,
-                "run_id": run_id,
-                "source_unit": _source_unit_payload(source_unit),
-            },
+            payload,
         )
         candidates = tuple(
             self._candidate(item, source_unit=source_unit, run_id=run_id, index=index)
@@ -135,16 +139,20 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         candidates: Sequence[RetrievalSurfaceCandidate],
         file_name: str,
         run_id: str,
+        compilation_context: Mapping[str, object] | None = None,
     ) -> LocalRelationPlanningResult:
         keys = frozenset(candidate.local_surface_key for candidate in candidates)
+        payload: dict[str, object] = {
+            "file_name": file_name,
+            "run_id": run_id,
+            "source_unit": _source_unit_payload(source_unit),
+            "surface_candidates": [asdict(candidate) for candidate in candidates],
+        }
+        if compilation_context is not None:
+            payload["compilation_context"] = dict(compilation_context)
         data = await self._stage(
             "relations",
-            {
-                "file_name": file_name,
-                "run_id": run_id,
-                "source_unit": _source_unit_payload(source_unit),
-                "surface_candidates": [asdict(candidate) for candidate in candidates],
-            },
+            payload,
         )
         relations = tuple(
             self._relation(
@@ -167,20 +175,24 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         related_candidates: Sequence[RetrievalSurfaceCandidate],
         file_name: str,
         run_id: str,
+        compilation_context: Mapping[str, object] | None = None,
     ) -> SurfaceAnswerDraft:
+        payload: dict[str, object] = {
+            "file_name": file_name,
+            "run_id": run_id,
+            "source_unit": _source_unit_payload(source_unit),
+            "current_surface_candidate": asdict(candidate),
+            "local_relations": [asdict(relation) for relation in local_relations],
+            "related_candidates": [asdict(item) for item in related_candidates],
+        }
+        if compilation_context is not None:
+            payload["compilation_context"] = dict(compilation_context)
         data = await self._stage(
             "answer",
-            {
-                "file_name": file_name,
-                "run_id": run_id,
-                "source_unit": _source_unit_payload(source_unit),
-                "current_surface_candidate": asdict(candidate),
-                "local_relations": [asdict(relation) for relation in local_relations],
-                "related_candidates": [asdict(item) for item in related_candidates],
-            },
+            payload,
         )
-        payload = data.get("surface_answer")
-        if not isinstance(payload, Mapping):
+        answer_payload = data.get("surface_answer")
+        if not isinstance(answer_payload, Mapping):
             raise KnowledgePreprocessingValidationError(
                 "surface_answer must be an object"
             )
@@ -189,21 +201,22 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
             run_id=run_id,
             document_id=source_unit.document_id,
             candidate_key=candidate.local_surface_key,
-            title=_compact_text(payload.get("title")) or candidate.provisional_title,
-            canonical_question=_compact_text(payload.get("canonical_question"))
+            title=_compact_text(answer_payload.get("title"))
             or candidate.provisional_title,
-            short_answer=_compact_text(payload.get("short_answer")),
-            answer=_compact_text(payload.get("answer")),
-            answer_scope=_compact_text(payload.get("answer_scope"))
+            canonical_question=_compact_text(answer_payload.get("canonical_question"))
+            or candidate.provisional_title,
+            short_answer=_compact_text(answer_payload.get("short_answer")),
+            answer=_compact_text(answer_payload.get("answer")),
+            answer_scope=_compact_text(answer_payload.get("answer_scope"))
             or candidate.answer_scope,
-            question_scope=_compact_text(payload.get("question_scope"))
+            question_scope=_compact_text(answer_payload.get("question_scope"))
             or candidate.question_scope,
-            exclusion_scope=_compact_text(payload.get("exclusion_scope"))
+            exclusion_scope=_compact_text(answer_payload.get("exclusion_scope"))
             or candidate.exclusion_scope,
-            source_refs=_text_tuple(payload.get("source_refs"))
+            source_refs=_text_tuple(answer_payload.get("source_refs"))
             or candidate.source_refs,
-            warnings=_text_tuple(payload.get("warnings")),
-            metadata=_json_object(payload.get("metadata")),
+            warnings=_text_tuple(answer_payload.get("warnings")),
+            metadata=_json_object(answer_payload.get("metadata")),
         )
 
     async def assign_surface_questions(
@@ -216,18 +229,22 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         related_candidates: Sequence[RetrievalSurfaceCandidate],
         file_name: str,
         run_id: str,
+        compilation_context: Mapping[str, object] | None = None,
     ) -> SurfaceQuestionOwnershipResult:
+        payload: dict[str, object] = {
+            "file_name": file_name,
+            "run_id": run_id,
+            "source_unit": _source_unit_payload(source_unit),
+            "current_surface_candidate": asdict(candidate),
+            "current_surface_answer": asdict(answer_draft),
+            "local_relations": [asdict(relation) for relation in local_relations],
+            "related_candidates": [asdict(item) for item in related_candidates],
+        }
+        if compilation_context is not None:
+            payload["compilation_context"] = dict(compilation_context)
         data = await self._stage(
             "questions",
-            {
-                "file_name": file_name,
-                "run_id": run_id,
-                "source_unit": _source_unit_payload(source_unit),
-                "current_surface_candidate": asdict(candidate),
-                "current_surface_answer": asdict(answer_draft),
-                "local_relations": [asdict(relation) for relation in local_relations],
-                "related_candidates": [asdict(item) for item in related_candidates],
-            },
+            payload,
         )
         owned = tuple(
             SurfaceQuestionOwnershipDecision(

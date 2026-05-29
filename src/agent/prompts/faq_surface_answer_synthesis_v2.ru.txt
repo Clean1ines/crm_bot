@@ -45,3 +45,133 @@
     "warnings": []
   }
 }
+
+# FAQ_INTENT_STATE_MACHINE_CONTRACT_V1
+
+Ты не просто извлекаешь карточки. Ты компилируешь документ в state machine клиентских answer slots.
+
+Answer slot — это не заголовок документа, не абзац, не маркетинговая фраза и не отдельная формулировка вопроса.
+
+Answer slot — это:
+1. один реальный customer intent;
+2. один factual_answer_core;
+3. один совместимый набор source evidence;
+4. один owner для всех alias-вопросов этого intent;
+5. одно финальное видимое surface, если duplicate/short-long варианты были merged.
+
+Всегда используй INPUT_JSON.compilation_context, если он передан. Это ledger предыдущих решений pipeline.
+Поздняя стадия обязана учитывать ранние решения, а не начинать рассуждение с нуля.
+
+## Универсальная taxonomy
+
+### SAME_INTENT_ALIAS
+Разные user questions, но один expected answer.
+
+Признаки:
+- отличается только wording: “что такое”, “как работает”, “что делает”, “зачем нужно”, “для чего”;
+- один вопрос использует название сущности, другой описывает функцию той же сущности;
+- factual_answer_core одинаковый;
+- source evidence одинаковый или совместимый.
+
+Действие:
+- не создавать отдельный answer slot;
+- сохранить как alias_questions / question_scope / owned question survivor slot.
+
+### DUPLICATE
+Две surfaces/candidates уже существуют, но отвечают на один intent.
+
+Признаки:
+- title различается, но объект ответа тот же;
+- canonical_question различается, но expected answer тот же;
+- answer одного повторяет answer другого другими словами;
+- source evidence совпадает или сильно пересекается.
+
+Действие:
+- relation_type = "duplicates" или "near_duplicate";
+- recommended_action = "merge_same_surface";
+- выбрать survivor по качеству title/question/answer/evidence.
+
+### SHORT_LONG_VARIANT
+Одна карточка — краткая формула, другая — расширенная версия того же ответа.
+
+Признаки:
+- short_answer одной содержится по смыслу в answer другой;
+- отличие только в уровне подробности;
+- расширенная версия не отвечает на отдельный follow-up question.
+
+Действие:
+- merge_same_surface;
+- short_answer survivor = краткая версия answer;
+- merged surface не должна остаться отдельной видимой карточкой.
+
+### PARENT_CHILD
+Одна surface обзорная, другая отвечает на самостоятельный под-вопрос.
+
+Признаки:
+- child можно спросить отдельно;
+- child имеет собственный answer value;
+- child добавляет отдельный аспект: цена, лимит, канал, интеграция, настройка, процесс, ошибка, роль, ограничение.
+
+Действие:
+- relation_type = "umbrella_contains" или "specializes";
+- не merge.
+
+### DETAIL_OF
+Одна surface детализирует часть другой, но является самостоятельным follow-up answer.
+
+Действие:
+- keep separate;
+- relation_type = "specializes" или "overlaps";
+- reason обязан объяснить отдельный answer value.
+
+### SIBLING_SEPARATE
+Одна тема, но разные customer intents.
+
+Признаки:
+- разные actions/decisions;
+- разные условия;
+- разные процессы;
+- разные цены/лимиты;
+- разные failure modes;
+- разные integrations/channels.
+
+Действие:
+- keep separate;
+- relation_type = "sibling" или "overlaps".
+
+### FULLY_SEPARATE
+Разные темы или нет общей decision value.
+
+Действие:
+- no relation или relation_type = "unrelated".
+
+## Правило сомнения
+Если сомневаешься между alias и new answer slot — выбирай alias.
+Если сомневаешься между duplicate и sibling — сравни factual_answer_core:
+- один factual answer => duplicate / short-long;
+- разные самостоятельные factual answers => parent/child/sibling/separate.
+
+## Обязательные metadata поля
+Где output schema позволяет metadata, заполняй:
+- customer_intent;
+- factual_answer_core;
+- alias_questions;
+- intent_taxonomy;
+- duplicate_of;
+- short_long_variant_of;
+- keep_separate_reason.
+
+Не выдумывай эти поля, если нет evidence, но если они есть — следующие стадии обязаны их учитывать.
+
+# ANSWER_STAGE_STATE_RULES_V1
+
+На answer stage ты не создаёшь новый intent. Ты пишешь answer для already selected answer slot.
+
+Обязательная процедура:
+1. Прочитай current_surface_candidate.metadata.customer_intent и factual_answer_core.
+2. Прочитай local_relations и related_candidates.
+3. Если related candidate является duplicate/short-long вариантом этого slot, folded aliases должны попасть в question_scope/metadata.
+4. canonical_question должен быть вопросом клиента, а не heading документа.
+5. short_answer должен быть краткой версией answer, а не новым intent.
+6. answer должен объединять краткую формулу и расширенное grounded пояснение, если это один factual_answer_core.
+7. surface_answer.metadata должен сохранять customer_intent, factual_answer_core, alias_questions, intent_taxonomy.
