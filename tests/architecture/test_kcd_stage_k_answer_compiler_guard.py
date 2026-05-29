@@ -46,7 +46,7 @@ def test_stage_k_process_document_does_not_combine_raw_and_structured_runtime_ro
     None
 ):
     process_document_source = _function_source(
-        INGESTION_SERVICE,
+        ROOT / "src/application/services/knowledge_structured_ingestion_service.py",
         "process_document",
     )
 
@@ -113,23 +113,48 @@ def test_answer_resolution_parser_does_not_read_candidate_ids_from_payload() -> 
 
 
 def test_stage_k_ingestion_records_answer_resolution_compiler_metrics() -> None:
-    source = _source(INGESTION_SERVICE)
+    structured_source = _source(
+        ROOT / "src/application/services/knowledge_structured_ingestion_service.py"
+    )
+    answer_resolution_source = _source(
+        ROOT / "src/application/services/knowledge_answer_resolution_service.py"
+    )
+    batching_source = _source(
+        ROOT / "src/application/services/knowledge_answer_compiler_batching.py"
+    )
+    canonical_publication_source = _source(
+        ROOT / "src/application/services/knowledge_canonical_publication_builder.py"
+    )
+    combined = (
+        structured_source
+        + "\n"
+        + answer_resolution_source
+        + "\n"
+        + batching_source
+        + "\n"
+        + canonical_publication_source
+    )
 
-    assert "technical_compiler_call_count" in source
-    assert "previous_title_carryover" in source
-    assert "False" in source
-    assert "one_answer_at_a_time_resolution" in source
-    assert "extractor_only_compiler_loop" not in source
-    assert "answer_resolution_enabled" in source
-    assert "answer_resolution" in source
-    assert "answer_resolution_fallback_published" in source
-    assert "llm_answer_resolution_call_count" in source
-    assert "KCD_STAGE_K_COMPILER_VERSION" in source
-    assert "Knowledge answer compiler technical batch completed" in source
-    assert "technical_compiler_total_count" in source
-    assert "compiled_entry_count" in source
-    assert "status_message" in source
-    assert "model" in source
+    assert "technical_compiler_call_count" in structured_source
+    assert "False" in structured_source
+    assert "one_answer_at_a_time_resolution" in structured_source
+    assert "extractor_only_compiler_loop" not in combined
+    assert "answer_resolution_enabled" in structured_source
+    assert "answer_resolution" in structured_source
+    assert "answer_resolution_fallback_published" in structured_source
+    assert "llm_answer_resolution_call_count" in structured_source
+    assert "semantic_answer_resolution_count" in structured_source
+    assert "answer_resolution_call_count" in structured_source
+    assert "KCD_STAGE_K_COMPILER_VERSION" in structured_source
+    assert "Knowledge answer compiler technical batch completed" in structured_source
+    assert "technical_compiler_total_count" in structured_source
+    assert "compiled_entry_count" in structured_source
+    assert "status_message" in structured_source
+    assert "model" in structured_source
+
+    assert "_technical_chunk_batches_for_answer_compiler" in batching_source
+    assert "canonical_entries_from_preprocessing_result" in canonical_publication_source
+    assert "resolve_compiled_answer_cases" in answer_resolution_source
 
 
 def test_runtime_prompts_preserve_user_language() -> None:
@@ -143,3 +168,27 @@ def test_runtime_prompts_preserve_user_language() -> None:
     assert "Верни только JSON" in intent_prompt
     assert "Значения enum оставляй строго на английском" in intent_prompt
     assert "ПРАВИЛА ИНТЕРПРЕТАЦИИ ПАМЯТИ" in interpretation_prompt
+
+
+def test_knowledge_ingestion_service_is_stage_k_facade_after_split() -> None:
+    source = _source(INGESTION_SERVICE)
+    process_document_source = _function_source(INGESTION_SERVICE, "process_document")
+    compact_process_document_source = "".join(process_document_source.split())
+
+    assert "KnowledgeStructuredIngestionService" in process_document_source
+    assert (
+        "returnawaitKnowledgeStructuredIngestionService(self.pool).process_document"
+        in compact_process_document_source
+    )
+
+    assert "_technical_chunk_batches_for_answer_compiler" not in process_document_source
+    assert "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases" not in (
+        process_document_source
+    )
+    assert "_canonical_entries_from_preprocessing_result" not in process_document_source
+    assert "_persist_stage_e_compiler_outputs" not in process_document_source
+
+    # Compatibility aliases may remain at module level for older unit tests, but the
+    # primary process_document path must not pull Stage K business logic back into
+    # the facade.
+    assert "class KnowledgeIngestionService" in source
