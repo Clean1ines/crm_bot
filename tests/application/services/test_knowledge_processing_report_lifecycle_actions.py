@@ -29,14 +29,18 @@ class CandidateSummary:
     rejected_count: int = 0
 
 
-def _action_ids(document: Document) -> set[str]:
+def _actions_by_id(document: Document):
     report = build_knowledge_processing_report(
         document_id="document-1",
         document=document,
         batches=(),
         candidate_summary=CandidateSummary(),
     )
-    return {action.id for action in report.actions}
+    return {action.id: action for action in report.actions}
+
+
+def _action_ids(document: Document) -> set[str]:
+    return set(_actions_by_id(document))
 
 
 def test_report_resume_action_is_lifecycle_driven_for_manual_cancel() -> None:
@@ -65,3 +69,18 @@ def test_report_does_not_show_manual_resume_for_quota_pause() -> None:
 
     assert "resume_processing" not in actions
     assert "retry_later" in actions
+
+
+def test_manual_cancel_resume_processing_action_is_primary() -> None:
+    actions = _actions_by_id(
+        Document(
+            status="error",
+            preprocessing_status="failed",
+            preprocessing_error=LEGACY_USER_CANCELLED_MESSAGE,
+            preprocessing_metrics={},
+        )
+    )
+
+    assert actions["resume_processing"].kind == "primary"
+    assert actions["resume_processing"].enabled is True
+    assert actions["resume_processing"].label == "Продолжить обработку"

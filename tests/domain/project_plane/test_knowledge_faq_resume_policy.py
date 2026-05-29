@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import pytest
 
 from src.domain.project_plane.knowledge_document_lifecycle import (
+    KnowledgeDocumentLifecycleDecision,
+    KnowledgeDocumentLifecycleTrigger,
     LEGACY_USER_CANCELLED_MESSAGE,
     NEEDS_RETRY_LATER_STATUS,
     NON_RETRYABLE_INPUT_TOO_LARGE_STATUS,
@@ -12,6 +14,7 @@ from src.domain.project_plane.knowledge_document_lifecycle import (
     TRIGGER_EXPLICIT_USER_RESUME,
     TRIGGER_NORMAL_UPLOAD,
     TRIGGER_QUOTA_RECOVERY,
+    TRIGGER_WORKER_RECOVERY,
     resolve_knowledge_document_lifecycle,
 )
 from src.domain.project_plane.knowledge_faq_resume_policy import (
@@ -109,7 +112,7 @@ def test_explicit_resume_reuses_matching_user_cancelled_run() -> None:
     ],
 )
 def test_explicit_resume_rejected_without_manual_lifecycle_permission(
-    lifecycle_decision: object,
+    lifecycle_decision: KnowledgeDocumentLifecycleDecision,
 ) -> None:
     decision = decide_faq_surface_run_reuse(
         latest_run=Run(id="run-1"),
@@ -162,3 +165,69 @@ def test_input_too_large_never_reuses_surface_run() -> None:
 
     assert decision.reuse is False
     assert decision.reason == "document_lifecycle_stop_reason_forbids_resume"
+
+
+def test_quota_recovery_rejects_user_cancelled_lifecycle_even_with_failed_run() -> None:
+    decision = decide_faq_surface_run_reuse(
+        latest_run=Run(
+            id="run-1",
+            status="failed",
+            error_type="GroqFallbackExhaustedError",
+        ),
+        lifecycle_trigger=TRIGGER_QUOTA_RECOVERY,
+        resume_run_id="run-1",
+        lifecycle_decision=_decision_for_user_cancel(),
+        expected_prompt_version="prompt-v1",
+    )
+
+    assert decision.reuse is False
+    assert decision.reason == "auto_recovery_requires_auto_lifecycle_permission"
+
+
+@pytest.mark.parametrize(
+    "lifecycle_trigger",
+    [TRIGGER_WORKER_RECOVERY, TRIGGER_QUOTA_RECOVERY],
+)
+def test_auto_recovery_rejects_failed_fatal_lifecycle(
+    lifecycle_trigger: KnowledgeDocumentLifecycleTrigger,
+) -> None:
+    decision = decide_faq_surface_run_reuse(
+        latest_run=Run(
+            id="run-1",
+            status="failed",
+            error_type="RuntimeError",
+        ),
+        lifecycle_trigger=lifecycle_trigger,
+        resume_run_id="run-1",
+        lifecycle_decision=_decision_for_fatal(),
+        expected_prompt_version="prompt-v1",
+    )
+
+    assert decision.reuse is False
+    assert decision.reason == "document_lifecycle_stop_reason_forbids_resume"
+
+
+def test_explicit_resume_rejects_missing_resume_run_id() -> None:
+    decision = decide_faq_surface_run_reuse(
+        latest_run=Run(id="run-1"),
+        lifecycle_trigger=TRIGGER_EXPLICIT_USER_RESUME,
+        resume_run_id=None,
+        lifecycle_decision=_decision_for_user_cancel(),
+        expected_prompt_version="prompt-v1",
+    )
+
+    assert decision.reuse is False
+    assert decision.reason == "explicit_resume_requires_resume_run_id"
+
+
+def test_explicit_resume_rejects_mismatched_resume_run_id() -> None:
+    decision = decide_faq_surface_run_reuse(
+        latest_run=Run(id="run-1"),
+        lifecycle_trigger=TRIGGER_EXPLICIT_USER_RESUME,
+        resume_run_id="other-run",
+        lifecycle_decision=_decision_for_user_cancel(),
+        expected_prompt_version="prompt-v1",
+    )
+
+    assert decision.reuse is False
+    assert decision.reason == "explicit_resume_run_id_mismatch"
