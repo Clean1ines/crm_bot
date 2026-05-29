@@ -44,30 +44,19 @@ def test_ingestion_no_longer_defines_moved_source_material_helpers() -> None:
 
 
 def test_surface_service_does_not_import_private_helpers_from_ingestion() -> None:
-    surface_source = SURFACE.read_text(encoding="utf-8")
+    source = Path(
+        "src/application/services/knowledge_surface_ingestion_service.py"
+    ).read_text(encoding="utf-8")
 
-    assert "from src.application.services.knowledge_source_material_builder import" in (
-        surface_source
+    assert (
+        "from src.application.services.knowledge_ingestion_service import" not in source
     )
+    assert "KnowledgeIngestionService" not in source
+    assert "knowledge_source_material_builder" in source
 
-    ingestion_import_start = surface_source.find(
-        "from src.application.services.knowledge_ingestion_service import"
-    )
-    assert ingestion_import_start != -1
-
-    next_import = surface_source.find(
-        "\nfrom ",
-        ingestion_import_start + 1,
-    )
-    ingestion_import_block = surface_source[
-        ingestion_import_start : next_import
-        if next_import != -1
-        else len(surface_source)
-    ]
-
-    for helper in (
+    for helper_name in (
         "_compiler_source_chunks_for_preprocessing",
         "_indexable_chunks",
         "_source_chunks_from_json_chunks",
     ):
-        assert helper not in ingestion_import_block
+        assert helper_name in source

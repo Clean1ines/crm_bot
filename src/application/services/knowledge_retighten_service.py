@@ -5,25 +5,29 @@ from typing import cast
 from src.application.ports.knowledge.retighten import (
     KnowledgeRetightenRepositoryFactoryPort,
 )
-from src.application.services.knowledge_ingestion_service import (
-    JsonObject,
+from src.application.ports.knowledge_port import (
     KnowledgePreprocessorFactoryPort,
-    LoggerPort,
     ModelUsageRepositoryFactoryPort,
+)
+from src.application.ports.logger_port import LoggerPort
+from src.application.services.knowledge_answer_resolution_service import (
     _answer_resolution_cases_from_entries,
     _answer_resolution_decision_is_too_noisy,
     _answer_resolution_decisions_with_case_candidate_ids,
     _cleanup_answer_resolution_text_with_metrics,
+    _limit_compiled_text,
+    _reject_noisy_answer_resolution_decisions,
+)
+from src.application.services.knowledge_retighten_planner import (
     _compose_retighten_existing_document_plans,
     _deterministic_retighten_existing_document_plan,
     _existing_project_titles_for_answer_resolution,
-    _limit_compiled_text,
     _preprocessing_entry_from_canonical_entry,
-    _reject_noisy_answer_resolution_decisions,
     _retighten_archived_entry_ids,
     _retighten_existing_document_plan,
     _retighten_updated_canonical_entries,
 )
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import MODE_PRICE_LIST
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 

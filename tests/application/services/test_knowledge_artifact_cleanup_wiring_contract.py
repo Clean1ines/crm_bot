@@ -17,14 +17,19 @@ def _method_slice(source: str, start_marker: str, end_marker: str) -> str:
 
 
 def test_knowledge_ingestion_process_document_uses_cleanup_contract() -> None:
-    source = INGESTION.read_text(encoding="utf-8")
+    facade_source = Path(
+        "src/application/services/knowledge_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    structured_source = Path(
+        "src/application/services/knowledge_structured_ingestion_service.py"
+    ).read_text(encoding="utf-8")
 
-    assert "build_document_reset_cleanup_plan" in source
-    assert "async def cleanup_document_artifacts(" in source
-    assert "await repo.cleanup_document_artifacts(" in source
-    assert "project_id=project_id" in source
-    assert "document_id=document_id" in source
-    assert "await repo.delete_document_chunks(document_id)" not in source
+    assert "KnowledgeStructuredIngestionService" in facade_source
+    assert "build_document_reset_cleanup_plan" not in facade_source
+
+    assert "build_document_reset_cleanup_plan" in structured_source
+    assert "cleanup_document_artifacts(" in structured_source
+    assert "KnowledgeDocumentDeletedDuringProcessingError" in structured_source
 
 
 def test_faq_surface_normal_no_resume_uses_cleanup_contract() -> None:

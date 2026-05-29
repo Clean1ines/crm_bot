@@ -76,12 +76,20 @@ def test_knowledge_repository_port_remains_temporary_aggregate_without_methods()
 
 
 def test_stage_e_publication_helper_uses_minimal_publication_port() -> None:
-    source = (
+    helper_source = (
+        ROOT / "src/application/services/knowledge_stage_k_shared_helpers.py"
+    ).read_text(encoding="utf-8")
+    wrapper_source = (
+        ROOT / "src/application/services/knowledge_stage_e_publication_helpers.py"
+    ).read_text(encoding="utf-8")
+    facade_source = (
         ROOT / "src/application/services/knowledge_ingestion_service.py"
     ).read_text(encoding="utf-8")
 
-    assert "KnowledgeStageEPublicationPort" in source
-    assert "repo: KnowledgeStageEPublicationPort" in source
+    assert "KnowledgeStageEPublicationPort" in helper_source
+    assert "repo: KnowledgeStageEPublicationPort" in helper_source
+    assert "_persist_stage_e_compiler_outputs" in wrapper_source
+    assert "KnowledgeStageEPublicationPort" not in facade_source
 
 
 def test_context_specific_ports_compose_bounded_ports_not_services() -> None:

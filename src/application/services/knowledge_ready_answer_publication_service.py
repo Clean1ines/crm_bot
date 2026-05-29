@@ -7,11 +7,11 @@ from src.application.ports.knowledge.ready_answer_publication import (
 from src.application.services.knowledge_canonical_publication_builder import (
     canonical_entries_from_raw_answer_candidates as _canonical_entries_from_raw_answer_candidates,
 )
-from src.application.services.knowledge_ingestion_service import (
-    JsonObject,
-    LoggerPort,
+from src.application.ports.logger_port import LoggerPort
+from src.application.services.knowledge_stage_e_publication_helpers import (
     _persist_stage_e_compiler_outputs,
 )
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     KnowledgePreprocessingValidationError,

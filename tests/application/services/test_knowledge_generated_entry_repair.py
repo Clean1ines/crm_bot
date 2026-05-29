@@ -124,16 +124,21 @@ def test_embedding_text_is_rebuilt_after_repair() -> None:
     assert repaired.embedding_text != "stale embedding"
 
 
-def test_ingestion_keeps_only_thin_repair_alias() -> None:
+def test_ingestion_facade_no_longer_keeps_generated_repair_alias() -> None:
     ingestion_source = Path(
         "src/application/services/knowledge_ingestion_service.py"
     ).read_text(encoding="utf-8")
+    repair_source = Path(
+        "src/application/services/knowledge_generated_entry_repair.py"
+    ).read_text(encoding="utf-8")
 
-    assert "from src.application.services.knowledge_generated_entry_repair import" in (
-        ingestion_source
+    assert (
+        "from src.application.services.knowledge_generated_entry_repair import"
+        not in (ingestion_source)
     )
-    assert "_repair_generated_entry = repair_generated_entry" in ingestion_source
+    assert "_repair_generated_entry" not in ingestion_source
 
+    assert "def repair_generated_entry(" in repair_source
     for marker in (
         "def _entry_has_markdown_heading(",
         "def _strip_markdown_heading_markers(",
@@ -142,4 +147,5 @@ def test_ingestion_keeps_only_thin_repair_alias() -> None:
         "def _strip_conversational_prefix(",
         "def _source_answer_coverage_ratio(",
     ):
+        assert marker in repair_source
         assert marker not in ingestion_source

@@ -15,8 +15,14 @@ def test_knowledge_ingestion_service_has_no_asyncpg_dependency() -> None:
     assert "ForeignKeyViolationError" not in source
 
 
-def test_knowledge_ingestion_uses_application_deleted_during_processing_error() -> None:
-    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+def test_structured_ingestion_uses_application_deleted_during_processing_error() -> (
+    None
+):
+    ingestion_source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    structured_source = Path(
+        "src/application/services/knowledge_structured_ingestion_service.py"
+    ).read_text(encoding="utf-8")
 
-    assert "KnowledgeDocumentDeletedDuringProcessingError" in source
-    assert "except KnowledgeDocumentDeletedDuringProcessingError" in source
+    assert "KnowledgeDocumentDeletedDuringProcessingError" not in ingestion_source
+    assert "KnowledgeDocumentDeletedDuringProcessingError" in structured_source
+    assert "except KnowledgeDocumentDeletedDuringProcessingError" in structured_source

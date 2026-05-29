@@ -48,15 +48,29 @@ def test_application_port_exposes_canonical_entry_write_not_legacy_chunk_write()
     assert "chunks: Sequence[KnowledgeChunk]" not in aggregate_source
 
 
-def test_ingestion_writes_source_chunks_then_canonical_entries() -> None:
-    source = _read("src/application/services/knowledge_ingestion_service.py")
+def test_structured_ingestion_writes_source_chunks_then_canonical_entries() -> None:
+    facade_source = _read("src/application/services/knowledge_ingestion_service.py")
+    structured_source = _read(
+        "src/application/services/knowledge_structured_ingestion_service.py"
+    )
+    publication_source = _read(
+        "src/application/services/knowledge_stage_k_shared_helpers.py"
+    )
+    canonical_builder_source = _read(
+        "src/application/services/knowledge_canonical_publication_builder.py"
+    )
 
-    assert "repo.add_source_chunks" in source
-    assert "repo.add_canonical_entries" in source
-    assert "CanonicalKnowledgeEntry(" in source
-    assert "KnowledgeEntryStatus.PUBLISHED" in source
-    assert "KnowledgeEntryVisibility.RUNTIME" in source
-    assert "repo.add_knowledge_chunks" not in source
+    assert "KnowledgeStructuredIngestionService" in facade_source
+    assert "repo.add_knowledge_chunks" not in facade_source
+
+    assert "repo.add_source_chunks" in structured_source
+    assert "canonical_entries_from_preprocessing_result" in structured_source
+    assert "repo.add_knowledge_chunks" not in structured_source
+
+    assert "repo.add_canonical_entries" in publication_source
+    assert "CanonicalKnowledgeEntry(" in canonical_builder_source
+    assert "KnowledgeEntryStatus.PUBLISHED" in canonical_builder_source
+    assert "KnowledgeEntryVisibility.RUNTIME" in canonical_builder_source
 
 
 def test_runtime_retrieval_reads_retrieval_surface_not_knowledge_base() -> None:

@@ -4,7 +4,9 @@ from pathlib import Path
 
 
 def test_no_hardcoded_meta_question_dictionary() -> None:
-    source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
+    source = Path(
+        "src/application/services/knowledge_stage_k_shared_helpers.py"
+    ).read_text(
         encoding="utf-8",
     )
     section = source[

@@ -177,24 +177,30 @@ def test_stable_keys_are_unchanged_for_stage_k_publication() -> None:
     assert len(entries[0].stable_key) == len("doc:stage_k:") + 24
 
 
-def test_ingestion_keeps_only_thin_publication_aliases() -> None:
-    source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
-        encoding="utf-8"
-    )
+def test_ingestion_facade_no_longer_keeps_publication_aliases() -> None:
+    ingestion_source = Path(
+        "src/application/services/knowledge_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    builder_source = Path(
+        "src/application/services/knowledge_canonical_publication_builder.py"
+    ).read_text(encoding="utf-8")
 
     assert (
         "from src.application.services.knowledge_canonical_publication_builder import"
-        in source
+        not in (ingestion_source)
     )
-    assert "_canonical_entries_from_preprocessing_result = (" in source
-    assert "_canonical_entries_from_raw_answer_candidates = (" in source
 
     for marker in (
-        "def _canonical_entries_from_preprocessing_result(",
-        "def _canonical_entries_from_raw_answer_candidates(",
-        "def _source_refs_for_compiled_answer_draft(",
-        "def _source_chunk_for_quote(",
-        "def _final_publication_guard_collapse_exact_duplicates(",
-        "def _merge_canonical_entries_structurally(",
+        "_canonical_entries_from_preprocessing_result",
+        "_canonical_entries_from_raw_answer_candidates",
+        "_source_refs_for_compiled_answer_draft",
+        "_source_chunk_for_quote",
+        "_final_publication_guard_collapse_exact_duplicates",
+        "_merge_canonical_entries_structurally",
     ):
-        assert marker not in source
+        assert marker not in ingestion_source
+
+    assert "def canonical_entries_from_preprocessing_result(" in builder_source
+    assert "def canonical_entries_from_raw_answer_candidates(" in builder_source
+    assert "def _source_refs_for_compiled_answer_draft(" in builder_source
+    assert "def _final_publication_guard_collapse_exact_duplicates(" in builder_source

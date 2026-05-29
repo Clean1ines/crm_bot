@@ -19,7 +19,7 @@ from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryPort,
 )
-from src.application.services.knowledge_ingestion_service import (
+from src.application.services.knowledge_ingestion_contracts import (
     KnowledgeIngestionRepositoryPort,
 )
 from src.application.services.knowledge_structured_ingestion_service import (

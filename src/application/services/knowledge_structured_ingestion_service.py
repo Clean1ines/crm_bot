@@ -28,33 +28,49 @@ from src.application.services.knowledge_canonical_publication_builder import (
 from src.application.services.knowledge_generated_entry_repair import (
     repair_generated_entry as _repair_generated_entry,
 )
-from src.application.services.knowledge_ingestion_service import (
-    CommercialPriceAcquisitionServiceFactoryPort,
-    CommercialPriceRepositoryFactoryPort,
-    CompilerBatch,
-    JsonObject,
+from src.application.ports.knowledge_port import (
+    KnowledgePreprocessorFactoryPort,
+    ModelUsageRepositoryFactoryPort,
+)
+from src.application.ports.logger_port import LoggerPort
+from src.application.services.knowledge_answer_candidate_builder import (
+    _raw_answer_candidates_from_preprocessing_entries,
+)
+from src.application.services.knowledge_compiled_entry_cleanup import (
+    _mechanically_cleanup_compiled_entries,
+    _source_excerpts_from_preprocessing_entry,
+)
+from src.application.services.knowledge_compiler_batch_builder import (
     KCD_STAGE_K_CANCELLED_ERROR,
     KCD_STAGE_K_COMPILER_VERSION,
     KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT,
+    _compiler_batches_from_technical_batches,
+    _stage_e_compiler_run,
+    _stage_e_compiler_run_id,
+)
+from src.application.services.knowledge_ingestion_contracts import (
+    CommercialPriceAcquisitionServiceFactoryPort,
+    CommercialPriceRepositoryFactoryPort,
     KnowledgeDocumentProcessingResult,
+)
+from src.application.services.knowledge_preprocessing_result_helpers import (
+    _json_metric_int,
+    _preprocessing_failure_status_message,
+    _preprocessing_result_from_entries,
+    _source_excerpt_to_text,
+)
+from src.application.services.knowledge_retighten_planner import (
+    _existing_project_titles_for_answer_resolution,
+)
+from src.application.services.knowledge_stage_e_publication_helpers import (
+    _persist_stage_e_compiler_outputs,
+)
+from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_compilation import CompilerBatch
+from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
-    KnowledgePreprocessorFactoryPort,
-    LoggerPort,
-    ModelUsageRepositoryFactoryPort,
-    _compiler_batches_from_technical_batches,
-    _existing_project_titles_for_answer_resolution,
-    _json_metric_int,
-    _mechanically_cleanup_compiled_entries,
-    _persist_stage_e_compiler_outputs,
-    _preprocessing_failure_status_message,
-    _preprocessing_result_from_entries,
-    _raw_answer_candidates_from_preprocessing_entries,
-    _source_excerpt_to_text,
-    _source_excerpts_from_preprocessing_entry,
-    _stage_e_compiler_run,
-    _stage_e_compiler_run_id,
 )
 from src.application.services.knowledge_source_material_builder import (
     _compiler_source_chunks_for_preprocessing,

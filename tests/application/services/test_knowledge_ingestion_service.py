@@ -13,15 +13,20 @@ def test_direct_knowledge_ingestion_service_rejects_faq_mode() -> None:
     )
 
 
-def test_direct_knowledge_ingestion_service_requires_price_list_preprocessor() -> None:
-    source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
-        encoding="utf-8"
-    )
+def test_structured_ingestion_service_requires_price_list_preprocessor() -> None:
+    ingestion_source = Path(
+        "src/application/services/knowledge_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    structured_source = Path(
+        "src/application/services/knowledge_structured_ingestion_service.py"
+    ).read_text(encoding="utf-8")
 
+    assert "KnowledgeStructuredIngestionService" in ingestion_source
     assert (
-        "Knowledge preprocessing adapter is required for price_list uploads" in source
+        "Knowledge preprocessing adapter is required for price_list uploads"
+        in structured_source
     )
-    assert "preprocessor_factory is None" in source
+    assert "preprocessor_factory is None" in structured_source
 
 
 def test_direct_knowledge_ingestion_service_no_longer_has_plain_runtime_branch() -> (
