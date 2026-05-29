@@ -7,26 +7,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_answer_resolution_progress_metrics_are_persisted_before_publication() -> None:
-    ingestion_source = (
-        ROOT / "src/application/services/knowledge_ingestion_service.py"
+    structured_source = Path(
+        "src/application/services/knowledge_structured_ingestion_service.py"
     ).read_text(encoding="utf-8")
     answer_resolution_source = (
         ROOT / "src/application/services/knowledge_answer_resolution_service.py"
     ).read_text(encoding="utf-8")
 
-    progress_index = ingestion_source.index(
+    progress_index = structured_source.index(
         "async def persist_answer_resolution_progress"
     )
-    tighten_index = ingestion_source.index(
+    tighten_index = structured_source.index(
         "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases"
     )
-    publish_index = ingestion_source.index(
+    publish_index = structured_source.index(
         "canonical_entries = _canonical_entries_from_preprocessing_result"
     )
 
     assert progress_index < tighten_index < publish_index
 
-    progress_slice = ingestion_source[progress_index:publish_index]
+    progress_slice = structured_source[progress_index:publish_index]
     assert '"stage": "answer_resolution"' in progress_slice
     assert "await repo.update_document_preprocessing_status" in progress_slice
     assert "metrics" in progress_slice

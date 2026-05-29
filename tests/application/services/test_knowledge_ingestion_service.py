@@ -37,11 +37,20 @@ def test_direct_knowledge_ingestion_service_no_longer_has_plain_runtime_branch()
 
 
 def test_direct_knowledge_ingestion_service_still_preserves_price_list_path() -> None:
-    source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
-        encoding="utf-8"
+    ingestion_source = Path(
+        "src/application/services/knowledge_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    structured_source = Path(
+        "src/application/services/knowledge_structured_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    compact_ingestion_source = "".join(ingestion_source.split())
+
+    assert "KnowledgeStructuredIngestionService" in ingestion_source
+    assert (
+        "returnawaitKnowledgeStructuredIngestionService(self.pool).process_document"
+        in compact_ingestion_source
     )
 
-    assert "MODE_PRICE_LIST" in source
-    assert "preprocessor_factory" in source
-    assert "KnowledgePreprocessorFactoryPort" in source
-    assert "add_canonical_entries" in source
+    assert "MODE_PRICE_LIST" in structured_source
+    assert "CommercialPriceIngestionService" in structured_source
+    assert "price_acquisition_row_count" in structured_source

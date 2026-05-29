@@ -4,7 +4,7 @@ import inspect
 from pathlib import Path
 
 from src.application.ports import knowledge_port
-from src.application.services import knowledge_ingestion_service, knowledge_service
+from src.application.services import knowledge_service
 from src.interfaces.http import knowledge as knowledge_http
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 
@@ -136,18 +136,15 @@ def test_repository_persists_stage_e_trace_tables() -> None:
 
 
 def test_ingestion_creates_compiler_run_before_outputs() -> None:
-    source = inspect.getsource(knowledge_ingestion_service.KnowledgeIngestionService)
+    source = Path(
+        "src/application/services/knowledge_structured_ingestion_service.py"
+    ).read_text(encoding="utf-8")
 
-    assert "repo.create_compiler_run" in source
-    assert "repo.create_compiler_batches" in source
-    assert "repo.mark_compiler_batch_processing" in source
-    assert "repo.complete_compiler_batch" in source
-    assert "_persist_stage_e_compiler_outputs" in Path(
-        "src/application/services/knowledge_ingestion_service.py"
-    ).read_text(encoding="utf-8")
-    assert "compiler_run_id=compiler_run_id" in Path(
-        "src/application/services/knowledge_ingestion_service.py"
-    ).read_text(encoding="utf-8")
+    create_run_index = source.index("await repo.create_compiler_run(")
+    create_batches_index = source.index("repo.create_compiler_batches")
+    persist_outputs_index = source.index("_persist_stage_e_compiler_outputs(")
+
+    assert create_run_index < create_batches_index < persist_outputs_index
 
 
 def test_knowledge_progress_report_exposes_durable_batch_state() -> None:
