@@ -40,6 +40,7 @@ async def test_deleted_during_processing_is_permanent_job_error(
         "_mark_recoverable_llm_upload_failure",
         mark_recoverable,
     )
+
     job = {
         "payload": {
             "project_id": "project-1",
