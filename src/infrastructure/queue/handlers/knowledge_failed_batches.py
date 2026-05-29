@@ -10,9 +10,11 @@ from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryPort,
 )
+from src.application.services.knowledge_failed_batch_retry_service import (
+    KnowledgeFailedBatchRetryService,
+)
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryPort,
-    KnowledgeIngestionService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
@@ -72,7 +74,7 @@ async def handle_retry_knowledge_failed_batches(
             "Use Retrieval Surface Compilation pipeline."
         )
 
-    service = KnowledgeIngestionService(db_pool)
+    service = KnowledgeFailedBatchRetryService(db_pool)
 
     try:
         await service.retry_failed_batches(
