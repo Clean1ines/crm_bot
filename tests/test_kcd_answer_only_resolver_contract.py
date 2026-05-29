@@ -5,14 +5,20 @@ import json
 
 import pytest
 
-from src.application.services.knowledge_ingestion_service import (
-    _apply_answer_resolution_decisions,
-    _mechanically_cleanup_compiled_entries,
-    _answer_resolution_decisions_with_case_candidate_ids,
+from src.application.services.knowledge_answer_resolution_service import (
     _answer_resolution_cases_from_entries,
+    _answer_resolution_decisions_with_case_candidate_ids,
+    _apply_answer_resolution_decisions,
     _resolve_compiled_answer_cases,
-    _source_excerpt_to_text,
+)
+from src.application.services.knowledge_compiled_entry_cleanup import (
+    _mechanically_cleanup_compiled_entries,
+)
+from src.application.services.knowledge_generated_entry_compat import (
     _regenerate_entry_from_source_excerpt,
+)
+from src.application.services.knowledge_preprocessing_result_helpers import (
+    _source_excerpt_to_text,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,

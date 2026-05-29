@@ -10,15 +10,19 @@ from src.application.services.knowledge_answer_compiler_batching import (
 from src.application.services.knowledge_canonical_publication_builder import (
     canonical_entries_from_raw_answer_candidates as _canonical_entries_from_raw_answer_candidates,
 )
-from src.application.services.knowledge_ingestion_service import (
-    CanonicalKnowledgeEntry,
-    JsonObject,
+from src.application.ports.knowledge_port import (
     KnowledgePreprocessorFactoryPort,
-    LoggerPort,
     ModelUsageRepositoryFactoryPort,
-    _persist_stage_e_compiler_outputs,
+)
+from src.application.ports.logger_port import LoggerPort
+from src.application.services.knowledge_answer_candidate_builder import (
     _raw_answer_candidates_from_preprocessing_entries,
 )
+from src.application.services.knowledge_stage_e_publication_helpers import (
+    _persist_stage_e_compiler_outputs,
+)
+from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_compilation import CanonicalKnowledgeEntry
 from src.application.services.knowledge_source_material_builder import (
     _json_chunks_from_source_chunks,
 )

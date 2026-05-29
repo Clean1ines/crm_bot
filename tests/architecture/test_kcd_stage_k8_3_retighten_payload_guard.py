@@ -5,7 +5,7 @@ from pathlib import Path
 from src.infrastructure.logging.logger import redact_sensitive_log_values
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
+SERVICE = ROOT / "src/application/services/knowledge_answer_resolution_service.py"
 RETIGHTEN_SERVICE = ROOT / "src/application/services/knowledge_retighten_service.py"
 ANSWER_RESOLUTION_SERVICE = (
     ROOT / "src/application/services/knowledge_answer_resolution_service.py"

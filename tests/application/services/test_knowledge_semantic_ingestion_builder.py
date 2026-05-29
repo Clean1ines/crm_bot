@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.application.services.knowledge_ingestion_service import (
+from src.application.services.knowledge_semantic_ingestion_helpers import (
     _document_from_json_chunks,
 )
 

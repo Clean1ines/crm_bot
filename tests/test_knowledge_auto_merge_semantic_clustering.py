@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.application.services import knowledge_ingestion_service as kis
+from src.application.services import knowledge_answer_resolution_service as ars
+from src.application.services import knowledge_compiled_entry_cleanup as cleanup_helpers
+from src.application.services import knowledge_retighten_planner as retighten_helpers
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingEntry
 
 
@@ -75,7 +77,7 @@ def _product_positioning_entries() -> tuple[KnowledgePreprocessingEntry, ...]:
 
 
 def test_same_intent_summary_candidates_form_cluster_before_cleanup() -> None:
-    cases = kis._answer_resolution_cases_from_entries(_product_positioning_entries())
+    cases = ars._answer_resolution_cases_from_entries(_product_positioning_entries())
 
     assert len(cases) == 1
     assert len(cases[0].candidates) == 3
@@ -84,10 +86,11 @@ def test_same_intent_summary_candidates_form_cluster_before_cleanup() -> None:
 def test_same_intent_summary_survives_mechanical_cleanup_as_llm_case() -> None:
     entries = _product_positioning_entries()
     source_excerpts = tuple(
-        kis._source_excerpts_from_preprocessing_entry(entry) for entry in entries
+        cleanup_helpers._source_excerpts_from_preprocessing_entry(entry)
+        for entry in entries
     )
 
-    cleanup = kis._mechanically_cleanup_compiled_entries(
+    cleanup = cleanup_helpers._mechanically_cleanup_compiled_entries(
         entries=entries,
         source_excerpts_by_entry=source_excerpts,
     )
@@ -95,7 +98,7 @@ def test_same_intent_summary_survives_mechanical_cleanup_as_llm_case() -> None:
     assert len(cleanup.entries) == 2
     assert cleanup.metrics["deterministic_candidate_collapse_count"] == 1
 
-    cases = kis._answer_resolution_cases_from_entries(cleanup.entries)
+    cases = ars._answer_resolution_cases_from_entries(cleanup.entries)
 
     assert len(cases) == 1
     assert len(cases[0].candidates) == 2
@@ -104,18 +107,21 @@ def test_same_intent_summary_survives_mechanical_cleanup_as_llm_case() -> None:
 def test_retighten_uses_same_intent_summary_candidate_generation() -> None:
     entries = _product_positioning_entries()
     source_excerpts = tuple(
-        kis._source_excerpts_from_preprocessing_entry(entry) for entry in entries
+        cleanup_helpers._source_excerpts_from_preprocessing_entry(entry)
+        for entry in entries
     )
-    cleanup = kis._mechanically_cleanup_compiled_entries(
+    cleanup = cleanup_helpers._mechanically_cleanup_compiled_entries(
         entries=entries,
         source_excerpts_by_entry=source_excerpts,
     )
 
-    retighten = kis._deterministic_retighten_existing_document_plan(cleanup.entries)
+    retighten = retighten_helpers._deterministic_retighten_existing_document_plan(
+        cleanup.entries
+    )
 
     assert len(retighten.plan.entries) == 2
 
-    cases = kis._answer_resolution_cases_from_entries(retighten.plan.entries)
+    cases = ars._answer_resolution_cases_from_entries(retighten.plan.entries)
 
     assert len(cases) == 1
     assert len(cases[0].candidates) == 2

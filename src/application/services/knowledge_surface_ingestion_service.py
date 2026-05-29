@@ -12,7 +12,7 @@ from src.application.ports.knowledge_port import (
     KnowledgeSurfaceCompilerFactoryPort,
 )
 from src.application.ports.logger_port import LoggerPort
-from src.application.services.knowledge_ingestion_service import (
+from src.application.services.knowledge_ingestion_contracts import (
     KnowledgeDocumentProcessingResult,
     KnowledgeIngestionRepositoryFactoryPort,
 )

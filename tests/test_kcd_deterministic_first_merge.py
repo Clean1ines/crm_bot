@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from src.application.services.knowledge_ingestion_service import (
-    _mechanically_cleanup_compiled_entries,
+from src.application.services.knowledge_answer_resolution_service import (
     _merge_answer_text,
+)
+from src.application.services.knowledge_compiled_entry_cleanup import (
+    _mechanically_cleanup_compiled_entries,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
