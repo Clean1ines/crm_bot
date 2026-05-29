@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import cast
 
+from src.application.ports.knowledge.retighten import (
+    KnowledgeRetightenRepositoryFactoryPort,
+)
 from src.application.services.knowledge_ingestion_service import (
     JsonObject,
-    KnowledgeIngestionRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     LoggerPort,
     ModelUsageRepositoryFactoryPort,
@@ -36,7 +38,7 @@ class KnowledgeRetightenService:
         project_id: str,
         document_id: str,
         file_name: str,
-        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeRetightenRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort,
         logger: LoggerPort,

@@ -24,6 +24,9 @@ from src.application.ports.knowledge import (
     KnowledgeCanonicalEntryPort,
     KnowledgeRuntimeRetrievalPort,
 )
+from src.application.ports.knowledge.ready_answer_publication import (
+    KnowledgeStageEPublicationPort,
+)
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryFactoryPort,
@@ -1299,7 +1302,7 @@ KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO = 0.55
 
 async def _existing_project_titles_for_answer_resolution(
     *,
-    repo: KnowledgeIngestionRepositoryPort,
+    repo: KnowledgeRuntimeRetrievalPort,
     project_id: str,
     document_id: str,
 ) -> tuple[str, ...]:
@@ -2117,7 +2120,7 @@ def _stage_e_compilation_metrics(
 
 async def _persist_stage_e_compiler_outputs(
     *,
-    repo: KnowledgeIngestionRepositoryPort,
+    repo: KnowledgeStageEPublicationPort,
     project_id: str,
     document_id: str,
     compiler_run_id: str,
@@ -2411,8 +2414,16 @@ class KnowledgeIngestionService:
                 source_chunks=source_chunks,
             )
 
+        from src.application.ports.knowledge.structured_ingestion import (
+            KnowledgeStructuredIngestionRepositoryFactoryPort,
+        )
         from src.application.services.knowledge_structured_ingestion_service import (
             KnowledgeStructuredIngestionService,
+        )
+
+        structured_knowledge_repo_factory = cast(
+            KnowledgeStructuredIngestionRepositoryFactoryPort,
+            knowledge_repo_factory,
         )
 
         return await KnowledgeStructuredIngestionService(self.pool).process_document(
@@ -2421,7 +2432,7 @@ class KnowledgeIngestionService:
             file_name=file_name,
             chunks=chunks,
             mode=mode,
-            knowledge_repo_factory=knowledge_repo_factory,
+            knowledge_repo_factory=structured_knowledge_repo_factory,
             model_usage_repo_factory=model_usage_repo_factory,
             preprocessor_factory=preprocessor_factory,
             logger=logger,

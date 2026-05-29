@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.application.ports.knowledge_artifact_cleanup import (
+from src.application.ports.knowledge.artifact_cleanup import (
     KnowledgeArtifactCleanupPort,
 )
 from src.domain.project_plane.knowledge_artifact_cleanup import (
