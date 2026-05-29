@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from src.application.errors import ValidationError
+from src.application.ports.knowledge.failed_batch_retry import (
+    KnowledgeFailedBatchRetryRepositoryFactoryPort,
+)
 from src.application.services.knowledge_answer_compiler_batching import (
     _technical_chunk_batches_for_answer_compiler,
 )
@@ -10,7 +13,6 @@ from src.application.services.knowledge_canonical_publication_builder import (
 from src.application.services.knowledge_ingestion_service import (
     CanonicalKnowledgeEntry,
     JsonObject,
-    KnowledgeIngestionRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     LoggerPort,
     ModelUsageRepositoryFactoryPort,
@@ -41,7 +43,7 @@ class KnowledgeFailedBatchRetryService:
         *,
         project_id: str,
         document_id: str,
-        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeFailedBatchRetryRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort,
         logger: LoggerPort,

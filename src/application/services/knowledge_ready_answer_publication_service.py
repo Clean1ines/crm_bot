@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from src.application.errors import ValidationError
+from src.application.ports.knowledge.ready_answer_publication import (
+    KnowledgeReadyAnswerPublicationRepositoryFactoryPort,
+)
 from src.application.services.knowledge_canonical_publication_builder import (
     canonical_entries_from_raw_answer_candidates as _canonical_entries_from_raw_answer_candidates,
 )
 from src.application.services.knowledge_ingestion_service import (
     JsonObject,
-    KnowledgeIngestionRepositoryFactoryPort,
     LoggerPort,
     _persist_stage_e_compiler_outputs,
 )
@@ -28,7 +30,7 @@ class KnowledgeReadyAnswerPublicationService:
         *,
         project_id: str,
         document_id: str,
-        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeReadyAnswerPublicationRepositoryFactoryPort,
         logger: LoggerPort,
     ) -> JsonObject:
         repo = knowledge_repo_factory(self.pool)

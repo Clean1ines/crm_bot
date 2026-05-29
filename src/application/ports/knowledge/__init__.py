@@ -3,6 +3,14 @@ from __future__ import annotations
 from src.application.ports.knowledge.answer_candidates import (
     KnowledgeAnswerCandidatePort,
 )
+from src.application.ports.knowledge.artifact_cleanup import (
+    KnowledgeArtifactCleanupPort,
+    KnowledgeArtifactCleanupRepositoryFactoryPort,
+)
+from src.application.ports.knowledge.failed_batch_retry import (
+    KnowledgeFailedBatchRetryRepositoryFactoryPort,
+    KnowledgeFailedBatchRetryRepositoryPort,
+)
 from src.application.ports.knowledge.canonical_entries import (
     KnowledgeCanonicalEntryPort,
 )
@@ -18,7 +26,24 @@ from src.application.ports.knowledge.documents import (
 from src.application.ports.knowledge.runtime_retrieval import (
     KnowledgeRuntimeRetrievalPort,
 )
+from src.application.ports.knowledge.source_import import (
+    KnowledgeSourceImportRepositoryFactoryPort,
+    KnowledgeSourceImportRepositoryPort,
+)
 from src.application.ports.knowledge.source_material import KnowledgeSourceMaterialPort
+from src.application.ports.knowledge.structured_ingestion import (
+    KnowledgeStructuredIngestionRepositoryFactoryPort,
+    KnowledgeStructuredIngestionRepositoryPort,
+)
+from src.application.ports.knowledge.ready_answer_publication import (
+    KnowledgeReadyAnswerPublicationRepositoryFactoryPort,
+    KnowledgeReadyAnswerPublicationRepositoryPort,
+    KnowledgeStageEPublicationPort,
+)
+from src.application.ports.knowledge.retighten import (
+    KnowledgeRetightenRepositoryFactoryPort,
+    KnowledgeRetightenRepositoryPort,
+)
 from src.application.ports.knowledge.surface_compiler_runs import (
     KnowledgeSurfaceCompilerRunPort,
 )
@@ -45,6 +70,19 @@ from src.application.ports.knowledge.surface_publication import (
 )
 
 __all__ = [
+    "KnowledgeStructuredIngestionRepositoryPort",
+    "KnowledgeStructuredIngestionRepositoryFactoryPort",
+    "KnowledgeStageEPublicationPort",
+    "KnowledgeSourceImportRepositoryPort",
+    "KnowledgeSourceImportRepositoryFactoryPort",
+    "KnowledgeRetightenRepositoryPort",
+    "KnowledgeRetightenRepositoryFactoryPort",
+    "KnowledgeReadyAnswerPublicationRepositoryPort",
+    "KnowledgeReadyAnswerPublicationRepositoryFactoryPort",
+    "KnowledgeFailedBatchRetryRepositoryPort",
+    "KnowledgeFailedBatchRetryRepositoryFactoryPort",
+    "KnowledgeArtifactCleanupRepositoryFactoryPort",
+    "KnowledgeArtifactCleanupPort",
     "KnowledgeAnswerCandidatePort",
     "KnowledgeCanonicalEntryPort",
     "KnowledgeCompilationTracePort",

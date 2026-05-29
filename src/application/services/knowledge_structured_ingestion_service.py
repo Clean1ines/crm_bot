@@ -11,6 +11,9 @@ from src.application.errors import (
 from src.application.services.commercial_price_ingestion_service import (
     CommercialPriceIngestionService,
 )
+from src.application.ports.knowledge.structured_ingestion import (
+    KnowledgeStructuredIngestionRepositoryFactoryPort,
+)
 from src.application.services.knowledge_answer_compiler_batching import (
     KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL,
     KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
@@ -34,7 +37,6 @@ from src.application.services.knowledge_ingestion_service import (
     KCD_STAGE_K_COMPILER_VERSION,
     KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT,
     KnowledgeDocumentProcessingResult,
-    KnowledgeIngestionRepositoryFactoryPort,
     KnowledgePreprocessingEntry,
     KnowledgePreprocessingMode,
     KnowledgePreprocessingResult,
@@ -88,7 +90,7 @@ class KnowledgeStructuredIngestionService:
         file_name: str,
         chunks: list[JsonObject],
         mode: KnowledgePreprocessingMode,
-        knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
+        knowledge_repo_factory: KnowledgeStructuredIngestionRepositoryFactoryPort,
         model_usage_repo_factory: ModelUsageRepositoryFactoryPort,
         preprocessor_factory: KnowledgePreprocessorFactoryPort | None,
         logger: LoggerPort,
