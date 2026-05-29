@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText } from 'lucide-react';
+import { FileText, Trash2 } from 'lucide-react';
 
 import { ImportQualitySummary } from './ImportQualitySummary';
 import { PriceFactsSummary } from './PriceFactsSummary';
@@ -26,6 +26,7 @@ export const KnowledgeDocumentCard: React.FC<{
   doc: DocCardDocument;
   statusBadge: { className: string; label: string };
   isRetighteningThisDoc: boolean;
+  isDeletePending: boolean;
   processingReport: KnowledgeProcessingReport | undefined;
   importQualityReport: KnowledgeImportQualityReport | undefined;
   priceFactsResponse: KnowledgePriceFactsResponse | undefined;
@@ -38,6 +39,7 @@ export const KnowledgeDocumentCard: React.FC<{
   onPolicyChange: (policy: KnowledgeCommercialTruthReviewPolicy) => void;
   onPublishFact: (fact: KnowledgePriceFact) => void;
   onRejectFact: (fact: KnowledgePriceFact) => void;
+  onRequestDelete: () => void;
   actionsNode: React.ReactNode;
   processingNode: React.ReactNode;
   retightenReportNode: React.ReactNode;
@@ -54,12 +56,14 @@ export const KnowledgeDocumentCard: React.FC<{
   knowledgeProcessingModeLabel: (value: string) => string;
 }> = ({
   doc,
+  isDeletePending,
   importQualityReport,
   importQualityLoading,
   priceFactsResponse,
   isPriceFactsLoading,
   onPublishFact,
   onRejectFact,
+  onRequestDelete,
   mutatingPriceFactId,
   commercialTruthReviewResponse,
   isCommercialTruthReviewLoading,
@@ -88,7 +92,7 @@ export const KnowledgeDocumentCard: React.FC<{
       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
         <FileText className="h-5 w-5" />
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {isDocumentProcessing ? (
           <button
             type="button"
@@ -122,6 +126,16 @@ export const KnowledgeDocumentCard: React.FC<{
           className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
         >
           {t('knowledge.documentCard.primaryAction.curation')}
+        </button>
+        <button
+          type="button"
+          onClick={onRequestDelete}
+          disabled={isDeletePending}
+          aria-label={t('common.actions.delete')}
+          className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-danger-bg)] px-2.5 py-1 text-xs font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80 disabled:cursor-wait disabled:opacity-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+          <span>{isDeletePending ? t('common.states.loading') : t('common.actions.delete')}</span>
         </button>
       </div>
     </div>

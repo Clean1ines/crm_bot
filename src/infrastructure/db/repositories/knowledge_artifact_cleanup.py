@@ -454,6 +454,116 @@ async def _cleanup_project_rag_eval_artifacts(
     return total
 
 
+async def _cleanup_document_commercial_price_artifacts(
+    conn: ConnectionLike,
+    *,
+    project_id: str,
+    document_id: str,
+) -> int:
+    total = 0
+
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_facts
+        WHERE project_id = $1
+          AND price_document_id IN (
+              SELECT id
+              FROM commercial_price_documents
+              WHERE project_id = $1
+                AND knowledge_document_id = $2::uuid
+          )
+        """,
+        project_id,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_source_rows
+        WHERE project_id = $1
+          AND price_document_id IN (
+              SELECT id
+              FROM commercial_price_documents
+              WHERE project_id = $1
+                AND knowledge_document_id = $2::uuid
+          )
+        """,
+        project_id,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_source_units
+        WHERE project_id = $1
+          AND price_document_id IN (
+              SELECT id
+              FROM commercial_price_documents
+              WHERE project_id = $1
+                AND knowledge_document_id = $2::uuid
+          )
+        """,
+        project_id,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_documents
+        WHERE project_id = $1
+          AND knowledge_document_id = $2::uuid
+        """,
+        project_id,
+        document_id,
+    )
+
+    return total
+
+
+async def _cleanup_project_commercial_price_artifacts(
+    conn: ConnectionLike,
+    *,
+    project_id: str,
+) -> int:
+    total = 0
+
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_facts
+        WHERE project_id = $1
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_source_rows
+        WHERE project_id = $1
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_source_units
+        WHERE project_id = $1
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM commercial_price_documents
+        WHERE project_id = $1
+        """,
+        project_id,
+    )
+
+    return total
+
+
 async def _cleanup_document_entry_artifacts(
     conn: ConnectionLike,
     *,
@@ -805,6 +915,14 @@ async def cleanup_document_artifacts(
                 document_id=document_id,
             )
 
+            commercial_price_artifacts = (
+                await _cleanup_document_commercial_price_artifacts(
+                    conn,
+                    project_id=project_id,
+                    document_id=document_id,
+                )
+            )
+
             (
                 entry_source_refs,
                 retrieval_surface_rows,
@@ -903,6 +1021,7 @@ async def cleanup_document_artifacts(
             surface_cards=surface_cards,
             surface_relations=surface_relations,
             rag_eval_artifacts=rag_eval_artifacts,
+            commercial_price_artifacts=commercial_price_artifacts,
             execution_queue_jobs=execution_queue_jobs,
         ),
     )
@@ -942,6 +1061,13 @@ async def cleanup_project_artifacts(
             rag_eval_artifacts = await _cleanup_project_rag_eval_artifacts(
                 conn,
                 project_id=project_id,
+            )
+
+            commercial_price_artifacts = (
+                await _cleanup_project_commercial_price_artifacts(
+                    conn,
+                    project_id=project_id,
+                )
             )
 
             (
@@ -1015,6 +1141,7 @@ async def cleanup_project_artifacts(
             surface_cards=surface_cards,
             surface_relations=surface_relations,
             rag_eval_artifacts=rag_eval_artifacts,
+            commercial_price_artifacts=commercial_price_artifacts,
             execution_queue_jobs=execution_queue_jobs,
         ),
     )

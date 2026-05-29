@@ -141,6 +141,15 @@ const formatPreviewScore = (value: number): string =>
 const DRAFT_FETCH_LIMIT = 1000;
 const SOURCE_UNIT_FETCH_LIMIT = 1000;
 
+const omitDocumentState = <T,>(
+  values: Record<string, T>,
+  documentId: string,
+): Record<string, T> => {
+  const next = { ...values };
+  delete next[documentId];
+  return next;
+};
+
 // Legacy fallback only for display/status of old rows that predate
 // backend KnowledgeDocumentLifecycle actions. Do not use this text as
 // the primary source for resume/retry/publish/stop action availability.
@@ -793,6 +802,7 @@ export const KnowledgePage: React.FC = () => {
   const [preprocessingMode, setPreprocessingMode] =
     useState<KnowledgePreprocessingMode>("faq");
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [deleteDocumentId, setDeleteDocumentId] = useState<string | null>(null);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<
     string | null
@@ -1199,6 +1209,9 @@ export const KnowledgePage: React.FC = () => {
   const curationDocument = curationDocumentId
     ? (documents.find((doc) => doc.id === curationDocumentId) ?? null)
     : null;
+  const deleteDocument = deleteDocumentId
+    ? (documents.find((doc) => doc.id === deleteDocumentId) ?? null)
+    : null;
 
   const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
@@ -1247,6 +1260,27 @@ export const KnowledgePage: React.FC = () => {
         : [...currentIds, sourceUnitId];
       return { ...current, [documentId]: nextIds };
     });
+  };
+  const removeDocumentLocalState = (documentId: string): void => {
+    setDraftsDocumentId((current) => (current === documentId ? null : current));
+    setSourceUnitsDocumentId((current) =>
+      current === documentId ? null : current,
+    );
+    setCurationDocumentId((current) =>
+      current === documentId ? null : current,
+    );
+    setDraftFiltersByDocument((current) =>
+      omitDocumentState(current, documentId),
+    );
+    setSourceUnitFiltersByDocument((current) =>
+      omitDocumentState(current, documentId),
+    );
+    setExpandedDraftIdsByDocument((current) =>
+      omitDocumentState(current, documentId),
+    );
+    setExpandedSourceUnitIdsByDocument((current) =>
+      omitDocumentState(current, documentId),
+    );
   };
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
@@ -1340,6 +1374,53 @@ export const KnowledgePage: React.FC = () => {
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.clearFailed")));
+    },
+  });
+
+  const deleteDocumentMutation = useMutation<string, unknown, string>({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
+      await knowledgeApi.deleteDocument(projectId, documentId);
+      return documentId;
+    },
+    onSuccess: async (documentId) => {
+      setDeleteDocumentId(null);
+      removeDocumentLocalState(documentId);
+      toast.success("Документ удалён");
+
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-overview", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-import-quality-reports", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-answer-drafts", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-source-units", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-price-facts", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["project-commercial-truth-review", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-commercial-truth-review", projectId],
+      });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, "Не удалось удалить документ"));
     },
   });
 
@@ -1957,6 +2038,10 @@ export const KnowledgePage: React.FC = () => {
                   doc={doc}
                   statusBadge={statusBadge}
                   isRetighteningThisDoc={isRetighteningThisDoc}
+                  isDeletePending={
+                    deleteDocumentMutation.isPending &&
+                    deleteDocumentMutation.variables === doc.id
+                  }
                   processingReport={processingReport}
                   importQualityReport={importQualityReport}
                   priceFactsResponse={priceFactsResponse}
@@ -1975,6 +2060,7 @@ export const KnowledgePage: React.FC = () => {
                   onPolicyChange={setCommercialTruthReviewPolicy}
                   onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
                   onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
+                  onRequestDelete={() => setDeleteDocumentId(doc.id)}
                   actionsNode={
                     <div className="flex flex-wrap items-center gap-2">
                       <DocumentActionsBlock
@@ -2222,6 +2308,38 @@ export const KnowledgePage: React.FC = () => {
           onClose={() => setSourceUnitsDocumentId(null)}
         />
       )}
+
+      <BaseModal
+        isOpen={deleteDocumentId !== null}
+        onClose={() => {
+          if (!deleteDocumentMutation.isPending) {
+            setDeleteDocumentId(null);
+          }
+        }}
+        title="Удалить документ"
+        cancelLabel={t("common.actions.cancel")}
+      >
+        <p className="text-sm leading-relaxed text-[var(--text-primary)]">
+          Документ «{deleteDocument?.file_name || "этот документ"}» и все связанные
+          артефакты будут удалены из базы. Это действие нельзя отменить.
+        </p>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (deleteDocumentId) {
+                deleteDocumentMutation.mutate(deleteDocumentId);
+              }
+            }}
+            disabled={deleteDocumentMutation.isPending || deleteDocumentId === null}
+            className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
+          >
+            {deleteDocumentMutation.isPending
+              ? "Удаляем..."
+              : t("common.actions.delete")}
+          </button>
+        </div>
+      </BaseModal>
 
       <BaseModal
         isOpen={isClearModalOpen}

@@ -86,6 +86,13 @@ DOCUMENT_RAG_EVAL_TABLES: tuple[str, ...] = (
     "rag_eval_datasets",
 )
 
+DOCUMENT_COMMERCIAL_PRICE_TABLES: tuple[str, ...] = (
+    "commercial_price_facts",
+    "commercial_price_source_rows",
+    "commercial_price_source_units",
+    "commercial_price_documents",
+)
+
 DOCUMENT_QUEUE_TABLES: tuple[str, ...] = ("execution_queue",)
 
 DOCUMENT_ARTIFACT_TABLES: tuple[str, ...] = (
@@ -95,6 +102,7 @@ DOCUMENT_ARTIFACT_TABLES: tuple[str, ...] = (
     *DOCUMENT_COMPILER_TABLES,
     *DOCUMENT_SURFACE_TABLES,
     *DOCUMENT_RAG_EVAL_TABLES,
+    *DOCUMENT_COMMERCIAL_PRICE_TABLES,
 )
 
 DESTRUCTIVE_DOCUMENT_TABLES: tuple[str, ...] = (
@@ -132,6 +140,7 @@ class KnowledgeArtifactCleanupCounters:
     surface_cards: int = 0
     surface_relations: int = 0
     rag_eval_artifacts: int = 0
+    commercial_price_artifacts: int = 0
     execution_queue_jobs: int = 0
 
     @property
@@ -154,6 +163,7 @@ class KnowledgeArtifactCleanupCounters:
             + self.surface_cards
             + self.surface_relations
             + self.rag_eval_artifacts
+            + self.commercial_price_artifacts
             + self.execution_queue_jobs
         )
 
