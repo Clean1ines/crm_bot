@@ -43,5 +43,5 @@ def test_direct_knowledge_ingestion_service_still_preserves_price_list_path() ->
 
     assert "MODE_PRICE_LIST" in source
     assert "preprocessor_factory" in source
-    assert "KnowledgePreprocessorPort" in source
+    assert "KnowledgePreprocessorFactoryPort" in source
     assert "add_canonical_entries" in source
