@@ -22,13 +22,28 @@ def assert_any(source: str, candidates: tuple[str, ...], *, label: str) -> None:
 
 
 def test_kcd_stage_k7_answer_resolution_is_deterministic_and_evidence_aware() -> None:
-    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    answer_resolution_source = (
+        ROOT / "src/application/services/knowledge_answer_resolution_service.py"
+    ).read_text(encoding="utf-8")
+    structured_source = (
+        ROOT / "src/application/services/knowledge_structured_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    canonical_publication_source = (
+        ROOT / "src/application/services/knowledge_canonical_publication_builder.py"
+    ).read_text(encoding="utf-8")
+    combined = (
+        answer_resolution_source
+        + "\n"
+        + structured_source
+        + "\n"
+        + canonical_publication_source
+    )
 
-    assert "_apply_answer_resolution_decisions" in source
-    assert "semantic_answer_resolution_count" in source
+    assert "_apply_answer_resolution_decisions" in answer_resolution_source
+    assert "semantic_answer_resolution_count" in structured_source
 
     assert_any(
-        source,
+        combined,
         (
             "source_refs",
             "source_ref",
@@ -40,29 +55,44 @@ def test_kcd_stage_k7_answer_resolution_is_deterministic_and_evidence_aware() ->
         label="source evidence",
     )
     assert_any(
-        source,
+        combined,
         (
             "merged_entry_ids",
             "semantic_answer_resolution_count",
             "answer_resolution",
             "merge_count",
+            "resolved_answer_count",
+            "kept_separate_count",
         ),
         label="answer resolution accounting",
     )
 
 
 def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
-    ingestion_source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    retighten_source = (
+        ROOT / "src/application/services/knowledge_retighten_service.py"
+    ).read_text(encoding="utf-8")
+    answer_resolution_source = (
+        ROOT / "src/application/services/knowledge_answer_resolution_service.py"
+    ).read_text(encoding="utf-8")
     repository_source = KNOWLEDGE_REPOSITORY.read_text(encoding="utf-8")
-    combined = ingestion_source + "\n" + repository_source
+    combined = (
+        retighten_source + "\n" + answer_resolution_source + "\n" + repository_source
+    )
 
-    assert "_retighten_existing_document_plan" in ingestion_source
-    assert "incoming_entry_count" in ingestion_source
-    assert "semantic_answer_count" in ingestion_source
+    assert "_retighten_existing_document_plan" in retighten_source
+    assert "_deterministic_retighten_existing_document_plan" in retighten_source
+    assert (
+        "current_entries = await repo.list_document_runtime_entries" in retighten_source
+    )
+    assert "_preprocessing_entry_from_canonical_entry" in retighten_source
+    assert "_answer_resolution_cases_from_entries" in retighten_source
+    assert "llm_call_count" in retighten_source
 
     assert_any(
         combined,
         (
+            "list_document_runtime_entries",
             "list_entries_for_document",
             "list_entries",
             "get_document",
