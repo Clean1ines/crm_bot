@@ -244,6 +244,7 @@ def resolve_knowledge_document_lifecycle(
             resume_policy=RESUME_POLICY_FORBIDDEN,
             is_recoverable=False,
             status_message="Документ сейчас обрабатывается.",
+            include_publish_ready_action=raw_candidate_count > published_answer_count,
         )
 
     if _has_any_status(status_values, _COMPLETED_STATUSES):
@@ -273,6 +274,7 @@ def resolve_knowledge_document_lifecycle(
                 resume_policy=RESUME_POLICY_NOT_NEEDED,
                 is_recoverable=False,
                 status_message="Документ обработан и ожидает публикации найденных ответов.",
+                include_publish_ready_action=True,
             )
         return _decision(
             state=STATE_COMPLETED,
@@ -280,6 +282,17 @@ def resolve_knowledge_document_lifecycle(
             resume_policy=RESUME_POLICY_NOT_NEEDED,
             is_recoverable=False,
             status_message="Документ обработан.",
+        )
+
+    if _positive(batch_failed_count):
+        return _decision(
+            state=STATE_INTERRUPTED,
+            stop_reason=STOP_REASON_WORKER_INTERRUPTED,
+            resume_policy=RESUME_POLICY_AUTO_ALLOWED,
+            is_recoverable=True,
+            status_message="Есть проблемные batch-части, которые можно повторить.",
+            include_retry_failed_batches_action=True,
+            include_publish_ready_action=raw_candidate_count > published_answer_count,
         )
 
     if _has_any_status(status_values, _FAILED_STATUSES):
@@ -295,6 +308,8 @@ def resolve_knowledge_document_lifecycle(
                 ),
                 include_retry_later_action=True,
                 include_retry_failed_batches_action=_positive(batch_failed_count),
+                include_publish_ready_action=raw_candidate_count
+                > published_answer_count,
             )
         return _decision(
             state=STATE_FAILED_FATAL,
@@ -302,16 +317,6 @@ def resolve_knowledge_document_lifecycle(
             resume_policy=RESUME_POLICY_FORBIDDEN,
             is_recoverable=False,
             status_message="Обработка завершилась фатальной ошибкой.",
-        )
-
-    if _positive(batch_failed_count):
-        return _decision(
-            state=STATE_INTERRUPTED,
-            stop_reason=STOP_REASON_WORKER_INTERRUPTED,
-            resume_policy=RESUME_POLICY_AUTO_ALLOWED,
-            is_recoverable=True,
-            status_message="Есть проблемные batch-части, которые можно повторить.",
-            include_retry_failed_batches_action=True,
         )
 
     if _positive(raw_candidate_count) and raw_candidate_count > max(
@@ -324,6 +329,7 @@ def resolve_knowledge_document_lifecycle(
             resume_policy=RESUME_POLICY_NOT_NEEDED,
             is_recoverable=False,
             status_message="Найденные ответы ожидают публикации.",
+            include_publish_ready_action=True,
         )
 
     if _positive(chunk_count) or _normalise(document_status) == STATE_UPLOADED:
@@ -353,6 +359,7 @@ def _decision(
     status_message: str,
     include_retry_later_action: bool = False,
     include_retry_failed_batches_action: bool = False,
+    include_publish_ready_action: bool = False,
 ) -> KnowledgeDocumentLifecycleDecision:
     is_processing = state in {STATE_QUEUED, STATE_PROCESSING}
     is_terminal = state in {
@@ -399,6 +406,15 @@ def _decision(
                 id="retry_failed_batches",
                 label="Повторить проблемные части",
                 kind="primary",
+            )
+        )
+    if include_publish_ready_action:
+        actions.append(
+            KnowledgeDocumentLifecycleAction(
+                id="publish_ready",
+                label="Опубликовать готовые ответы",
+                kind="primary",
+                enabled=not is_processing,
             )
         )
 
