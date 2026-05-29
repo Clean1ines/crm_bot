@@ -90,6 +90,7 @@ def test_clear_project_is_destructive_cleanup() -> None:
     assert plan.cleanup_surface_artifacts is True
     assert plan.cleanup_execution_queue is True
     assert "knowledge_documents" in plan.affected_tables
+    assert "knowledge_surfaces" in plan.affected_tables
     assert "knowledge_surface_source_units" in plan.affected_tables
     assert "execution_queue" in plan.affected_tables
 
