@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
 import pytest
 
 from src.application.errors import ValidationError
+from src.application.ports.knowledge_port import (
+    KnowledgeSurfaceCompilerPort,
+)
 from src.application.services.knowledge_surface_ingestion_service import (
     KnowledgeFaqSurfaceIngestionService,
     _should_reuse_surface_run,
@@ -18,16 +23,23 @@ from src.domain.project_plane.knowledge_artifact_cleanup import (
 )
 from src.domain.project_plane.knowledge_document_lifecycle import (
     LEGACY_USER_CANCELLED_MESSAGE,
+    NON_RETRYABLE_INPUT_TOO_LARGE_STATUS,
     PROCESSING_PAUSED_QUOTA_STATUS,
     TRIGGER_EXPLICIT_USER_RESUME,
     TRIGGER_NORMAL_UPLOAD,
     TRIGGER_QUOTA_RECOVERY,
     resolve_knowledge_document_lifecycle,
 )
-from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ
+from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
+    KnowledgePreprocessingMode,
+)
 from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilerRun,
+    RetrievalSurfaceCompilationResult,
+    RetrievalSurfaceGraph,
     RetrievalSurfaceSourceUnit,
+    SurfaceCompilerRunStatus,
 )
 
 
@@ -50,10 +62,19 @@ class Document:
 
 
 class Logger:
+    def debug(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
     def info(self, *_args: object, **_kwargs: object) -> None:
         return None
 
     def warning(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def error(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def exception(self, *_args: object, **_kwargs: object) -> None:
         return None
 
 
@@ -76,23 +97,53 @@ class CompileResult:
 
 
 class Compiler:
-    model_name = "fake-model"
+    @property
+    def model_name(self) -> str:
+        return "fake-model"
 
     async def compile_surfaces(
         self,
         *,
-        mode: str,
-        source_units: tuple[RetrievalSurfaceSourceUnit, ...],
+        mode: KnowledgePreprocessingMode,
+        source_units: Sequence[RetrievalSurfaceSourceUnit],
         file_name: str,
         run_id: str,
-    ) -> CompileResult:
-        del mode, file_name, run_id
-        return CompileResult(
-            graph=Graph(source_units=tuple(source_units)),
-            model=self.model_name,
+    ) -> RetrievalSurfaceCompilationResult:
+        del file_name
+        return RetrievalSurfaceCompilationResult(
+            mode=mode,
             prompt_version=PROMPT_VERSION,
+            model=self.model_name,
+            graph=RetrievalSurfaceGraph(
+                run_id=run_id,
+                document_id="document-1",
+                source_units=tuple(source_units),
+                surfaces=(),
+                relations=(),
+                ownership=(),
+                reassignments=(),
+                merge_decisions=(),
+            ),
             metrics={},
         )
+
+    def set_progress_callback(
+        self,
+        callback: object | None,
+    ) -> None:
+        del callback
+
+    def set_source_unit_result_checkpoints(
+        self,
+        checkpoints: Mapping[str, object],
+    ) -> None:
+        del checkpoints
+
+    def set_cancel_check(
+        self,
+        callback: object | None,
+    ) -> None:
+        del callback
 
 
 class Repo:
@@ -231,7 +282,7 @@ class Repo:
 def _run(
     *,
     run_id: str = "run-1",
-    status: str = "cancelled",
+    status: SurfaceCompilerRunStatus = "cancelled",
     error_type: str | None = "processing_cancelled",
 ) -> RetrievalSurfaceCompilerRun:
     return RetrievalSurfaceCompilerRun(
@@ -273,7 +324,7 @@ def _factory(repo: Repo):
     return make_repo
 
 
-def _compiler_factory() -> Compiler:
+def _compiler_factory() -> KnowledgeSurfaceCompilerPort:
     return Compiler()
 
 
@@ -453,6 +504,170 @@ async def test_quota_recovery_refuses_user_cancelled_run_without_destructive_cle
             preprocessing_status=PROCESSING_PAUSED_QUOTA_STATUS,
         ),
         latest_run=_run(run_id="run-1", status="cancelled"),
+    )
+    service = KnowledgeFaqSurfaceIngestionService(pool=object())
+
+    with pytest.raises(ValidationError, match="not allowed by document lifecycle"):
+        await service.process_document(
+            project_id="project-1",
+            document_id="document-1",
+            file_name="faq.md",
+            chunks=[{"content": "Question? Answer."}],
+            knowledge_repo_factory=_factory(repo),
+            surface_compiler_factory=_compiler_factory,
+            logger=Logger(),
+            lifecycle_trigger=TRIGGER_QUOTA_RECOVERY,
+            resume_run_id="run-1",
+        )
+
+    assert repo.cleanup_calls == 0
+    assert repo.created_runs == []
+
+
+@pytest.mark.asyncio
+async def test_normal_upload_after_user_cancel_cleanup_is_guarded_by_source_unit_validation() -> (
+    None
+):
+    repo = Repo(
+        document=Document(
+            status="error",
+            preprocessing_status="failed",
+            preprocessing_error=LEGACY_USER_CANCELLED_MESSAGE,
+        ),
+        latest_run=_run(run_id="old-run", status="cancelled"),
+    )
+    service = KnowledgeFaqSurfaceIngestionService(pool=object())
+
+    with pytest.raises(ValidationError, match="No indexable FAQ source units"):
+        await service.process_document(
+            project_id="project-1",
+            document_id="document-1",
+            file_name="faq.md",
+            chunks=[],
+            knowledge_repo_factory=_factory(repo),
+            surface_compiler_factory=_compiler_factory,
+            logger=Logger(),
+            lifecycle_trigger=TRIGGER_NORMAL_UPLOAD,
+        )
+
+    assert repo.cleanup_calls == 0
+    assert repo.created_runs == []
+
+
+@pytest.mark.asyncio
+async def test_quota_recovery_reuses_running_non_cancelled_run_when_lifecycle_allows_auto() -> (
+    None
+):
+    repo = Repo(
+        document=Document(
+            status=PROCESSING_PAUSED_QUOTA_STATUS,
+            preprocessing_status=PROCESSING_PAUSED_QUOTA_STATUS,
+        ),
+        latest_run=_run(
+            run_id="run-1",
+            status="running",
+            error_type=None,
+        ),
+        existing_source_units=(_source_unit("run-1"),),
+    )
+    service = KnowledgeFaqSurfaceIngestionService(pool=object())
+
+    await service.process_document(
+        project_id="project-1",
+        document_id="document-1",
+        file_name="faq.md",
+        chunks=[{"content": "Question? Answer."}],
+        knowledge_repo_factory=_factory(repo),
+        surface_compiler_factory=_compiler_factory,
+        logger=Logger(),
+        lifecycle_trigger=TRIGGER_QUOTA_RECOVERY,
+        resume_run_id="run-1",
+    )
+
+    assert repo.cleanup_calls == 0
+    assert repo.created_runs == []
+    assert ("run-1", "running") in repo.updated_runs
+
+
+@pytest.mark.asyncio
+async def test_quota_recovery_after_user_cancel_raises_without_cleanup() -> None:
+    repo = Repo(
+        document=Document(
+            status="error",
+            preprocessing_status="failed",
+            preprocessing_error=LEGACY_USER_CANCELLED_MESSAGE,
+        ),
+        latest_run=_run(
+            run_id="run-1",
+            status="cancelled",
+            error_type="processing_cancelled",
+        ),
+    )
+    service = KnowledgeFaqSurfaceIngestionService(pool=object())
+
+    with pytest.raises(ValidationError, match="not allowed by document lifecycle"):
+        await service.process_document(
+            project_id="project-1",
+            document_id="document-1",
+            file_name="faq.md",
+            chunks=[{"content": "Question? Answer."}],
+            knowledge_repo_factory=_factory(repo),
+            surface_compiler_factory=_compiler_factory,
+            logger=Logger(),
+            lifecycle_trigger=TRIGGER_QUOTA_RECOVERY,
+            resume_run_id="run-1",
+        )
+
+    assert repo.cleanup_calls == 0
+    assert repo.created_runs == []
+
+
+@pytest.mark.asyncio
+async def test_input_too_large_lifecycle_raises_without_cleanup() -> None:
+    repo = Repo(
+        document=Document(
+            status="error",
+            preprocessing_status=NON_RETRYABLE_INPUT_TOO_LARGE_STATUS,
+            preprocessing_error="input too large",
+        ),
+        latest_run=_run(
+            run_id="run-1",
+            status="failed",
+            error_type="input_too_large",
+        ),
+    )
+    service = KnowledgeFaqSurfaceIngestionService(pool=object())
+
+    with pytest.raises(ValidationError, match="not allowed by document lifecycle"):
+        await service.process_document(
+            project_id="project-1",
+            document_id="document-1",
+            file_name="faq.md",
+            chunks=[{"content": "Question? Answer."}],
+            knowledge_repo_factory=_factory(repo),
+            surface_compiler_factory=_compiler_factory,
+            logger=Logger(),
+            lifecycle_trigger=TRIGGER_QUOTA_RECOVERY,
+            resume_run_id="run-1",
+        )
+
+    assert repo.cleanup_calls == 0
+    assert repo.created_runs == []
+
+
+@pytest.mark.asyncio
+async def test_failed_fatal_lifecycle_raises_without_cleanup() -> None:
+    repo = Repo(
+        document=Document(
+            status="error",
+            preprocessing_status="failed",
+            preprocessing_error="fatal backend error",
+        ),
+        latest_run=_run(
+            run_id="run-1",
+            status="failed",
+            error_type="RuntimeError",
+        ),
     )
     service = KnowledgeFaqSurfaceIngestionService(pool=object())
 

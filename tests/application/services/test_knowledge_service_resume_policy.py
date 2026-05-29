@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -7,14 +8,18 @@ import pytest
 
 from src.application.errors import ValidationError
 from src.application.services.knowledge_service import KnowledgeService
+from src.domain.control_plane.project_views import ProjectSummaryView
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_document_lifecycle import (
     LEGACY_USER_CANCELLED_MESSAGE,
+    NON_RETRYABLE_INPUT_TOO_LARGE_STATUS,
     PROCESSING_PAUSED_QUOTA_STATUS,
 )
 from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ
 from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilerRun,
     RetrievalSurfaceSourceUnit,
+    SurfaceCompilerRunStatus,
 )
 
 
@@ -36,13 +41,15 @@ class Document:
 
 
 class Jwt:
-    class ExpiredSignatureError(Exception):
-        pass
+    ExpiredSignatureError: type[Exception] = Exception
+    InvalidTokenError: type[Exception] = Exception
 
-    class InvalidTokenError(Exception):
-        pass
-
-    def decode(self, token: str, secret: str, algorithms: list[str]) -> dict[str, str]:
+    def decode(
+        self,
+        token: str,
+        secret: str,
+        algorithms: list[str],
+    ) -> JsonObject:
         del token, secret, algorithms
         return {"sub": "user-1"}
 
@@ -55,12 +62,12 @@ class ProjectRepo:
         self,
         project_id: str,
         user_id: str,
-        roles: list[str],
+        allowed_roles: Sequence[str],
     ) -> bool:
-        del project_id, user_id, roles
+        del project_id, user_id, allowed_roles
         return True
 
-    async def get_project_view(self, project_id: str) -> object | None:
+    async def get_project_view(self, project_id: str) -> ProjectSummaryView | None:
         del project_id
         return None
 
@@ -73,14 +80,13 @@ class UserRepo:
 
 class QueueRepo:
     def __init__(self) -> None:
-        self.payload: dict[str, object] | None = None
+        self.payload: JsonObject | None = None
 
     async def enqueue(
         self,
         task_type: str,
-        *,
-        payload: dict[str, object],
-        max_attempts: int | None = None,
+        payload: JsonObject | None = None,
+        max_attempts: int = 3,
     ) -> str:
         del task_type, max_attempts
         self.payload = payload
@@ -88,10 +94,16 @@ class QueueRepo:
 
 
 class Logger:
+    def debug(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
     def info(self, *_args: object, **_kwargs: object) -> None:
         return None
 
     def warning(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def error(self, *_args: object, **_kwargs: object) -> None:
         return None
 
     def exception(self, *_args: object, **_kwargs: object) -> None:
@@ -159,7 +171,7 @@ def _service() -> KnowledgeService:
 
 def _run(
     *,
-    status: str = "cancelled",
+    status: SurfaceCompilerRunStatus = "cancelled",
     error_type: str | None = "processing_cancelled",
 ) -> RetrievalSurfaceCompilerRun:
     return RetrievalSurfaceCompilerRun(
@@ -257,3 +269,85 @@ async def test_resume_document_processing_authorizes_user_cancelled_run_for_work
     assert repo.resume_metrics["manual_resume_authorized_by_lifecycle"] is True
     assert repo.resume_metrics["authorized_resume_run_id"] == "run-1"
     assert repo.resume_metrics["resume_policy_before_resume"] == "manual_only"
+
+
+@pytest.mark.asyncio
+async def test_resume_document_processing_rejects_input_too_large_document() -> None:
+    repo = Repo(
+        document=Document(
+            status="error",
+            preprocessing_status=NON_RETRYABLE_INPUT_TOO_LARGE_STATUS,
+            preprocessing_error="input too large",
+        ),
+        run=_run(status="failed", error_type="input_too_large"),
+        source_units=(_source_unit(),),
+    )
+    queue = QueueRepo()
+
+    with pytest.raises(ValidationError, match="does not allow manual FAQ resume"):
+        await _service().resume_document_processing(
+            project_id="project-1",
+            document_id="document-1",
+            authorization="Bearer token",
+            knowledge_repo_factory=_repo_factory(repo),
+            queue_repo=queue,
+            knowledge_upload_task_type="process_knowledge_upload",
+            logger=Logger(),
+        )
+
+    assert queue.payload is None
+    assert repo.resume_metrics is None
+
+
+@pytest.mark.asyncio
+async def test_resume_document_processing_rejects_fatal_failed_document() -> None:
+    repo = Repo(
+        document=Document(
+            status="error",
+            preprocessing_status="failed",
+            preprocessing_error="fatal backend error",
+        ),
+        run=_run(status="failed", error_type="RuntimeError"),
+        source_units=(_source_unit(),),
+    )
+    queue = QueueRepo()
+
+    with pytest.raises(ValidationError, match="does not allow manual FAQ resume"):
+        await _service().resume_document_processing(
+            project_id="project-1",
+            document_id="document-1",
+            authorization="Bearer token",
+            knowledge_repo_factory=_repo_factory(repo),
+            queue_repo=queue,
+            knowledge_upload_task_type="process_knowledge_upload",
+            logger=Logger(),
+        )
+
+    assert queue.payload is None
+    assert repo.resume_metrics is None
+
+
+@pytest.mark.asyncio
+async def test_resume_document_processing_rejects_manual_cancel_without_saved_source_units() -> (
+    None
+):
+    repo = Repo(
+        document=Document(),
+        run=_run(status="cancelled", error_type="processing_cancelled"),
+        source_units=(),
+    )
+    queue = QueueRepo()
+
+    with pytest.raises(ValidationError, match="No saved FAQ source units found"):
+        await _service().resume_document_processing(
+            project_id="project-1",
+            document_id="document-1",
+            authorization="Bearer token",
+            knowledge_repo_factory=_repo_factory(repo),
+            queue_repo=queue,
+            knowledge_upload_task_type="process_knowledge_upload",
+            logger=Logger(),
+        )
+
+    assert queue.payload is None
+    assert repo.resume_metrics is None
