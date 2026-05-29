@@ -41,15 +41,25 @@ def test_faq_surface_normal_no_resume_uses_cleanup_contract() -> None:
 
 def test_faq_surface_resume_paths_preserve_artifacts() -> None:
     source = SURFACE_INGESTION.read_text(encoding="utf-8")
-    resume_cleanup_slice = _method_slice(
+    validation_slice = _method_slice(
         source,
         "resume_run = (",
-        "indexable_chunks = _indexable_chunks(chunks)",
+        "if resume_run is None:",
+    )
+    cleanup_slice = _method_slice(
+        source,
+        "if not source_units:",
+        "started_at = datetime.now(timezone.utc)",
     )
 
-    assert "if resume_run is None:" in resume_cleanup_slice
-    assert "await repo.cleanup_document_artifacts(" in resume_cleanup_slice
-    assert "if resume_run is not None:" not in resume_cleanup_slice
+    assert "indexable_chunks = _indexable_chunks(chunks)" in validation_slice
+    assert "source_units = _source_units_from_chunks(" in validation_slice
+    assert "await repo.cleanup_document_artifacts(" not in validation_slice
+
+    assert "if resume_run is None:" in cleanup_slice
+    assert "await repo.cleanup_document_artifacts(" in cleanup_slice
+    assert "build_document_reset_cleanup_plan(" in cleanup_slice
+    assert "if resume_run is not None:" not in cleanup_slice
     assert "lifecycle_decision.can_auto_resume" in source
     assert "lifecycle_decision.can_manual_resume" in source
 

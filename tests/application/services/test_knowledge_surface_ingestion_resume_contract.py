@@ -24,15 +24,21 @@ def test_faq_surface_ingestion_reuses_run_id_through_lifecycle_policy() -> None:
 
 def test_faq_surface_ingestion_cleans_up_only_when_no_resume_run_exists() -> None:
     source = INGESTION.read_text(encoding="utf-8")
-    resume_cleanup_slice = source[
-        source.index("run_id = resume_run.id if resume_run is not None") : source.index(
-            "indexable_chunks = _indexable_chunks(chunks)"
-        )
-    ]
+    run_id_start = source.index("run_id = resume_run.id if resume_run is not None")
+    cleanup_start = source.index(
+        "if resume_run is None:", source.index("if not source_units:")
+    )
+    cleanup_end = source.index("started_at = datetime.now(timezone.utc)", cleanup_start)
+    validation_slice = source[run_id_start:cleanup_start]
+    cleanup_slice = source[cleanup_start:cleanup_end]
 
-    assert "if resume_run is None:" in resume_cleanup_slice
-    assert "await repo.cleanup_document_artifacts(" in resume_cleanup_slice
-    assert "build_document_reset_cleanup_plan(" in resume_cleanup_slice
+    assert "indexable_chunks = _indexable_chunks(chunks)" in validation_slice
+    assert "source_units = _source_units_from_chunks(" in validation_slice
+    assert "await repo.cleanup_document_artifacts(" not in validation_slice
+
+    assert "if resume_run is None:" in cleanup_slice
+    assert "await repo.cleanup_document_artifacts(" in cleanup_slice
+    assert "build_document_reset_cleanup_plan(" in cleanup_slice
     assert "await repo.delete_document_chunks(document_id)" not in source
 
 
