@@ -41,6 +41,13 @@ from src.application.services.knowledge_answer_compiler_batching import (
     KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
     _technical_chunk_batches_for_answer_compiler,
 )
+from src.application.services.knowledge_canonical_publication_builder import (
+    _CompiledAnswerEntryDraft,
+    _answer_topic_key,
+    _source_refs_for_compiled_answer_draft,
+    canonical_entries_from_preprocessing_result,
+    canonical_entries_from_raw_answer_candidates,
+)
 from src.application.services.knowledge_generated_entry_repair import (
     repair_generated_entry,
 )
@@ -97,7 +104,6 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeAnswerResolutionDecision,
     KnowledgeAnswerResolutionCase,
     build_embedding_text,
-    entry_kind_for_preprocessing_mode,
     prompt_version_for_mode,
 )
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
@@ -483,6 +489,14 @@ KCD_STAGE_K_PREVIOUS_TITLE_LIMIT = 80
 KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS = 220
 
 
+_canonical_entries_from_preprocessing_result = (
+    canonical_entries_from_preprocessing_result
+)
+_canonical_entries_from_raw_answer_candidates = (
+    canonical_entries_from_raw_answer_candidates
+)
+
+
 _repair_generated_entry = repair_generated_entry
 
 
@@ -801,126 +815,10 @@ def _raw_answer_candidates_from_preprocessing_entries(
     return tuple(candidates)
 
 
-def _metadata_text_tuple(metadata: Mapping[str, object], key: str) -> tuple[str, ...]:
-    value = metadata.get(key)
-    if isinstance(value, str):
-        values: Sequence[object] = (value,)
-    elif isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
-        values = value
-    else:
-        return ()
-
-    result: list[str] = []
-    for item in values:
-        text = _clean_optional_text(str(item or ""))
-        if text and text not in result:
-            result.append(text)
-    return tuple(result)
-
-
-def _canonical_entries_from_raw_answer_candidates(
-    *,
-    project_id: str,
-    document_id: str,
-    compiler_run_id: str,
-    mode: KnowledgePreprocessingMode,
-    candidates: Sequence[AnswerCandidate],
-) -> tuple[CanonicalKnowledgeEntry, ...]:
-    entry_kind = entry_kind_for_preprocessing_mode(mode)
-    entries: list[CanonicalKnowledgeEntry] = []
-
-    for index, candidate in enumerate(candidates):
-        answer = _clean_optional_text(candidate.candidate_answer)
-        if not answer:
-            continue
-
-        candidate_metadata = dict(candidate.metadata)
-        canonical_question = _clean_optional_text(
-            str(candidate_metadata.get("canonical_question") or "")
-        )
-        question_variants = _metadata_text_tuple(
-            candidate_metadata, "question_variants"
-        )
-        questions = (
-            _merge_text_tuple_values((canonical_question,), question_variants)
-            if canonical_question
-            else question_variants
-        )
-        stable_key_digest = hashlib.sha256(
-            f"{document_id}:stage_k_raw:{entry_kind.value}:{candidate.id}".encode(
-                "utf-8"
-            )
-        ).hexdigest()
-        stable_key = f"{document_id}:stage_k_retry:{stable_key_digest[:24]}"
-        metadata: dict[str, object] = dict(candidate_metadata)
-        metadata["source_candidate_id"] = candidate.id
-        metadata["compiler_index"] = index
-        metadata["compiler_stage"] = "stage_k_answer_compiler_retry"
-
-        entry = CanonicalKnowledgeEntry(
-            id=str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key)),
-            project_id=project_id,
-            document_id=document_id,
-            compiler_run_id=compiler_run_id,
-            stable_key=stable_key,
-            entry_kind=entry_kind,
-            title=_clean_optional_text(candidate.title) or f"Answer entry {index + 1}",
-            answer=answer,
-            source_refs=candidate.source_refs,
-            enrichment=KnowledgeEnrichment(
-                questions=questions,
-                synonyms=(),
-                tags=(),
-            ),
-            embedding_text=None,
-            status=KnowledgeEntryStatus.PUBLISHED,
-            visibility=KnowledgeEntryVisibility.RUNTIME,
-            version=1,
-            compiler_version=KCD_STAGE_K_COMPILER_VERSION,
-            embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
-            metadata=metadata,
-        )
-        entry.assert_publishable()
-        entries.append(entry)
-
-    return tuple(entries)
-
-
-@dataclass(frozen=True, slots=True)
-class _CompiledAnswerEntryDraft:
-    title: str
-    answer: str
-    source_excerpts: tuple[str, ...]
-    source_refs: tuple[SourceRef, ...]
-    questions: tuple[str, ...]
-    synonyms: tuple[str, ...]
-    tags: tuple[str, ...]
-    embedding_text: str
-    metadata: Mapping[str, object]
-
-
 def _normalized_answer_topic_key(value: str) -> str:
     text = value.lower().replace("ё", "е")
     text = re.sub(r"[^0-9a-zа-я]+", " ", text)
     return " ".join(text.split())
-
-
-def _answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
-    title_key = _normalized_answer_topic_key(entry.title)
-    question_key = _normalized_answer_topic_key(
-        entry.canonical_question or _question_intent_primary_question(entry)
-    )
-    answer_key = _normalized_answer_topic_key(entry.answer)
-    source_excerpt_key = _normalized_answer_topic_key(entry.source_excerpt)
-
-    if answer_key and source_excerpt_key:
-        return f"exact-answer-source:{answer_key}:{source_excerpt_key}"
-    if title_key and question_key and answer_key:
-        return f"exact-title-question-answer:{title_key}:{question_key}:{answer_key}"
-    if answer_key:
-        return f"exact-answer:{answer_key}"
-
-    return f"entry-{index}"
 
 
 def _merge_text_tuple_values(
@@ -2972,295 +2870,6 @@ def _preprocessing_result_from_entries(
         entries=tuple(entries),
         metrics=metrics,
     )
-
-
-def _source_chunk_for_quote(
-    *,
-    quote: str,
-    source_chunks: Sequence[SourceChunk],
-) -> SourceChunk:
-    if not source_chunks:
-        raise ValidationError("Cannot ground answer entry without source chunks")
-
-    quote_clean = _clean_optional_text(quote)
-    if quote_clean:
-        for source_chunk in source_chunks:
-            if (
-                quote_clean in source_chunk.content
-                or source_chunk.content in quote_clean
-            ):
-                return source_chunk
-
-    quote_terms = {
-        token
-        for token in re.findall(
-            r"[0-9a-zа-яё]+",
-            quote_clean.lower().replace("ё", "е"),
-        )
-        if len(token) >= 4
-    }
-
-    if quote_terms:
-        best_chunk = source_chunks[0]
-        best_score = -1
-        for source_chunk in source_chunks:
-            chunk_terms = {
-                token
-                for token in re.findall(
-                    r"[0-9a-zа-яё]+",
-                    source_chunk.content.lower().replace("ё", "е"),
-                )
-                if len(token) >= 4
-            }
-            score = len(quote_terms & chunk_terms)
-            if score > best_score:
-                best_chunk = source_chunk
-                best_score = score
-        return best_chunk
-
-    return source_chunks[0]
-
-
-def _source_refs_for_compiled_answer_draft(
-    *,
-    draft: _CompiledAnswerEntryDraft,
-    source_chunks: Sequence[SourceChunk],
-) -> tuple[SourceRef, ...]:
-    refs: list[SourceRef] = []
-    seen_quotes: set[str] = set()
-
-    quotes = draft.source_excerpts or (draft.answer,)
-    for quote in quotes:
-        cleaned_quote = _clean_optional_text(quote)
-        if not cleaned_quote or cleaned_quote in seen_quotes:
-            continue
-
-        source_chunk = _source_chunk_for_quote(
-            quote=cleaned_quote,
-            source_chunks=source_chunks,
-        )
-        refs.append(
-            SourceRef(
-                source_index=source_chunk.source_index,
-                quote=cleaned_quote,
-                source_chunk_id=source_chunk.id,
-                start_offset=source_chunk.start_offset,
-                end_offset=source_chunk.end_offset,
-                confidence=1.0,
-            )
-        )
-        seen_quotes.add(cleaned_quote)
-
-    return tuple(refs)
-
-
-def _publication_text_fingerprint(value: str) -> str:
-    return " ".join(
-        re.sub(r"[^0-9a-zа-яё]+", " ", value.lower().replace("ё", "е")).split()
-    )
-
-
-def _source_ref_fingerprint(source_ref: SourceRef) -> tuple[object, ...]:
-    return (
-        source_ref.source_chunk_id or "",
-        source_ref.source_index,
-        _publication_text_fingerprint(source_ref.quote),
-    )
-
-
-def _merge_source_ref_tuple_values(
-    *groups: tuple[SourceRef, ...],
-) -> tuple[SourceRef, ...]:
-    result: list[SourceRef] = []
-    for group in groups:
-        for source_ref in group:
-            quote_fp = _publication_text_fingerprint(source_ref.quote)
-            if not quote_fp:
-                continue
-            duplicate_index = None
-            for idx, existing in enumerate(result):
-                same_origin = (existing.source_chunk_id or "") == (
-                    source_ref.source_chunk_id or ""
-                ) and existing.source_index == source_ref.source_index
-                if not same_origin:
-                    continue
-                existing_fp = _publication_text_fingerprint(existing.quote)
-                if existing_fp == quote_fp:
-                    duplicate_index = idx
-                    break
-                if quote_fp in existing_fp:
-                    duplicate_index = idx
-                    break
-                if existing_fp in quote_fp:
-                    if len(source_ref.quote) > len(existing.quote):
-                        result[idx] = source_ref
-                    duplicate_index = idx
-                    break
-            if duplicate_index is not None:
-                continue
-            result.append(source_ref)
-    return tuple(result)
-
-
-def _merge_canonical_entries_structurally(
-    existing_entry: CanonicalKnowledgeEntry,
-    incoming_entry: CanonicalKnowledgeEntry,
-) -> CanonicalKnowledgeEntry:
-    source_refs = _merge_source_ref_tuple_values(
-        existing_entry.source_refs,
-        incoming_entry.source_refs,
-    )
-    enrichment = KnowledgeEnrichment(
-        questions=_merge_text_tuple_values(
-            existing_entry.enrichment.questions,
-            incoming_entry.enrichment.questions,
-        ),
-        paraphrases=_merge_text_tuple_values(
-            existing_entry.enrichment.paraphrases,
-            incoming_entry.enrichment.paraphrases,
-        ),
-        synonyms=_merge_text_tuple_values(
-            existing_entry.enrichment.synonyms,
-            incoming_entry.enrichment.synonyms,
-        ),
-        typo_queries=_merge_text_tuple_values(
-            existing_entry.enrichment.typo_queries,
-            incoming_entry.enrichment.typo_queries,
-        ),
-        colloquial_queries=_merge_text_tuple_values(
-            existing_entry.enrichment.colloquial_queries,
-            incoming_entry.enrichment.colloquial_queries,
-        ),
-        tags=_merge_text_tuple_values(
-            existing_entry.enrichment.tags,
-            incoming_entry.enrichment.tags,
-        ),
-        retrieval_guards=_merge_text_tuple_values(
-            existing_entry.enrichment.retrieval_guards,
-            incoming_entry.enrichment.retrieval_guards,
-        ),
-    )
-    metadata = dict(existing_entry.metadata)
-    merged_ids = _merge_text_tuple_values(
-        _text_tuple(metadata.get("merged_entry_ids")),
-        (existing_entry.id, incoming_entry.id),
-        _text_tuple(incoming_entry.metadata.get("merged_entry_ids")),
-    )
-    metadata["publication_guard"] = "exact_fingerprint_collapse"
-    metadata["merged_candidate_count"] = len(merged_ids)
-    metadata["merged_candidate_ids"] = list(merged_ids)
-    metadata["source_ref_count"] = len(source_refs)
-    return replace(
-        existing_entry,
-        source_refs=source_refs,
-        enrichment=enrichment,
-        metadata=metadata,
-    )
-
-
-def _final_publication_guard_collapse_exact_duplicates(
-    entries: Sequence[CanonicalKnowledgeEntry],
-) -> tuple[CanonicalKnowledgeEntry, ...]:
-    result: list[CanonicalKnowledgeEntry] = []
-    key_to_index: dict[tuple[str, str], int] = {}
-
-    for entry in entries:
-        fingerprints = (
-            (
-                "question",
-                _publication_text_fingerprint(entry.enrichment.questions[0])
-                if entry.enrichment.questions
-                else "",
-            ),
-            ("answer", _publication_text_fingerprint(entry.answer)),
-            (
-                "title_answer",
-                _publication_text_fingerprint(f"{entry.title} {entry.answer}"),
-            ),
-        )
-        target_index: int | None = None
-        for fingerprint in fingerprints:
-            if fingerprint[1] and fingerprint in key_to_index:
-                target_index = key_to_index[fingerprint]
-                break
-
-        if target_index is None:
-            target_index = len(result)
-            result.append(entry)
-        else:
-            result[target_index] = _merge_canonical_entries_structurally(
-                result[target_index],
-                entry,
-            )
-
-        for fingerprint in fingerprints:
-            if fingerprint[1]:
-                key_to_index[fingerprint] = target_index
-
-    return tuple(result)
-
-
-def _canonical_entries_from_preprocessing_result(
-    *,
-    project_id: str,
-    document_id: str,
-    compiler_run_id: str,
-    result: KnowledgePreprocessingResult,
-    source_chunks: Sequence[SourceChunk],
-) -> tuple[CanonicalKnowledgeEntry, ...]:
-    drafts = _compiled_answer_drafts_from_preprocessing_result(result)
-    entry_kind = entry_kind_for_preprocessing_mode(result.mode)
-    entries: list[CanonicalKnowledgeEntry] = []
-
-    for index, draft in enumerate(drafts):
-        source_refs = _source_refs_for_compiled_answer_draft(
-            draft=draft,
-            source_chunks=source_chunks,
-        )
-        stable_key_digest = hashlib.sha256(
-            (
-                f"{document_id}:stage_k:{entry_kind.value}:{draft.title}:{draft.answer}"
-            ).encode("utf-8")
-        ).hexdigest()
-        stable_key = f"{document_id}:stage_k:{stable_key_digest[:24]}"
-        entry_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
-        metadata: dict[str, object] = dict(draft.metadata)
-        merged_counts = result.metrics.get("merged_preprocessing_entry_counts")
-        if isinstance(merged_counts, list) and index < len(merged_counts):
-            merged_count = merged_counts[index]
-            if isinstance(merged_count, int) and merged_count > 1:
-                metadata["compiler_merge"] = "exact_duplicate_grouping"
-                metadata["merged_preprocessing_entry_count"] = merged_count
-        metadata["source_ref_count"] = len(source_refs)
-        metadata["compiler_index"] = index
-
-        entry = CanonicalKnowledgeEntry(
-            id=entry_id,
-            project_id=project_id,
-            document_id=document_id,
-            compiler_run_id=compiler_run_id,
-            stable_key=stable_key,
-            entry_kind=entry_kind,
-            title=draft.title,
-            answer=draft.answer,
-            source_refs=source_refs,
-            enrichment=KnowledgeEnrichment(
-                questions=draft.questions,
-                synonyms=draft.synonyms,
-                tags=draft.tags,
-            ),
-            embedding_text=None,
-            status=KnowledgeEntryStatus.PUBLISHED,
-            visibility=KnowledgeEntryVisibility.RUNTIME,
-            version=1,
-            compiler_version=KCD_STAGE_K_COMPILER_VERSION,
-            embedding_text_version=CANONICAL_EMBEDDING_TEXT_VERSION,
-            metadata=metadata,
-        )
-        entry.assert_publishable()
-        entries.append(entry)
-
-    return _final_publication_guard_collapse_exact_duplicates(entries)
 
 
 def _canonical_entries_from_knowledge_chunks(
