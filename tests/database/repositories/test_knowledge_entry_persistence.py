@@ -66,7 +66,8 @@ def test_repository_delegates_retrieval_surface_delete_helper() -> None:
     ).read_text(encoding="utf-8")
 
     assert "delete_retrieval_surface(" in repository
-    assert "delete_document_retrieval_surface(" in repository
+    assert "delete_document_retrieval_surface(" not in repository
+    assert "cleanup_document_artifacts(" in repository
     assert "update_retrieval_surface_metadata(" not in repository
     assert "update_retrieval_surface_metadata(" in curation_operations
 

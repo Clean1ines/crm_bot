@@ -130,7 +130,9 @@ def test_repository_persists_stage_e_trace_tables() -> None:
     )
     assert "DELETE FROM knowledge_answer_candidates" in candidate_persistence_source
 
-    assert "DELETE FROM knowledge_compiler_runs WHERE document_id = $1" in source
+    assert "cleanup_document_artifacts(" in source
+    assert "build_document_reset_cleanup_plan(" in source
+    assert "DELETE FROM knowledge_compiler_runs WHERE document_id = $1" not in source
 
 
 def test_ingestion_creates_compiler_run_before_outputs() -> None:

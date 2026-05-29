@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 from uuid import uuid4
 
@@ -165,26 +166,22 @@ async def test_preview_search_does_not_request_embeddings(
 
 
 @pytest.mark.asyncio
-async def test_clear_project_knowledge_success(knowledge_repo, mock_pool):
+async def test_clear_project_knowledge_success() -> None:
     project_id = str(uuid4())
-    transaction = AsyncMock()
-    transaction.__aenter__.return_value = mock_pool.mock_conn
-    transaction.__aexit__.return_value = None
-    mock_pool.mock_conn.transaction = MagicMock(return_value=transaction)
+    conn = RecordingConnection()
+    repo = KnowledgeRepository(RecordingPool(conn))
 
-    await knowledge_repo.clear_project_knowledge(project_id)
+    await repo.clear_project_knowledge(project_id)
 
-    executed_sql = "\n".join(
-        str(call_item.args[0])
-        for call_item in mock_pool.mock_conn.execute.await_args_list
-    )
+    executed_sql = "\n".join(execute_call[0] for execute_call in conn.execute_calls)
 
     assert "UPDATE execution_queue" in executed_sql
-    assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
-    assert "DELETE FROM knowledge_documents WHERE project_id = $1" in executed_sql
-    assert "DELETE FROM knowledge_base WHERE project_id = $1" not in executed_sql
+    assert "payload::jsonb ->> 'project_id' = $1" in executed_sql
+    assert "DELETE FROM knowledge_base" in executed_sql
+    assert "DELETE FROM knowledge_documents" in executed_sql
+    assert "WHERE project_id = $1" in executed_sql
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
-        "DELETE FROM knowledge_documents WHERE project_id = $1"
+        "DELETE FROM knowledge_documents"
     )
 
 
@@ -237,28 +234,30 @@ class RecordingPool:
         return _RecordingAcquire(self._conn)
 
 
-async def test_delete_document_cancels_related_queue_jobs_before_hard_delete() -> None:
+async def test_delete_document_uses_artifact_cleanup_delete_plan() -> None:
+    project_id = str(uuid4())
     document_id = str(uuid4())
     conn = RecordingConnection()
     repo = KnowledgeRepository(RecordingPool(conn))
+    repo.get_document = AsyncMock(return_value=SimpleNamespace(project_id=project_id))
 
     await repo.delete_document(document_id)
 
     executed_sql = "\n".join(execute_call[0] for execute_call in conn.execute_calls)
 
     assert "UPDATE execution_queue" in executed_sql
-    assert "payload::jsonb ->> 'document_id' = $3" in executed_sql
+    assert "payload::jsonb ->> 'document_id' = $1" in executed_sql
     assert "process_knowledge_upload" in repr(conn.execute_calls)
     assert "run_full_rag_eval" in repr(conn.execute_calls)
-    assert "DELETE FROM knowledge_base WHERE document_id = $1" not in executed_sql
+    assert "DELETE FROM knowledge_base" in executed_sql
+    assert "DELETE FROM knowledge_documents" in executed_sql
+    assert "AND id = $2" in executed_sql
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
-        "DELETE FROM knowledge_documents WHERE id = $1"
+        "DELETE FROM knowledge_documents"
     )
 
 
-async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete() -> (
-    None
-):
+async def test_clear_project_knowledge_uses_artifact_cleanup_project_plan() -> None:
     project_id = str(uuid4())
     conn = RecordingConnection()
     repo = KnowledgeRepository(RecordingPool(conn))
@@ -268,12 +267,13 @@ async def test_clear_project_knowledge_cancels_project_jobs_before_hard_delete()
     executed_sql = "\n".join(execute_call[0] for execute_call in conn.execute_calls)
 
     assert "UPDATE execution_queue" in executed_sql
-    assert "payload::jsonb ->> 'project_id' = $3" in executed_sql
+    assert "payload::jsonb ->> 'project_id' = $1" in executed_sql
     assert "process_knowledge_upload" in repr(conn.execute_calls)
     assert "run_full_rag_eval" in repr(conn.execute_calls)
-    assert "DELETE FROM knowledge_base WHERE project_id = $1" not in executed_sql
+    assert "DELETE FROM knowledge_base" in executed_sql
+    assert "DELETE FROM knowledge_documents" in executed_sql
     assert executed_sql.index("UPDATE execution_queue") < executed_sql.index(
-        "DELETE FROM knowledge_documents WHERE project_id = $1"
+        "DELETE FROM knowledge_documents"
     )
 
 
@@ -459,7 +459,8 @@ def test_add_source_chunks_persists_raw_source_chunks() -> None:
 
     assert "await replace_document_source_chunks(" in repository_source
     assert "await query_document_source_chunks(" in repository_source
-    assert "await delete_document_source_chunks(" in repository_source
+    assert "await delete_document_source_chunks(" not in repository_source
+    assert "build_document_reset_cleanup_plan(" in repository_source
 
     assert "FROM knowledge_source_chunks" in helper_source
     assert "DELETE FROM knowledge_source_chunks WHERE document_id = $1" in helper_source

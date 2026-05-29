@@ -22,13 +22,18 @@ def test_faq_surface_ingestion_reuses_run_id_through_lifecycle_policy() -> None:
     )
 
 
-def test_faq_surface_ingestion_does_not_delete_chunks_on_resume() -> None:
+def test_faq_surface_ingestion_cleans_up_only_when_no_resume_run_exists() -> None:
     source = INGESTION.read_text(encoding="utf-8")
+    resume_cleanup_slice = source[
+        source.index("run_id = resume_run.id if resume_run is not None") : source.index(
+            "indexable_chunks = _indexable_chunks(chunks)"
+        )
+    ]
 
-    assert (
-        "if resume_run is None:\n            await repo.delete_document_chunks(document_id)"
-        in source
-    )
+    assert "if resume_run is None:" in resume_cleanup_slice
+    assert "await repo.cleanup_document_artifacts(" in resume_cleanup_slice
+    assert "build_document_reset_cleanup_plan(" in resume_cleanup_slice
+    assert "await repo.delete_document_chunks(document_id)" not in source
 
 
 def test_faq_surface_ingestion_reuses_existing_source_units_and_surfaces() -> None:
