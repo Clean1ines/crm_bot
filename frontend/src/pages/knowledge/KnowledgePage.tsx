@@ -1,16 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  BookOpen,
-  Upload,
-  Search,
-  TestTube2,
-  Loader2,
-} from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
-import { useParams } from 'react-router-dom';
-import { getErrorMessage } from '@shared/api/core/errors';
-import { knowledgeDocumentStatusLabel } from '@shared/lib/uiLabels';
+import React, { useEffect, useRef, useState } from "react";
+import { BookOpen, Upload, Search, TestTube2, Loader2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import toast from "react-hot-toast";
+import { useParams } from "react-router-dom";
+import { getErrorMessage } from "@shared/api/core/errors";
+import { knowledgeDocumentStatusLabel } from "@shared/lib/uiLabels";
 
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
@@ -19,6 +13,7 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
+  type KnowledgeProcessingAction,
   type KnowledgeImportQualityReport,
   type KnowledgeAnswerDraftsResponse,
   type KnowledgeSourceUnitsResponse,
@@ -26,28 +21,46 @@ import {
   type KnowledgePriceFactsResponse,
   type KnowledgeCommercialTruthReviewResponse,
   type KnowledgeCommercialTruthReviewPolicy,
-} from '@shared/api/modules/knowledge';
-import { BaseModal } from '@shared/ui';
-import { t } from '@shared/i18n';
-import { CommercialTruthReviewSummary } from './components/CommercialTruthReviewSummary';
-import { DraftsSummary } from './components/DraftsSummary';
-import { DraftsModal } from './components/DraftsModal';
-import { SourceUnitsSummary } from './components/SourceUnitsSummary';
-import { SourceUnitsModal } from './components/SourceUnitsModal';
-import { DocumentStatusBlock } from './components/DocumentStatusBlock';
-import { KnowledgeDocumentCard } from './components/KnowledgeDocumentCard';
-import { DocumentProcessingBlock } from './components/DocumentProcessingBlock';
-import { DocumentActionsBlock } from './components/DocumentActionsBlock';
-import { KnowledgeDocumentCurationModal } from './components/KnowledgeDocumentCurationModal';
+} from "@shared/api/modules/knowledge";
+import { BaseModal } from "@shared/ui";
+import { t } from "@shared/i18n";
+import { CommercialTruthReviewSummary } from "./components/CommercialTruthReviewSummary";
+import { DraftsSummary } from "./components/DraftsSummary";
+import { DraftsModal } from "./components/DraftsModal";
+import { SourceUnitsSummary } from "./components/SourceUnitsSummary";
+import { SourceUnitsModal } from "./components/SourceUnitsModal";
+import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
+import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
+import { DocumentProcessingBlock } from "./components/DocumentProcessingBlock";
+import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
+import { KnowledgeDocumentCurationModal } from "./components/KnowledgeDocumentCurationModal";
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
-type KnowledgeProcessingReportByDocument = Record<string, KnowledgeProcessingReport>;
-type KnowledgeImportQualityByDocument = Record<string, KnowledgeImportQualityReport>;
-type KnowledgeAnswerDraftsByDocument = Record<string, KnowledgeAnswerDraftsResponse>;
-type KnowledgeSourceUnitsByDocument = Record<string, KnowledgeSourceUnitsResponse>;
-type KnowledgePriceFactsByDocument = Record<string, KnowledgePriceFactsResponse>;
-type KnowledgeCommercialTruthReviewsByDocument = Record<string, KnowledgeCommercialTruthReviewResponse>;
+type KnowledgeProcessingReportByDocument = Record<
+  string,
+  KnowledgeProcessingReport
+>;
+type KnowledgeImportQualityByDocument = Record<
+  string,
+  KnowledgeImportQualityReport
+>;
+type KnowledgeAnswerDraftsByDocument = Record<
+  string,
+  KnowledgeAnswerDraftsResponse
+>;
+type KnowledgeSourceUnitsByDocument = Record<
+  string,
+  KnowledgeSourceUnitsResponse
+>;
+type KnowledgePriceFactsByDocument = Record<
+  string,
+  KnowledgePriceFactsResponse
+>;
+type KnowledgeCommercialTruthReviewsByDocument = Record<
+  string,
+  KnowledgeCommercialTruthReviewResponse
+>;
 
 type PriceFactActionVariables = {
   documentId: string;
@@ -55,19 +68,30 @@ type PriceFactActionVariables = {
   reason?: string;
 };
 
-
-
 interface Document {
   id: string;
   file_name: string;
   file_size: number;
-  status: 'pending' | 'processing' | 'processed' | 'error' | 'cancelled' | string;
+  status:
+    | "pending"
+    | "processing"
+    | "processed"
+    | "error"
+    | "cancelled"
+    | string;
   error?: string | null;
   chunk_count: number;
   created_at: string;
   updated_at?: string | null;
   preprocessing_mode?: KnowledgePreprocessingMode | string | null;
-  preprocessing_status?: 'not_requested' | 'processing' | 'completed' | 'failed' | 'cancelled' | string | null;
+  preprocessing_status?:
+    | "not_requested"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | string
+    | null;
   preprocessing_error?: string | null;
   preprocessing_model?: string | null;
   preprocessing_prompt_version?: string | null;
@@ -81,65 +105,83 @@ interface Document {
   llm_models?: string | null;
 }
 
-
 const formatSize = (bytes: number) => {
-  if (bytes === 0) return '0 Bytes';
+  if (bytes === 0) return "0 Bytes";
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const sizes = ["Bytes", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
 
 const confidenceLabel = (score: number): string => {
-  if (score >= 0.75) return t('knowledge.confidence.high');
-  if (score >= 0.45) return t('knowledge.confidence.medium');
-  return t('knowledge.confidence.low');
+  if (score >= 0.75) return t("knowledge.confidence.high");
+  if (score >= 0.45) return t("knowledge.confidence.medium");
+  return t("knowledge.confidence.low");
 };
-
 
 const previewTraceLabel = (value: string): string => {
   const labels: Record<string, string> = {
-    title: t('knowledge.preview.trace.field.title'),
-    questions: t('knowledge.preview.trace.field.questions'),
-    synonyms: t('knowledge.preview.trace.field.synonyms'),
-    tags: t('knowledge.preview.trace.field.tags'),
-    answer: t('knowledge.preview.trace.field.answer'),
-    search_text: t('knowledge.preview.trace.field.searchText'),
-    embedding_text: t('knowledge.preview.trace.field.embeddingText'),
-    exact: t('knowledge.preview.trace.field.exact'),
-    embedding: t('knowledge.preview.trace.field.embedding'),
+    title: t("knowledge.preview.trace.field.title"),
+    questions: t("knowledge.preview.trace.field.questions"),
+    synonyms: t("knowledge.preview.trace.field.synonyms"),
+    tags: t("knowledge.preview.trace.field.tags"),
+    answer: t("knowledge.preview.trace.field.answer"),
+    search_text: t("knowledge.preview.trace.field.searchText"),
+    embedding_text: t("knowledge.preview.trace.field.embeddingText"),
+    exact: t("knowledge.preview.trace.field.exact"),
+    embedding: t("knowledge.preview.trace.field.embedding"),
   };
 
   return labels[value] || value;
 };
 
-const formatPreviewScore = (value: number): string => (
-  Number.isFinite(value) ? value.toFixed(3) : '0.000'
-);
-
+const formatPreviewScore = (value: number): string =>
+  Number.isFinite(value) ? value.toFixed(3) : "0.000";
 
 const DRAFT_FETCH_LIMIT = 1000;
 const SOURCE_UNIT_FETCH_LIMIT = 1000;
 
+// Legacy fallback only for display/status of old rows that predate
+// backend KnowledgeDocumentLifecycle actions. Do not use this text as
+// the primary source for resume/retry/publish/stop action availability.
+const STOPPED_BY_USER_ISSUE_NEEDLE =
+  "\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c";
 
+const PROCESSING_REPORT_PRIMARY_ACTION_IDS = new Set([
+  "resume_processing",
+  "retry_failed_batches",
+  "publish_ready",
+]);
 
+const enabledProcessingReportAction = (
+  report: KnowledgeProcessingReport | undefined,
+  actionId: string,
+): KnowledgeProcessingAction | null =>
+  report?.actions.find((action) => action.id === actionId && action.enabled) ??
+  null;
 
+const enabledPrimaryProcessingReportActions = (
+  report: KnowledgeProcessingReport | undefined,
+): KnowledgeProcessingAction[] =>
+  report?.actions.filter(
+    (action) =>
+      action.enabled && PROCESSING_REPORT_PRIMARY_ACTION_IDS.has(action.id),
+  ) ?? [];
 
-const STOPPED_BY_USER_ISSUE_NEEDLE = '\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c';
-
-const formatNumber = (value: number): string => new Intl.NumberFormat('ru-RU').format(value);
+const formatNumber = (value: number): string =>
+  new Intl.NumberFormat("ru-RU").format(value);
 
 const shouldFetchPriceFactsForDocument = (
   doc: Document,
   report: KnowledgeProcessingReport | undefined,
 ): boolean => {
-  if (doc.preprocessing_mode === 'price_list') return true;
+  if (doc.preprocessing_mode === "price_list") return true;
 
   const candidateCount = report
-    ? metricNumber(report.metrics, 'price_acquisition_fact_candidate_count')
+    ? metricNumber(report.metrics, "price_acquisition_fact_candidate_count")
     : null;
   const reviewFactCount = report
-    ? metricNumber(report.metrics, 'price_review_fact_count')
+    ? metricNumber(report.metrics, "price_review_fact_count")
     : null;
 
   return (candidateCount ?? 0) > 0 || (reviewFactCount ?? 0) > 0;
@@ -150,8 +192,8 @@ const metricNumber = (
   key: string,
 ): number | null => {
   const value = metrics?.[key];
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
@@ -162,23 +204,25 @@ const isLikelyEmbeddingModel = (model: string): boolean => {
   const normalized = model.toLowerCase();
 
   return (
-    normalized.includes('embedding')
-    || normalized.includes('voyage')
-    || normalized.includes('jina')
-    || normalized.includes('minilm')
-    || normalized.includes('e5')
-    || normalized.includes('bge')
+    normalized.includes("embedding") ||
+    normalized.includes("voyage") ||
+    normalized.includes("jina") ||
+    normalized.includes("minilm") ||
+    normalized.includes("e5") ||
+    normalized.includes("bge")
   );
 };
 
 const processingModelLabel = (doc: Document): string => {
   const candidates = [
-    metricText(doc.preprocessing_metrics, 'model'),
+    metricText(doc.preprocessing_metrics, "model"),
     doc.preprocessing_model,
   ].filter((value): value is string => Boolean(value && value.trim()));
 
-  return candidates.find((model) => !isLikelyEmbeddingModel(model))
-    || t('knowledge.processing.modelPending');
+  return (
+    candidates.find((model) => !isLikelyEmbeddingModel(model)) ||
+    t("knowledge.processing.modelPending")
+  );
 };
 
 const metricText = (
@@ -186,11 +230,11 @@ const metricText = (
   key: string,
 ): string | null => {
   const value = metrics?.[key];
-  return typeof value === 'string' && value.trim() !== '' ? value : null;
+  return typeof value === "string" && value.trim() !== "" ? value : null;
 };
 
 const rawDocumentIssueText = (doc: Document): string | null => {
-  const message = doc.preprocessing_error?.trim() || doc.error?.trim() || '';
+  const message = doc.preprocessing_error?.trim() || doc.error?.trim() || "";
 
   return message || null;
 };
@@ -199,57 +243,55 @@ const documentIssueText = (doc: Document): string | null => {
   const message = rawDocumentIssueText(doc);
   if (!message) return null;
 
-  return getErrorMessage(
-    message,
-    t('knowledge.document.failureAdvice'),
-  );
+  return getErrorMessage(message, t("knowledge.document.failureAdvice"));
 };
 
 const isDocumentCancelled = (doc: Document): boolean => {
-  const issueText = rawDocumentIssueText(doc)?.toLowerCase() || '';
+  const issueText = rawDocumentIssueText(doc)?.toLowerCase() || "";
 
   return (
-    doc.status === 'cancelled'
-    || doc.preprocessing_status === 'cancelled'
-    || issueText.includes(STOPPED_BY_USER_ISSUE_NEEDLE)
-    || issueText.includes('cancelled')
-    || issueText.includes('canceled')
+    doc.status === "cancelled" ||
+    doc.preprocessing_status === "cancelled" ||
+    issueText.includes(STOPPED_BY_USER_ISSUE_NEEDLE) ||
+    issueText.includes("cancelled") ||
+    issueText.includes("canceled")
   );
 };
 
-const isDocumentFailed = (doc: Document): boolean => (
-  doc.status === 'error'
-  || doc.preprocessing_status === 'failed'
-);
+const isDocumentFailed = (doc: Document): boolean =>
+  doc.status === "error" || doc.preprocessing_status === "failed";
 
-const isDocumentProcessing = (doc: Document): boolean => (
-  !isDocumentCancelled(doc)
-  && !isDocumentFailed(doc)
-  && (
-    doc.status === 'pending'
-    || doc.status === 'processing'
-    || doc.preprocessing_status === 'processing'
-  )
-);
+const isDocumentProcessing = (doc: Document): boolean =>
+  !isDocumentCancelled(doc) &&
+  !isDocumentFailed(doc) &&
+  (doc.status === "pending" ||
+    doc.status === "processing" ||
+    doc.preprocessing_status === "processing");
 
-const isDocumentRetightenable = (doc: Document): boolean => (
-  doc.status === 'processed'
-  && !isDocumentProcessing(doc)
-  && !isDocumentFailed(doc)
-  && !isDocumentCancelled(doc)
-);
+const isDocumentRetightenable = (doc: Document): boolean =>
+  doc.status === "processed" &&
+  !isDocumentProcessing(doc) &&
+  !isDocumentFailed(doc) &&
+  !isDocumentCancelled(doc);
 
-const knowledgeProcessingModeLabel = (mode: string | null | undefined): string => (
-  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === mode)?.label
-  || mode
-  || t('knowledge.common.unspecified')
-);
+const knowledgeProcessingModeLabel = (
+  mode: string | null | undefined,
+): string =>
+  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === mode)
+    ?.label ||
+  mode ||
+  t("knowledge.common.unspecified");
 
 const processingProgressPercent = (doc: Document): number | null => {
-  const current = metricNumber(doc.preprocessing_metrics, 'technical_chunk_processed_count')
-    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_call_count');
-  const total = metricNumber(doc.preprocessing_metrics, 'technical_chunk_total_count')
-    ?? metricNumber(doc.preprocessing_metrics, 'technical_compiler_total_count');
+  const current =
+    metricNumber(
+      doc.preprocessing_metrics,
+      "technical_chunk_processed_count",
+    ) ??
+    metricNumber(doc.preprocessing_metrics, "technical_compiler_call_count");
+  const total =
+    metricNumber(doc.preprocessing_metrics, "technical_chunk_total_count") ??
+    metricNumber(doc.preprocessing_metrics, "technical_compiler_total_count");
 
   if (current === null || total === null || total <= 0) return null;
 
@@ -258,47 +300,51 @@ const processingProgressPercent = (doc: Document): number | null => {
 
 const processingProgressLabel = (doc: Document): string => {
   const metrics = doc.preprocessing_metrics;
-  const current = metricNumber(metrics, 'technical_chunk_processed_count')
-    ?? metricNumber(metrics, 'technical_compiler_call_count');
-  const total = metricNumber(metrics, 'technical_chunk_total_count')
-    ?? metricNumber(metrics, 'technical_compiler_total_count');
+  const current =
+    metricNumber(metrics, "technical_chunk_processed_count") ??
+    metricNumber(metrics, "technical_compiler_call_count");
+  const total =
+    metricNumber(metrics, "technical_chunk_total_count") ??
+    metricNumber(metrics, "technical_compiler_total_count");
 
   if (current !== null && total !== null && total > 0) {
-    return t('knowledge.progress.stepOf', { current: formatNumber(current), total: formatNumber(total) });
+    return t("knowledge.progress.stepOf", {
+      current: formatNumber(current),
+      total: formatNumber(total),
+    });
   }
 
-  if (doc.status === 'pending') return t('knowledge.document.pendingProcessing');
-  return t('knowledge.document.preparingProcessing');
+  if (doc.status === "pending")
+    return t("knowledge.document.pendingProcessing");
+  return t("knowledge.document.preparingProcessing");
 };
 
-const answerResolutionCount = (doc: Document): number | null => (
-  metricNumber(doc.preprocessing_metrics, 'answer_resolution_call_count')
-);
-
+const answerResolutionCount = (doc: Document): number | null =>
+  metricNumber(doc.preprocessing_metrics, "answer_resolution_call_count");
 
 const metricObject = (
   metrics: KnowledgeProcessingMetrics | null | undefined,
   key: string,
 ): KnowledgeProcessingMetrics | null => {
   const value = metrics?.[key];
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as KnowledgeProcessingMetrics
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as KnowledgeProcessingMetrics)
     : null;
 };
 
-const retightenMetrics = (doc: Document): KnowledgeProcessingMetrics | null => (
-  metricObject(doc.preprocessing_metrics, 'answer_resolution')
-);
+const retightenMetrics = (doc: Document): KnowledgeProcessingMetrics | null =>
+  metricObject(doc.preprocessing_metrics, "answer_resolution");
 
-const retightenStatusText = (metrics: KnowledgeProcessingMetrics): string | null => {
-  const status = metricText(metrics, 'status');
-  const reason = metricText(metrics, 'reason');
+const retightenStatusText = (
+  metrics: KnowledgeProcessingMetrics,
+): string | null => {
+  const status = metricText(metrics, "status");
+  const reason = metricText(metrics, "reason");
 
   if (!status && !reason) return null;
   if (status && reason) return `${status}: ${reason}`;
   return status || reason;
 };
-
 
 const retightenReportRows = (doc: Document): string[] => {
   const metrics = retightenMetrics(doc);
@@ -306,154 +352,306 @@ const retightenReportRows = (doc: Document): string[] => {
 
   const rows: string[] = [];
   const statusText = retightenStatusText(metrics);
-  const before = metricNumber(metrics, 'entry_count_before');
-  const after = metricNumber(metrics, 'entry_count_after');
-  const groups = metricNumber(metrics, 'candidate_case_count');
-  const decisions = metricNumber(metrics, 'decision_count');
-  const resolvedAnswers = metricNumber(metrics, 'resolved_answer_count');
-  const rejectedNoisyResolutions = metricNumber(metrics, 'rejected_noisy_resolved_answer_count');
-  const combinedEntries = metricNumber(metrics, 'collapsed_entry_count');
-  const llmCalls = metricNumber(metrics, 'llm_call_count');
-  const cleanupOriginalUnits = metricNumber(metrics, 'retighten_cleanup_original_unit_count');
-  const cleanupRemovedUnits = metricNumber(metrics, 'retighten_cleanup_removed_unit_count');
-  const deterministicCombined = metricNumber(metrics, 'deterministic_collapsed_entry_count');
-  const deterministicExactAnswer = metricNumber(metrics, 'deterministic_exact_answer_merge_count');
-  const deterministicContainment = metricNumber(metrics, 'deterministic_answer_containment_merge_count');
-  const dedupedQuestions = metricNumber(metrics, 'deduped_question_variant_count');
-  const suspiciousMeta = metricNumber(metrics, 'suspicious_meta_entry_count');
-  const answerResolutionCombined = metricNumber(metrics, 'llm_resolved_entry_count');
+  const before = metricNumber(metrics, "entry_count_before");
+  const after = metricNumber(metrics, "entry_count_after");
+  const groups = metricNumber(metrics, "candidate_case_count");
+  const decisions = metricNumber(metrics, "decision_count");
+  const resolvedAnswers = metricNumber(metrics, "resolved_answer_count");
+  const rejectedNoisyResolutions = metricNumber(
+    metrics,
+    "rejected_noisy_resolved_answer_count",
+  );
+  const combinedEntries = metricNumber(metrics, "collapsed_entry_count");
+  const llmCalls = metricNumber(metrics, "llm_call_count");
+  const cleanupOriginalUnits = metricNumber(
+    metrics,
+    "retighten_cleanup_original_unit_count",
+  );
+  const cleanupRemovedUnits = metricNumber(
+    metrics,
+    "retighten_cleanup_removed_unit_count",
+  );
+  const deterministicCombined = metricNumber(
+    metrics,
+    "deterministic_collapsed_entry_count",
+  );
+  const deterministicExactAnswer = metricNumber(
+    metrics,
+    "deterministic_exact_answer_merge_count",
+  );
+  const deterministicContainment = metricNumber(
+    metrics,
+    "deterministic_answer_containment_merge_count",
+  );
+  const dedupedQuestions = metricNumber(
+    metrics,
+    "deduped_question_variant_count",
+  );
+  const suspiciousMeta = metricNumber(metrics, "suspicious_meta_entry_count");
+  const answerResolutionCombined = metricNumber(
+    metrics,
+    "llm_resolved_entry_count",
+  );
 
   if (statusText) {
-    rows.push(t('knowledge.retightenReport.status', { status: statusText }));
+    rows.push(t("knowledge.retightenReport.status", { status: statusText }));
   }
   if (before !== null && after !== null) {
-    rows.push(t('knowledge.retightenReport.entries', {
-      before: formatNumber(before),
-      after: formatNumber(after),
-    }));
+    rows.push(
+      t("knowledge.retightenReport.entries", {
+        before: formatNumber(before),
+        after: formatNumber(after),
+      }),
+    );
   }
   if (combinedEntries !== null) {
-    rows.push(t('knowledge.retightenReport.combinedEntries', { count: formatNumber(combinedEntries) }));
+    rows.push(
+      t("knowledge.retightenReport.combinedEntries", {
+        count: formatNumber(combinedEntries),
+      }),
+    );
   }
   if (deterministicCombined !== null) {
-    rows.push(t('knowledge.retightenReport.deterministicCombined', { count: formatNumber(deterministicCombined) }));
+    rows.push(
+      t("knowledge.retightenReport.deterministicCombined", {
+        count: formatNumber(deterministicCombined),
+      }),
+    );
   }
   if (deterministicExactAnswer !== null) {
-    rows.push(t('knowledge.retightenReport.deterministicExactAnswer', { count: formatNumber(deterministicExactAnswer) }));
+    rows.push(
+      t("knowledge.retightenReport.deterministicExactAnswer", {
+        count: formatNumber(deterministicExactAnswer),
+      }),
+    );
   }
   if (deterministicContainment !== null) {
-    rows.push(t('knowledge.retightenReport.deterministicContainment', { count: formatNumber(deterministicContainment) }));
+    rows.push(
+      t("knowledge.retightenReport.deterministicContainment", {
+        count: formatNumber(deterministicContainment),
+      }),
+    );
   }
   if (answerResolutionCombined !== null) {
-    rows.push(t('knowledge.retightenReport.answerResolutionCombined', { count: formatNumber(answerResolutionCombined) }));
+    rows.push(
+      t("knowledge.retightenReport.answerResolutionCombined", {
+        count: formatNumber(answerResolutionCombined),
+      }),
+    );
   }
   if (dedupedQuestions !== null) {
-    rows.push(t('knowledge.retightenReport.dedupedQuestions', { count: formatNumber(dedupedQuestions) }));
+    rows.push(
+      t("knowledge.retightenReport.dedupedQuestions", {
+        count: formatNumber(dedupedQuestions),
+      }),
+    );
   }
   if (suspiciousMeta !== null) {
-    rows.push(t('knowledge.retightenReport.suspiciousMeta', { count: formatNumber(suspiciousMeta) }));
+    rows.push(
+      t("knowledge.retightenReport.suspiciousMeta", {
+        count: formatNumber(suspiciousMeta),
+      }),
+    );
   }
   if (groups !== null) {
-    rows.push(t('knowledge.retightenReport.groups', { count: formatNumber(groups) }));
+    rows.push(
+      t("knowledge.retightenReport.groups", { count: formatNumber(groups) }),
+    );
   }
   if (decisions !== null) {
-    rows.push(t('knowledge.retightenReport.decisions', { count: formatNumber(decisions) }));
+    rows.push(
+      t("knowledge.retightenReport.decisions", {
+        count: formatNumber(decisions),
+      }),
+    );
   }
   if (resolvedAnswers !== null) {
-    rows.push(t('knowledge.retightenReport.resolvedAnswers', { count: formatNumber(resolvedAnswers) }));
+    rows.push(
+      t("knowledge.retightenReport.resolvedAnswers", {
+        count: formatNumber(resolvedAnswers),
+      }),
+    );
   }
   if (rejectedNoisyResolutions !== null) {
-    rows.push(t('knowledge.retightenReport.rejectedNoisyResolutions', {
-      count: formatNumber(rejectedNoisyResolutions),
-    }));
+    rows.push(
+      t("knowledge.retightenReport.rejectedNoisyResolutions", {
+        count: formatNumber(rejectedNoisyResolutions),
+      }),
+    );
   }
   if (llmCalls !== null) {
-    rows.push(t('knowledge.retightenReport.llmCalls', { count: formatNumber(llmCalls) }));
+    rows.push(
+      t("knowledge.retightenReport.llmCalls", {
+        count: formatNumber(llmCalls),
+      }),
+    );
   }
   if (cleanupOriginalUnits !== null) {
-    rows.push(t('knowledge.retightenReport.cleanupOriginalUnits', {
-      count: formatNumber(cleanupOriginalUnits),
-    }));
+    rows.push(
+      t("knowledge.retightenReport.cleanupOriginalUnits", {
+        count: formatNumber(cleanupOriginalUnits),
+      }),
+    );
   }
   if (cleanupRemovedUnits !== null) {
-    rows.push(t('knowledge.retightenReport.cleanupRemovedUnits', {
-      count: formatNumber(cleanupRemovedUnits),
-    }));
+    rows.push(
+      t("knowledge.retightenReport.cleanupRemovedUnits", {
+        count: formatNumber(cleanupRemovedUnits),
+      }),
+    );
   }
 
   return rows;
 };
 
-const ANSWER_RESOLUTION_STEP_ID = 'answer_resolution';
+const ANSWER_RESOLUTION_STEP_ID = "answer_resolution";
 
-const positiveMetric = (value: number | null): number | null => (
-  value !== null && value > 0 ? value : null
-);
+const positiveMetric = (value: number | null): number | null =>
+  value !== null && value > 0 ? value : null;
 
-const sourceChunkCount = (doc: Document): number | null => (
-  positiveMetric(metricNumber(doc.preprocessing_metrics, 'raw_source_chunk_count'))
-  ?? positiveMetric(metricNumber(doc.preprocessing_metrics, 'source_chunk_count'))
-  ?? (Number.isFinite(doc.chunk_count) && doc.chunk_count > 0 ? doc.chunk_count : null)
-);
+const sourceChunkCount = (doc: Document): number | null =>
+  positiveMetric(
+    metricNumber(doc.preprocessing_metrics, "raw_source_chunk_count"),
+  ) ??
+  positiveMetric(
+    metricNumber(doc.preprocessing_metrics, "source_chunk_count"),
+  ) ??
+  (Number.isFinite(doc.chunk_count) && doc.chunk_count > 0
+    ? doc.chunk_count
+    : null);
 
-const incomingAnswerCandidateCount = (doc: Document): number | null => (
-  metricNumber(doc.preprocessing_metrics, 'incoming_entry_count')
-  ?? metricNumber(doc.preprocessing_metrics, 'answer_candidate_count')
-);
-
+const incomingAnswerCandidateCount = (doc: Document): number | null =>
+  metricNumber(doc.preprocessing_metrics, "incoming_entry_count") ??
+  metricNumber(doc.preprocessing_metrics, "answer_candidate_count");
 
 const processingDetailRows = (doc: Document): string[] => {
   const metrics = doc.preprocessing_metrics;
   const rows: string[] = [];
-  const totalParts = metricNumber(metrics, 'technical_chunk_total_count')
-    ?? metricNumber(metrics, 'technical_compiler_total_count');
-  const completedParts = metricNumber(metrics, 'technical_chunk_processed_count')
-    ?? metricNumber(metrics, 'technical_compiler_call_count');
-  const failedParts = metricNumber(metrics, 'failed_part_count');
-  const rawDrafts = metricNumber(metrics, 'raw_draft_count')
-    ?? metricNumber(metrics, 'draft_answer_count');
-  const safelyCombined = metricNumber(metrics, 'duplicates_collapsed_safely_count')
-    ?? metricNumber(metricObject(metrics, 'deterministic_cleanup'), 'exact_duplicate_candidate_collapse_count');
-  const answerResolution = metricObject(metrics, 'answer_resolution');
-  const resolutionPasses = answerResolution ? 1 : metricNumber(metrics, 'answer_resolution_pass_count');
-  const answerResolutionCases = metricNumber(answerResolution, 'candidate_case_count');
-  const appliedAnswerResolutions = metricNumber(answerResolution, 'resolved_answer_count');
-  const keptSeparate = metricNumber(answerResolution, 'kept_separate_count');
-  const invalidResolverOutputs = metricNumber(answerResolution, 'invalid_resolution_output_count');
-  const publishedEntries = metricNumber(metrics, 'canonical_entry_count')
-    ?? metricNumber(metrics, 'published_entry_count');
+  const totalParts =
+    metricNumber(metrics, "technical_chunk_total_count") ??
+    metricNumber(metrics, "technical_compiler_total_count");
+  const completedParts =
+    metricNumber(metrics, "technical_chunk_processed_count") ??
+    metricNumber(metrics, "technical_compiler_call_count");
+  const failedParts = metricNumber(metrics, "failed_part_count");
+  const rawDrafts =
+    metricNumber(metrics, "raw_draft_count") ??
+    metricNumber(metrics, "draft_answer_count");
+  const safelyCombined =
+    metricNumber(metrics, "duplicates_collapsed_safely_count") ??
+    metricNumber(
+      metricObject(metrics, "deterministic_cleanup"),
+      "exact_duplicate_candidate_collapse_count",
+    );
+  const answerResolution = metricObject(metrics, "answer_resolution");
+  const resolutionPasses = answerResolution
+    ? 1
+    : metricNumber(metrics, "answer_resolution_pass_count");
+  const answerResolutionCases = metricNumber(
+    answerResolution,
+    "candidate_case_count",
+  );
+  const appliedAnswerResolutions = metricNumber(
+    answerResolution,
+    "resolved_answer_count",
+  );
+  const keptSeparate = metricNumber(answerResolution, "kept_separate_count");
+  const invalidResolverOutputs = metricNumber(
+    answerResolution,
+    "invalid_resolution_output_count",
+  );
+  const publishedEntries =
+    metricNumber(metrics, "canonical_entry_count") ??
+    metricNumber(metrics, "published_entry_count");
 
-  if (totalParts !== null) rows.push(t('knowledge.document.technicalPartsTotal', { total: formatNumber(totalParts) }));
+  if (totalParts !== null)
+    rows.push(
+      t("knowledge.document.technicalPartsTotal", {
+        total: formatNumber(totalParts),
+      }),
+    );
   if (completedParts !== null && totalParts !== null) {
-    rows.push(t('knowledge.document.extractedPartsProgress', { current: formatNumber(completedParts), total: formatNumber(totalParts) }));
+    rows.push(
+      t("knowledge.document.extractedPartsProgress", {
+        current: formatNumber(completedParts),
+        total: formatNumber(totalParts),
+      }),
+    );
   }
-  if (failedParts !== null) rows.push(t('knowledge.document.failedParts', { count: formatNumber(failedParts) }));
-  if (rawDrafts !== null) rows.push(t('knowledge.document.rawDraftsSaved', { count: formatNumber(rawDrafts) }));
-  if (safelyCombined !== null) rows.push(t('knowledge.document.duplicateAnswersCombinedSafely', { count: formatNumber(safelyCombined) }));
-  if (resolutionPasses !== null) rows.push(t('knowledge.document.answerResolutionPasses', { count: formatNumber(resolutionPasses) }));
-  if (answerResolutionCases !== null) rows.push(t('knowledge.document.answerResolverCases', { count: formatNumber(answerResolutionCases) }));
-  if (appliedAnswerResolutions !== null) rows.push(t('knowledge.document.answerResolutionsApplied', { count: formatNumber(appliedAnswerResolutions) }));
-  if (keptSeparate !== null) rows.push(t('knowledge.document.keptSeparateByResolver', { count: formatNumber(keptSeparate) }));
-  if (invalidResolverOutputs !== null) rows.push(t('knowledge.document.rejectedInvalidResolverOutputs', { count: formatNumber(invalidResolverOutputs) }));
-  if (publishedEntries !== null) rows.push(t('knowledge.document.publishedEntries', { count: formatNumber(publishedEntries) }));
+  if (failedParts !== null)
+    rows.push(
+      t("knowledge.document.failedParts", { count: formatNumber(failedParts) }),
+    );
+  if (rawDrafts !== null)
+    rows.push(
+      t("knowledge.document.rawDraftsSaved", {
+        count: formatNumber(rawDrafts),
+      }),
+    );
+  if (safelyCombined !== null)
+    rows.push(
+      t("knowledge.document.duplicateAnswersCombinedSafely", {
+        count: formatNumber(safelyCombined),
+      }),
+    );
+  if (resolutionPasses !== null)
+    rows.push(
+      t("knowledge.document.answerResolutionPasses", {
+        count: formatNumber(resolutionPasses),
+      }),
+    );
+  if (answerResolutionCases !== null)
+    rows.push(
+      t("knowledge.document.answerResolverCases", {
+        count: formatNumber(answerResolutionCases),
+      }),
+    );
+  if (appliedAnswerResolutions !== null)
+    rows.push(
+      t("knowledge.document.answerResolutionsApplied", {
+        count: formatNumber(appliedAnswerResolutions),
+      }),
+    );
+  if (keptSeparate !== null)
+    rows.push(
+      t("knowledge.document.keptSeparateByResolver", {
+        count: formatNumber(keptSeparate),
+      }),
+    );
+  if (invalidResolverOutputs !== null)
+    rows.push(
+      t("knowledge.document.rejectedInvalidResolverOutputs", {
+        count: formatNumber(invalidResolverOutputs),
+      }),
+    );
+  if (publishedEntries !== null)
+    rows.push(
+      t("knowledge.document.publishedEntries", {
+        count: formatNumber(publishedEntries),
+      }),
+    );
 
   return rows;
 };
 
 const processingStatusMessage = (doc: Document): string => {
-  const message = metricText(doc.preprocessing_metrics, 'status_message');
+  const message = metricText(doc.preprocessing_metrics, "status_message");
   if (message) return message;
-  if (isDocumentProcessing(doc)) return t('knowledge.document.draftStatus.processing');
-  if (doc.status === 'error') return t('knowledge.document.draftStatus.error');
-  return t('knowledge.document.draftStatus.ready');
+  if (isDocumentProcessing(doc))
+    return t("knowledge.document.draftStatus.processing");
+  if (doc.status === "error") return t("knowledge.document.draftStatus.error");
+  return t("knowledge.document.draftStatus.ready");
 };
 
 const documentLlmTokenText = (doc: Document): string | null => {
-  const total = doc.llm_tokens_total
-    ?? metricNumber(doc.preprocessing_metrics, 'llm_tokens_total');
+  const total =
+    doc.llm_tokens_total ??
+    metricNumber(doc.preprocessing_metrics, "llm_tokens_total");
   if (total === null || total <= 0) return null;
 
-  return t('knowledge.progress.processingUnits', { total: formatNumber(total) });
+  return t("knowledge.progress.processingUnits", {
+    total: formatNumber(total),
+  });
 };
 
 const documentLlmModels = (doc: Document): string | null => {
@@ -468,24 +666,40 @@ const formatDurationSeconds = (seconds: number): string => {
   const restSeconds = safeSeconds % 60;
 
   if (hours > 0) {
-    return t('knowledge.duration.hoursMinutesSeconds', { hours, minutes: minutes.toString().padStart(2, '0'), seconds: restSeconds.toString().padStart(2, '0') });
+    return t("knowledge.duration.hoursMinutesSeconds", {
+      hours,
+      minutes: minutes.toString().padStart(2, "0"),
+      seconds: restSeconds.toString().padStart(2, "0"),
+    });
   }
   if (minutes > 0) {
-    return t('knowledge.duration.minutesSeconds', { minutes, seconds: restSeconds.toString().padStart(2, '0') });
+    return t("knowledge.duration.minutesSeconds", {
+      minutes,
+      seconds: restSeconds.toString().padStart(2, "0"),
+    });
   }
-  return t('knowledge.duration.seconds', { seconds: restSeconds });
+  return t("knowledge.duration.seconds", { seconds: restSeconds });
 };
 
 const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
-  const metricElapsed = metricNumber(doc.preprocessing_metrics, 'elapsed_seconds') ?? 0;
-  const elapsedBeforeResume = metricNumber(doc.preprocessing_metrics, 'elapsed_before_resume_seconds') ?? metricElapsed;
-  const processingStartedAtEpoch = metricNumber(doc.preprocessing_metrics, 'processing_started_at_epoch');
-  const startedAt = Date.parse(doc.created_at || '');
-  const updatedAt = Date.parse(doc.updated_at || '');
+  const metricElapsed =
+    metricNumber(doc.preprocessing_metrics, "elapsed_seconds") ?? 0;
+  const elapsedBeforeResume =
+    metricNumber(doc.preprocessing_metrics, "elapsed_before_resume_seconds") ??
+    metricElapsed;
+  const processingStartedAtEpoch = metricNumber(
+    doc.preprocessing_metrics,
+    "processing_started_at_epoch",
+  );
+  const startedAt = Date.parse(doc.created_at || "");
+  const updatedAt = Date.parse(doc.updated_at || "");
 
   if (isDocumentProcessing(doc)) {
     if (processingStartedAtEpoch !== null && processingStartedAtEpoch > 0) {
-      return Math.max(0, elapsedBeforeResume + ((nowMs / 1000) - processingStartedAtEpoch));
+      return Math.max(
+        0,
+        elapsedBeforeResume + (nowMs / 1000 - processingStartedAtEpoch),
+      );
     }
     if (Number.isFinite(startedAt)) {
       return Math.max(metricElapsed, Math.max(0, (nowMs - startedAt) / 1000));
@@ -494,7 +708,11 @@ const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
   }
 
   if (metricElapsed > 0) return metricElapsed;
-  if (Number.isFinite(startedAt) && Number.isFinite(updatedAt) && updatedAt >= startedAt) {
+  if (
+    Number.isFinite(startedAt) &&
+    Number.isFinite(updatedAt) &&
+    updatedAt >= startedAt
+  ) {
     return Math.max(0, (updatedAt - startedAt) / 1000);
   }
   return metricElapsed;
@@ -508,36 +726,58 @@ const PreviewResultCard: React.FC<{
 }> = ({ title, result, compact = false, isDebugMode = false }) => (
   <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
+      <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+        {title}
+      </h3>
       <span className="inline-flex w-fit items-center rounded-full bg-[var(--accent-muted)] px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]">
         {confidenceLabel(result.score)}
       </span>
     </div>
-    <p className={`text-sm leading-relaxed text-[var(--text-primary)] ${compact ? 'line-clamp-3' : ''}`}>
+    <p
+      className={`text-sm leading-relaxed text-[var(--text-primary)] ${compact ? "line-clamp-3" : ""}`}
+    >
       {result.answer || result.content}
     </p>
     <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-      <span>{t('knowledge.preview.matchFound')}</span>
-      {result.source && <span>{t('knowledge.preview.sourcePrefix')} {result.source}</span>}
-      {result.document_status && <span>{t('knowledge.preview.documentPrefix')} {knowledgeDocumentStatusLabel(result.document_status)}</span>}
-      {isDebugMode && result.entry_kind && <span>entry: {result.entry_kind}</span>}
+      <span>{t("knowledge.preview.matchFound")}</span>
+      {result.source && (
+        <span>
+          {t("knowledge.preview.sourcePrefix")} {result.source}
+        </span>
+      )}
+      {result.document_status && (
+        <span>
+          {t("knowledge.preview.documentPrefix")}{" "}
+          {knowledgeDocumentStatusLabel(result.document_status)}
+        </span>
+      )}
+      {isDebugMode && result.entry_kind && (
+        <span>entry: {result.entry_kind}</span>
+      )}
       {isDebugMode && result.trace && (
         <span>
-          {t('knowledge.preview.trace.summary', {
-            fields: result.trace.matched_fields.map(previewTraceLabel).join(', ') || t('knowledge.preview.trace.none'),
+          {t("knowledge.preview.trace.summary", {
+            fields:
+              result.trace.matched_fields.map(previewTraceLabel).join(", ") ||
+              t("knowledge.preview.trace.none"),
             lexical: formatPreviewScore(result.trace.lexical_score),
             vector: formatPreviewScore(result.trace.vector_score),
             final: formatPreviewScore(result.trace.final_score),
             field: previewTraceLabel(result.trace.displayed_field),
           })}
-          {' · '}{result.trace.is_production_safe
-            ? t('knowledge.preview.trace.productionSafe')
-            : t('knowledge.preview.trace.notProductionSafe')}
-          {result.trace.title_match ? ` · ${t('knowledge.preview.trace.titleMatch')}` : ''}
-          {result.trace.exact_question_match ? ` · ${t('knowledge.preview.trace.questionMatch')}` : ''}
+          {" · "}
+          {result.trace.is_production_safe
+            ? t("knowledge.preview.trace.productionSafe")
+            : t("knowledge.preview.trace.notProductionSafe")}
+          {result.trace.title_match
+            ? ` · ${t("knowledge.preview.trace.titleMatch")}`
+            : ""}
+          {result.trace.exact_question_match
+            ? ` · ${t("knowledge.preview.trace.questionMatch")}`
+            : ""}
           {result.trace.length_penalty > 0
-            ? ` · ${t('knowledge.preview.trace.penalty', { penalty: formatPreviewScore(result.trace.length_penalty) })}`
-            : ''}
+            ? ` · ${t("knowledge.preview.trace.penalty", { penalty: formatPreviewScore(result.trace.length_penalty) })}`
+            : ""}
         </span>
       )}
     </div>
@@ -547,19 +787,30 @@ const PreviewResultCard: React.FC<{
 export const KnowledgePage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [previewQuestion, setPreviewQuestion] = useState('');
-  const [preprocessingMode, setPreprocessingMode] = useState<KnowledgePreprocessingMode>('faq');
+  const [previewQuestion, setPreviewQuestion] = useState("");
+  const [preprocessingMode, setPreprocessingMode] =
+    useState<KnowledgePreprocessingMode>("faq");
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
-  const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<string | null>(null);
-  const [curationDocumentId, setCurationDocumentId] = useState<string | null>(null);
+  const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<
+    string | null
+  >(null);
+  const [curationDocumentId, setCurationDocumentId] = useState<string | null>(
+    null,
+  );
   const [isDebugMode, setIsDebugMode] = useState(false);
-  const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<Record<string, string>>({});
-  const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] = useState<Record<string, string>>({});
-  const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<Record<string, string[]>>({});
-  const [expandedSourceUnitIdsByDocument, setExpandedSourceUnitIdsByDocument] = useState<Record<string, string[]>>({});
+  const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<
+    Record<string, string>
+  >({});
+  const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] =
+    useState<Record<string, string>>({});
+  const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<
+    Record<string, string[]>
+  >({});
+  const [expandedSourceUnitIdsByDocument, setExpandedSourceUnitIdsByDocument] =
+    useState<Record<string, string[]>>({});
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -571,19 +822,22 @@ export const KnowledgePage: React.FC = () => {
       }
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener("mousedown", handlePointerDown);
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener("mousedown", handlePointerDown);
     };
   }, []);
 
   const documentsQuery = useQuery({
-    queryKey: ['knowledge-documents', projectId],
+    queryKey: ["knowledge-documents", projectId],
     queryFn: async () => {
       if (!projectId) return [];
       const { data } = await knowledgeApi.list(projectId);
 
-      const payload = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+      const payload =
+        data && typeof data === "object"
+          ? (data as Record<string, unknown>)
+          : {};
       const list = Array.isArray(payload.documents)
         ? payload.documents
         : Array.isArray(payload.items)
@@ -596,10 +850,12 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
 
-  const baseDocuments = Array.isArray(documentsQuery.data) ? documentsQuery.data : [];
+  const baseDocuments = Array.isArray(documentsQuery.data)
+    ? documentsQuery.data
+    : [];
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
   const processingOverviewQuery = useQuery({
-    queryKey: ['knowledge-processing-overview', projectId],
+    queryKey: ["knowledge-processing-overview", projectId],
     queryFn: async () => {
       if (!projectId) return undefined;
       const { data } = await knowledgeApi.processingOverview(projectId);
@@ -609,17 +865,28 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
     refetchInterval: baseHasProcessingDocuments ? 3000 : false,
   });
-  const overviewDocuments = Array.isArray(processingOverviewQuery.data?.documents)
-    ? processingOverviewQuery.data.documents as unknown as Document[]
+  const overviewDocuments = Array.isArray(
+    processingOverviewQuery.data?.documents,
+  )
+    ? (processingOverviewQuery.data.documents as unknown as Document[])
     : [];
-  const documents = overviewDocuments.length > 0 ? overviewDocuments : baseDocuments;
+  const documents =
+    overviewDocuments.length > 0 ? overviewDocuments : baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
-  const reportableDocuments = documents.filter((doc) => (
-    isDocumentProcessing(doc) || isDocumentFailed(doc) || isDocumentCancelled(doc) || Boolean(doc.structured_entries)
-  ));
+  const reportableDocuments = documents.filter(
+    (doc) =>
+      isDocumentProcessing(doc) ||
+      isDocumentFailed(doc) ||
+      isDocumentCancelled(doc) ||
+      Boolean(doc.structured_entries),
+  );
   const reportableDocumentIds = reportableDocuments.map((doc) => doc.id).sort();
   const processingReportsQuery = useQuery({
-    queryKey: ['knowledge-processing-reports', projectId, reportableDocumentIds.join(',')],
+    queryKey: [
+      "knowledge-processing-reports",
+      projectId,
+      reportableDocumentIds.join(","),
+    ],
     queryFn: async () => {
       if (!projectId || reportableDocumentIds.length === 0) return {};
 
@@ -634,31 +901,45 @@ export const KnowledgePage: React.FC = () => {
         }),
       );
 
-      return reports.reduce<KnowledgeProcessingReportByDocument>((acc, item) => {
-        if (item !== null) {
-          acc[item[0]] = item[1];
-        }
-        return acc;
-      }, {});
+      return reports.reduce<KnowledgeProcessingReportByDocument>(
+        (acc, item) => {
+          if (item !== null) {
+            acc[item[0]] = item[1];
+          }
+          return acc;
+        },
+        {},
+      );
     },
-    enabled: !!projectId && reportableDocumentIds.length > 0 && !baseHasProcessingDocuments,
+    enabled:
+      !!projectId &&
+      reportableDocumentIds.length > 0 &&
+      !baseHasProcessingDocuments,
     retry: false,
   });
-  const processingReports = (
-    processingOverviewQuery.data?.processing_reports
-    || processingReportsQuery.data
-    || {}
-  );
-  const importQualityDocumentIds = hasProcessingDocuments ? [] : documents.map((doc) => doc.id).sort();
+  const processingReports =
+    processingOverviewQuery.data?.processing_reports ||
+    processingReportsQuery.data ||
+    {};
+  const importQualityDocumentIds = hasProcessingDocuments
+    ? []
+    : documents.map((doc) => doc.id).sort();
   const importQualityReportsQuery = useQuery({
-    queryKey: ['knowledge-import-quality-reports', projectId, importQualityDocumentIds.join(',')],
+    queryKey: [
+      "knowledge-import-quality-reports",
+      projectId,
+      importQualityDocumentIds.join(","),
+    ],
     queryFn: async () => {
       if (!projectId || importQualityDocumentIds.length === 0) return {};
 
       const reports = await Promise.all(
         importQualityDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.importQuality(projectId, documentId);
+            const { data } = await knowledgeApi.importQuality(
+              projectId,
+              documentId,
+            );
             return [documentId, data] as const;
           } catch {
             return null;
@@ -683,25 +964,41 @@ export const KnowledgePage: React.FC = () => {
       : hasProcessingDocuments
         ? []
         : Object.values(processingReports)
-          .filter((report) => {
-            const document = documents.find((doc) => doc.id === report.document_id);
-            const draftCount = metricNumber(report.metrics, 'raw_draft_count')
-              ?? metricNumber(report.metrics, 'draft_answer_count')
-              ?? 0;
-            const publishedCount = metricNumber(report.metrics, 'published_answer_count') ?? 0;
-            return Boolean(document && isDocumentProcessing(document)) || draftCount > publishedCount;
-          })
-          .map((report) => report.document_id)
+            .filter((report) => {
+              const document = documents.find(
+                (doc) => doc.id === report.document_id,
+              );
+              const draftCount =
+                metricNumber(report.metrics, "raw_draft_count") ??
+                metricNumber(report.metrics, "draft_answer_count") ??
+                0;
+              const publishedCount =
+                metricNumber(report.metrics, "published_answer_count") ?? 0;
+              return (
+                Boolean(document && isDocumentProcessing(document)) ||
+                draftCount > publishedCount
+              );
+            })
+            .map((report) => report.document_id)
   ).sort();
   const answerDraftsQuery = useQuery({
-    queryKey: ['knowledge-answer-drafts', projectId, draftPreviewDocumentIds.join(','), DRAFT_FETCH_LIMIT],
+    queryKey: [
+      "knowledge-answer-drafts",
+      projectId,
+      draftPreviewDocumentIds.join(","),
+      DRAFT_FETCH_LIMIT,
+    ],
     queryFn: async () => {
       if (!projectId || draftPreviewDocumentIds.length === 0) return {};
 
       const drafts = await Promise.all(
         draftPreviewDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.fragments(projectId, documentId, DRAFT_FETCH_LIMIT);
+            const { data } = await knowledgeApi.fragments(
+              projectId,
+              documentId,
+              DRAFT_FETCH_LIMIT,
+            );
             return [documentId, data] as const;
           } catch {
             return null;
@@ -726,24 +1023,41 @@ export const KnowledgePage: React.FC = () => {
       : hasProcessingDocuments
         ? []
         : Object.values(processingReports)
-          .filter((report) => {
-            const document = documents.find((doc) => doc.id === report.document_id);
-            const sourceCount = metricNumber(report.metrics, 'raw_source_chunk_count')
-              ?? metricNumber(report.metrics, 'source_chunk_count')
-              ?? (document && Number.isFinite(document.chunk_count) ? document.chunk_count : 0);
-            return Boolean(document && isDocumentProcessing(document)) || sourceCount > 0;
-          })
-          .map((report) => report.document_id)
+            .filter((report) => {
+              const document = documents.find(
+                (doc) => doc.id === report.document_id,
+              );
+              const sourceCount =
+                metricNumber(report.metrics, "raw_source_chunk_count") ??
+                metricNumber(report.metrics, "source_chunk_count") ??
+                (document && Number.isFinite(document.chunk_count)
+                  ? document.chunk_count
+                  : 0);
+              return (
+                Boolean(document && isDocumentProcessing(document)) ||
+                sourceCount > 0
+              );
+            })
+            .map((report) => report.document_id)
   ).sort();
   const sourceUnitsQuery = useQuery({
-    queryKey: ['knowledge-source-units', projectId, sourceUnitDocumentIds.join(','), SOURCE_UNIT_FETCH_LIMIT],
+    queryKey: [
+      "knowledge-source-units",
+      projectId,
+      sourceUnitDocumentIds.join(","),
+      SOURCE_UNIT_FETCH_LIMIT,
+    ],
     queryFn: async () => {
       if (!projectId || sourceUnitDocumentIds.length === 0) return {};
 
       const sourceUnits = await Promise.all(
         sourceUnitDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.sourceUnits(projectId, documentId, SOURCE_UNIT_FETCH_LIMIT);
+            const { data } = await knowledgeApi.sourceUnits(
+              projectId,
+              documentId,
+              SOURCE_UNIT_FETCH_LIMIT,
+            );
             return [documentId, data] as const;
           } catch {
             return null;
@@ -765,18 +1079,27 @@ export const KnowledgePage: React.FC = () => {
   const priceFactDocumentIds = hasProcessingDocuments
     ? []
     : documents
-      .filter((doc) => shouldFetchPriceFactsForDocument(doc, processingReports[doc.id]))
-      .map((doc) => doc.id)
-      .sort();
+        .filter((doc) =>
+          shouldFetchPriceFactsForDocument(doc, processingReports[doc.id]),
+        )
+        .map((doc) => doc.id)
+        .sort();
   const priceFactsQuery = useQuery({
-    queryKey: ['knowledge-price-facts', projectId, priceFactDocumentIds.join(',')],
+    queryKey: [
+      "knowledge-price-facts",
+      projectId,
+      priceFactDocumentIds.join(","),
+    ],
     queryFn: async () => {
       if (!projectId || priceFactDocumentIds.length === 0) return {};
 
       const priceFacts = await Promise.all(
         priceFactDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.priceFacts(projectId, documentId);
+            const { data } = await knowledgeApi.priceFacts(
+              projectId,
+              documentId,
+            );
             return [documentId, data] as const;
           } catch {
             return null;
@@ -795,9 +1118,14 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const priceFacts = priceFactsQuery.data || {};
-  const [commercialTruthReviewPolicy, setCommercialTruthReviewPolicy] = useState<KnowledgeCommercialTruthReviewPolicy>('manual_review');
+  const [commercialTruthReviewPolicy, setCommercialTruthReviewPolicy] =
+    useState<KnowledgeCommercialTruthReviewPolicy>("manual_review");
   const projectCommercialTruthReviewQuery = useQuery({
-    queryKey: ['project-commercial-truth-review', projectId, commercialTruthReviewPolicy],
+    queryKey: [
+      "project-commercial-truth-review",
+      projectId,
+      commercialTruthReviewPolicy,
+    ],
     queryFn: async () => {
       if (!projectId) return undefined;
 
@@ -811,14 +1139,23 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const commercialTruthReviewQuery = useQuery({
-    queryKey: ['knowledge-commercial-truth-review', projectId, priceFactDocumentIds.join(','), commercialTruthReviewPolicy],
+    queryKey: [
+      "knowledge-commercial-truth-review",
+      projectId,
+      priceFactDocumentIds.join(","),
+      commercialTruthReviewPolicy,
+    ],
     queryFn: async () => {
       if (!projectId || priceFactDocumentIds.length === 0) return {};
 
       const reviews = await Promise.all(
         priceFactDocumentIds.map(async (documentId) => {
           try {
-            const { data } = await knowledgeApi.commercialTruthReview(projectId, documentId, commercialTruthReviewPolicy);
+            const { data } = await knowledgeApi.commercialTruthReview(
+              projectId,
+              documentId,
+              commercialTruthReviewPolicy,
+            );
             return [documentId, data] as const;
           } catch {
             return null;
@@ -826,37 +1163,52 @@ export const KnowledgePage: React.FC = () => {
         }),
       );
 
-      return reviews.reduce<KnowledgeCommercialTruthReviewsByDocument>((acc, item) => {
-        if (item !== null) {
-          acc[item[0]] = item[1];
-        }
-        return acc;
-      }, {});
+      return reviews.reduce<KnowledgeCommercialTruthReviewsByDocument>(
+        (acc, item) => {
+          if (item !== null) {
+            acc[item[0]] = item[1];
+          }
+          return acc;
+        },
+        {},
+      );
     },
-    enabled: !!projectId && priceFactDocumentIds.length > 0 && !hasProcessingDocuments,
+    enabled:
+      !!projectId && priceFactDocumentIds.length > 0 && !hasProcessingDocuments,
     retry: false,
   });
   const commercialTruthReviews = commercialTruthReviewQuery.data || {};
   const draftsDocument = draftsDocumentId
-    ? documents.find((doc) => doc.id === draftsDocumentId) ?? null
+    ? (documents.find((doc) => doc.id === draftsDocumentId) ?? null)
     : null;
-  const draftsModalResponse = draftsDocumentId ? answerDrafts[draftsDocumentId] : undefined;
-  const draftsModalFilter = draftsDocumentId ? draftFiltersByDocument[draftsDocumentId] || '' : '';
-  const draftsModalExpandedIds = draftsDocumentId ? expandedDraftIdsByDocument[draftsDocumentId] || [] : [];
+  const draftsModalResponse = draftsDocumentId
+    ? answerDrafts[draftsDocumentId]
+    : undefined;
+  const draftsModalFilter = draftsDocumentId
+    ? draftFiltersByDocument[draftsDocumentId] || ""
+    : "";
+  const draftsModalExpandedIds = draftsDocumentId
+    ? expandedDraftIdsByDocument[draftsDocumentId] || []
+    : [];
   const sourceUnitsDocument = sourceUnitsDocumentId
-    ? documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null
+    ? (documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null)
     : null;
-  const sourceUnitsModalResponse = sourceUnitsDocumentId ? sourceUnits[sourceUnitsDocumentId] : undefined;
+  const sourceUnitsModalResponse = sourceUnitsDocumentId
+    ? sourceUnits[sourceUnitsDocumentId]
+    : undefined;
   const curationDocument = curationDocumentId
-    ? documents.find((doc) => doc.id === curationDocumentId) ?? null
+    ? (documents.find((doc) => doc.id === curationDocumentId) ?? null)
     : null;
 
   const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
 
-
-  const sourceUnitsModalFilter = sourceUnitsDocumentId ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || '' : '';
-  const sourceUnitsModalExpandedIds = sourceUnitsDocumentId ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || [] : [];
+  const sourceUnitsModalFilter = sourceUnitsDocumentId
+    ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || ""
+    : "";
+  const sourceUnitsModalExpandedIds = sourceUnitsDocumentId
+    ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || []
+    : [];
   const openDraftsModal = (documentId: string): void => {
     setDraftsDocumentId(documentId);
   };
@@ -864,10 +1216,16 @@ export const KnowledgePage: React.FC = () => {
     setSourceUnitsDocumentId(documentId);
   };
   const setDraftFilter = (documentId: string, value: string): void => {
-    setDraftFiltersByDocument((current) => ({ ...current, [documentId]: value }));
+    setDraftFiltersByDocument((current) => ({
+      ...current,
+      [documentId]: value,
+    }));
   };
   const setSourceUnitFilter = (documentId: string, value: string): void => {
-    setSourceUnitFiltersByDocument((current) => ({ ...current, [documentId]: value }));
+    setSourceUnitFiltersByDocument((current) => ({
+      ...current,
+      [documentId]: value,
+    }));
   };
   const toggleDraftExpanded = (documentId: string, draftId: string): void => {
     setExpandedDraftIdsByDocument((current) => {
@@ -878,7 +1236,10 @@ export const KnowledgePage: React.FC = () => {
       return { ...current, [documentId]: nextIds };
     });
   };
-  const toggleSourceUnitExpanded = (documentId: string, sourceUnitId: string): void => {
+  const toggleSourceUnitExpanded = (
+    documentId: string,
+    sourceUnitId: string,
+  ): void => {
     setExpandedSourceUnitIdsByDocument((current) => {
       const currentIds = current[documentId] || [];
       const nextIds = currentIds.includes(sourceUnitId)
@@ -902,171 +1263,236 @@ export const KnowledgePage: React.FC = () => {
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
 
-      const response = await knowledgeApi.upload(projectId, file, preprocessingMode);
+      const response = await knowledgeApi.upload(
+        projectId,
+        file,
+        preprocessingMode,
+      );
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(getErrorMessage(errData, t('knowledge.feedback.uploadDocumentFailed')));
+        throw new Error(
+          getErrorMessage(
+            errData,
+            t("knowledge.feedback.uploadDocumentFailed"),
+          ),
+        );
       }
 
       return await response.json();
     },
     onSuccess: async () => {
-      toast.success(t('knowledge.feedback.documentQueued'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-overview', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success(t("knowledge.feedback.documentQueued"));
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-overview", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.uploadError')));
+      toast.error(getErrorMessage(err, t("knowledge.feedback.uploadError")));
     },
   });
 
-  const previewMutation = useMutation<KnowledgePreviewResponse, unknown, string>({
+  const previewMutation = useMutation<
+    KnowledgePreviewResponse,
+    unknown,
+    string
+  >({
     mutationFn: async (question: string) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       const { data } = await knowledgeApi.preview(projectId, question, 5);
       return data;
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.previewFailed')));
+      toast.error(getErrorMessage(err, t("knowledge.feedback.previewFailed")));
     },
   });
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.clear(projectId);
     },
     onSuccess: async () => {
       setIsClearModalOpen(false);
-      setPreviewQuestion('');
+      setPreviewQuestion("");
       previewMutation.reset();
-      toast.success(t('knowledge.feedback.cleared'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success(t("knowledge.feedback.cleared"));
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.clearFailed')));
+      toast.error(getErrorMessage(err, t("knowledge.feedback.clearFailed")));
     },
   });
 
-
   const cancelProcessingMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.cancel(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success(t('knowledge.feedback.processingStopped'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success(t("knowledge.feedback.processingStopped"));
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.stopFailed')));
+      toast.error(getErrorMessage(err, t("knowledge.feedback.stopFailed")));
     },
   });
 
   const resumeProcessingMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.resumeProcessing(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success('Обработка документа возобновлена');
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-overview', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success("Обработка документа возобновлена");
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-overview", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, 'Не удалось возобновить обработку документа'));
+      toast.error(
+        getErrorMessage(err, "Не удалось возобновить обработку документа"),
+      );
     },
   });
 
   const retightenMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.retighten(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success(t('knowledge.feedback.retightenQueued'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success(t("knowledge.feedback.retightenQueued"));
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.retightenFailed')));
+      toast.error(
+        getErrorMessage(err, t("knowledge.feedback.retightenFailed")),
+      );
     },
   });
 
   const retryFailedBatchesMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.retryFailedBatches(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success(t('knowledge.feedback.retryFailedBatchesQueued'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success(t("knowledge.feedback.retryFailedBatchesQueued"));
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.retryFailedBatchesFailed')));
+      toast.error(
+        getErrorMessage(err, t("knowledge.feedback.retryFailedBatchesFailed")),
+      );
     },
   });
 
   const publishReadyMutation = useMutation({
     mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.publishReady(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success(t('knowledge.feedback.publishReadyQueued'));
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-usage', projectId] });
-      await queryClient.invalidateQueries({ queryKey: ['knowledge-processing-reports', projectId] });
+      toast.success(t("knowledge.feedback.publishReadyQueued"));
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-usage", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, t('knowledge.feedback.publishReadyFailed')));
+      toast.error(
+        getErrorMessage(err, t("knowledge.feedback.publishReadyFailed")),
+      );
     },
   });
 
-
   const priceFactActionMutation = useMutation<
-    'publish' | 'reject',
+    "publish" | "reject",
     unknown,
     PriceFactActionVariables
   >({
     mutationFn: async ({ documentId, factId, reason }) => {
-      if (!projectId) throw new Error(t('knowledge.errors.projectIdMissing'));
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
 
       if (reason !== undefined) {
         await knowledgeApi.rejectPriceFacts(projectId, documentId, {
           fact_ids: [factId],
           reason,
         });
-        return 'reject';
+        return "reject";
       }
 
       await knowledgeApi.publishPriceFacts(projectId, documentId, {
         fact_ids: [factId],
       });
-      return 'publish';
+      return "publish";
     },
     onSuccess: async (action) => {
       toast.success(
-        action === 'reject'
-          ? t('knowledge.priceFacts.actions.rejectSuccess')
-          : t('knowledge.priceFacts.actions.publishSuccess'),
+        action === "reject"
+          ? t("knowledge.priceFacts.actions.rejectSuccess")
+          : t("knowledge.priceFacts.actions.publishSuccess"),
       );
       await queryClient.invalidateQueries({
-        queryKey: ['knowledge-price-facts', projectId],
+        queryKey: ["knowledge-price-facts", projectId],
       });
     },
     onError: (err: unknown, variables) => {
@@ -1074,31 +1500,36 @@ export const KnowledgePage: React.FC = () => {
         getErrorMessage(
           err,
           variables.reason !== undefined
-            ? t('knowledge.priceFacts.actions.rejectFailed')
-            : t('knowledge.priceFacts.actions.publishFailed'),
+            ? t("knowledge.priceFacts.actions.rejectFailed")
+            : t("knowledge.priceFacts.actions.publishFailed"),
         ),
       );
     },
   });
 
-
-  const handlePublishPriceFact = (documentId: string, fact: KnowledgePriceFact): void => {
+  const handlePublishPriceFact = (
+    documentId: string,
+    fact: KnowledgePriceFact,
+  ): void => {
     priceFactActionMutation.mutate({
       documentId,
       factId: fact.id,
     });
   };
 
-  const handleRejectPriceFact = (documentId: string, fact: KnowledgePriceFact): void => {
+  const handleRejectPriceFact = (
+    documentId: string,
+    fact: KnowledgePriceFact,
+  ): void => {
     const reason = window.prompt(
-      t('knowledge.priceFacts.actions.reasonPlaceholder'),
-      '',
+      t("knowledge.priceFacts.actions.reasonPlaceholder"),
+      "",
     );
     if (reason === null) return;
 
     const cleanedReason = reason.trim();
     if (!cleanedReason) {
-      toast.error(t('knowledge.priceFacts.actions.rejectReasonRequired'));
+      toast.error(t("knowledge.priceFacts.actions.rejectReasonRequired"));
       return;
     }
 
@@ -1124,7 +1555,7 @@ export const KnowledgePage: React.FC = () => {
     event.preventDefault();
     const question = previewQuestion.trim();
     if (!question) {
-      toast.error(t('knowledge.feedback.enterClientQuestion'));
+      toast.error(t("knowledge.feedback.enterClientQuestion"));
       return;
     }
     previewMutation.mutate(question);
@@ -1148,25 +1579,28 @@ export const KnowledgePage: React.FC = () => {
   if (documentsQuery.isLoading) {
     return (
       <div className="flex justify-center p-4 text-sm text-[var(--text-muted)] sm:p-6 lg:p-8">
-        {t('knowledge.loading')}
+        {t("knowledge.loading")}
       </div>
     );
   }
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  const startsWithMatches = documents.filter((doc) => (
-    doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
-  ));
-  const fallbackIncludesMatches = documents.filter((doc) => (
-    !doc.file_name.toLowerCase().startsWith(normalizedSearchQuery)
-    && doc.file_name.toLowerCase().includes(normalizedSearchQuery)
-  ));
-  const filteredDocuments = normalizedSearchQuery.length === 0
-    ? documents
-    : startsWithMatches.length > 0
-      ? startsWithMatches
-      : fallbackIncludesMatches;
-  const searchSuggestions = normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
+  const startsWithMatches = documents.filter((doc) =>
+    doc.file_name.toLowerCase().startsWith(normalizedSearchQuery),
+  );
+  const fallbackIncludesMatches = documents.filter(
+    (doc) =>
+      !doc.file_name.toLowerCase().startsWith(normalizedSearchQuery) &&
+      doc.file_name.toLowerCase().includes(normalizedSearchQuery),
+  );
+  const filteredDocuments =
+    normalizedSearchQuery.length === 0
+      ? documents
+      : startsWithMatches.length > 0
+        ? startsWithMatches
+        : fallbackIncludesMatches;
+  const searchSuggestions =
+    normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
 
   const previewResult = previewMutation.data;
 
@@ -1175,31 +1609,33 @@ export const KnowledgePage: React.FC = () => {
 
     if (isDocumentCancelled(doc)) {
       return {
-        label: t('knowledge.status.stopped'),
-        className: 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]',
+        label: t("knowledge.status.stopped"),
+        className: "bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]",
       };
     }
     if (isDocumentFailed(doc)) {
       return {
-        label: t('knowledge.status.error'),
-        className: 'bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]',
+        label: t("knowledge.status.error"),
+        className:
+          "bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]",
       };
     }
     if (isDocumentProcessing(doc)) {
       return {
-        label: t('knowledge.status.processing'),
-        className: 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]',
+        label: t("knowledge.status.processing"),
+        className: "bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]",
       };
     }
-    if (status === 'processed') {
+    if (status === "processed") {
       return {
-        label: t('knowledge.status.processed'),
-        className: 'bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]',
+        label: t("knowledge.status.processed"),
+        className:
+          "bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]",
       };
     }
     return {
-      label: t('knowledge.status.queued'),
-      className: 'bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]',
+      label: t("knowledge.status.queued"),
+      className: "bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]",
     };
   };
 
@@ -1216,10 +1652,10 @@ export const KnowledgePage: React.FC = () => {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="mb-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">
-            {t('knowledge.title')}
+            {t("knowledge.title")}
           </h1>
           <p className="text-[var(--text-muted)]">
-            {t('knowledge.description')}
+            {t("knowledge.description")}
           </p>
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
@@ -1229,7 +1665,7 @@ export const KnowledgePage: React.FC = () => {
             </div>
             <input
               type="text"
-              placeholder={t('knowledge.search.placeholder')}
+              placeholder={t("knowledge.search.placeholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setIsSearchFocused(true)}
@@ -1244,7 +1680,12 @@ export const KnowledgePage: React.FC = () => {
                     onClick={() => {
                       setSearchQuery(doc.file_name);
                       setIsSearchFocused(false);
-                      document.getElementById(`knowledge-doc-card-${doc.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      document
+                        .getElementById(`knowledge-doc-card-${doc.id}`)
+                        ?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        });
                       openDraftsModal(doc.id);
                     }}
                     className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]"
@@ -1259,51 +1700,63 @@ export const KnowledgePage: React.FC = () => {
             type="button"
             onClick={() => setIsDebugMode((current) => !current)}
             aria-pressed={isDebugMode}
-            title={t('knowledge.debugMode.toggleTitle')}
+            title={t("knowledge.debugMode.toggleTitle")}
             className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg)]"
           >
-            {isDebugMode ? t('knowledge.debugMode.on') : t('knowledge.debugMode.off')}
+            {isDebugMode
+              ? t("knowledge.debugMode.on")
+              : t("knowledge.debugMode.off")}
           </button>
           <button
             type="button"
             onClick={() => setIsClearModalOpen(true)}
             className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--accent-danger-bg)] px-4 py-2 text-sm font-medium text-[var(--accent-danger-text)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--accent-danger-bg)]/80"
           >
-            {t('knowledge.actions.clear')}
+            {t("knowledge.actions.clear")}
           </button>
         </div>
       </div>
-
 
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              {t('knowledge.upload.title')}
+              {t("knowledge.upload.title")}
             </h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              {t('knowledge.upload.description')}
+              {t("knowledge.upload.description")}
             </p>
           </div>
 
           <label className="flex w-full flex-col gap-2 lg:w-80">
             <span className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-              {t('knowledge.upload.preprocessingMode')}
+              {t("knowledge.upload.preprocessingMode")}
             </span>
             <select
               value={preprocessingMode}
-              onChange={(event) => setPreprocessingMode(event.target.value as KnowledgePreprocessingMode)}
+              onChange={(event) =>
+                setPreprocessingMode(
+                  event.target.value as KnowledgePreprocessingMode,
+                )
+              }
               disabled={uploadMutation.isPending}
               className="min-h-11 rounded-xl border border-[var(--border-subtle)] bg-[var(--control-bg)] px-3 py-2 text-sm font-medium text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 disabled:cursor-wait disabled:opacity-60"
             >
-              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.filter((option) => option.value === 'faq' || option.value === 'price_list').map((option) => (
+              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.filter(
+                (option) =>
+                  option.value === "faq" || option.value === "price_list",
+              ).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
             <span className="text-xs leading-relaxed text-[var(--text-muted)]">
-              {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.description}
+              {
+                KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find(
+                  (option) => option.value === preprocessingMode,
+                )?.description
+              }
             </span>
           </label>
         </div>
@@ -1313,11 +1766,13 @@ export const KnowledgePage: React.FC = () => {
             <div className="flex items-start gap-3">
               <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[var(--accent-primary)]" />
               <div>
-                <div className="font-semibold">{t('knowledge.processing.title')}</div>
+                <div className="font-semibold">
+                  {t("knowledge.processing.title")}
+                </div>
                 <p className="mt-1 leading-relaxed text-[var(--text-muted)]">
-                  {t('knowledge.processing.descriptionLine1')}
-                  {t('knowledge.processing.descriptionLine2')}
-                  {t('knowledge.processing.descriptionLine3')}
+                  {t("knowledge.processing.descriptionLine1")}
+                  {t("knowledge.processing.descriptionLine2")}
+                  {t("knowledge.processing.descriptionLine3")}
                 </p>
               </div>
             </div>
@@ -1330,20 +1785,31 @@ export const KnowledgePage: React.FC = () => {
           onDrop={handleDrop}
           className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl bg-[var(--surface-card)] p-6 shadow-sm transition-colors group sm:p-8 lg:p-12 ${
             uploadMutation.isPending
-              ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 cursor-wait'
-              : 'border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)]'
+              ? "border-[var(--accent-primary)] bg-[var(--accent-primary)]/5 cursor-wait"
+              : "border-[var(--border-subtle)] hover:bg-[var(--surface-secondary)]"
           }`}
         >
-          <div className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full transition-transform sm:h-16 sm:w-16 ${
-            uploadMutation.isPending ? 'bg-[var(--accent-primary)]/20 animate-pulse' : 'bg-[var(--accent-primary)]/10 group-hover:scale-110'
-          }`}>
+          <div
+            className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full transition-transform sm:h-16 sm:w-16 ${
+              uploadMutation.isPending
+                ? "bg-[var(--accent-primary)]/20 animate-pulse"
+                : "bg-[var(--accent-primary)]/10 group-hover:scale-110"
+            }`}
+          >
             <Upload className="h-7 w-7 text-[var(--accent-primary)] sm:h-8 sm:w-8" />
           </div>
           <h3 className="text-center text-base font-semibold text-[var(--text-primary)] sm:text-lg">
-            {uploadMutation.isPending ? t('common.states.loading') : t('knowledge.upload.dropzoneText')}
+            {uploadMutation.isPending
+              ? t("common.states.loading")
+              : t("knowledge.upload.dropzoneText")}
           </h3>
           <p className="mt-1 text-center text-sm text-[var(--text-muted)]">
-            {t('knowledge.upload.acceptedFormats')} · {KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find((option) => option.value === preprocessingMode)?.label}
+            {t("knowledge.upload.acceptedFormats")} ·{" "}
+            {
+              KNOWLEDGE_PREPROCESSING_MODE_OPTIONS.find(
+                (option) => option.value === preprocessingMode,
+              )?.label
+            }
           </p>
         </div>
       </section>
@@ -1355,19 +1821,22 @@ export const KnowledgePage: React.FC = () => {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              {t('knowledge.preview.title')}
+              {t("knowledge.preview.title")}
             </h2>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              {t('knowledge.preview.description')}
+              {t("knowledge.preview.description")}
             </p>
           </div>
         </div>
 
-        <form onSubmit={handlePreviewSubmit} className="flex flex-col gap-3 lg:flex-row">
+        <form
+          onSubmit={handlePreviewSubmit}
+          className="flex flex-col gap-3 lg:flex-row"
+        >
           <textarea
             value={previewQuestion}
             onChange={(event) => setPreviewQuestion(event.target.value)}
-            placeholder={t('knowledge.preview.placeholder')}
+            placeholder={t("knowledge.preview.placeholder")}
             rows={3}
             className="min-h-24 flex-1 resize-y rounded-xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
           />
@@ -1376,7 +1845,9 @@ export const KnowledgePage: React.FC = () => {
             disabled={previewMutation.isPending}
             className="min-h-11 rounded-xl bg-[var(--accent-primary)] px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-wait disabled:opacity-60 lg:self-start"
           >
-            {previewMutation.isPending ? t('knowledge.preview.checking') : t('knowledge.preview.check')}
+            {previewMutation.isPending
+              ? t("knowledge.preview.checking")
+              : t("knowledge.preview.check")}
           </button>
         </form>
 
@@ -1384,20 +1855,24 @@ export const KnowledgePage: React.FC = () => {
           <div className="mt-5 space-y-4">
             {previewResult.is_empty || !previewResult.best_result ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                {t('knowledge.preview.noResults')}
+                {t("knowledge.preview.noResults")}
               </div>
             ) : (
               <>
-                <PreviewResultCard title={t('knowledge.preview.bestAnswer')} result={previewResult.best_result} isDebugMode={isDebugMode} />
+                <PreviewResultCard
+                  title={t("knowledge.preview.bestAnswer")}
+                  result={previewResult.best_result}
+                  isDebugMode={isDebugMode}
+                />
                 {previewResult.top_results.length > 1 && (
                   <div className="space-y-3">
                     <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                      {t('knowledge.preview.topMatches')}
+                      {t("knowledge.preview.topMatches")}
                     </h3>
                     {previewResult.top_results.slice(1).map((result) => (
                       <PreviewResultCard
                         key={result.id}
-                        title={t('knowledge.preview.additionalMatch')}
+                        title={t("knowledge.preview.additionalMatch")}
                         result={result}
                         compact
                         isDebugMode={isDebugMode}
@@ -1415,149 +1890,287 @@ export const KnowledgePage: React.FC = () => {
         <div className="flex flex-col items-center justify-center rounded-2xl bg-[var(--surface-secondary)] p-6 text-center sm:p-10 lg:p-16">
           <BookOpen className="mb-4 h-12 w-12 text-[var(--border-subtle)] sm:h-16 sm:w-16" />
           <h3 className="text-lg font-semibold text-[var(--text-primary)] sm:text-xl">
-            {t('knowledge.empty.title')}
+            {t("knowledge.empty.title")}
           </h3>
           <p className="mt-2 text-[var(--text-muted)]">
-            {t('knowledge.empty.description')}
+            {t("knowledge.empty.description")}
           </p>
         </div>
       ) : (
         <>
-
-          <div ref={projectCommercialTruthRef} id="knowledge-project-commercial-truth">
-          <CommercialTruthReviewSummary
-            response={projectCommercialTruthReviewQuery.data}
-            isLoading={
-              projectCommercialTruthReviewQuery.isLoading
-              || (projectCommercialTruthReviewQuery.isFetching && !projectCommercialTruthReviewQuery.data)
-            }
-            policy={commercialTruthReviewPolicy}
-            onPolicyChange={setCommercialTruthReviewPolicy}
-          />
-
+          <div
+            ref={projectCommercialTruthRef}
+            id="knowledge-project-commercial-truth"
+          >
+            <CommercialTruthReviewSummary
+              response={projectCommercialTruthReviewQuery.data}
+              isLoading={
+                projectCommercialTruthReviewQuery.isLoading ||
+                (projectCommercialTruthReviewQuery.isFetching &&
+                  !projectCommercialTruthReviewQuery.data)
+              }
+              policy={commercialTruthReviewPolicy}
+              onPolicyChange={setCommercialTruthReviewPolicy}
+            />
           </div>
 
-          <div ref={documentsGridRef} id="knowledge-documents-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6">
-          {filteredDocuments.map((doc) => {
-            const statusBadge = getStatusBadge(doc);
-            const isRetighteningThisDoc = retightenMutation.isPending && retightenMutation.variables === doc.id;
-            const processingReport = processingReports[doc.id];
-            const importQualityReport = importQualityReports[doc.id];
-            const priceFactsResponse = priceFacts[doc.id];
-            const commercialTruthReviewResponse = commercialTruthReviews[doc.id];
-            const shouldLoadPriceFacts = priceFactDocumentIds.includes(doc.id);
-            const isPriceFactsLoading = shouldLoadPriceFacts
-              && (priceFactsQuery.isLoading || (priceFactsQuery.isFetching && !priceFactsResponse));
-            const isCommercialTruthReviewLoading = shouldLoadPriceFacts
-              && (commercialTruthReviewQuery.isLoading || (commercialTruthReviewQuery.isFetching && !commercialTruthReviewResponse));
-            const mutatingPriceFactId = priceFactActionMutation.variables?.documentId === doc.id
-              ? priceFactActionMutation.variables.factId
-              : null;
+          <div
+            ref={documentsGridRef}
+            id="knowledge-documents-grid"
+            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6"
+          >
+            {filteredDocuments.map((doc) => {
+              const statusBadge = getStatusBadge(doc);
+              const isRetighteningThisDoc =
+                retightenMutation.isPending &&
+                retightenMutation.variables === doc.id;
+              const processingReport = processingReports[doc.id];
+              const importQualityReport = importQualityReports[doc.id];
+              const priceFactsResponse = priceFacts[doc.id];
+              const commercialTruthReviewResponse =
+                commercialTruthReviews[doc.id];
+              const shouldLoadPriceFacts = priceFactDocumentIds.includes(
+                doc.id,
+              );
+              const isPriceFactsLoading =
+                shouldLoadPriceFacts &&
+                (priceFactsQuery.isLoading ||
+                  (priceFactsQuery.isFetching && !priceFactsResponse));
+              const isCommercialTruthReviewLoading =
+                shouldLoadPriceFacts &&
+                (commercialTruthReviewQuery.isLoading ||
+                  (commercialTruthReviewQuery.isFetching &&
+                    !commercialTruthReviewResponse));
+              const mutatingPriceFactId =
+                priceFactActionMutation.variables?.documentId === doc.id
+                  ? priceFactActionMutation.variables.factId
+                  : null;
+              const canCancelProcessing = Boolean(
+                enabledProcessingReportAction(processingReport, "cancel"),
+              );
+              const primaryProcessingReportActions =
+                enabledPrimaryProcessingReportActions(processingReport);
 
-            return (
-              <KnowledgeDocumentCard
-                key={doc.id}
-                doc={doc}
-                statusBadge={statusBadge}
-                isRetighteningThisDoc={isRetighteningThisDoc}
-                processingReport={processingReport}
-                importQualityReport={importQualityReport}
-                priceFactsResponse={priceFactsResponse}
-                commercialTruthReviewResponse={commercialTruthReviewResponse}
-                isPriceFactsLoading={isPriceFactsLoading}
-                isCommercialTruthReviewLoading={isCommercialTruthReviewLoading}
-                mutatingPriceFactId={mutatingPriceFactId}
-                importQualityLoading={importQualityReportsQuery.isLoading || (importQualityReportsQuery.isFetching && !importQualityReport)}
-                commercialTruthReviewPolicy={commercialTruthReviewPolicy}
-                onPolicyChange={setCommercialTruthReviewPolicy}
-                onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
-                onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
-                actionsNode={(<DocumentActionsBlock showRetighten={isDocumentRetightenable(doc)} showStop={false} isRetighteningThisDoc={isRetighteningThisDoc} retightenPending={retightenMutation.isPending} cancelPending={cancelProcessingMutation.isPending} onRetighten={() => retightenMutation.mutate(doc.id)} onStop={() => cancelProcessingMutation.mutate(doc.id)} />)}
-                processingNode={(
-                  <DocumentProcessingBlock
-                    doc={doc}
-                    processingReport={processingReport}
-                    isDocumentProcessing={isDocumentProcessing(doc)}
-                    showCompletedElapsed={!isDocumentProcessing(doc) && processingElapsedSeconds(doc, processingNowMs) > 0}
-                    processingProgressLabel={processingProgressLabel(doc)}
-                    processingProgressPercent={processingProgressPercent(doc)}
-                    processingStatusMessage={processingStatusMessage(doc)}
-                    processingModelLabel={processingModelLabel(doc)}
-                    processingElapsedLabel={formatDurationSeconds(processingElapsedSeconds(doc, processingNowMs))}
-                    processingDetailRows={processingDetailRows(doc)}
-                    sourceChunkCount={sourceChunkCount(doc)}
-                    incomingAnswerCandidateCount={incomingAnswerCandidateCount(doc)}
-                    answerResolutionCount={answerResolutionCount(doc)}
-                    documentLlmTokenText={documentLlmTokenText(doc)}
-                    documentLlmModels={documentLlmModels(doc)}
-                    answerDraftsResponse={answerDrafts[doc.id]}
-                    answerDraftsLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !answerDrafts[doc.id])}
-                    showDraftSummary={draftPreviewDocumentIds.includes(doc.id)}
-                    onOpenDrafts={() => openDraftsModal(doc.id)}
-                    sourceUnitsResponse={sourceUnits[doc.id]}
-                    sourceUnitsLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])}
-                    showSourceUnitsSummary={sourceUnitDocumentIds.includes(doc.id)}
-                    onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
-                    onRetryFailedBatches={() => retryFailedBatchesMutation.mutate(doc.id)}
-                    onPublishReady={() => publishReadyMutation.mutate(doc.id)}
-                     onResumeProcessing={() => resumeProcessingMutation.mutate(doc.id)}
-                    retryPending={retryFailedBatchesMutation.isPending}
-                    retryTarget={retryFailedBatchesMutation.variables}
-                    publishReadyPending={publishReadyMutation.isPending}
-                    publishReadyTarget={publishReadyMutation.variables}
-                     resumePending={resumeProcessingMutation.isPending}
-                     resumeTarget={resumeProcessingMutation.variables}
-                    formatNumber={formatNumber}
-                    answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
-                    renderDraftsSummary={({ response, isLoading, onOpen }) => (
-                      <DraftsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
-                    )}
-                    renderSourceUnitsSummary={({ response, isLoading, onOpen }) => (
-                      <SourceUnitsSummary response={response} isLoading={isLoading} onOpen={onOpen} />
-                    )}
-                  />
-                )}
-                retightenReportNode={(() => {
-                  const reportRows = retightenReportRows(doc);
-                  if (reportRows.length === 0) return null;
+              return (
+                <KnowledgeDocumentCard
+                  key={doc.id}
+                  doc={doc}
+                  statusBadge={statusBadge}
+                  isRetighteningThisDoc={isRetighteningThisDoc}
+                  processingReport={processingReport}
+                  importQualityReport={importQualityReport}
+                  priceFactsResponse={priceFactsResponse}
+                  commercialTruthReviewResponse={commercialTruthReviewResponse}
+                  isPriceFactsLoading={isPriceFactsLoading}
+                  isCommercialTruthReviewLoading={
+                    isCommercialTruthReviewLoading
+                  }
+                  mutatingPriceFactId={mutatingPriceFactId}
+                  importQualityLoading={
+                    importQualityReportsQuery.isLoading ||
+                    (importQualityReportsQuery.isFetching &&
+                      !importQualityReport)
+                  }
+                  commercialTruthReviewPolicy={commercialTruthReviewPolicy}
+                  onPolicyChange={setCommercialTruthReviewPolicy}
+                  onPublishFact={(fact) => handlePublishPriceFact(doc.id, fact)}
+                  onRejectFact={(fact) => handleRejectPriceFact(doc.id, fact)}
+                  actionsNode={
+                    <div className="flex flex-wrap items-center gap-2">
+                      <DocumentActionsBlock
+                        showRetighten={isDocumentRetightenable(doc)}
+                        showStop={false}
+                        isRetighteningThisDoc={isRetighteningThisDoc}
+                        retightenPending={retightenMutation.isPending}
+                        cancelPending={cancelProcessingMutation.isPending}
+                        onRetighten={() => retightenMutation.mutate(doc.id)}
+                        onStop={() => cancelProcessingMutation.mutate(doc.id)}
+                      />
 
-                  return (
-                    <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
-                      <div className="mb-1 font-medium text-[var(--text-primary)]">
-                        {t('knowledge.retightenReport.title')}
-                      </div>
-                      <div className="space-y-1">
-                        {reportRows.map((row) => (
-                          <div key={row}>{row}</div>
-                        ))}
-                      </div>
+                      {primaryProcessingReportActions.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {primaryProcessingReportActions.map((action) => {
+                            const isResume = action.id === "resume_processing";
+                            const isRetry =
+                              action.id === "retry_failed_batches";
+                            const isPublishReady =
+                              action.id === "publish_ready";
+                            const isPending =
+                              (isResume &&
+                                resumeProcessingMutation.isPending &&
+                                resumeProcessingMutation.variables ===
+                                  doc.id) ||
+                              (isRetry &&
+                                retryFailedBatchesMutation.isPending &&
+                                retryFailedBatchesMutation.variables ===
+                                  doc.id) ||
+                              (isPublishReady &&
+                                publishReadyMutation.isPending &&
+                                publishReadyMutation.variables === doc.id);
+                            const isMutationPending =
+                              (isResume &&
+                                resumeProcessingMutation.isPending) ||
+                              (isRetry &&
+                                retryFailedBatchesMutation.isPending) ||
+                              (isPublishReady &&
+                                publishReadyMutation.isPending);
+                            const onClick = isResume
+                              ? () => resumeProcessingMutation.mutate(doc.id)
+                              : isRetry
+                                ? () =>
+                                    retryFailedBatchesMutation.mutate(doc.id)
+                                : isPublishReady
+                                  ? () => publishReadyMutation.mutate(doc.id)
+                                  : undefined;
+
+                            if (!onClick) return null;
+
+                            return (
+                              <button
+                                key={action.id}
+                                type="button"
+                                onClick={onClick}
+                                disabled={isMutationPending}
+                                className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20 disabled:cursor-wait disabled:opacity-60"
+                              >
+                                {isPending
+                                  ? t("common.states.loading")
+                                  : action.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  );
-                })()}
-                hasDrafts={draftPreviewDocumentIds.includes(doc.id)}
-                draftCount={answerDrafts[doc.id]?.total_count}
-                hasSourceUnits={sourceUnitDocumentIds.includes(doc.id)}
-                isDocumentProcessing={isDocumentProcessing(doc)}
-                onOpenDrafts={() => openDraftsModal(doc.id)}
-                onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
-                onStopProcessing={() => cancelProcessingMutation.mutate(doc.id)}
-                onOpenCuration={() => setCurationDocumentId(doc.id)}
-                statusNode={(
-                  <DocumentStatusBlock
-                    doc={doc}
-                    statusBadge={statusBadge}
-                    isCancelled={isDocumentCancelled(doc)}
-                    isFailed={isDocumentFailed(doc)}
-                    issueText={documentIssueText(doc)}
-                    processingFailedText={t('knowledge.document.processingFailed')}
-                    stoppedWarningText={t('knowledge.document.stoppedWarning')}
-                  />
-                )}
-                formatSize={formatSize}
-                knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}
-              />
-            );
-          })}
+                  }
+                  processingNode={
+                    <DocumentProcessingBlock
+                      doc={doc}
+                      processingReport={processingReport}
+                      isDocumentProcessing={isDocumentProcessing(doc)}
+                      showCompletedElapsed={
+                        !isDocumentProcessing(doc) &&
+                        processingElapsedSeconds(doc, processingNowMs) > 0
+                      }
+                      processingProgressLabel={processingProgressLabel(doc)}
+                      processingProgressPercent={processingProgressPercent(doc)}
+                      processingStatusMessage={processingStatusMessage(doc)}
+                      processingModelLabel={processingModelLabel(doc)}
+                      processingElapsedLabel={formatDurationSeconds(
+                        processingElapsedSeconds(doc, processingNowMs),
+                      )}
+                      processingDetailRows={processingDetailRows(doc)}
+                      sourceChunkCount={sourceChunkCount(doc)}
+                      incomingAnswerCandidateCount={incomingAnswerCandidateCount(
+                        doc,
+                      )}
+                      answerResolutionCount={answerResolutionCount(doc)}
+                      documentLlmTokenText={documentLlmTokenText(doc)}
+                      documentLlmModels={documentLlmModels(doc)}
+                      answerDraftsResponse={answerDrafts[doc.id]}
+                      answerDraftsLoading={
+                        answerDraftsQuery.isLoading ||
+                        (answerDraftsQuery.isFetching && !answerDrafts[doc.id])
+                      }
+                      showDraftSummary={draftPreviewDocumentIds.includes(
+                        doc.id,
+                      )}
+                      onOpenDrafts={() => openDraftsModal(doc.id)}
+                      sourceUnitsResponse={sourceUnits[doc.id]}
+                      sourceUnitsLoading={
+                        sourceUnitsQuery.isLoading ||
+                        (sourceUnitsQuery.isFetching && !sourceUnits[doc.id])
+                      }
+                      showSourceUnitsSummary={sourceUnitDocumentIds.includes(
+                        doc.id,
+                      )}
+                      onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                      onRetryFailedBatches={() =>
+                        retryFailedBatchesMutation.mutate(doc.id)
+                      }
+                      onPublishReady={() => publishReadyMutation.mutate(doc.id)}
+                      onResumeProcessing={() =>
+                        resumeProcessingMutation.mutate(doc.id)
+                      }
+                      retryPending={retryFailedBatchesMutation.isPending}
+                      retryTarget={retryFailedBatchesMutation.variables}
+                      publishReadyPending={publishReadyMutation.isPending}
+                      publishReadyTarget={publishReadyMutation.variables}
+                      resumePending={resumeProcessingMutation.isPending}
+                      resumeTarget={resumeProcessingMutation.variables}
+                      formatNumber={formatNumber}
+                      answerResolutionStepId={ANSWER_RESOLUTION_STEP_ID}
+                      renderDraftsSummary={({
+                        response,
+                        isLoading,
+                        onOpen,
+                      }) => (
+                        <DraftsSummary
+                          response={response}
+                          isLoading={isLoading}
+                          onOpen={onOpen}
+                        />
+                      )}
+                      renderSourceUnitsSummary={({
+                        response,
+                        isLoading,
+                        onOpen,
+                      }) => (
+                        <SourceUnitsSummary
+                          response={response}
+                          isLoading={isLoading}
+                          onOpen={onOpen}
+                        />
+                      )}
+                    />
+                  }
+                  retightenReportNode={(() => {
+                    const reportRows = retightenReportRows(doc);
+                    if (reportRows.length === 0) return null;
+
+                    return (
+                      <div className="mb-4 rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-muted)]">
+                        <div className="mb-1 font-medium text-[var(--text-primary)]">
+                          {t("knowledge.retightenReport.title")}
+                        </div>
+                        <div className="space-y-1">
+                          {reportRows.map((row) => (
+                            <div key={row}>{row}</div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  hasDrafts={draftPreviewDocumentIds.includes(doc.id)}
+                  draftCount={answerDrafts[doc.id]?.total_count}
+                  hasSourceUnits={sourceUnitDocumentIds.includes(doc.id)}
+                  isDocumentProcessing={canCancelProcessing}
+                  onOpenDrafts={() => openDraftsModal(doc.id)}
+                  onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
+                  onStopProcessing={() =>
+                    cancelProcessingMutation.mutate(doc.id)
+                  }
+                  onOpenCuration={() => setCurationDocumentId(doc.id)}
+                  statusNode={
+                    <DocumentStatusBlock
+                      doc={doc}
+                      statusBadge={statusBadge}
+                      isCancelled={isDocumentCancelled(doc)}
+                      isFailed={isDocumentFailed(doc)}
+                      issueText={documentIssueText(doc)}
+                      processingFailedText={t(
+                        "knowledge.document.processingFailed",
+                      )}
+                      stoppedWarningText={t(
+                        "knowledge.document.stoppedWarning",
+                      )}
+                    />
+                  }
+                  formatSize={formatSize}
+                  knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}
+                />
+              );
+            })}
           </div>
         </>
       )}
@@ -1566,11 +2179,16 @@ export const KnowledgePage: React.FC = () => {
         <DraftsModal
           documentName={draftsDocument.file_name}
           response={draftsModalResponse}
-          isLoading={answerDraftsQuery.isLoading || (answerDraftsQuery.isFetching && !draftsModalResponse)}
+          isLoading={
+            answerDraftsQuery.isLoading ||
+            (answerDraftsQuery.isFetching && !draftsModalResponse)
+          }
           filter={draftsModalFilter}
           expandedDraftIds={draftsModalExpandedIds}
           onFilterChange={(value) => setDraftFilter(draftsDocumentId, value)}
-          onToggleDraft={(draftId) => toggleDraftExpanded(draftsDocumentId, draftId)}
+          onToggleDraft={(draftId) =>
+            toggleDraftExpanded(draftsDocumentId, draftId)
+          }
           isDebugMode={isDebugMode}
           onClose={() => setDraftsDocumentId(null)}
         />
@@ -1589,11 +2207,18 @@ export const KnowledgePage: React.FC = () => {
         <SourceUnitsModal
           documentName={sourceUnitsDocument.file_name}
           response={sourceUnitsModalResponse}
-          isLoading={sourceUnitsQuery.isLoading || (sourceUnitsQuery.isFetching && !sourceUnitsModalResponse)}
+          isLoading={
+            sourceUnitsQuery.isLoading ||
+            (sourceUnitsQuery.isFetching && !sourceUnitsModalResponse)
+          }
           filter={sourceUnitsModalFilter}
           expandedSourceUnitIds={sourceUnitsModalExpandedIds}
-          onFilterChange={(value) => setSourceUnitFilter(sourceUnitsDocumentId, value)}
-          onToggleSourceUnit={(sourceUnitId) => toggleSourceUnitExpanded(sourceUnitsDocumentId, sourceUnitId)}
+          onFilterChange={(value) =>
+            setSourceUnitFilter(sourceUnitsDocumentId, value)
+          }
+          onToggleSourceUnit={(sourceUnitId) =>
+            toggleSourceUnitExpanded(sourceUnitsDocumentId, sourceUnitId)
+          }
           onClose={() => setSourceUnitsDocumentId(null)}
         />
       )}
@@ -1605,11 +2230,11 @@ export const KnowledgePage: React.FC = () => {
             setIsClearModalOpen(false);
           }
         }}
-        title={t('knowledge.actions.clear')}
-        cancelLabel={t('common.actions.cancel')}
+        title={t("knowledge.actions.clear")}
+        cancelLabel={t("common.actions.cancel")}
       >
         <p className="text-sm leading-relaxed text-[var(--text-primary)]">
-          {t('knowledge.clearModal.confirm')}
+          {t("knowledge.clearModal.confirm")}
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <button
@@ -1618,7 +2243,9 @@ export const KnowledgePage: React.FC = () => {
             disabled={clearMutation.isPending}
             className="min-h-9 rounded-lg bg-[var(--accent-danger)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-danger-text)] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[var(--accent-danger)]/25"
           >
-            {clearMutation.isPending ? t('knowledge.clearModal.clearing') : t('knowledge.clearModal.clear')}
+            {clearMutation.isPending
+              ? t("knowledge.clearModal.clearing")
+              : t("knowledge.clearModal.clear")}
           </button>
         </div>
       </BaseModal>
