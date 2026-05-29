@@ -6,12 +6,16 @@ ROOT = Path(__file__).resolve().parents[3]
 INGESTION = ROOT / "src/application/services/knowledge_surface_ingestion_service.py"
 
 
-def test_faq_surface_ingestion_reuses_recoverable_run_id() -> None:
+def test_faq_surface_ingestion_reuses_run_id_through_lifecycle_policy() -> None:
     source = INGESTION.read_text(encoding="utf-8")
 
     assert "get_latest_surface_run_for_document" in source
     assert "resume_run =" in source
-    assert 'latest_run.status in {"running", "failed", "cancelled"}' in source
+    assert "_should_reuse_surface_run(" in source
+    assert "lifecycle_trigger=lifecycle_trigger" in source
+    assert "resume_run_id=resume_run_id" in source
+    assert "lifecycle_decision=lifecycle_decision" in source
+    assert 'latest_run.status in {"running", "failed", "cancelled"}' not in source
     assert (
         "run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())"
         in source

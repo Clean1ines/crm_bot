@@ -70,15 +70,22 @@ class KnowledgeUploadJobPayloadDto:
     file_name: str
     preprocessing_mode: str
     chunks: list[JsonObject]
+    source: str | None = None
+    resume_run_id: str | None = None
 
     def to_dict(self) -> JsonObject:
-        return {
+        payload: JsonObject = {
             "project_id": self.project_id,
             "document_id": self.document_id,
             "file_name": self.file_name,
             "preprocessing_mode": self.preprocessing_mode,
             "chunks": json_value_from_unknown(self.chunks),
         }
+        if self.source is not None:
+            payload["source"] = self.source
+        if self.resume_run_id is not None:
+            payload["resume_run_id"] = self.resume_run_id
+        return payload
 
     def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
         return normalize_preprocessing_mode(self.preprocessing_mode)
@@ -91,6 +98,8 @@ class KnowledgeUploadJobPayloadDto:
         document_id = str(payload.get("document_id") or "").strip()
         file_name = str(payload.get("file_name") or "").strip()
         preprocessing_mode = str(payload.get("preprocessing_mode") or "").strip()
+        source = str(payload.get("source") or "").strip() or None
+        resume_run_id = str(payload.get("resume_run_id") or "").strip() or None
         raw_chunks = payload.get("chunks")
 
         if not project_id:
@@ -123,6 +132,8 @@ class KnowledgeUploadJobPayloadDto:
             file_name=file_name,
             preprocessing_mode=preprocessing_mode,
             chunks=chunks,
+            source=source,
+            resume_run_id=resume_run_id,
         )
 
 

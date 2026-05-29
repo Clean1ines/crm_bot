@@ -25,6 +25,16 @@ from src.domain.project_plane.json_types import (
     json_value_from_unknown,
 )
 from src.domain.project_plane.knowledge_compilation import SourceChunk
+from src.domain.project_plane.knowledge_document_lifecycle import (
+    KnowledgeDocumentLifecycleDecision,
+    KnowledgeDocumentLifecycleTrigger,
+    TRIGGER_EXPLICIT_USER_RESUME,
+    TRIGGER_NORMAL_UPLOAD,
+    TRIGGER_QUOTA_RECOVERY,
+    TRIGGER_STALE_JOB_RECOVERY,
+    TRIGGER_WORKER_RECOVERY,
+    resolve_knowledge_document_lifecycle,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     KnowledgePreprocessingMode,
@@ -272,6 +282,90 @@ def _json_object(value: object) -> JsonObject:
     return {str(key): json_value_from_unknown(item) for key, item in value.items()}
 
 
+AUTO_RECOVERY_LIFECYCLE_TRIGGERS: frozenset[KnowledgeDocumentLifecycleTrigger] = (
+    frozenset(
+        {
+            TRIGGER_WORKER_RECOVERY,
+            TRIGGER_QUOTA_RECOVERY,
+            TRIGGER_STALE_JOB_RECOVERY,
+        }
+    )
+)
+
+
+def _int_attr(value: object | None, name: str) -> int:
+    if value is None:
+        return 0
+    raw_value = getattr(value, name, 0)
+    if isinstance(raw_value, bool) or raw_value is None:
+        return 0
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, float) and raw_value.is_integer():
+        return int(raw_value)
+    if isinstance(raw_value, str) and raw_value.strip().isdigit():
+        return int(raw_value.strip())
+    return 0
+
+
+def _document_lifecycle_decision(
+    document: object | None,
+) -> KnowledgeDocumentLifecycleDecision:
+    return resolve_knowledge_document_lifecycle(
+        document_status=str(getattr(document, "status", "") or ""),
+        preprocessing_status=getattr(document, "preprocessing_status", None),
+        preprocessing_error=getattr(document, "preprocessing_error", None),
+        preprocessing_metrics=_json_object(
+            getattr(document, "preprocessing_metrics", None)
+        ),
+        chunk_count=_int_attr(document, "chunk_count"),
+        structured_entries=_int_attr(document, "structured_entries"),
+    )
+
+
+def _is_reusable_faq_surface_run(
+    run: RetrievalSurfaceCompilerRun | None,
+) -> bool:
+    return (
+        run is not None
+        and run.compiler_kind == "faq_retrieval_surface_compiler"
+        and run.prompt_version == GRAPH_PROMPT_VERSION
+        and run.status in {"running", "failed", "cancelled"}
+    )
+
+
+def _should_reuse_surface_run(
+    *,
+    latest_run: RetrievalSurfaceCompilerRun | None,
+    lifecycle_trigger: KnowledgeDocumentLifecycleTrigger,
+    resume_run_id: str | None,
+    lifecycle_decision: KnowledgeDocumentLifecycleDecision,
+) -> bool:
+    if not _is_reusable_faq_surface_run(latest_run):
+        return False
+
+    assert latest_run is not None
+
+    if lifecycle_trigger == TRIGGER_EXPLICIT_USER_RESUME:
+        if not resume_run_id or resume_run_id != latest_run.id:
+            return False
+        return (
+            latest_run.status == "cancelled"
+            or latest_run.error_type == "processing_cancelled"
+            or lifecycle_decision.can_manual_resume
+        )
+
+    if lifecycle_trigger in AUTO_RECOVERY_LIFECYCLE_TRIGGERS:
+        if resume_run_id is not None and resume_run_id != latest_run.id:
+            return False
+        return (
+            latest_run.status in {"failed", "running"}
+            and lifecycle_decision.can_auto_resume
+        )
+
+    return False
+
+
 def _json_array(value: object) -> tuple[object, ...]:
     if isinstance(value, list | tuple):
         return tuple(value)
@@ -513,6 +607,8 @@ class KnowledgeFaqSurfaceIngestionService:
         knowledge_repo_factory: KnowledgeIngestionRepositoryFactoryPort,
         surface_compiler_factory: KnowledgeSurfaceCompilerFactoryPort,
         logger: LoggerPort,
+        lifecycle_trigger: KnowledgeDocumentLifecycleTrigger = TRIGGER_NORMAL_UPLOAD,
+        resume_run_id: str | None = None,
     ) -> KnowledgeDocumentProcessingResult:
         repo = cast(
             KnowledgeSurfaceIngestionRepositoryPort,
@@ -524,12 +620,15 @@ class KnowledgeFaqSurfaceIngestionService:
             project_id=project_id,
             document_id=document_id,
         )
+        lifecycle_decision = _document_lifecycle_decision(existing_document)
         resume_run = (
             latest_run
-            if latest_run is not None
-            and latest_run.compiler_kind == "faq_retrieval_surface_compiler"
-            and latest_run.prompt_version == GRAPH_PROMPT_VERSION
-            and latest_run.status in {"running", "failed", "cancelled"}
+            if _should_reuse_surface_run(
+                latest_run=latest_run,
+                lifecycle_trigger=lifecycle_trigger,
+                resume_run_id=resume_run_id,
+                lifecycle_decision=lifecycle_decision,
+            )
             else None
         )
         run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
@@ -594,6 +693,8 @@ class KnowledgeFaqSurfaceIngestionService:
                         "source_chunk_count": len(source_chunks),
                         "bootstrap_forbidden": True,
                         "resume_reused_run": False,
+                        "lifecycle_trigger": lifecycle_trigger,
+                        "resume_run_id": resume_run_id,
                     },
                 )
             )
@@ -629,6 +730,11 @@ class KnowledgeFaqSurfaceIngestionService:
                     "source_unit_count": len(source_units),
                     "resume_reused_run": resume_run is not None,
                     "resume_existing_source_unit_count": len(existing_source_units),
+                    "lifecycle_trigger": lifecycle_trigger,
+                    "resume_run_id": resume_run.id
+                    if resume_run is not None
+                    else resume_run_id,
+                    "resume_policy": lifecycle_decision.resume_policy,
                 },
             )
         )
@@ -645,6 +751,13 @@ class KnowledgeFaqSurfaceIngestionService:
                 "source_unit_count": len(source_units),
                 "bootstrap_forbidden": True,
                 "resume_reused_run": resume_run is not None,
+                "lifecycle_trigger": lifecycle_trigger,
+                "resume_run_id": resume_run.id
+                if resume_run is not None
+                else resume_run_id,
+                "resume_policy": lifecycle_decision.resume_policy,
+                "can_auto_resume": lifecycle_decision.can_auto_resume,
+                "can_manual_resume": lifecycle_decision.can_manual_resume,
                 "elapsed_before_resume_seconds": round(elapsed_before_resume, 1),
                 "processing_started_at_epoch": round(processing_started_at_epoch, 3),
             },
