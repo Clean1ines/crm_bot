@@ -174,10 +174,8 @@ async def _cleanup_document_surface_artifacts(
             conn,
             f"""
             DELETE FROM {table}
-            WHERE project_id = $1
-              AND document_id = $2
+            WHERE document_id = $1
             """,
-            project_id,
             document_id,
         )
 
@@ -191,10 +189,8 @@ async def _cleanup_document_surface_artifacts(
             conn,
             f"""
             DELETE FROM {table}
-            WHERE project_id = $1
-              AND document_id = $2
+            WHERE document_id = $1
             """,
-            project_id,
             document_id,
         )
 
@@ -218,10 +214,8 @@ async def _cleanup_document_surface_artifacts(
         conn,
         """
         DELETE FROM knowledge_surface_compiler_runs
-        WHERE project_id = $1
-          AND document_id = $2
+        WHERE document_id = $1
         """,
-        project_id,
         document_id,
     )
 
@@ -251,7 +245,7 @@ async def _cleanup_project_surface_artifacts(
             conn,
             f"""
             DELETE FROM {table}
-            WHERE project_id = $1
+            WHERE document_id IN (SELECT id FROM knowledge_documents WHERE project_id = $1)
             """,
             project_id,
         )
@@ -266,7 +260,7 @@ async def _cleanup_project_surface_artifacts(
             conn,
             f"""
             DELETE FROM {table}
-            WHERE project_id = $1
+            WHERE document_id IN (SELECT id FROM knowledge_documents WHERE project_id = $1)
             """,
             project_id,
         )
@@ -278,7 +272,7 @@ async def _cleanup_project_surface_artifacts(
         WHERE run_id IN (
             SELECT id
             FROM knowledge_surface_compiler_runs
-            WHERE project_id = $1
+            WHERE document_id IN (SELECT id FROM knowledge_documents WHERE project_id = $1)
         )
         """,
         project_id,
@@ -290,7 +284,7 @@ async def _cleanup_project_surface_artifacts(
         WHERE run_id IN (
             SELECT id
             FROM knowledge_surface_compiler_runs
-            WHERE project_id = $1
+            WHERE document_id IN (SELECT id FROM knowledge_documents WHERE project_id = $1)
         )
         """,
         project_id,
@@ -299,7 +293,7 @@ async def _cleanup_project_surface_artifacts(
         conn,
         """
         DELETE FROM knowledge_surface_compiler_runs
-        WHERE project_id = $1
+        WHERE document_id IN (SELECT id FROM knowledge_documents WHERE project_id = $1)
         """,
         project_id,
     )
@@ -313,26 +307,62 @@ async def _cleanup_document_rag_eval_artifacts(
     project_id: str,
     document_id: str,
 ) -> int:
+    del project_id
     total = 0
-    for table in (
-        "rag_eval_review_groups",
-        "rag_eval_question_reviews",
-        "rag_eval_results",
-        "rag_eval_run_failures",
-        "rag_eval_runs",
-        "rag_eval_questions",
-        "rag_eval_datasets",
-    ):
-        total += await _execute_count(
-            conn,
-            f"""
-            DELETE FROM {table}
-            WHERE project_id = $1
-              AND document_id = $2
-            """,
-            project_id,
-            document_id,
+
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_review_groups
+        WHERE document_id = $1
+        """,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_question_reviews
+        WHERE document_id = $1
+        """,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_results
+        WHERE run_id IN (
+            SELECT id FROM rag_eval_runs WHERE document_id = $1
         )
+        OR question_id IN (
+            SELECT id FROM rag_eval_questions WHERE document_id = $1
+        )
+        """,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_runs
+        WHERE document_id = $1
+        """,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_questions
+        WHERE document_id = $1
+        """,
+        document_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_datasets
+        WHERE document_id = $1
+        """,
+        document_id,
+    )
     return total
 
 
@@ -342,23 +372,85 @@ async def _cleanup_project_rag_eval_artifacts(
     project_id: str,
 ) -> int:
     total = 0
-    for table in (
-        "rag_eval_review_groups",
-        "rag_eval_question_reviews",
-        "rag_eval_results",
-        "rag_eval_run_failures",
-        "rag_eval_runs",
-        "rag_eval_questions",
-        "rag_eval_datasets",
-    ):
-        total += await _execute_count(
-            conn,
-            f"""
-            DELETE FROM {table}
-            WHERE project_id = $1
-            """,
-            project_id,
+
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_review_groups
+        WHERE project_id = $1
+        OR document_id IN (
+            SELECT id FROM knowledge_documents WHERE project_id = $1
         )
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_question_reviews
+        WHERE project_id = $1
+        OR document_id IN (
+            SELECT id FROM knowledge_documents WHERE project_id = $1
+        )
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_results
+        WHERE run_id IN (
+            SELECT id
+            FROM rag_eval_runs
+            WHERE project_id = $1
+               OR document_id IN (
+                   SELECT id FROM knowledge_documents WHERE project_id = $1
+               )
+        )
+        OR question_id IN (
+            SELECT id
+            FROM rag_eval_questions
+            WHERE project_id = $1
+               OR document_id IN (
+                   SELECT id FROM knowledge_documents WHERE project_id = $1
+               )
+        )
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_runs
+        WHERE project_id = $1
+        OR document_id IN (
+            SELECT id FROM knowledge_documents WHERE project_id = $1
+        )
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_questions
+        WHERE project_id = $1
+        OR document_id IN (
+            SELECT id FROM knowledge_documents WHERE project_id = $1
+        )
+        """,
+        project_id,
+    )
+    total += await _execute_count(
+        conn,
+        """
+        DELETE FROM rag_eval_datasets
+        WHERE project_id = $1
+        OR document_id IN (
+            SELECT id FROM knowledge_documents WHERE project_id = $1
+        )
+        """,
+        project_id,
+    )
     return total
 
 
@@ -783,8 +875,6 @@ async def cleanup_document_artifacts(
                         preprocessing_model = NULL,
                         preprocessing_prompt_version = NULL,
                         preprocessing_metrics = '{}'::jsonb,
-                        structured_entries = 0,
-                        chunk_count = 0,
                         updated_at = now()
                     WHERE project_id = $1
                       AND id = $2

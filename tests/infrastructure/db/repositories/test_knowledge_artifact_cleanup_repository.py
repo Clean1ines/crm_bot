@@ -132,7 +132,6 @@ async def test_cleanup_one_document_removes_all_document_artifacts() -> None:
         "rag_eval_review_groups",
         "rag_eval_question_reviews",
         "rag_eval_results",
-        "rag_eval_run_failures",
         "rag_eval_runs",
         "rag_eval_questions",
         "rag_eval_datasets",
