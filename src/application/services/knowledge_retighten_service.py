@@ -7,8 +7,6 @@ from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     LoggerPort,
-    MODE_PRICE_LIST,
-    ModelUsageEventCreate,
     ModelUsageRepositoryFactoryPort,
     _answer_resolution_cases_from_entries,
     _answer_resolution_decision_is_too_noisy,
@@ -24,6 +22,8 @@ from src.application.services.knowledge_ingestion_service import (
     _retighten_existing_document_plan,
     _retighten_updated_canonical_entries,
 )
+from src.domain.project_plane.knowledge_preprocessing import MODE_PRICE_LIST
+from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 
 class KnowledgeRetightenService:

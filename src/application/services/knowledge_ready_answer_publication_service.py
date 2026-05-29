@@ -8,14 +8,14 @@ from src.application.services.knowledge_ingestion_service import (
     JsonObject,
     KnowledgeIngestionRepositoryFactoryPort,
     LoggerPort,
-    PREPROCESSING_STATUS_COMPLETED,
-    PREPROCESSING_STATUS_PROCESSING,
     _persist_stage_e_compiler_outputs,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     KnowledgePreprocessingValidationError,
     normalize_preprocessing_mode,
+    PREPROCESSING_STATUS_COMPLETED,
+    PREPROCESSING_STATUS_PROCESSING,
 )
 
 

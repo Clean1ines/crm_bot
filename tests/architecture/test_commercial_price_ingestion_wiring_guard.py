@@ -5,6 +5,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INGESTION_SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
+STRUCTURED_SERVICE = (
+    ROOT / "src/application/services/knowledge_structured_ingestion_service.py"
+)
 COMMERCIAL_PRICE_INGESTION_SERVICE = (
     ROOT / "src/application/services/commercial_price_ingestion_service.py"
 )
@@ -12,7 +15,7 @@ QUEUE_HANDLER = ROOT / "src/infrastructure/queue/handlers/knowledge_upload.py"
 
 
 def test_price_list_ingestion_wiring_is_mode_gated() -> None:
-    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    source = STRUCTURED_SERVICE.read_text(encoding="utf-8")
 
     assert "CommercialPriceIngestionService" in source
     assert "CommercialPriceRepositoryFactoryPort" in source
@@ -48,7 +51,7 @@ def test_price_list_ingestion_wiring_does_not_touch_runtime_answer_path() -> Non
 
 
 def test_price_list_ingestion_logs_acquisition_summary_without_runtime_lookup() -> None:
-    source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    source = STRUCTURED_SERVICE.read_text(encoding="utf-8")
 
     assert "price_acquisition_row_count" in source
     assert "price_acquisition_fact_candidate_count" in source
@@ -58,7 +61,7 @@ def test_price_list_ingestion_logs_acquisition_summary_without_runtime_lookup() 
 
 def test_price_list_ingestion_persists_review_facts_without_publishing_them() -> None:
     commercial_source = COMMERCIAL_PRICE_INGESTION_SERVICE.read_text(encoding="utf-8")
-    orchestration_source = INGESTION_SERVICE.read_text(encoding="utf-8")
+    orchestration_source = STRUCTURED_SERVICE.read_text(encoding="utf-8")
     combined = commercial_source + "\n" + orchestration_source
 
     assert "replace_price_facts_for_document" in commercial_source

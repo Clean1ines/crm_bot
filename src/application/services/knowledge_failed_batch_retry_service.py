@@ -13,11 +13,7 @@ from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryFactoryPort,
     KnowledgePreprocessorFactoryPort,
     LoggerPort,
-    ModelUsageEventCreate,
     ModelUsageRepositoryFactoryPort,
-    PREPROCESSING_STATUS_COMPLETED,
-    PREPROCESSING_STATUS_FAILED,
-    PREPROCESSING_STATUS_PROCESSING,
     _persist_stage_e_compiler_outputs,
     _raw_answer_candidates_from_preprocessing_entries,
 )
@@ -26,10 +22,14 @@ from src.application.services.knowledge_source_material_builder import (
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
+    PREPROCESSING_STATUS_COMPLETED,
+    PREPROCESSING_STATUS_FAILED,
+    PREPROCESSING_STATUS_PROCESSING,
     KnowledgePreprocessingValidationError,
     normalize_preprocessing_mode,
     prompt_version_for_mode,
 )
+from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 
 class KnowledgeFailedBatchRetryService:
