@@ -6,6 +6,9 @@ from src.infrastructure.logging.logger import redact_sensitive_log_values
 
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "src/application/services/knowledge_ingestion_service.py"
+ANSWER_RESOLUTION_SERVICE = (
+    ROOT / "src/application/services/knowledge_answer_resolution_service.py"
+)
 WORKER = ROOT / "src/infrastructure/queue/worker_loop.py"
 LOGGER = ROOT / "src/infrastructure/logging/logger.py"
 
@@ -42,7 +45,7 @@ def test_existing_document_retighten_dispatches_one_suspect_group_per_llm_call()
 
 
 def test_compiled_ingestion_tightening_reports_actual_llm_call_count() -> None:
-    source = SERVICE.read_text(encoding="utf-8")
+    source = ANSWER_RESOLUTION_SERVICE.read_text(encoding="utf-8")
     body = _function_body(source, "_resolve_compiled_answer_cases")
 
     assert "cases=groups" not in body

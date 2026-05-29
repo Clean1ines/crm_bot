@@ -3,28 +3,44 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_answer_resolution_progress_metrics_are_persisted_before_publication() -> None:
-    source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
-        encoding="utf-8"
-    )
+ROOT = Path(__file__).resolve().parents[2]
 
-    progress_index = source.index("async def persist_answer_resolution_progress")
-    tighten_index = source.index("await _resolve_compiled_answer_cases")
-    publish_index = source.index(
-        "canonical_entries = _canonical_entries_from_preprocessing_result",
-        tighten_index,
+
+def test_answer_resolution_progress_metrics_are_persisted_before_publication() -> None:
+    ingestion_source = (
+        ROOT / "src/application/services/knowledge_ingestion_service.py"
+    ).read_text(encoding="utf-8")
+    answer_resolution_source = (
+        ROOT / "src/application/services/knowledge_answer_resolution_service.py"
+    ).read_text(encoding="utf-8")
+
+    progress_index = ingestion_source.index(
+        "async def persist_answer_resolution_progress"
     )
-    progress_slice = source[progress_index:publish_index]
+    tighten_index = ingestion_source.index(
+        "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases"
+    )
+    publish_index = ingestion_source.index(
+        "canonical_entries = _canonical_entries_from_preprocessing_result"
+    )
 
     assert progress_index < tighten_index < publish_index
+
+    progress_slice = ingestion_source[progress_index:publish_index]
     assert '"stage": "answer_resolution"' in progress_slice
-    assert (
-        '"processed_case_count"'
-        in source[
-            source.index("async def _resolve_compiled_answer_cases") : publish_index
-        ]
-    )
+    assert "await repo.update_document_preprocessing_status" in progress_slice
+    assert "metrics" in progress_slice
     assert "on_progress=persist_answer_resolution_progress" in progress_slice
+
+    resolver_index = answer_resolution_source.index(
+        "async def _resolve_compiled_answer_cases"
+    )
+    resolver_slice = answer_resolution_source[resolver_index:]
+
+    assert '"decision_trace": []' in resolver_slice
+    assert 'metrics["decision_trace"] = decision_trace[-200:]' in resolver_slice
+    assert 'metrics["resolved_answer_count"]' in resolver_slice
+    assert 'metrics["kept_separate_count"]' in resolver_slice
 
 
 def test_processing_report_exposes_answer_resolution_step() -> None:
