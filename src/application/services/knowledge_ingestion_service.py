@@ -8,9 +8,12 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol, cast
 
-import asyncpg
 
-from src.application.errors import EmbeddingProviderError, ValidationError
+from src.application.errors import (
+    EmbeddingProviderError,
+    KnowledgeDocumentDeletedDuringProcessingError,
+    ValidationError,
+)
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
 from src.application.ports.commercial_price_acquisition import (
     CommercialPriceAcquisitionServicePort,
@@ -4079,7 +4082,7 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", exc.detail)
             raise
-        except asyncpg.ForeignKeyViolationError as exc:
+        except KnowledgeDocumentDeletedDuringProcessingError as exc:
             logger.warning(
                 "Knowledge document disappeared before plain chunks were persisted",
                 extra={
@@ -4089,9 +4092,7 @@ class KnowledgeIngestionService:
                     "error_type": type(exc).__name__,
                 },
             )
-            raise ValidationError(
-                "Knowledge document was deleted before chunk persistence completed"
-            ) from exc
+            raise
         except Exception as exc:
             logger.exception(
                 "Knowledge plain chunk persistence failed",
@@ -5574,7 +5575,7 @@ class KnowledgeIngestionService:
             )
             await repo.update_document_status(document_id, "error", exc.detail)
             raise
-        except asyncpg.ForeignKeyViolationError as exc:
+        except KnowledgeDocumentDeletedDuringProcessingError as exc:
             logger.warning(
                 "Knowledge document disappeared during structured indexing",
                 extra={
@@ -5584,9 +5585,7 @@ class KnowledgeIngestionService:
                     "error_type": type(exc).__name__,
                 },
             )
-            raise ValidationError(
-                "Knowledge document was deleted before structured indexing completed"
-            ) from exc
+            raise
         except Exception as exc:
             error_message = str(exc)[:500] or type(exc).__name__
             logger.warning(

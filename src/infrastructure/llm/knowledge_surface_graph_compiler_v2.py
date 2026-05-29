@@ -7,6 +7,9 @@ from typing import cast
 
 from groq import APIError, RateLimitError
 
+from src.application.services.knowledge_surface_prompt_versions import (
+    FAQ_RETRIEVAL_SURFACE_GRAPH_PROMPT_VERSION,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingValidationError,
 )
@@ -38,7 +41,7 @@ from src.infrastructure.llm.knowledge_surface_compiler import (
     _text_tuple,
 )
 
-GRAPH_PROMPT_VERSION = "faq_retrieval_surface_graph_v2"
+GRAPH_PROMPT_VERSION = FAQ_RETRIEVAL_SURFACE_GRAPH_PROMPT_VERSION
 PROMPTS = {
     "discover": "faq_surface_local_discovery.ru.txt",
     "relations": "faq_surface_local_relations.ru.txt",

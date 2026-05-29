@@ -53,10 +53,10 @@ from src.infrastructure.db.repositories.model_usage_repository import (
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.llm.chunker import ChunkerService
-from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
-from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
+from src.application.services.knowledge_surface_prompt_versions import (
     GRAPH_PROMPT_VERSION,
 )
+from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_types import (
     TASK_PROCESS_KNOWLEDGE_UPLOAD,
