@@ -19,6 +19,14 @@ from src.application.services.knowledge_ingestion_service import (
 from src.application.services.knowledge_surface_ingestion_service import (
     KnowledgeFaqSurfaceIngestionService,
 )
+from src.domain.project_plane.knowledge_document_lifecycle import (
+    KnowledgeDocumentLifecycleTrigger,
+    TRIGGER_EXPLICIT_USER_RESUME,
+    TRIGGER_NORMAL_UPLOAD,
+    TRIGGER_QUOTA_RECOVERY,
+    TRIGGER_STALE_JOB_RECOVERY,
+    TRIGGER_WORKER_RECOVERY,
+)
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
     KnowledgePreprocessingMode,
@@ -52,6 +60,30 @@ logger = get_logger(__name__)
 EXHAUSTED_KNOWLEDGE_UPLOAD_DETAIL = (
     "Knowledge upload failed after repeated temporary embedding provider errors"
 )
+
+FAQ_EXPLICIT_RESUME_SOURCE = "knowledge_document_resume"
+AUTO_RECOVERY_UPLOAD_SOURCES: dict[str, KnowledgeDocumentLifecycleTrigger] = {
+    "knowledge_upload_recovery": TRIGGER_WORKER_RECOVERY,
+    "knowledge_document_auto_resume": TRIGGER_WORKER_RECOVERY,
+    "knowledge_worker_recovery": TRIGGER_WORKER_RECOVERY,
+    "worker_recovery": TRIGGER_WORKER_RECOVERY,
+    "knowledge_provider_recovery": TRIGGER_WORKER_RECOVERY,
+    "provider_recovery": TRIGGER_WORKER_RECOVERY,
+    "knowledge_quota_recovery": TRIGGER_QUOTA_RECOVERY,
+    "quota_recovery": TRIGGER_QUOTA_RECOVERY,
+    "knowledge_stale_job_recovery": TRIGGER_STALE_JOB_RECOVERY,
+    "stale_job_recovery": TRIGGER_STALE_JOB_RECOVERY,
+}
+
+
+def _knowledge_upload_lifecycle_trigger(
+    source: str | None,
+) -> KnowledgeDocumentLifecycleTrigger:
+    if source == FAQ_EXPLICIT_RESUME_SOURCE:
+        return TRIGGER_EXPLICIT_USER_RESUME
+    if source is None:
+        return TRIGGER_NORMAL_UPLOAD
+    return AUTO_RECOVERY_UPLOAD_SOURCES.get(source, TRIGGER_NORMAL_UPLOAD)
 
 
 def make_model_usage_repository(
@@ -121,6 +153,8 @@ async def handle_process_knowledge_upload(
                 knowledge_repo_factory=make_knowledge_repository,
                 surface_compiler_factory=GroqQualityGatedKnowledgeSurfaceCompiler,
                 logger=logger,
+                lifecycle_trigger=_knowledge_upload_lifecycle_trigger(dto.source),
+                resume_run_id=dto.resume_run_id,
             )
             return
 
