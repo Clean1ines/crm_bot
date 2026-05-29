@@ -16,6 +16,10 @@ import asyncpg
 
 from src.application.errors import ConflictError, NotFoundError, ValidationError
 
+from src.domain.project_plane.knowledge_artifact_cleanup import (
+    KnowledgeArtifactCleanupPlan,
+    KnowledgeArtifactCleanupResult,
+)
 from src.domain.project_plane.knowledge_views import (
     KnowledgeAnswerCandidateSummaryView,
     KnowledgeCompilerBatchView,
@@ -48,6 +52,10 @@ from src.domain.project_plane.json_types import JsonObject, json_object_from_unk
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.domain.project_plane.knowledge_retrieval_surface import (
     RUNTIME_ENTRY_KIND_VALUES,
+)
+from src.infrastructure.db.repositories.knowledge_artifact_cleanup import (
+    cleanup_document_artifacts as run_cleanup_document_artifacts,
+    cleanup_project_artifacts as run_cleanup_project_artifacts,
 )
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
@@ -364,6 +372,27 @@ class KnowledgeRepository:
                 titles.append(title)
 
         return tuple(titles)
+
+    async def cleanup_document_artifacts(
+        self,
+        plan: KnowledgeArtifactCleanupPlan,
+    ) -> KnowledgeArtifactCleanupResult:
+        return await run_cleanup_document_artifacts(
+            self.pool,
+            project_id=plan.project_id,
+            document_id=str(plan.document_id or ""),
+            plan=plan,
+        )
+
+    async def cleanup_project_artifacts(
+        self,
+        plan: KnowledgeArtifactCleanupPlan,
+    ) -> KnowledgeArtifactCleanupResult:
+        return await run_cleanup_project_artifacts(
+            self.pool,
+            project_id=plan.project_id,
+            plan=plan,
+        )
 
     async def list_document_runtime_entries(
         self,

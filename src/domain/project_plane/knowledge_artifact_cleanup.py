@@ -60,12 +60,17 @@ DOCUMENT_COMPILER_TABLES: tuple[str, ...] = (
 )
 
 DOCUMENT_SURFACE_TABLES: tuple[str, ...] = (
-    "knowledge_surface_reassignment_decisions",
-    "knowledge_surface_ownership_decisions",
+    "knowledge_surface_rejected_questions",
+    "knowledge_surface_question_reassignments",
+    "knowledge_surface_question_ownership",
     "knowledge_surface_merge_decisions",
+    "knowledge_surface_global_relations",
+    "knowledge_surface_local_relations",
     "knowledge_surface_relations",
-    "knowledge_surface_cards",
-    "knowledge_surface_draft_cards",
+    "knowledge_surface_answer_drafts",
+    "knowledge_surface_candidates",
+    "knowledge_surfaces",
+    "knowledge_surface_reconciliation_runs",
     "knowledge_surface_source_units",
     "knowledge_surface_compiler_stages",
     "knowledge_surface_compiler_runs",
