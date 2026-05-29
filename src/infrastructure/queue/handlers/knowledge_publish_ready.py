@@ -9,7 +9,9 @@ from src.application.errors import EmbeddingProviderError, ValidationError
 from src.application.ports.knowledge_port import KnowledgeDbPoolPort
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryPort,
-    KnowledgeIngestionService,
+)
+from src.application.services.knowledge_ready_answer_publication_service import (
+    KnowledgeReadyAnswerPublicationService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
@@ -57,7 +59,7 @@ async def handle_publish_knowledge_ready_answers(
             "Use Retrieval Surface Compilation pipeline."
         )
 
-    service = KnowledgeIngestionService(db_pool)
+    service = KnowledgeReadyAnswerPublicationService(db_pool)
 
     try:
         await service.publish_ready_answers(
