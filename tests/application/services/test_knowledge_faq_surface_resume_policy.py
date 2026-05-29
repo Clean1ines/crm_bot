@@ -14,7 +14,7 @@ from src.application.services.knowledge_surface_ingestion_service import (
     KnowledgeFaqSurfaceIngestionService,
     _should_reuse_surface_run,
 )
-from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
+from src.application.services.knowledge_surface_prompt_versions import (
     GRAPH_PROMPT_VERSION,
 )
 from src.domain.project_plane.knowledge_artifact_cleanup import (

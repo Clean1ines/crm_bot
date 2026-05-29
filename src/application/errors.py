@@ -29,6 +29,10 @@ class ConflictError(ApplicationError):
     status_code = 409
 
 
+class KnowledgeDocumentDeletedDuringProcessingError(ConflictError):
+    """Document artifacts disappeared because the document was deleted/reset mid-job."""
+
+
 class InternalServiceError(ApplicationError):
     status_code = 500
 

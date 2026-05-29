@@ -10,11 +10,16 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from collections.abc import Mapping, Sequence
-from typing import cast
+from typing import NoReturn, cast
 
 import asyncpg
 
-from src.application.errors import ConflictError, NotFoundError, ValidationError
+from src.application.errors import (
+    ConflictError,
+    KnowledgeDocumentDeletedDuringProcessingError,
+    NotFoundError,
+    ValidationError,
+)
 
 from src.domain.project_plane.knowledge_artifact_cleanup import (
     KnowledgeArtifactCleanupPlan,
@@ -177,6 +182,15 @@ from src.infrastructure.db.repositories.knowledge_curation_action_persistence im
 
 
 logger = get_logger(__name__)
+
+
+def _raise_document_deleted_during_processing(
+    exc: asyncpg.ForeignKeyViolationError,
+) -> NoReturn:
+    raise KnowledgeDocumentDeletedDuringProcessingError(
+        "Knowledge document was deleted or reset during processing"
+    ) from exc
+
 
 CANCELLABLE_KNOWLEDGE_JOB_TYPES = (
     "process_knowledge_upload",
@@ -1748,13 +1762,16 @@ class KnowledgeRepository:
         compiler_run_id: str,
         metrics: CompilationMetrics,
     ) -> None:
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                await persist_complete_compiler_run(
-                    conn,
-                    compiler_run_id,
-                    metrics=metrics,
-                )
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    await persist_complete_compiler_run(
+                        conn,
+                        compiler_run_id,
+                        metrics=metrics,
+                    )
+        except asyncpg.ForeignKeyViolationError as exc:
+            _raise_document_deleted_during_processing(exc)
 
     async def fail_compiler_run(
         self,
@@ -1789,14 +1806,17 @@ class KnowledgeRepository:
         if not candidates:
             return 0
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                return await upsert_answer_candidates(
-                    conn,
-                    project_id=project_id,
-                    document_id=document_id,
-                    candidates=candidates,
-                )
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    return await upsert_answer_candidates(
+                        conn,
+                        project_id=project_id,
+                        document_id=document_id,
+                        candidates=candidates,
+                    )
+        except asyncpg.ForeignKeyViolationError as exc:
+            _raise_document_deleted_during_processing(exc)
 
     async def add_candidate_clusters(
         self,
@@ -1808,14 +1828,17 @@ class KnowledgeRepository:
         if not clusters:
             return 0
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                return await upsert_candidate_clusters(
-                    conn,
-                    project_id=project_id,
-                    document_id=document_id,
-                    clusters=clusters,
-                )
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    return await upsert_candidate_clusters(
+                        conn,
+                        project_id=project_id,
+                        document_id=document_id,
+                        clusters=clusters,
+                    )
+        except asyncpg.ForeignKeyViolationError as exc:
+            _raise_document_deleted_during_processing(exc)
 
     async def add_canonical_entries(
         self,
@@ -1845,102 +1868,105 @@ class KnowledgeRepository:
                     )
                 )
 
-            async with self.pool.acquire() as conn:
-                async with conn.transaction():
-                    for index, entry in enumerate(batch):
-                        entry_uuid = ensure_uuid(entry.id)
-                        enrichment_payload_value = enrichment_payload(entry)
-                        embedding_text = entry_embedding_text(entry)
-                        embedding_text_version = entry_embedding_text_version(entry)
+            try:
+                async with self.pool.acquire() as conn:
+                    async with conn.transaction():
+                        for index, entry in enumerate(batch):
+                            entry_uuid = ensure_uuid(entry.id)
+                            enrichment_payload_value = enrichment_payload(entry)
+                            embedding_text = entry_embedding_text(entry)
+                            embedding_text_version = entry_embedding_text_version(entry)
 
-                        await conn.execute(
-                            """
-                            INSERT INTO knowledge_entries (
-                                id,
-                                project_id,
-                                document_id,
-                                compiler_run_id,
-                                stable_key,
-                                entry_kind,
-                                title,
-                                answer,
-                                status,
-                                visibility,
-                                version,
-                                compiler_version,
+                            await conn.execute(
+                                """
+                                INSERT INTO knowledge_entries (
+                                    id,
+                                    project_id,
+                                    document_id,
+                                    compiler_run_id,
+                                    stable_key,
+                                    entry_kind,
+                                    title,
+                                    answer,
+                                    status,
+                                    visibility,
+                                    version,
+                                    compiler_version,
+                                    embedding_text,
+                                    embedding_text_version,
+                                    enrichment,
+                                    metadata
+                                )
+                                VALUES (
+                                    $1,
+                                    $2,
+                                    $3,
+                                    $4,
+                                    $5,
+                                    $6,
+                                    $7,
+                                    $8,
+                                    $9,
+                                    $10,
+                                    $11,
+                                    $12,
+                                    $13,
+                                    $14,
+                                    $15::jsonb,
+                                    $16::jsonb
+                                )
+                                ON CONFLICT (project_id, document_id, stable_key, version)
+                                DO UPDATE SET
+                                    entry_kind = EXCLUDED.entry_kind,
+                                    title = EXCLUDED.title,
+                                    answer = EXCLUDED.answer,
+                                    status = EXCLUDED.status,
+                                    visibility = EXCLUDED.visibility,
+                                    compiler_version = EXCLUDED.compiler_version,
+                                    embedding_text = EXCLUDED.embedding_text,
+                                    embedding_text_version = EXCLUDED.embedding_text_version,
+                                    enrichment = EXCLUDED.enrichment,
+                                    metadata = EXCLUDED.metadata,
+                                    updated_at = now()
+                                """,
+                                entry_uuid,
+                                ensure_uuid(project_id),
+                                ensure_uuid(document_id),
+                                entry.compiler_run_id or None,
+                                entry.stable_key,
+                                entry.entry_kind.value,
+                                entry.title,
+                                entry.answer,
+                                entry.status.value,
+                                entry.visibility.value,
+                                entry.version,
+                                entry.compiler_version,
                                 embedding_text,
                                 embedding_text_version,
-                                enrichment,
-                                metadata
+                                jsonb_object_payload(enrichment_payload_value),
+                                jsonb_object_payload(entry.metadata),
                             )
-                            VALUES (
-                                $1,
-                                $2,
-                                $3,
-                                $4,
-                                $5,
-                                $6,
-                                $7,
-                                $8,
-                                $9,
-                                $10,
-                                $11,
-                                $12,
-                                $13,
-                                $14,
-                                $15::jsonb,
-                                $16::jsonb
+
+                            source_refs_payload = await replace_entry_source_refs(
+                                conn,
+                                entry_id=entry.id,
+                                source_refs=entry.source_refs,
                             )
-                            ON CONFLICT (project_id, document_id, stable_key, version)
-                            DO UPDATE SET
-                                entry_kind = EXCLUDED.entry_kind,
-                                title = EXCLUDED.title,
-                                answer = EXCLUDED.answer,
-                                status = EXCLUDED.status,
-                                visibility = EXCLUDED.visibility,
-                                compiler_version = EXCLUDED.compiler_version,
-                                embedding_text = EXCLUDED.embedding_text,
-                                embedding_text_version = EXCLUDED.embedding_text_version,
-                                enrichment = EXCLUDED.enrichment,
-                                metadata = EXCLUDED.metadata,
-                                updated_at = now()
-                            """,
-                            entry_uuid,
-                            ensure_uuid(project_id),
-                            ensure_uuid(document_id),
-                            entry.compiler_run_id or None,
-                            entry.stable_key,
-                            entry.entry_kind.value,
-                            entry.title,
-                            entry.answer,
-                            entry.status.value,
-                            entry.visibility.value,
-                            entry.version,
-                            entry.compiler_version,
-                            embedding_text,
-                            embedding_text_version,
-                            jsonb_object_payload(enrichment_payload_value),
-                            jsonb_object_payload(entry.metadata),
-                        )
 
-                        source_refs_payload = await replace_entry_source_refs(
-                            conn,
-                            entry_id=entry.id,
-                            source_refs=entry.source_refs,
-                        )
-
-                        await sync_entry_retrieval_surface(
-                            conn,
-                            project_id=project_id,
-                            document_id=document_id,
-                            entry=entry,
-                            embedding=embeddings[index],
-                            enrichment_payload_value=enrichment_payload_value,
-                            source_refs_payload_value=source_refs_payload,
-                            metadata=entry.metadata,
-                            status=entry.status.value,
-                            visibility=entry.visibility.value,
-                        )
+                            await sync_entry_retrieval_surface(
+                                conn,
+                                project_id=project_id,
+                                document_id=document_id,
+                                entry=entry,
+                                embedding=embeddings[index],
+                                enrichment_payload_value=enrichment_payload_value,
+                                source_refs_payload_value=source_refs_payload,
+                                metadata=entry.metadata,
+                                status=entry.status.value,
+                                visibility=entry.visibility.value,
+                            )
+            except asyncpg.ForeignKeyViolationError as exc:
+                _raise_document_deleted_during_processing(exc)
 
         return len(entries)
 
@@ -1968,14 +1994,17 @@ class KnowledgeRepository:
         if not chunks:
             return 0
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                return await replace_document_source_chunks(
-                    conn,
-                    project_id=project_id,
-                    document_id=document_id,
-                    chunks=chunks,
-                )
+        try:
+            async with self.pool.acquire() as conn:
+                async with conn.transaction():
+                    return await replace_document_source_chunks(
+                        conn,
+                        project_id=project_id,
+                        document_id=document_id,
+                        chunks=chunks,
+                    )
+        except asyncpg.ForeignKeyViolationError as exc:
+            _raise_document_deleted_during_processing(exc)
 
     async def create_document(
         self,

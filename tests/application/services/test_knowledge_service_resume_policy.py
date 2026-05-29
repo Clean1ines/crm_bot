@@ -16,7 +16,7 @@ from src.domain.project_plane.knowledge_document_lifecycle import (
     PROCESSING_PAUSED_QUOTA_STATUS,
 )
 from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ
-from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
+from src.application.services.knowledge_surface_prompt_versions import (
     GRAPH_PROMPT_VERSION,
 )
 from src.domain.project_plane.retrieval_surface_compilation import (
