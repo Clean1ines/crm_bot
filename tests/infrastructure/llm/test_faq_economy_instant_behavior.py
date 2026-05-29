@@ -61,6 +61,7 @@ class EconomyCompletesAfterQuotaCompiler(
         source_unit,
         file_name: str,
         run_id: str,
+        **_: object,
     ):
         if self.model_name != GROQ_INSTANT_MODEL_ID and not source_unit.metadata.get(
             "economy_instant_subunit"
@@ -93,6 +94,7 @@ class EconomyCompletesAfterQuotaCompiler(
         related_candidates,
         file_name: str,
         run_id: str,
+        **_: object,
     ):
         assert self.model_name == GROQ_INSTANT_MODEL_ID
         self.synthesis_models.append(self.model_name)

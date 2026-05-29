@@ -30,6 +30,7 @@ class CancelAwareEconomyCompiler(GroqEconomyInstantKnowledgeSurfaceGraphCompiler
         source_unit,
         file_name: str,
         run_id: str,
+        **_: object,
     ):
         self.discover_calls += 1
         return SurfaceDiscoveryResult(
@@ -52,6 +53,7 @@ class CancelAwareEconomyCompiler(GroqEconomyInstantKnowledgeSurfaceGraphCompiler
         related_candidates,
         file_name: str,
         run_id: str,
+        **_: object,
     ):
         self.synthesis_calls += 1
         return draft(

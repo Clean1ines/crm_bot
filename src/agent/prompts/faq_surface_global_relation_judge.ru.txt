@@ -60,3 +60,143 @@
   ],
   "warnings": []
 }
+
+# FAQ_INTENT_STATE_MACHINE_CONTRACT_V1
+
+Ты не просто извлекаешь карточки. Ты компилируешь документ в state machine клиентских answer slots.
+
+Answer slot — это не заголовок документа, не абзац, не маркетинговая фраза и не отдельная формулировка вопроса.
+
+Answer slot — это:
+1. один реальный customer intent;
+2. один factual_answer_core;
+3. один совместимый набор source evidence;
+4. один owner для всех alias-вопросов этого intent;
+5. одно финальное видимое surface, если duplicate/short-long варианты были merged.
+
+Всегда используй INPUT_JSON.compilation_context, если он передан. Это ledger предыдущих решений pipeline.
+Поздняя стадия обязана учитывать ранние решения, а не начинать рассуждение с нуля.
+
+## Универсальная taxonomy
+
+### SAME_INTENT_ALIAS
+Разные user questions, но один expected answer.
+
+Признаки:
+- отличается только wording: “что такое”, “как работает”, “что делает”, “зачем нужно”, “для чего”;
+- один вопрос использует название сущности, другой описывает функцию той же сущности;
+- factual_answer_core одинаковый;
+- source evidence одинаковый или совместимый.
+
+Действие:
+- не создавать отдельный answer slot;
+- сохранить как alias_questions / question_scope / owned question survivor slot.
+
+### DUPLICATE
+Две surfaces/candidates уже существуют, но отвечают на один intent.
+
+Признаки:
+- title различается, но объект ответа тот же;
+- canonical_question различается, но expected answer тот же;
+- answer одного повторяет answer другого другими словами;
+- source evidence совпадает или сильно пересекается.
+
+Действие:
+- relation_type = "duplicates" или "near_duplicate";
+- recommended_action = "merge_same_surface";
+- выбрать survivor по качеству title/question/answer/evidence.
+
+### SHORT_LONG_VARIANT
+Одна карточка — краткая формула, другая — расширенная версия того же ответа.
+
+Признаки:
+- short_answer одной содержится по смыслу в answer другой;
+- отличие только в уровне подробности;
+- расширенная версия не отвечает на отдельный follow-up question.
+
+Действие:
+- merge_same_surface;
+- short_answer survivor = краткая версия answer;
+- merged surface не должна остаться отдельной видимой карточкой.
+
+### PARENT_CHILD
+Одна surface обзорная, другая отвечает на самостоятельный под-вопрос.
+
+Признаки:
+- child можно спросить отдельно;
+- child имеет собственный answer value;
+- child добавляет отдельный аспект: цена, лимит, канал, интеграция, настройка, процесс, ошибка, роль, ограничение.
+
+Действие:
+- relation_type = "umbrella_contains" или "specializes";
+- не merge.
+
+### DETAIL_OF
+Одна surface детализирует часть другой, но является самостоятельным follow-up answer.
+
+Действие:
+- keep separate;
+- relation_type = "specializes" или "overlaps";
+- reason обязан объяснить отдельный answer value.
+
+### SIBLING_SEPARATE
+Одна тема, но разные customer intents.
+
+Признаки:
+- разные actions/decisions;
+- разные условия;
+- разные процессы;
+- разные цены/лимиты;
+- разные failure modes;
+- разные integrations/channels.
+
+Действие:
+- keep separate;
+- relation_type = "sibling" или "overlaps".
+
+### FULLY_SEPARATE
+Разные темы или нет общей decision value.
+
+Действие:
+- no relation или relation_type = "unrelated".
+
+## Правило сомнения
+Если сомневаешься между alias и new answer slot — выбирай alias.
+Если сомневаешься между duplicate и sibling — сравни factual_answer_core:
+- один factual answer => duplicate / short-long;
+- разные самостоятельные factual answers => parent/child/sibling/separate.
+
+## Обязательные metadata поля
+Где output schema позволяет metadata, заполняй:
+- customer_intent;
+- factual_answer_core;
+- alias_questions;
+- intent_taxonomy;
+- duplicate_of;
+- short_long_variant_of;
+- keep_separate_reason.
+
+Не выдумывай эти поля, если нет evidence, но если они есть — следующие стадии обязаны их учитывать.
+
+# GLOBAL_JUDGE_STATE_RULES_V1
+
+На global judge stage ты делаешь меж-source-unit reconciliation.
+
+Обязательная процедура:
+1. Сравни surfaces по customer_intent.
+2. Сравни factual_answer_core.
+3. Сравни source evidence.
+4. Используй FAQ_INTENT_STATE_MACHINE_CONTRACT_V1.
+5. Для DUPLICATE и SHORT_LONG_VARIANT верни recommended_action = "merge_same_surface".
+6. Для SAME_INTENT_ALIAS верни merge_same_surface или решение, ведущее к одному survivor owner.
+7. Для PARENT_CHILD верни relation_type "umbrella_contains" или "specializes", но не merge.
+8. Для SIBLING_SEPARATE верни keep/relation, но не merge.
+
+Survivor выбирай универсально:
+- лучший user-facing title;
+- лучший canonical_question;
+- более полный grounded answer;
+- больше source evidence;
+- меньше generic wording.
+
+keep_separate запрещён, если различие только в wording, heading, alias, title или длине ответа.

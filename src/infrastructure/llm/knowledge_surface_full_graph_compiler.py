@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import cast
 
@@ -75,6 +75,13 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 source_unit=unit,
                 file_name=file_name,
                 run_id=run_id,
+                compilation_context=_intent_ledger_context(
+                    stage="discovery",
+                    candidates=tuple(candidates),
+                    drafts=tuple(drafts),
+                    local_relations=tuple(local_relations),
+                    merge_decisions=(),
+                ),
             )
             unit_candidates = discovered.surface_candidates
             candidates.extend(unit_candidates)
@@ -97,6 +104,14 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                 candidates=unit_candidates,
                 file_name=file_name,
                 run_id=run_id,
+                compilation_context=_intent_ledger_context(
+                    stage="relations",
+                    candidates=tuple(candidates),
+                    drafts=tuple(drafts),
+                    local_relations=tuple(local_relations),
+                    merge_decisions=(),
+                    current_candidates=unit_candidates,
+                ),
             )
             unit_relations = planned.relations
             local_relations.extend(unit_relations)
@@ -129,6 +144,14 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                     related_candidates=related_candidates,
                     file_name=file_name,
                     run_id=run_id,
+                    compilation_context=_intent_ledger_context(
+                        stage="answer",
+                        candidates=tuple(candidates),
+                        drafts=tuple(drafts),
+                        local_relations=tuple(local_relations),
+                        merge_decisions=(),
+                        current_candidates=unit_candidates,
+                    ),
                 )
                 drafts.append(draft)
                 warnings.extend(draft.warnings)
@@ -157,6 +180,14 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                     related_candidates=related_candidates,
                     file_name=file_name,
                     run_id=run_id,
+                    compilation_context=_intent_ledger_context(
+                        stage="ownership",
+                        candidates=tuple(candidates),
+                        drafts=tuple(drafts),
+                        local_relations=tuple(local_relations),
+                        merge_decisions=(),
+                        current_candidates=unit_candidates,
+                    ),
                 )
                 ownership_decisions.extend(ownership_result.owned_questions)
                 warnings.extend(ownership_result.warnings)
@@ -228,8 +259,20 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             existing_reassignments=tuple(reassignments),
         )
         warnings.extend(reassignment_warnings)
+        merge_reassignments = _reassign_merged_surface_questions(
+            run_id=run_id,
+            document_id=units[0].document_id,
+            ownership_decisions=tuple(ownership_decisions),
+            merge_decisions=merge_decisions,
+        )
         reassignments = list(
-            _dedupe_reassignments(tuple(reassignments) + final_reassignments)
+            _dedupe_reassignments(
+                tuple(reassignments) + final_reassignments + merge_reassignments
+            )
+        )
+        final_relations = _filter_merged_relations(
+            final_relations,
+            merge_decisions=merge_decisions,
         )
         final_ownership = _final_ownership(
             run_id=run_id,
@@ -243,6 +286,7 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
             candidates=tuple(candidates),
             drafts=tuple(drafts),
             warnings=tuple(warnings),
+            merge_decisions=merge_decisions,
         )
         graph = RetrievalSurfaceGraph(
             run_id=run_id,
@@ -263,6 +307,12 @@ class GroqFullKnowledgeSurfaceGraphCompiler(GroqKnowledgeSurfaceGraphCompilerV2)
                     "ownership_count": len(final_ownership),
                     "reassignment_count": len(reassignments),
                     "merge_decision_count": len(merge_decisions),
+                    "merged_surface_count": sum(
+                        len(item.merged_surface_keys)
+                        for item in merge_decisions
+                        if item.decision_type == "merge"
+                    ),
+                    "visible_surface_count": len(surfaces),
                     "warning_count": len(warnings),
                 }
             ),
@@ -594,6 +644,185 @@ def _dedupe_relations(
     return result
 
 
+def _intent_ledger_context(
+    *,
+    stage: str,
+    candidates: tuple[RetrievalSurfaceCandidate, ...],
+    drafts: tuple[SurfaceAnswerDraft, ...],
+    local_relations: tuple[LocalSurfaceRelation, ...],
+    merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+    current_candidates: Sequence[RetrievalSurfaceCandidate] = (),
+) -> JsonObject:
+    return _json_object(
+        {
+            "contract": "FAQ_INTENT_STATE_MACHINE_CONTRACT_V1",
+            "stage": stage,
+            "rules": {
+                "answer_slot_is_customer_intent": True,
+                "respect_previous_decisions": True,
+                "same_intent_alias_must_not_create_new_visible_surface": True,
+                "merge_decision_is_authoritative": True,
+            },
+            "known_answer_slots": [_draft_ledger_item(item) for item in drafts[-24:]],
+            "known_candidates_without_answer_yet": [
+                _candidate_ledger_item(item) for item in candidates[-24:]
+            ],
+            "current_source_unit_candidates": [
+                _candidate_ledger_item(item) for item in tuple(current_candidates)
+            ],
+            "duplicate_or_alias_relations": [
+                {
+                    "source_surface_key": item.source_surface_key,
+                    "target_surface_key": item.target_surface_key,
+                    "relation_type": item.relation_type,
+                    "confidence": item.confidence,
+                    "reason": item.reason,
+                }
+                for item in local_relations[-48:]
+                if item.relation_type
+                in {
+                    "duplicates",
+                    "near_duplicate",
+                    "overlaps",
+                    "umbrella_contains",
+                    "specializes",
+                }
+            ],
+            "merge_decisions": [
+                {
+                    "survivor_surface_key": item.survivor_surface_key,
+                    "merged_surface_keys": list(item.merged_surface_keys),
+                    "decision_type": item.decision_type,
+                    "reason": item.reason,
+                    "confidence": item.confidence,
+                }
+                for item in merge_decisions[-24:]
+            ],
+        }
+    )
+
+
+def _candidate_ledger_item(candidate: RetrievalSurfaceCandidate) -> JsonObject:
+    return _json_object(
+        {
+            "local_surface_key": candidate.local_surface_key,
+            "provisional_title": candidate.provisional_title,
+            "surface_kind": candidate.surface_kind,
+            "answer_scope": candidate.answer_scope,
+            "question_scope": candidate.question_scope,
+            "exclusion_scope": candidate.exclusion_scope,
+            "source_refs": list(candidate.source_refs),
+            "metadata": candidate.metadata,
+        }
+    )
+
+
+def _draft_ledger_item(draft: SurfaceAnswerDraft) -> JsonObject:
+    return _json_object(
+        {
+            "candidate_key": draft.candidate_key,
+            "title": draft.title,
+            "canonical_question": draft.canonical_question,
+            "short_answer": draft.short_answer,
+            "answer_scope": draft.answer_scope,
+            "question_scope": draft.question_scope,
+            "source_refs": list(draft.source_refs),
+            "metadata": draft.metadata,
+        }
+    )
+
+
+def _merged_to_survivor(
+    merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for decision in merge_decisions:
+        if decision.decision_type != "merge":
+            continue
+        for key in decision.merged_surface_keys:
+            result[key] = decision.survivor_surface_key
+    return result
+
+
+def _filter_merged_relations(
+    relations: tuple[RetrievalSurfaceRelation, ...],
+    *,
+    merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+) -> tuple[RetrievalSurfaceRelation, ...]:
+    merged_keys = set(_merged_to_survivor(merge_decisions))
+    if not merged_keys:
+        return relations
+    return tuple(
+        relation
+        for relation in relations
+        if relation.parent_surface_key not in merged_keys
+        and relation.child_surface_key not in merged_keys
+    )
+
+
+def _reassign_merged_surface_questions(
+    *,
+    run_id: str,
+    document_id: str,
+    ownership_decisions: tuple[SurfaceQuestionOwnershipDecision, ...],
+    merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...],
+) -> tuple[SurfaceQuestionReassignment, ...]:
+    merged_to_survivor = _merged_to_survivor(merge_decisions)
+    if not merged_to_survivor:
+        return ()
+
+    result: list[SurfaceQuestionReassignment] = []
+    for index, decision in enumerate(ownership_decisions):
+        survivor_key = merged_to_survivor.get(decision.surface_key)
+        if survivor_key is None or survivor_key == decision.surface_key:
+            continue
+        result.append(
+            SurfaceQuestionReassignment(
+                id=_stable_id(
+                    run_id,
+                    "merged_surface_question_reassignment",
+                    index,
+                    decision.surface_key,
+                    survivor_key,
+                    decision.question,
+                ),
+                run_id=run_id,
+                document_id=document_id,
+                question=decision.question,
+                from_surface_key=decision.surface_key,
+                to_surface_key=survivor_key,
+                reason="Question moved because source surface was merged into survivor.",
+                confidence=decision.ownership_confidence,
+            )
+        )
+    return tuple(result)
+
+
+def _merged_question_scope(drafts: tuple[SurfaceAnswerDraft, ...]) -> str:
+    parts = _dedupe_texts(
+        part
+        for draft in drafts
+        for part in (
+            draft.question_scope,
+            draft.canonical_question,
+        )
+        if part.strip()
+    )
+    return "\n".join(parts)
+
+
+def _dedupe_texts(values: Iterable[object]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return tuple(result)
+
+
 def _final_surfaces(
     *,
     run_id: str,
@@ -601,13 +830,38 @@ def _final_surfaces(
     candidates: tuple[RetrievalSurfaceCandidate, ...],
     drafts: tuple[SurfaceAnswerDraft, ...],
     warnings: tuple[str, ...],
+    merge_decisions: tuple[RetrievalSurfaceMergeDecision, ...] = (),
 ) -> tuple[RetrievalSurfaceDraft, ...]:
     candidate_by_key = {
         candidate.local_surface_key: candidate for candidate in candidates
     }
+    draft_by_key = {draft.candidate_key: draft for draft in drafts}
+    merged_to_survivor = _merged_to_survivor(merge_decisions)
+
     result: list[RetrievalSurfaceDraft] = []
     for draft in drafts:
+        survivor_key = merged_to_survivor.get(draft.candidate_key)
+        if survivor_key is not None and survivor_key != draft.candidate_key:
+            continue
+
         candidate = candidate_by_key[draft.candidate_key]
+        merged_drafts = tuple(
+            draft_by_key[key]
+            for decision in merge_decisions
+            if decision.decision_type == "merge"
+            and decision.survivor_surface_key == draft.candidate_key
+            for key in decision.merged_surface_keys
+            if key in draft_by_key
+        )
+        all_drafts = (draft, *merged_drafts)
+        source_refs = _dedupe_texts(
+            ref for item in all_drafts for ref in item.source_refs
+        )
+        draft_warnings = _dedupe_texts(
+            warning for item in all_drafts for warning in item.warnings
+        )
+        merged_keys = tuple(item.candidate_key for item in merged_drafts)
+
         result.append(
             RetrievalSurfaceDraft(
                 id=_stable_id(run_id, "surface", draft.candidate_key),
@@ -618,22 +872,36 @@ def _final_surfaces(
                 canonical_question=draft.canonical_question,
                 surface_kind=candidate.surface_kind,
                 answer_scope=draft.answer_scope,
-                question_scope=draft.question_scope,
+                question_scope=_merged_question_scope(all_drafts),
                 exclusion_scope=draft.exclusion_scope,
                 answer=draft.answer,
                 short_answer=draft.short_answer,
                 status="draft",
                 publication_status="unpublished",
-                source_refs=draft.source_refs,
+                source_refs=source_refs,
                 source_excerpt=draft.answer[:500],
                 confidence=candidate.confidence,
-                warnings=tuple(sorted(set(draft.warnings + warnings))),
+                warnings=tuple(sorted(set(draft_warnings + warnings))),
                 metadata={
                     **draft.metadata,
                     "graph_context_compiled": True,
                     "candidate_id": candidate.id,
+                    "merged_surface_keys": list(merged_keys),
+                    "merge_decision_applied": bool(merged_keys),
+                    "merged_surface_audit": [
+                        {
+                            "candidate_key": item.candidate_key,
+                            "title": item.title,
+                            "canonical_question": item.canonical_question,
+                            "short_answer": item.short_answer,
+                            "source_refs": list(item.source_refs),
+                        }
+                        for item in merged_drafts
+                    ],
                 },
-                source_chunk_indexes=_source_indexes(candidate.source_refs),
+                source_chunk_indexes=_source_indexes(
+                    source_refs or candidate.source_refs
+                ),
             )
         )
     return tuple(result)
