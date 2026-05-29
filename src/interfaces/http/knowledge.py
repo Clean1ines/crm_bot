@@ -54,6 +54,9 @@ from src.infrastructure.db.repositories.model_usage_repository import (
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
+from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
+    GRAPH_PROMPT_VERSION,
+)
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_types import (
     TASK_PROCESS_KNOWLEDGE_UPLOAD,
@@ -867,6 +870,7 @@ async def resume_knowledge_processing(
         knowledge_repo_factory=make_knowledge_repo,
         queue_repo=queue_repo,
         knowledge_upload_task_type=TASK_PROCESS_KNOWLEDGE_UPLOAD,
+        expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
         logger=logger,
     )
 

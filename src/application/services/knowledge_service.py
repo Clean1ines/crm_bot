@@ -926,6 +926,7 @@ class KnowledgeService:
         knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort,
         queue_repo: KnowledgeQueuePort,
         knowledge_upload_task_type: str,
+        expected_faq_surface_prompt_version: str,
         logger: LoggerPort,
     ) -> JsonObject:
         user_id = await self.require_access(project_id, authorization)
@@ -950,9 +951,7 @@ class KnowledgeService:
             lifecycle_trigger=TRIGGER_EXPLICIT_USER_RESUME,
             resume_run_id=requested_resume_run_id,
             lifecycle_decision=lifecycle_decision,
-            expected_prompt_version=latest_run.prompt_version
-            if latest_run is not None
-            else "",
+            expected_prompt_version=expected_faq_surface_prompt_version,
         ):
             raise ValidationError("Document lifecycle does not allow manual FAQ resume")
 
