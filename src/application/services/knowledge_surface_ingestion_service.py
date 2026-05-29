@@ -33,12 +33,14 @@ from src.domain.project_plane.knowledge_compilation import SourceChunk
 from src.domain.project_plane.knowledge_document_lifecycle import (
     KnowledgeDocumentLifecycleDecision,
     KnowledgeDocumentLifecycleTrigger,
-    TRIGGER_EXPLICIT_USER_RESUME,
     TRIGGER_NORMAL_UPLOAD,
     TRIGGER_QUOTA_RECOVERY,
     TRIGGER_STALE_JOB_RECOVERY,
     TRIGGER_WORKER_RECOVERY,
     resolve_knowledge_document_lifecycle,
+)
+from src.domain.project_plane.knowledge_faq_resume_policy import (
+    should_reuse_faq_surface_run,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
@@ -333,14 +335,42 @@ def _document_lifecycle_decision(
     )
 
 
-def _is_reusable_faq_surface_run(
-    run: RetrievalSurfaceCompilerRun | None,
+def _bool_document_metric(
+    document: object | None,
+    key: str,
 ) -> bool:
+    metrics = getattr(document, "preprocessing_metrics", None)
+    if not isinstance(metrics, Mapping):
+        return False
+
+    value = metrics.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+def _text_document_metric(
+    document: object | None,
+    key: str,
+) -> str:
+    metrics = getattr(document, "preprocessing_metrics", None)
+    if not isinstance(metrics, Mapping):
+        return ""
+    return _compact_text(metrics.get(key))
+
+
+def _manual_resume_authorized_by_lifecycle(
+    document: object | None,
+    *,
+    resume_run_id: str | None,
+) -> bool:
+    if not resume_run_id:
+        return False
     return (
-        run is not None
-        and run.compiler_kind == "faq_retrieval_surface_compiler"
-        and run.prompt_version == GRAPH_PROMPT_VERSION
-        and run.status in {"running", "failed", "cancelled"}
+        _bool_document_metric(document, "manual_resume_authorized_by_lifecycle")
+        and _text_document_metric(document, "authorized_resume_run_id") == resume_run_id
     )
 
 
@@ -350,30 +380,19 @@ def _should_reuse_surface_run(
     lifecycle_trigger: KnowledgeDocumentLifecycleTrigger,
     resume_run_id: str | None,
     lifecycle_decision: KnowledgeDocumentLifecycleDecision,
+    existing_document: object | None,
 ) -> bool:
-    if not _is_reusable_faq_surface_run(latest_run):
-        return False
-
-    assert latest_run is not None
-
-    if lifecycle_trigger == TRIGGER_EXPLICIT_USER_RESUME:
-        if not resume_run_id or resume_run_id != latest_run.id:
-            return False
-        return (
-            latest_run.status == "cancelled"
-            or latest_run.error_type == "processing_cancelled"
-            or lifecycle_decision.can_manual_resume
-        )
-
-    if lifecycle_trigger in AUTO_RECOVERY_LIFECYCLE_TRIGGERS:
-        if resume_run_id is not None and resume_run_id != latest_run.id:
-            return False
-        return (
-            latest_run.status in {"failed", "running"}
-            and lifecycle_decision.can_auto_resume
-        )
-
-    return False
+    return should_reuse_faq_surface_run(
+        latest_run=latest_run,
+        lifecycle_trigger=lifecycle_trigger,
+        resume_run_id=resume_run_id,
+        lifecycle_decision=lifecycle_decision,
+        expected_prompt_version=GRAPH_PROMPT_VERSION,
+        manual_resume_authorized_by_lifecycle=_manual_resume_authorized_by_lifecycle(
+            existing_document,
+            resume_run_id=resume_run_id,
+        ),
+    )
 
 
 def _json_array(value: object) -> tuple[object, ...]:
@@ -638,17 +657,16 @@ class KnowledgeFaqSurfaceIngestionService:
                 lifecycle_trigger=lifecycle_trigger,
                 resume_run_id=resume_run_id,
                 lifecycle_decision=lifecycle_decision,
+                existing_document=existing_document,
             )
             else None
         )
-        run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
-        if resume_run is None:
-            await repo.cleanup_document_artifacts(
-                build_document_reset_cleanup_plan(
-                    project_id=project_id,
-                    document_id=document_id,
-                )
+        if resume_run is None and lifecycle_trigger != TRIGGER_NORMAL_UPLOAD:
+            raise ValidationError(
+                "FAQ surface resume/recovery is not allowed by document lifecycle"
             )
+
+        run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
 
         indexable_chunks = _indexable_chunks(chunks)
         if not indexable_chunks:
@@ -683,6 +701,14 @@ class KnowledgeFaqSurfaceIngestionService:
             message = "FAQ surface compiler requires source units"
             await repo.update_document_status(document_id, "error", message)
             raise ValidationError(message)
+
+        if resume_run is None:
+            await repo.cleanup_document_artifacts(
+                build_document_reset_cleanup_plan(
+                    project_id=project_id,
+                    document_id=document_id,
+                )
+            )
 
         started_at = datetime.now(timezone.utc)
         elapsed_before_resume = (

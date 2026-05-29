@@ -56,7 +56,11 @@ from src.application.services.knowledge_chunk_normalizer import (
 from src.application.services.knowledge_processing_report_builder import (
     build_knowledge_processing_report,
 )
-from src.domain.project_plane.json_types import JsonObject, JsonValue
+from src.domain.project_plane.json_types import (
+    JsonObject,
+    JsonValue,
+    json_value_from_unknown,
+)
 from src.domain.project_plane.knowledge_compilation import AnswerCandidate
 from src.domain.project_plane.knowledge_import_quality import (
     ImportQualitySourceUnit,
@@ -75,6 +79,13 @@ from src.domain.project_plane.knowledge_preprocessing import (
 from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilerRun,
     RetrievalSurfaceSourceUnit,
+)
+from src.domain.project_plane.knowledge_document_lifecycle import (
+    TRIGGER_EXPLICIT_USER_RESUME,
+    resolve_knowledge_document_lifecycle,
+)
+from src.domain.project_plane.knowledge_faq_resume_policy import (
+    should_reuse_faq_surface_run,
 )
 
 
@@ -146,6 +157,39 @@ def _document_resume_elapsed_seconds(document: object) -> float:
     if isinstance(created_at, datetime) and isinstance(updated_at, datetime):
         return max(0.0, (updated_at - created_at).total_seconds())
     return 0.0
+
+
+def _document_metrics(document: object) -> JsonObject:
+    raw_metrics = getattr(document, "preprocessing_metrics", None)
+    if not isinstance(raw_metrics, Mapping):
+        return {}
+    return {
+        str(key): json_value_from_unknown(value) for key, value in raw_metrics.items()
+    }
+
+
+def _document_int_attr(document: object, name: str) -> int:
+    value = getattr(document, name, 0)
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return 0
+
+
+def _knowledge_service_lifecycle_decision(document: object):
+    return resolve_knowledge_document_lifecycle(
+        document_status=str(getattr(document, "status", "") or ""),
+        preprocessing_status=getattr(document, "preprocessing_status", None),
+        preprocessing_error=getattr(document, "preprocessing_error", None),
+        preprocessing_metrics=_document_metrics(document),
+        chunk_count=_document_int_attr(document, "chunk_count"),
+        structured_entries=_document_int_attr(document, "structured_entries"),
+    )
 
 
 def _resume_chunks_from_source_units(
@@ -899,14 +943,20 @@ class KnowledgeService:
             project_id=project_id,
             document_id=document_id,
         )
-        if (
-            latest_run is None
-            or latest_run.compiler_kind != "faq_retrieval_surface_compiler"
-            or latest_run.status not in {"cancelled", "failed", "running"}
+        lifecycle_decision = _knowledge_service_lifecycle_decision(document)
+        requested_resume_run_id = latest_run.id if latest_run is not None else None
+        if not should_reuse_faq_surface_run(
+            latest_run=latest_run,
+            lifecycle_trigger=TRIGGER_EXPLICIT_USER_RESUME,
+            resume_run_id=requested_resume_run_id,
+            lifecycle_decision=lifecycle_decision,
+            expected_prompt_version=latest_run.prompt_version
+            if latest_run is not None
+            else "",
         ):
-            raise ValidationError(
-                "No recoverable FAQ compiler run found for this document"
-            )
+            raise ValidationError("Document lifecycle does not allow manual FAQ resume")
+
+        assert latest_run is not None
 
         source_units = await repo.list_surface_source_units_for_run(
             run_id=latest_run.id
@@ -927,6 +977,11 @@ class KnowledgeService:
             "source_unit_count": len(source_units),
             "elapsed_before_resume_seconds": round(elapsed_before_resume, 1),
             "processing_started_at_epoch": round(now_epoch, 3),
+            "manual_resume_authorized_by_lifecycle": lifecycle_decision.can_manual_resume,
+            "authorized_resume_run_id": latest_run.id,
+            "lifecycle_state_before_resume": lifecycle_decision.state,
+            "resume_policy_before_resume": lifecycle_decision.resume_policy,
+            "stop_reason_before_resume": lifecycle_decision.stop_reason,
         }
 
         resumed = await repo.resume_document_processing(

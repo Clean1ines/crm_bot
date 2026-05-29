@@ -54,6 +54,7 @@ def test_normal_upload_does_not_reuse_manual_cancelled_run() -> None:
             lifecycle_trigger=TRIGGER_NORMAL_UPLOAD,
             resume_run_id=None,
             lifecycle_decision=decision,
+            existing_document=None,
         )
         is False
     )
@@ -73,6 +74,7 @@ def test_explicit_user_resume_reuses_matching_cancelled_run() -> None:
             lifecycle_trigger=TRIGGER_EXPLICIT_USER_RESUME,
             resume_run_id="run-1",
             lifecycle_decision=decision,
+            existing_document=None,
         )
         is True
     )
@@ -92,6 +94,7 @@ def test_explicit_user_resume_rejects_wrong_resume_run_id() -> None:
             lifecycle_trigger=TRIGGER_EXPLICIT_USER_RESUME,
             resume_run_id="other-run",
             lifecycle_decision=decision,
+            existing_document=None,
         )
         is False
     )
@@ -112,6 +115,7 @@ def test_auto_recovery_reuses_quota_paused_failed_run_when_policy_allows() -> No
             lifecycle_trigger=TRIGGER_QUOTA_RECOVERY,
             resume_run_id=None,
             lifecycle_decision=decision,
+            existing_document=None,
         )
         is True
     )
@@ -132,6 +136,7 @@ def test_auto_recovery_does_not_reuse_manual_cancelled_run() -> None:
             lifecycle_trigger=TRIGGER_WORKER_RECOVERY,
             resume_run_id=None,
             lifecycle_decision=decision,
+            existing_document=None,
         )
         is False
     )
