@@ -6,12 +6,12 @@ from typing import cast
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
+from src.application.ports.knowledge.retighten import (
+    KnowledgeRetightenRepositoryPort,
+)
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryPort,
-)
-from src.application.services.knowledge_ingestion_service import (
-    KnowledgeIngestionRepositoryPort,
 )
 from src.application.services.knowledge_retighten_service import (
     KnowledgeRetightenService,
@@ -53,8 +53,8 @@ def _required_text(payload: Mapping[str, object], key: str) -> str:
 
 def make_knowledge_repository(
     pool: KnowledgeDbPoolPort,
-) -> KnowledgeIngestionRepositoryPort:
-    return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
+) -> KnowledgeRetightenRepositoryPort:
+    return cast(KnowledgeRetightenRepositoryPort, KnowledgeRepository(pool))
 
 
 async def handle_retighten_knowledge_document(

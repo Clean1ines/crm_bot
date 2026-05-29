@@ -12,13 +12,18 @@ from src.application.errors import (
     ValidationError,
 )
 from src.application.ports.commercial_price import CommercialPriceKnowledgePort
+from src.application.ports.knowledge.structured_ingestion import (
+    KnowledgeStructuredIngestionRepositoryPort,
+)
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryPort,
 )
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryPort,
-    KnowledgeIngestionService,
+)
+from src.application.services.knowledge_structured_ingestion_service import (
+    KnowledgeStructuredIngestionService,
 )
 from src.application.services.knowledge_surface_ingestion_service import (
     KnowledgeFaqSurfaceIngestionService,
@@ -108,6 +113,12 @@ def make_knowledge_repository(
     return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
 
 
+def make_structured_knowledge_repository(
+    pool: KnowledgeDbPoolPort,
+) -> KnowledgeStructuredIngestionRepositoryPort:
+    return cast(KnowledgeStructuredIngestionRepositoryPort, KnowledgeRepository(pool))
+
+
 async def _mark_recoverable_llm_upload_failure(
     *,
     db_pool: asyncpg.Pool,
@@ -162,13 +173,13 @@ async def handle_process_knowledge_upload(
             )
             return
 
-        await KnowledgeIngestionService(db_pool).process_document(
+        await KnowledgeStructuredIngestionService(db_pool).process_document(
             project_id=dto.project_id,
             document_id=dto.document_id,
             file_name=dto.file_name,
             chunks=dto.chunks,
             mode=mode,
-            knowledge_repo_factory=make_knowledge_repository,
+            knowledge_repo_factory=make_structured_knowledge_repository,
             model_usage_repo_factory=make_model_usage_repository,
             preprocessor_factory=GroqKnowledgePreprocessor,
             logger=logger,

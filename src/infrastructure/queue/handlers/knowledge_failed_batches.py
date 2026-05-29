@@ -6,15 +6,15 @@ from typing import cast
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
+from src.application.ports.knowledge.failed_batch_retry import (
+    KnowledgeFailedBatchRetryRepositoryPort,
+)
 from src.application.ports.knowledge_port import (
     KnowledgeDbPoolPort,
     ModelUsageRepositoryPort,
 )
 from src.application.services.knowledge_failed_batch_retry_service import (
     KnowledgeFailedBatchRetryService,
-)
-from src.application.services.knowledge_ingestion_service import (
-    KnowledgeIngestionRepositoryPort,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
@@ -39,8 +39,8 @@ def make_model_usage_repository(
 
 def make_knowledge_repository(
     pool: KnowledgeDbPoolPort,
-) -> KnowledgeIngestionRepositoryPort:
-    return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
+) -> KnowledgeFailedBatchRetryRepositoryPort:
+    return cast(KnowledgeFailedBatchRetryRepositoryPort, KnowledgeRepository(pool))
 
 
 def _payload(job: Mapping[str, object]) -> Mapping[str, object]:

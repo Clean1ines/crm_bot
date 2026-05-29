@@ -10,7 +10,10 @@ def test_knowledge_retighten_handler_uses_retighten_service_directly() -> None:
 
     assert "KnowledgeRetightenService" in source
     assert "KnowledgeIngestionService" not in source
-    assert "knowledge_ingestion_service import" in source
+    assert (
+        "from src.application.services.knowledge_ingestion_service import" not in source
+    )
+    assert "KnowledgeRetightenRepositoryPort" in source
 
 
 def test_knowledge_retighten_service_keeps_existing_mode_constant_behavior() -> None:

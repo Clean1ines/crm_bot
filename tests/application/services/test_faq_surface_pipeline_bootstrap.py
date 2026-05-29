@@ -17,7 +17,7 @@ def test_queue_handler_routes_faq_to_surface_ingestion_service() -> None:
     )
 
     faq_branch = source.split("mode == MODE_FAQ", 1)[1].split(
-        "KnowledgeIngestionService", 1
+        "KnowledgeStructuredIngestionService", 1
     )[0]
     assert "KnowledgeFaqSurfaceIngestionService" in faq_branch
     assert "GroqQualityGatedKnowledgeSurfaceCompiler" in faq_branch

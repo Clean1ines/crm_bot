@@ -6,10 +6,10 @@ from typing import cast
 import asyncpg
 
 from src.application.errors import EmbeddingProviderError, ValidationError
-from src.application.ports.knowledge_port import KnowledgeDbPoolPort
-from src.application.services.knowledge_ingestion_service import (
-    KnowledgeIngestionRepositoryPort,
+from src.application.ports.knowledge.ready_answer_publication import (
+    KnowledgeReadyAnswerPublicationRepositoryPort,
 )
+from src.application.ports.knowledge_port import KnowledgeDbPoolPort
 from src.application.services.knowledge_ready_answer_publication_service import (
     KnowledgeReadyAnswerPublicationService,
 )
@@ -26,8 +26,10 @@ logger = get_logger(__name__)
 
 def make_knowledge_repository(
     pool: KnowledgeDbPoolPort,
-) -> KnowledgeIngestionRepositoryPort:
-    return cast(KnowledgeIngestionRepositoryPort, KnowledgeRepository(pool))
+) -> KnowledgeReadyAnswerPublicationRepositoryPort:
+    return cast(
+        KnowledgeReadyAnswerPublicationRepositoryPort, KnowledgeRepository(pool)
+    )
 
 
 def _payload(job: Mapping[str, object]) -> Mapping[str, object]:
