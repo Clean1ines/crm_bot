@@ -97,9 +97,17 @@ def test_rag_eval_loads_retrieval_surface_not_knowledge_base() -> None:
 
 
 def test_active_src_has_no_legacy_knowledge_base_runtime_paths() -> None:
+    cleanup_only_exceptions = {
+        "src/domain/project_plane/knowledge_artifact_cleanup.py",
+        "src/infrastructure/db/repositories/knowledge_artifact_cleanup.py",
+    }
+
     offenders: list[str] = []
     for path in (ROOT / "src").rglob("*.py"):
         rel = path.relative_to(ROOT).as_posix()
+        if rel in cleanup_only_exceptions:
+            continue
+
         text = path.read_text(encoding="utf-8")
         if "knowledge_base" in text:
             offenders.append(rel)
