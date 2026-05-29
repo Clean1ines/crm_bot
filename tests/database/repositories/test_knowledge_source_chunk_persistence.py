@@ -23,7 +23,8 @@ def test_repository_delegates_source_chunk_sql() -> None:
 
     assert "await query_document_source_chunks(" in repository_source
     assert "await replace_document_source_chunks(" in repository_source
-    assert "await delete_document_source_chunks(" in repository_source
+    assert "await delete_document_source_chunks(" not in repository_source
+    assert "build_document_reset_cleanup_plan(" in repository_source
 
     assert "FROM knowledge_source_chunks" not in repository_source
     assert "DELETE FROM knowledge_source_chunks WHERE document_id = $1" not in (

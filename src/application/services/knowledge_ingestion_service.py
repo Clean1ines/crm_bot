@@ -36,6 +36,11 @@ from src.application.services.commercial_price_ingestion_service import (
 from src.application.services.knowledge_normalization_service import (
     KnowledgeNormalizationService,
 )
+from src.domain.project_plane.knowledge_artifact_cleanup import (
+    KnowledgeArtifactCleanupPlan,
+    KnowledgeArtifactCleanupResult,
+    build_document_reset_cleanup_plan,
+)
 from src.domain.project_plane.json_types import (
     JsonObject,
     JsonValue,
@@ -115,6 +120,11 @@ class KnowledgeIngestionRepositoryPort(
     Protocol,
 ):
     """Repository subset required by knowledge ingestion workflows."""
+
+    async def cleanup_document_artifacts(
+        self,
+        plan: KnowledgeArtifactCleanupPlan,
+    ) -> KnowledgeArtifactCleanupResult: ...
 
 
 class CommercialPriceAcquisitionServiceFactoryPort(Protocol):
@@ -4793,7 +4803,12 @@ class KnowledgeIngestionService:
     ) -> KnowledgeDocumentProcessingResult:
         repo = knowledge_repo_factory(self.pool)
         usage_repo = model_usage_repo_factory(self.pool)
-        await repo.delete_document_chunks(document_id)
+        await repo.cleanup_document_artifacts(
+            build_document_reset_cleanup_plan(
+                project_id=project_id,
+                document_id=document_id,
+            )
+        )
 
         indexable_chunks = _indexable_chunks(chunks)
         if not indexable_chunks:

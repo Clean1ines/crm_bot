@@ -63,4 +63,7 @@ def test_repository_delegates_document_read_sql() -> None:
 
     # Other document curation/delete SQL still belongs to later slices.
     assert "FROM knowledge_documents" in repository_source
-    assert "DELETE FROM knowledge_documents" in repository_source
+    assert "DELETE FROM knowledge_documents" not in repository_source
+    assert "cleanup_document_artifacts(" in repository_source
+    assert "build_document_delete_cleanup_plan(" in repository_source
+    assert "build_project_clear_cleanup_plan(" in repository_source

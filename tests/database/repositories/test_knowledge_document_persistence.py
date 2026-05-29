@@ -61,7 +61,10 @@ def test_repository_delegates_create_and_status_document_sql() -> None:
 
     # Other document curation/delete lifecycle SQL still belongs to later slices.
     assert "FROM knowledge_documents" in repository_source
-    assert "DELETE FROM knowledge_documents" in repository_source
+    assert "DELETE FROM knowledge_documents" not in repository_source
+    assert "cleanup_document_artifacts(" in repository_source
+    assert "build_document_delete_cleanup_plan(" in repository_source
+    assert "build_project_clear_cleanup_plan(" in repository_source
 
 
 def test_repository_delegates_answer_resolution_metrics_update() -> None:

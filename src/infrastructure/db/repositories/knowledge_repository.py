@@ -19,6 +19,9 @@ from src.application.errors import ConflictError, NotFoundError, ValidationError
 from src.domain.project_plane.knowledge_artifact_cleanup import (
     KnowledgeArtifactCleanupPlan,
     KnowledgeArtifactCleanupResult,
+    build_document_delete_cleanup_plan,
+    build_document_reset_cleanup_plan,
+    build_project_clear_cleanup_plan,
 )
 from src.domain.project_plane.knowledge_views import (
     KnowledgeAnswerCandidateSummaryView,
@@ -93,7 +96,6 @@ from src.infrastructure.db.repositories.knowledge_search_ranking import (
     search_score_and_trace,
 )
 from src.infrastructure.db.repositories.knowledge_source_chunk_persistence import (
-    delete_document_source_chunks,
     list_document_source_chunks as query_document_source_chunks,
     replace_document_source_chunks,
 )
@@ -156,7 +158,6 @@ from src.infrastructure.db.repositories.knowledge_document_persistence import (
 )
 from src.infrastructure.db.repositories.knowledge_entry_persistence import (
     batched_canonical_entries,
-    delete_document_retrieval_surface,
     delete_retrieval_surface,
     entry_embedding_text,
     entry_embedding_text_version,
@@ -377,10 +378,13 @@ class KnowledgeRepository:
         self,
         plan: KnowledgeArtifactCleanupPlan,
     ) -> KnowledgeArtifactCleanupResult:
+        if plan.document_id is None:
+            raise ValueError("document cleanup plan requires document_id")
+
         return await run_cleanup_document_artifacts(
             self.pool,
             project_id=plan.project_id,
-            document_id=str(plan.document_id or ""),
+            document_id=plan.document_id,
             plan=plan,
         )
 
@@ -2318,34 +2322,36 @@ class KnowledgeRepository:
         )
 
     async def delete_document_chunks(self, document_id: str) -> None:
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                await delete_document_retrieval_surface(
-                    conn,
-                    document_id=document_id,
-                )
-                await conn.execute(
-                    "DELETE FROM knowledge_entries WHERE document_id = $1",
-                    ensure_uuid(document_id),
-                )
-                await conn.execute(
-                    "DELETE FROM knowledge_compiler_runs WHERE document_id = $1",
-                    ensure_uuid(document_id),
-                )
-                await delete_document_source_chunks(
-                    conn,
-                    document_id=document_id,
-                )
+        """Deprecated wrapper; use cleanup_document_artifacts with a cleanup plan."""
+
+        document = await self.get_document(document_id)
+        if document is None:
+            return
+
+        await self.cleanup_document_artifacts(
+            build_document_reset_cleanup_plan(
+                project_id=str(document.project_id),
+                document_id=document_id,
+            )
+        )
 
     async def delete_document(self, document_id: str) -> None:
         logger.info("Deleting knowledge document", extra={"document_id": document_id})
 
-        async with self.pool.acquire() as conn:
-            await self._cancel_document_jobs(conn, document_id)
-            await conn.execute(
-                "DELETE FROM knowledge_documents WHERE id = $1",
-                ensure_uuid(document_id),
+        document = await self.get_document(document_id)
+        if document is None:
+            logger.info(
+                "Document delete skipped; document not found",
+                extra={"document_id": document_id},
             )
+            return
+
+        await self.cleanup_document_artifacts(
+            build_document_delete_cleanup_plan(
+                project_id=str(document.project_id),
+                document_id=document_id,
+            )
+        )
 
         logger.info("Document deleted", extra={"document_id": document_id})
 
@@ -2969,12 +2975,8 @@ class KnowledgeRepository:
     async def clear_project_knowledge(self, project_id: str) -> None:
         logger.info("Clearing project knowledge", extra={"project_id": project_id})
 
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                await self._cancel_project_knowledge_jobs(conn, project_id)
-                await conn.execute(
-                    "DELETE FROM knowledge_documents WHERE project_id = $1",
-                    ensure_uuid(project_id),
-                )
+        await self.cleanup_project_artifacts(
+            build_project_clear_cleanup_plan(project_id=project_id)
+        )
 
         logger.info("Project knowledge cleared", extra={"project_id": project_id})

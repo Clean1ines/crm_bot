@@ -19,6 +19,11 @@ from src.application.services.knowledge_ingestion_service import (
     _indexable_chunks,
     _source_chunks_from_json_chunks,
 )
+from src.domain.project_plane.knowledge_artifact_cleanup import (
+    KnowledgeArtifactCleanupPlan,
+    KnowledgeArtifactCleanupResult,
+    build_document_reset_cleanup_plan,
+)
 from src.domain.project_plane.json_types import (
     JsonObject,
     JsonValue,
@@ -97,6 +102,11 @@ class KnowledgeSurfaceCancelAwareCompilerPort(Protocol):
 
 class KnowledgeSurfaceIngestionRepositoryPort(Protocol):
     async def get_document(self, document_id: str) -> object | None: ...
+
+    async def cleanup_document_artifacts(
+        self,
+        plan: KnowledgeArtifactCleanupPlan,
+    ) -> KnowledgeArtifactCleanupResult: ...
 
     async def delete_document_chunks(self, document_id: str) -> None: ...
 
@@ -633,7 +643,12 @@ class KnowledgeFaqSurfaceIngestionService:
         )
         run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
         if resume_run is None:
-            await repo.delete_document_chunks(document_id)
+            await repo.cleanup_document_artifacts(
+                build_document_reset_cleanup_plan(
+                    project_id=project_id,
+                    document_id=document_id,
+                )
+            )
 
         indexable_chunks = _indexable_chunks(chunks)
         if not indexable_chunks:
