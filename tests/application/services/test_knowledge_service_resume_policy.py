@@ -16,6 +16,9 @@ from src.domain.project_plane.knowledge_document_lifecycle import (
     PROCESSING_PAUSED_QUOTA_STATUS,
 )
 from src.domain.project_plane.knowledge_preprocessing import MODE_FAQ
+from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
+    GRAPH_PROMPT_VERSION,
+)
 from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilerRun,
     RetrievalSurfaceSourceUnit,
@@ -33,7 +36,7 @@ class Document:
     preprocessing_error: str | None = LEGACY_USER_CANCELLED_MESSAGE
     preprocessing_metrics: dict[str, object] | None = None
     preprocessing_model: str | None = "fake-model"
-    preprocessing_prompt_version: str | None = "prompt-v1"
+    preprocessing_prompt_version: str | None = GRAPH_PROMPT_VERSION
     chunk_count: int = 1
     structured_entries: int = 0
     created_at: datetime = datetime.now(timezone.utc)
@@ -182,7 +185,7 @@ def _run(
         status=status,
         compiler_kind="faq_retrieval_surface_compiler",
         model="fake-model",
-        prompt_version="prompt-v1",
+        prompt_version=GRAPH_PROMPT_VERSION,
         error_type=error_type,
     )
 
@@ -234,6 +237,7 @@ async def test_resume_document_processing_requires_manual_lifecycle_permission()
             knowledge_repo_factory=_repo_factory(repo),
             queue_repo=QueueRepo(),
             knowledge_upload_task_type="process_knowledge_upload",
+            expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
             logger=Logger(),
         )
 
@@ -258,6 +262,7 @@ async def test_resume_document_processing_authorizes_user_cancelled_run_for_work
         knowledge_repo_factory=_repo_factory(repo),
         queue_repo=queue,
         knowledge_upload_task_type="process_knowledge_upload",
+        expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
         logger=Logger(),
     )
 
@@ -292,6 +297,7 @@ async def test_resume_document_processing_rejects_input_too_large_document() -> 
             knowledge_repo_factory=_repo_factory(repo),
             queue_repo=queue,
             knowledge_upload_task_type="process_knowledge_upload",
+            expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
             logger=Logger(),
         )
 
@@ -320,6 +326,7 @@ async def test_resume_document_processing_rejects_fatal_failed_document() -> Non
             knowledge_repo_factory=_repo_factory(repo),
             queue_repo=queue,
             knowledge_upload_task_type="process_knowledge_upload",
+            expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
             logger=Logger(),
         )
 
@@ -346,6 +353,42 @@ async def test_resume_document_processing_rejects_manual_cancel_without_saved_so
             knowledge_repo_factory=_repo_factory(repo),
             queue_repo=queue,
             knowledge_upload_task_type="process_knowledge_upload",
+            expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
+            logger=Logger(),
+        )
+
+    assert queue.payload is None
+    assert repo.resume_metrics is None
+
+
+@pytest.mark.asyncio
+async def test_resume_document_processing_rejects_stale_prompt_version_run() -> None:
+    repo = Repo(
+        document=Document(),
+        run=RetrievalSurfaceCompilerRun(
+            id="run-1",
+            project_id="project-1",
+            document_id="document-1",
+            mode=MODE_FAQ,
+            status="cancelled",
+            compiler_kind="faq_retrieval_surface_compiler",
+            model="fake-model",
+            prompt_version="stale-faq-surface-prompt-version",
+            error_type="processing_cancelled",
+        ),
+        source_units=(_source_unit(),),
+    )
+    queue = QueueRepo()
+
+    with pytest.raises(ValidationError, match="does not allow manual FAQ resume"):
+        await _service().resume_document_processing(
+            project_id="project-1",
+            document_id="document-1",
+            authorization="Bearer token",
+            knowledge_repo_factory=_repo_factory(repo),
+            queue_repo=queue,
+            knowledge_upload_task_type="process_knowledge_upload",
+            expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
             logger=Logger(),
         )
 
