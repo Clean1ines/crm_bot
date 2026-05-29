@@ -3,14 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.domain.project_plane.json_types import JsonValue
+from src.domain.project_plane.knowledge_document_lifecycle import (
+    NEEDS_RETRY_LATER_STATUS,
+    NON_RETRYABLE_INPUT_TOO_LARGE_STATUS,
+    PROCESSING_PAUSED_QUOTA_STATUS,
+)
 from src.infrastructure.llm.groq_router import (
     GroqFallbackExhaustedError,
     GroqRouteFailureType,
 )
 
-PROCESSING_PAUSED_QUOTA_STATUS = "processing_paused_quota"
-NEEDS_RETRY_LATER_STATUS = "needs_retry_later"
-NON_RETRYABLE_INPUT_TOO_LARGE_STATUS = "non_retryable_input_too_large"
 DEFAULT_QUOTA_RETRY_AFTER_SECONDS = 24 * 60 * 60
 
 

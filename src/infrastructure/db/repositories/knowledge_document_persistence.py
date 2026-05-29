@@ -5,10 +5,11 @@ import json
 import asyncpg
 
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_document_lifecycle import (
+    LEGACY_USER_CANCELLED_MESSAGE,
+)
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
 from src.utils.uuid_utils import ensure_uuid
-
-PROCESSING_CANCELLED_REASON = "Остановлено пользователем"
 
 
 async def create_document(
@@ -54,7 +55,7 @@ async def update_document_status(
         status,
         error,
         ensure_uuid(document_id),
-        PROCESSING_CANCELLED_REASON,
+        LEGACY_USER_CANCELLED_MESSAGE,
     )
 
 
@@ -93,7 +94,7 @@ async def update_document_preprocessing_status(
         prompt_version,
         json.dumps(metrics, ensure_ascii=False) if metrics is not None else None,
         ensure_uuid(document_id),
-        PROCESSING_CANCELLED_REASON,
+        LEGACY_USER_CANCELLED_MESSAGE,
     )
 
 
@@ -190,5 +191,5 @@ async def merge_document_preprocessing_metrics(
         ensure_uuid(project_id),
         ensure_uuid(document_id),
         json.dumps(metrics, ensure_ascii=False),
-        PROCESSING_CANCELLED_REASON,
+        LEGACY_USER_CANCELLED_MESSAGE,
     )
