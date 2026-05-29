@@ -12,7 +12,9 @@ from src.application.ports.knowledge_port import (
 )
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeIngestionRepositoryPort,
-    KnowledgeIngestionService,
+)
+from src.application.services.knowledge_retighten_service import (
+    KnowledgeRetightenService,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
@@ -71,7 +73,7 @@ async def handle_retighten_knowledge_document(
             "Use Retrieval Surface Compilation pipeline."
         )
 
-    service = KnowledgeIngestionService(db_pool)
+    service = KnowledgeRetightenService(db_pool)
 
     try:
         await service.retighten_processed_document(
