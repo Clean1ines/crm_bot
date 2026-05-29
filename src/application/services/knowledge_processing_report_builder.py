@@ -9,6 +9,10 @@ from src.application.dto.knowledge_dto import (
     KnowledgeProcessingStepDto,
 )
 from src.domain.project_plane.json_types import JsonObject
+from src.domain.project_plane.knowledge_document_lifecycle import (
+    KnowledgeDocumentLifecycleAction,
+    resolve_knowledge_document_lifecycle,
+)
 
 
 class KnowledgeProcessingDocumentLike(Protocol):
@@ -158,49 +162,25 @@ def _knowledge_processing_message(
     return "Документ ожидает обработки или пока не дал пригодных ответов."
 
 
+def _knowledge_processing_action_from_lifecycle(
+    action: KnowledgeDocumentLifecycleAction,
+) -> KnowledgeProcessingActionDto:
+    return KnowledgeProcessingActionDto(
+        id=action.id,
+        label=action.label,
+        kind=action.kind,
+        enabled=action.enabled,
+    )
+
+
 def _knowledge_processing_actions(
     *,
-    batch_failed: int,
-    raw_answer_count: int,
-    published_answer_count: int,
-    is_processing: bool,
-    can_resume: bool,
+    lifecycle_actions: Sequence[KnowledgeDocumentLifecycleAction],
 ) -> tuple[KnowledgeProcessingActionDto, ...]:
-    actions: list[KnowledgeProcessingActionDto] = []
-    if is_processing:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="cancel",
-                label="Остановить обработку",
-                kind="destructive",
-            )
-        )
-    if can_resume:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="resume_processing",
-                label="Продолжить обработку",
-                kind="primary",
-            )
-        )
-    if batch_failed > 0:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="retry_failed_batches",
-                label="Повторить проблемные части",
-                kind="primary",
-            )
-        )
-    if raw_answer_count > published_answer_count:
-        actions.append(
-            KnowledgeProcessingActionDto(
-                id="publish_ready",
-                label="Опубликовать готовые ответы",
-                kind="primary",
-                enabled=not is_processing,
-            )
-        )
-    return tuple(actions)
+    return tuple(
+        _knowledge_processing_action_from_lifecycle(action)
+        for action in lifecycle_actions
+    )
 
 
 def build_knowledge_processing_report(
@@ -215,28 +195,24 @@ def build_knowledge_processing_report(
     batch_failed = _batch_status_count(batches, "failed")
     batch_processing = _batch_status_count(batches, "processing")
     batch_pending = _batch_status_count(batches, "pending")
-    is_processing = document.status in {"processing", "pending"} or (
-        document.preprocessing_status == "processing"
-    )
-    is_cancelled = (
-        document.status == "cancelled"
-        or document.preprocessing_status == "cancelled"
-        or (
-            document.status == "error"
-            and document.preprocessing_status == "failed"
-            and str(getattr(document, "preprocessing_error", "") or "").lower()
-            in {
-                "остановлено пользователем",
-                "knowledge document processing was cancelled",
-            }
-        )
-    )
     published_answer_count = int(document.structured_entries or 0)
     document_metrics = (
         dict(document.preprocessing_metrics)
         if isinstance(document.preprocessing_metrics, Mapping)
         else {}
     )
+    lifecycle_decision = resolve_knowledge_document_lifecycle(
+        document_status=document.status,
+        preprocessing_status=document.preprocessing_status,
+        preprocessing_error=getattr(document, "preprocessing_error", None),
+        preprocessing_metrics=document_metrics,
+        chunk_count=document.chunk_count,
+        structured_entries=published_answer_count,
+        raw_candidate_count=candidate_summary.raw_count,
+        published_answer_count=published_answer_count,
+        batch_failed_count=batch_failed,
+    )
+    is_processing = lifecycle_decision.is_processing
     answer_resolution_metrics = _answer_resolution_metrics(document_metrics)
     current_stage = str(document_metrics.get("stage") or "")
     answer_resolution_status = _answer_resolution_report_status(
@@ -358,17 +334,6 @@ def build_knowledge_processing_report(
         "answer_resolution": answer_resolution_metrics,
     }
 
-    can_resume = bool(
-        is_cancelled
-        and not is_processing
-        and (
-            _json_int_metric(document_metrics, "source_unit_count") > 0
-            or _json_int_metric(document_metrics, "raw_source_chunk_count") > 0
-            or document.chunk_count > 0
-            or candidate_summary.raw_count > published_answer_count
-        )
-    )
-
     if current_stage == "answer_resolution" and is_processing:
         title = "Разрешаем похожие ответы"
         message = (
@@ -397,16 +362,10 @@ def build_knowledge_processing_report(
         status=document.preprocessing_status or document.status,
         title=title,
         message=message,
-        recoverable=batch_failed > 0
-        or candidate_summary.raw_count > published_answer_count
-        or can_resume,
+        recoverable=lifecycle_decision.is_recoverable,
         steps=steps,
         actions=_knowledge_processing_actions(
-            batch_failed=batch_failed,
-            raw_answer_count=candidate_summary.raw_count,
-            published_answer_count=published_answer_count,
-            is_processing=is_processing,
-            can_resume=can_resume,
+            lifecycle_actions=lifecycle_decision.actions,
         ),
         metrics=metrics,
     )

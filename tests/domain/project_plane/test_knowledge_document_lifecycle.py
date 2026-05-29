@@ -160,3 +160,53 @@ def test_recoverable_metrics_require_explicit_safe_key_for_generic_failed() -> N
     assert safe_decision.can_auto_resume is True
     assert safe_decision.can_manual_resume is False
     assert "retry_later" in _action_ids(safe_decision)
+
+
+def test_failed_batches_produce_retry_failed_batches_action() -> None:
+    decision = resolve_knowledge_document_lifecycle(
+        document_status="error",
+        preprocessing_status="failed",
+        preprocessing_error="batch failed",
+        preprocessing_metrics={},
+        chunk_count=3,
+        raw_candidate_count=2,
+        published_answer_count=0,
+        batch_failed_count=1,
+    )
+
+    assert decision.is_recoverable is True
+    assert decision.can_auto_resume is True
+    assert "retry_failed_batches" in _action_ids(decision)
+    assert "publish_ready" in _action_ids(decision)
+
+
+def test_processing_with_unpublished_candidates_exposes_disabled_publish_action() -> (
+    None
+):
+    decision = resolve_knowledge_document_lifecycle(
+        document_status="processing",
+        preprocessing_status="processing",
+        preprocessing_error=None,
+        preprocessing_metrics={},
+        raw_candidate_count=5,
+        published_answer_count=0,
+    )
+
+    actions = {action.id: action for action in decision.actions}
+    assert "cancel" in actions
+    assert "publish_ready" in actions
+    assert actions["publish_ready"].enabled is False
+
+
+def test_completed_with_unpublished_candidates_exposes_publish_action() -> None:
+    decision = resolve_knowledge_document_lifecycle(
+        document_status="processed",
+        preprocessing_status="completed",
+        preprocessing_error=None,
+        preprocessing_metrics={},
+        raw_candidate_count=3,
+        published_answer_count=0,
+    )
+
+    assert decision.resume_policy == "not_needed"
+    assert "publish_ready" in _action_ids(decision)

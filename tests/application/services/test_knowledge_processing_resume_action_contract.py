@@ -8,6 +8,9 @@ from src.application.services.knowledge_processing_report_builder import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
+REPORT_BUILDER = (
+    ROOT / "src/application/services/knowledge_processing_report_builder.py"
+)
 SERVICE = ROOT / "src/application/services/knowledge_service.py"
 HTTP = ROOT / "src/interfaces/http/knowledge.py"
 
@@ -47,6 +50,14 @@ def test_cancelled_faq_document_gets_resume_processing_action() -> None:
     assert report.recoverable is True
     assert any(action.id == "resume_processing" for action in report.actions)
     assert not any(action.id == "cancel" for action in report.actions)
+
+
+def test_report_builder_does_not_match_manual_cancel_string_itself() -> None:
+    source = REPORT_BUILDER.read_text(encoding="utf-8")
+
+    assert "resolve_knowledge_document_lifecycle(" in source
+    assert '"Остановлено пользователем"' not in source
+    assert '"knowledge document processing was cancelled"' not in source
 
 
 def test_resume_backend_contract_is_explicit_not_late_write() -> None:
