@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import time
+from typing import cast
 
 import pytest
+from groq import AsyncGroq
 
 from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceDiscoveryResult,
@@ -18,7 +20,7 @@ from tests.infrastructure.llm.faq_behavior_helpers import candidate, draft, unit
 class CancelAwareEconomyCompiler(GroqEconomyInstantKnowledgeSurfaceGraphCompiler):
     def __init__(self) -> None:
         super().__init__(
-            client=object(),  # type: ignore[arg-type]
+            client=cast(AsyncGroq, object()),
             model=GROQ_INSTANT_MODEL_ID,
         )
         self.discover_calls = 0

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
+from groq import AsyncGroq
 
 from src.infrastructure.llm.knowledge_surface_parallel_graph_compiler import (
     GroqParallelKnowledgeSurfaceGraphCompiler,
@@ -29,7 +32,7 @@ class CheckpointOnlyCompiler(GroqParallelKnowledgeSurfaceGraphCompiler):
 @pytest.mark.asyncio
 async def test_checkpointed_source_unit_is_restored_without_llm_work() -> None:
     compiler = CheckpointOnlyCompiler(
-        client=object(),  # type: ignore[arg-type]
+        client=cast(AsyncGroq, object()),
         model="checkpoint-model",
     )
     restored = _UnitCompilationResult(

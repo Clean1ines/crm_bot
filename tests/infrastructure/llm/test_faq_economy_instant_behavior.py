@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
+from groq import AsyncGroq
 
 from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceDiscoveryResult,
@@ -50,7 +53,7 @@ class EconomyCompletesAfterQuotaCompiler(
     GroqEconomyInstantKnowledgeSurfaceGraphCompiler
 ):
     def __init__(self) -> None:
-        super().__init__(client=object(), model="large-model")  # type: ignore[arg-type]
+        super().__init__(client=cast(AsyncGroq, object()), model="large-model")
         self.normal_discover_failures = 0
         self.instant_discover_calls = 0
         self.synthesis_models: list[str] = []
