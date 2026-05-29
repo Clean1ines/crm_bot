@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from src.application.services.knowledge_ingestion_service import (
     _apply_answer_resolution_decisions,
-    _compiler_source_chunks_for_preprocessing,
     _raw_answer_candidates_from_preprocessing_entries,
+)
+from src.application.services.knowledge_source_material_builder import (
+    _compiler_source_chunks_for_preprocessing,
 )
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,

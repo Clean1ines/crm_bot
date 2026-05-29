@@ -15,6 +15,8 @@ from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_ingestion_service import (
     KnowledgeDocumentProcessingResult,
     KnowledgeIngestionRepositoryFactoryPort,
+)
+from src.application.services.knowledge_source_material_builder import (
     _compiler_source_chunks_for_preprocessing,
     _indexable_chunks,
     _source_chunks_from_json_chunks,
