@@ -32,11 +32,13 @@ def test_frontend_api_exposes_processing_overview() -> None:
 def test_processing_screen_uses_overview_for_polling_and_lazies_heavy_queries() -> None:
     source = KNOWLEDGE_PAGE.read_text(encoding="utf-8")
 
+    normalized_source = " ".join(source.split())
+
     assert "knowledge-processing-overview" in source
     assert "knowledgeApi.processingOverview(projectId)" in source
     assert "processingOverviewQuery.data?.processing_reports" in source
     assert "baseHasProcessingDocuments ? 3000 : false" in source
-    assert "hasProcessingDocuments ? [] : documents.map" in source
+    assert "hasProcessingDocuments ? [] : documents.map" in normalized_source
     assert "draftsDocumentId" in source
     assert "sourceUnitsDocumentId" in source
     assert "enabled: !!projectId && !hasProcessingDocuments" in source

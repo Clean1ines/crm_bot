@@ -43,4 +43,4 @@ def test_frontend_references_answer_resolution_step_key() -> None:
         encoding="utf-8"
     )
 
-    assert "ANSWER_RESOLUTION_STEP_ID = 'answer_resolution'" in source
+    assert 'ANSWER_RESOLUTION_STEP_ID = "answer_resolution"' in source
