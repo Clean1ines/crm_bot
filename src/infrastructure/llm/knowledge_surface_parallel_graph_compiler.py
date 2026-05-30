@@ -292,7 +292,7 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             result = _unit_result_from_checkpoint(payload)
             if result is not None:
                 restored[str(source_unit_key)] = result
-        self._source_unit_result_checkpoints = restored
+        self._source_unit_result_checkpoints = dict(restored)
 
     def _runtime_metrics_snapshot(self, *, started_monotonic: float) -> JsonObject:
         return {

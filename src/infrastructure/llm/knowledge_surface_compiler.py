@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from dataclasses import dataclass, field
+from typing import TypedDict, cast
 
 from groq import (
     APIConnectionError,
@@ -49,13 +51,9 @@ FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION = (
     "faq_retrieval_surface_compilation_v1"
 )
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "agent" / "prompts"
-FAQ_SURFACE_PROMPT_FILES: tuple[str, ...] = (
-    "faq_surface_discovery.ru.txt",
-    "faq_surface_relation_planning.ru.txt",
-    "faq_surface_answer_synthesis.ru.txt",
-    "faq_surface_question_ownership.ru.txt",
-    "faq_surface_merge_decisions.ru.txt",
-)
+FAQ_SECTION_FINDINGS_PROMPT_FILE = "faq_surface_section_findings.ru.txt"
+FAQ_REGISTRY_MERGE_PROMPT_FILE = "faq_surface_registry_merge.ru.txt"
+FAQ_FINAL_RECONCILIATION_PROMPT_FILE = "faq_surface_final_reconciliation.ru.txt"
 STRICT_JSON_SYSTEM_MESSAGE = (
     "You are a strict JSON API. Return exactly one valid JSON object. "
     "Do not include markdown, code fences, explanations, comments, apologies, "
@@ -716,16 +714,343 @@ def _source_unit_payload(unit: RetrievalSurfaceSourceUnit) -> JsonObject:
     }
 
 
-def _load_instruction() -> str:
-    sections = [
-        (PROMPTS_DIR / file_name).read_text(encoding="utf-8")
-        for file_name in FAQ_SURFACE_PROMPT_FILES
-    ]
-    return "\n\n".join(sections)
+def _load_prompt(file_name: str) -> str:
+    safe_name = Path(file_name).name
+    if safe_name != file_name:
+        raise KnowledgePreprocessingValidationError(
+            f"Unsafe FAQ surface prompt file name: {file_name}"
+        )
+    path = PROMPTS_DIR / safe_name
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise KnowledgePreprocessingValidationError(
+            f"FAQ surface compiler prompt file not found: {safe_name}"
+        ) from exc
+
+
+ROLE_LABEL_SURFACE_FINGERPRINTS: frozenset[str] = frozenset(
+    {
+        "factual answer core",
+        "factual_answer_core",
+        "short answer",
+        "short_answer",
+        "customer intent",
+        "customer_intent",
+        "expected topic",
+        "expected_topic",
+        "test question",
+        "test_question",
+        "короткий ответ клиенту",
+    }
+)
+
+
+def _is_role_label_surface(value: str) -> bool:
+    fingerprint = _fingerprint(value)
+    return fingerprint in ROLE_LABEL_SURFACE_FINGERPRINTS or _is_short_answer_label(
+        value
+    )
+
+
+ProgressCallback = Callable[[Mapping[str, object]], Awaitable[None] | None]
+CancelCheck = Callable[[], Awaitable[None]]
+
+
+class _LangGraphCompilerState(TypedDict, total=False):
+    mode: KnowledgePreprocessingMode
+    source_units: Sequence[RetrievalSurfaceSourceUnit]
+    file_name: str
+    run_id: str
+    result: RetrievalSurfaceCompilationResult
+
+
+@dataclass(slots=True)
+class _SectionFinding:
+    local_surface_key: str
+    target_surface_key: str
+    action: str
+    title: str
+    canonical_question: str
+    surface_kind: SurfaceKind
+    answer: str
+    short_answer: str
+    answer_scope: str
+    question_scope: str
+    exclusion_scope: str
+    variants: tuple[str, ...]
+    parent_surface_key: str
+    child_surface_keys: tuple[str, ...]
+    source_refs: tuple[str, ...]
+    source_chunk_indexes: tuple[int, ...]
+    confidence: float
+    reason: str
+    warnings: tuple[str, ...]
+    evidence_quotes: tuple[str, ...] = ()
+    role_label_kind: str = ""
+    role_label_metadata: JsonObject = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class _RegistryEntry:
+    registry_entry_key: str
+    canonical_question: str
+    question_variants: list[str]
+    surface_kind: SurfaceKind
+    answer: str
+    short_answer: str
+    answer_scope: str
+    question_scope: str
+    exclusion_scope: str
+    evidence_quotes: list[str]
+    source_refs: list[str]
+    source_chunk_indexes: list[int]
+    parent_keys: list[str]
+    child_keys: list[str]
+    duplicate_keys: list[str]
+    source_unit_keys: list[str]
+    role_label_metadata: JsonObject
+    title: str
+    confidence: float = 0.75
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def local_surface_key(self) -> str:
+        return self.registry_entry_key
+
+    @property
+    def variants(self) -> list[str]:
+        return self.question_variants
+
+    @property
+    def evidence_refs(self) -> list[str]:
+        return self.evidence_quotes
+
+    @property
+    def parent_surface_key(self) -> str:
+        return self.parent_keys[0] if self.parent_keys else ""
+
+    @parent_surface_key.setter
+    def parent_surface_key(self, value: str) -> None:
+        text = _compact_text(value)
+        if text and text not in self.parent_keys:
+            self.parent_keys.append(text)
+
+    @property
+    def child_surface_keys(self) -> list[str]:
+        return self.child_keys
+
+
+@dataclass(slots=True)
+class _CompilerState:
+    source_units: tuple[RetrievalSurfaceSourceUnit, ...]
+    current_index: int
+    processed_source_unit_keys: set[str]
+    pending_source_unit_keys: list[str]
+    question_registry: dict[str, _RegistryEntry]
+    section_findings: list[_SectionFinding]
+    answer_drafts: list[_SectionFinding]
+    relations: list[RetrievalSurfaceRelation]
+    ownership: list[SurfaceQuestionOwnership]
+    merge_decisions: list[RetrievalSurfaceMergeDecision]
+    warnings: list[str]
+    metrics: dict[str, object]
+    run_id: str
+    file_name: str
+    model: str
+
+
+SECTION_FINDING_CHECKPOINT_VERSION = 1
+SECTION_REGISTRY_CHECKPOINT_VERSION = 2
+SECTION_REGISTRY_CHECKPOINT_KIND = "section_registry_state"
+
+
+def _role_label_kind(value: object) -> str:
+    fingerprint = _fingerprint(_compact_text(value))
+    if fingerprint in {"factual answer core", "factual_answer_core", "answer core"}:
+        return "factual_answer_core"
+    if fingerprint in {
+        "short answer",
+        "short_answer",
+        "short answer for customer",
+        "client short answer",
+        "короткий ответ клиенту",
+    }:
+        return "short_answer"
+    if fingerprint in {"customer intent", "customer_intent", "intent"}:
+        return "customer_intent"
+    if fingerprint in {
+        "expected topic",
+        "expected_topic",
+        "expected topic hint",
+        "topic hint",
+    }:
+        return "expected_topic"
+    if fingerprint in {"test question", "test_question", "negative test question"}:
+        return "test_question"
+    return ""
+
+
+def _finding_role_label_kind(finding: _SectionFinding) -> str:
+    return (
+        _role_label_kind(finding.role_label_kind)
+        or _role_label_kind(finding.local_surface_key)
+        or _role_label_kind(finding.title)
+        or _role_label_kind(finding.canonical_question)
+        or _role_label_kind(finding.action)
+        or _role_label_kind(finding.role_label_metadata.get("role_label_kind"))
+    )
+
+
+def _append_unique(target: list[str], values: Sequence[str]) -> None:
+    for value in values:
+        text = _compact_text(value)
+        if text and text not in target:
+            target.append(text)
+
+
+def _append_unique_int(target: list[int], values: Sequence[int]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
+
+
+def _metadata_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list | tuple):
+        return [str(item) for item in value]
+    return []
+
+
+def _put_role_label_metadata(
+    entry: _RegistryEntry,
+    key: str,
+    values: Sequence[str],
+) -> None:
+    current = _metadata_list(entry.role_label_metadata.get(key))
+    _append_unique(current, values)
+    entry.role_label_metadata[key] = json_value_from_unknown(current)
+
+
+def _finding_to_json(finding: _SectionFinding) -> JsonObject:
+    return {
+        "local_surface_key": finding.local_surface_key,
+        "target_surface_key": finding.target_surface_key,
+        "action": finding.action,
+        "title": finding.title,
+        "canonical_question": finding.canonical_question,
+        "surface_kind": finding.surface_kind,
+        "answer": finding.answer,
+        "short_answer": finding.short_answer,
+        "answer_scope": finding.answer_scope,
+        "question_scope": finding.question_scope,
+        "exclusion_scope": finding.exclusion_scope,
+        "variants": json_value_from_unknown(list(finding.variants)),
+        "parent_surface_key": finding.parent_surface_key,
+        "child_surface_keys": json_value_from_unknown(list(finding.child_surface_keys)),
+        "source_refs": json_value_from_unknown(list(finding.source_refs)),
+        "source_chunk_indexes": json_value_from_unknown(
+            list(finding.source_chunk_indexes)
+        ),
+        "confidence": finding.confidence,
+        "reason": finding.reason,
+        "warnings": json_value_from_unknown(list(finding.warnings)),
+        "evidence_quotes": json_value_from_unknown(list(finding.evidence_quotes)),
+        "role_label_kind": finding.role_label_kind,
+        "role_label_metadata": finding.role_label_metadata,
+    }
+
+
+def _finding_from_json(value: object) -> _SectionFinding | None:
+    if not isinstance(value, Mapping):
+        return None
+    question = _compact_text(value.get("canonical_question"))
+    title = _compact_text(value.get("title"))
+    answer = _compact_text(value.get("answer"))
+    role_label_kind = (
+        _role_label_kind(value.get("role_label_kind"))
+        or _role_label_kind(value.get("local_surface_key"))
+        or _role_label_kind(title)
+        or _role_label_kind(question)
+        or _role_label_kind(value.get("action"))
+    )
+    if not role_label_kind and not question and not answer:
+        return None
+    return _SectionFinding(
+        local_surface_key=_compact_text(value.get("local_surface_key")),
+        target_surface_key=_compact_text(value.get("target_surface_key")),
+        action=_compact_text(value.get("action")) or "new",
+        title=title or question or role_label_kind,
+        canonical_question=question or title,
+        surface_kind=cast(
+            SurfaceKind,
+            _enum_text(
+                value.get("surface_kind"),
+                allowed=SURFACE_KIND_VALUES,
+                default="specific",
+            ),
+        ),
+        answer=answer,
+        short_answer=_compact_text(value.get("short_answer")) or answer,
+        answer_scope=_limited_text(value.get("answer_scope"), max_chars=1000),
+        question_scope=_limited_text(value.get("question_scope"), max_chars=1000),
+        exclusion_scope=_limited_text(value.get("exclusion_scope"), max_chars=1000),
+        variants=_text_tuple(value.get("variants")),
+        parent_surface_key=_compact_text(value.get("parent_surface_key")),
+        child_surface_keys=_text_tuple(value.get("child_surface_keys")),
+        source_refs=_text_tuple(value.get("source_refs")),
+        source_chunk_indexes=_int_tuple(value.get("source_chunk_indexes")),
+        confidence=_confidence(value.get("confidence"), default=0.75),
+        reason=_limited_text(value.get("reason"), max_chars=1000),
+        warnings=_text_tuple(value.get("warnings")),
+        evidence_quotes=_text_tuple(value.get("evidence_quotes")),
+        role_label_kind=role_label_kind,
+        role_label_metadata=_json_object(value.get("role_label_metadata")),
+    )
+
+
+def _section_findings_to_checkpoint(
+    *,
+    source_unit_key: str,
+    findings: Sequence[_SectionFinding],
+) -> JsonObject:
+    return {
+        "version": SECTION_FINDING_CHECKPOINT_VERSION,
+        "source_unit_key": source_unit_key,
+        "findings": json_value_from_unknown(
+            [_finding_to_json(item) for item in findings]
+        ),
+    }
+
+
+def _section_findings_from_checkpoint(value: object) -> tuple[_SectionFinding, ...]:
+    if not isinstance(value, Mapping):
+        return ()
+    version = value.get("version")
+    if version != SECTION_FINDING_CHECKPOINT_VERSION:
+        return ()
+    findings: list[_SectionFinding] = []
+    raw_findings = value.get("findings")
+    if not isinstance(raw_findings, list):
+        return ()
+    for item in raw_findings:
+        finding = _finding_from_json(item)
+        if finding is not None:
+            findings.append(finding)
+    return tuple(findings)
 
 
 class GroqKnowledgeSurfaceCompiler(KnowledgeSurfaceCompilerPort):
-    """Groq-backed FAQ Retrieval Surface Compilation adapter."""
+    """Groq-backed section-scoped FAQ Retrieval Surface Compiler.
+
+    This is intentionally the same production adapter class and the same
+    compile_surfaces entrypoint, but the implementation is now a bounded
+    section state-machine instead of a one-shot all-document compiler.
+    """
+
+    _seed_section_count = 3
+    _parallel_section_concurrency = 3
 
     def __init__(
         self,
@@ -739,44 +1064,348 @@ class GroqKnowledgeSurfaceCompiler(KnowledgeSurfaceCompilerPort):
         self._model = model or settings.GROQ_KNOWLEDGE_PREPROCESSING_MODEL
         self._max_source_units = max(1, max_source_units)
         self._max_unit_chars = max(2000, max_unit_chars)
+        self._progress_callback: ProgressCallback | None = None
+        self._cancel_check: CancelCheck | None = None
+        self._source_unit_result_checkpoints: dict[str, object] = {}
+        self._source_unit_state_checkpoints: dict[str, Mapping[str, object]] = {}
+        self._checkpoint_restore_warnings: list[str] = []
 
     @property
     def model_name(self) -> str:
         return self._model
 
-    def _model_for_request(self, *, prompt: str, max_tokens: int) -> str:
-        # Provider response is the source of truth. Keep instant-first routing;
-        # GroqModelRouter reacts to provider failures.
-        return self._model
+    def set_progress_callback(self, callback: ProgressCallback | None) -> None:
+        self._progress_callback = callback
 
-    def _build_prompt(
+    def set_cancel_check(self, cancel_check: CancelCheck | None) -> None:
+        self._cancel_check = cancel_check
+
+    def set_source_unit_result_checkpoints(
+        self,
+        checkpoints: Mapping[str, object],
+    ) -> None:
+        restored_findings: dict[str, object] = {}
+        restored_state: dict[str, Mapping[str, object]] = {}
+        restore_warnings: list[str] = []
+
+        for source_unit_key, payload in checkpoints.items():
+            if isinstance(payload, Mapping) and (
+                payload.get("checkpoint_kind") == SECTION_REGISTRY_CHECKPOINT_KIND
+            ):
+                version = payload.get("version")
+                if version == SECTION_REGISTRY_CHECKPOINT_VERSION:
+                    restored_state[str(source_unit_key)] = payload
+                else:
+                    restore_warnings.append(
+                        f"incompatible_section_registry_checkpoint:"
+                        f"{source_unit_key}:version={version}"
+                    )
+                continue
+
+            findings = _section_findings_from_checkpoint(payload)
+            if findings:
+                restored_findings[str(source_unit_key)] = findings
+            elif isinstance(payload, Mapping):
+                restore_warnings.append(
+                    f"ignored_unknown_source_unit_checkpoint:{source_unit_key}"
+                )
+
+        self._source_unit_result_checkpoints = restored_findings
+        self._source_unit_state_checkpoints = restored_state
+        self._checkpoint_restore_warnings = restore_warnings
+
+    def _checkpoint_processed_count(self, checkpoint: Mapping[str, object]) -> int:
+        processed = checkpoint.get("processed_source_unit_keys")
+        if isinstance(processed, list | tuple):
+            return len(tuple(str(item) for item in processed))
+        metrics = checkpoint.get("metrics")
+        if isinstance(metrics, Mapping):
+            value = metrics.get("processed_source_unit_count")
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return 0
+
+    def _latest_state_checkpoint(self) -> Mapping[str, object] | None:
+        checkpoints = tuple(self._source_unit_state_checkpoints.values())
+        if not checkpoints:
+            return None
+        return max(
+            checkpoints,
+            key=lambda item: (
+                self._checkpoint_processed_count(item),
+                _compact_text(item.get("source_unit_key")),
+            ),
+        )
+
+    def _registry_entry_to_checkpoint(self, entry: _RegistryEntry) -> JsonObject:
+        return {
+            "registry_entry_key": entry.registry_entry_key,
+            "canonical_question": entry.canonical_question,
+            "question_variants": json_value_from_unknown(entry.question_variants),
+            "surface_kind": entry.surface_kind,
+            "answer": entry.answer,
+            "short_answer": entry.short_answer,
+            "answer_scope": entry.answer_scope,
+            "question_scope": entry.question_scope,
+            "exclusion_scope": entry.exclusion_scope,
+            "evidence_quotes": json_value_from_unknown(entry.evidence_quotes),
+            "source_refs": json_value_from_unknown(entry.source_refs),
+            "source_chunk_indexes": json_value_from_unknown(entry.source_chunk_indexes),
+            "parent_keys": json_value_from_unknown(entry.parent_keys),
+            "child_keys": json_value_from_unknown(entry.child_keys),
+            "duplicate_keys": json_value_from_unknown(entry.duplicate_keys),
+            "source_unit_keys": json_value_from_unknown(entry.source_unit_keys),
+            "role_label_metadata": entry.role_label_metadata,
+            "title": entry.title,
+            "confidence": entry.confidence,
+            "warnings": json_value_from_unknown(entry.warnings),
+        }
+
+    def _registry_entry_from_checkpoint(
+        self,
+        value: object,
+    ) -> _RegistryEntry | None:
+        if not isinstance(value, Mapping):
+            return None
+        key = _compact_text(value.get("registry_entry_key"))
+        question = _compact_text(value.get("canonical_question"))
+        if not key or not question:
+            return None
+        return _RegistryEntry(
+            registry_entry_key=key,
+            canonical_question=question,
+            question_variants=list(_text_tuple(value.get("question_variants"))),
+            surface_kind=cast(
+                SurfaceKind,
+                _enum_text(
+                    value.get("surface_kind"),
+                    allowed=SURFACE_KIND_VALUES,
+                    default="specific",
+                ),
+            ),
+            answer=_compact_text(value.get("answer")),
+            short_answer=_compact_text(value.get("short_answer")),
+            answer_scope=_limited_text(value.get("answer_scope"), max_chars=1000),
+            question_scope=_limited_text(value.get("question_scope"), max_chars=1000),
+            exclusion_scope=_limited_text(
+                value.get("exclusion_scope"),
+                max_chars=1000,
+            ),
+            evidence_quotes=list(_text_tuple(value.get("evidence_quotes"))),
+            source_refs=list(_text_tuple(value.get("source_refs"))),
+            source_chunk_indexes=list(_int_tuple(value.get("source_chunk_indexes"))),
+            parent_keys=list(_text_tuple(value.get("parent_keys"))),
+            child_keys=list(_text_tuple(value.get("child_keys"))),
+            duplicate_keys=list(_text_tuple(value.get("duplicate_keys"))),
+            source_unit_keys=list(_text_tuple(value.get("source_unit_keys"))),
+            role_label_metadata=_json_object(value.get("role_label_metadata")),
+            title=_compact_text(value.get("title")) or question,
+            confidence=_confidence(value.get("confidence"), default=0.75),
+            warnings=list(_text_tuple(value.get("warnings"))),
+        )
+
+    def _registry_snapshot_for_checkpoint(self, state: _CompilerState) -> JsonObject:
+        return {
+            "entries": json_value_from_unknown(
+                [
+                    self._registry_entry_to_checkpoint(entry)
+                    for entry in state.question_registry.values()
+                ]
+            )
+        }
+
+    def _restore_registry_snapshot(
         self,
         *,
-        mode: KnowledgePreprocessingMode,
-        source_units: Sequence[RetrievalSurfaceSourceUnit],
-        file_name: str,
-        run_id: str,
-    ) -> str:
-        payload = {
-            "file_name": file_name,
-            "mode": mode,
-            "run_id": run_id,
-            "prompt_version": FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
-            "json_contract": {
-                "required_root_fields": [
-                    "surfaces",
-                    "relations",
-                    "question_ownership",
-                    "merge_decisions",
-                ],
-                "forbidden_root_fields": ["fragments"],
-            },
-            "source_units": [
-                _source_unit_payload(unit)
-                for unit in source_units[: self._max_source_units]
-            ],
+        state: _CompilerState,
+        snapshot: object,
+    ) -> None:
+        if not isinstance(snapshot, Mapping):
+            raise KnowledgePreprocessingValidationError(
+                "section registry checkpoint missing registry_snapshot_after_section"
+            )
+        raw_entries = snapshot.get("entries")
+        if not isinstance(raw_entries, list):
+            raise KnowledgePreprocessingValidationError(
+                "section registry checkpoint registry snapshot must contain entries[]"
+            )
+        restored: dict[str, _RegistryEntry] = {}
+        for raw_entry in raw_entries:
+            entry = self._registry_entry_from_checkpoint(raw_entry)
+            if entry is not None:
+                restored[entry.registry_entry_key] = entry
+        state.question_registry = restored
+
+    def _restore_checkpointed_state(self, state: _CompilerState) -> _CompilerState:
+        if self._checkpoint_restore_warnings:
+            state.warnings.extend(self._checkpoint_restore_warnings)
+            state.metrics["checkpoint_restore_warnings"] = json_value_from_unknown(
+                list(self._checkpoint_restore_warnings)
+            )
+
+        latest = self._latest_state_checkpoint()
+        if latest is not None:
+            self._restore_registry_snapshot(
+                state=state,
+                snapshot=latest.get("registry_snapshot_after_section"),
+            )
+            processed = _text_tuple(latest.get("processed_source_unit_keys"))
+            state.processed_source_unit_keys = set(processed)
+            state.pending_source_unit_keys = [
+                unit.source_unit_key
+                for unit in state.source_units
+                if unit.source_unit_key not in state.processed_source_unit_keys
+            ]
+            state.warnings.extend(_text_tuple(latest.get("warnings")))
+            state.metrics.update(_json_object(latest.get("metrics")))
+            state.metrics["checkpoint_restore_mode"] = "section_registry_state"
+            state.metrics["checkpoint_restored_source_unit_key"] = _compact_text(
+                latest.get("source_unit_key")
+            )
+            state.metrics["checkpoint_restored_processed_source_unit_keys"] = (
+                json_value_from_unknown(list(state.processed_source_unit_keys))
+            )
+            state.metrics["checkpoint_restored_processed_source_unit_count"] = len(
+                state.processed_source_unit_keys
+            )
+            return state
+
+        if self._source_unit_result_checkpoints:
+            state.metrics["checkpoint_restore_mode"] = "legacy_section_findings_rebuild"
+            for unit in state.source_units:
+                raw_findings = self._source_unit_result_checkpoints.get(
+                    unit.source_unit_key
+                )
+                if not isinstance(raw_findings, tuple) or not all(
+                    isinstance(item, _SectionFinding) for item in raw_findings
+                ):
+                    continue
+                findings = cast(tuple[_SectionFinding, ...], raw_findings)
+                self._merge_section_findings_into_registry(
+                    state=state,
+                    unit=unit,
+                    findings=findings,
+                    merge_context={"registry_updates": []},
+                )
+            state.metrics["checkpoint_restored_processed_source_unit_count"] = len(
+                state.processed_source_unit_keys
+            )
+            return state
+
+        state.metrics["checkpoint_restore_mode"] = "none"
+        return state
+
+    def _build_source_unit_checkpoint(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        findings: Sequence[_SectionFinding],
+        merge_context: Mapping[str, object],
+    ) -> JsonObject:
+        processed = [
+            source_unit.source_unit_key
+            for source_unit in state.source_units
+            if source_unit.source_unit_key in state.processed_source_unit_keys
+        ]
+        registry_updates = self._registry_updates_from_context(merge_context)
+        relation_count = sum(
+            len(entry.parent_keys) + len(entry.child_keys)
+            for entry in state.question_registry.values()
+        )
+        metrics: JsonObject = {
+            "processed_source_unit_count": len(processed),
+            "registry_size": len(state.question_registry),
+            "finding_count": len(findings),
+            "surface_count_so_far": len(state.question_registry),
+            "relation_count_so_far": relation_count,
+            "checkpoint_version": SECTION_REGISTRY_CHECKPOINT_VERSION,
         }
-        return f"{_load_instruction()}\n\nSOURCE_PAYLOAD_JSON:\n{json.dumps(payload, ensure_ascii=False)}"
+        return {
+            "version": SECTION_REGISTRY_CHECKPOINT_VERSION,
+            "checkpoint_kind": SECTION_REGISTRY_CHECKPOINT_KIND,
+            "run_id": state.run_id,
+            "source_unit_key": unit.source_unit_key,
+            "processed_source_unit_keys": json_value_from_unknown(processed),
+            "registry_snapshot_after_section": self._registry_snapshot_for_checkpoint(
+                state
+            ),
+            "section_findings": json_value_from_unknown(
+                [_finding_to_json(item) for item in findings]
+            ),
+            "registry_updates_applied": json_value_from_unknown(
+                [dict(item) for item in registry_updates]
+            ),
+            "relations_snapshot": json_value_from_unknown([]),
+            "ownership_snapshot": json_value_from_unknown([]),
+            "merge_decisions_snapshot": json_value_from_unknown([]),
+            "warnings": json_value_from_unknown(list(state.warnings)),
+            "metrics": metrics,
+        }
+
+    def _model_for_request(self, *, prompt: str, max_tokens: int) -> str:
+        # Provider response is the source of truth. Keep current model routing.
+        return self._model
+
+    async def _ensure_not_cancelled(self) -> None:
+        if self._cancel_check is not None:
+            await self._cancel_check()
+
+    async def _emit_progress(
+        self,
+        *,
+        stage_kind: str,
+        status: str,
+        input_summary: str = "",
+        output_summary: str = "",
+        metrics: Mapping[str, object] | None = None,
+        source_unit_checkpoint: JsonObject | None = None,
+    ) -> None:
+        callback = self._progress_callback
+        if callback is None:
+            return
+
+        event_metrics: dict[str, object] = dict(metrics or {})
+        event: dict[str, object] = {
+            "stage_kind": stage_kind,
+            "status": status,
+            "input_summary": input_summary,
+            "output_summary": output_summary,
+            "metrics": event_metrics,
+        }
+        if source_unit_checkpoint is not None:
+            event["source_unit_checkpoint"] = source_unit_checkpoint
+            event["source_unit_checkpoint_version"] = source_unit_checkpoint.get(
+                "version",
+                SECTION_REGISTRY_CHECKPOINT_VERSION,
+            )
+            for key in (
+                "source_unit_key",
+                "processed_source_unit_keys",
+                "registry_snapshot_after_section",
+            ):
+                if key in source_unit_checkpoint:
+                    event[key] = source_unit_checkpoint[key]
+            checkpoint_metrics = source_unit_checkpoint.get("metrics")
+            if isinstance(checkpoint_metrics, Mapping):
+                event_metrics.update(
+                    {str(key): value for key, value in checkpoint_metrics.items()}
+                )
+                for key in (
+                    "registry_size",
+                    "finding_count",
+                    "surface_count_so_far",
+                    "relation_count_so_far",
+                ):
+                    if key in checkpoint_metrics:
+                        event[key] = checkpoint_metrics[key]
+        result = callback(event)
+        if result is not None:
+            await result
 
     async def _request_json(self, *, prompt: str, max_tokens: int) -> tuple[str, str]:
         request_model = self._model_for_request(prompt=prompt, max_tokens=max_tokens)
@@ -792,6 +1421,1288 @@ class GroqKnowledgeSurfaceCompiler(KnowledgeSurfaceCompilerPort):
         )
         content = response.choices[0].message.content or ""
         return request_model, content
+
+    def _initialize_registry(
+        self,
+        *,
+        source_units: Sequence[RetrievalSurfaceSourceUnit],
+        file_name: str,
+        run_id: str,
+    ) -> _CompilerState:
+        units = tuple(source_units)
+        return _CompilerState(
+            source_units=units,
+            current_index=0,
+            processed_source_unit_keys=set(),
+            pending_source_unit_keys=[unit.source_unit_key for unit in units],
+            question_registry={},
+            section_findings=[],
+            answer_drafts=[],
+            relations=[],
+            ownership=[],
+            merge_decisions=[],
+            warnings=[],
+            metrics={
+                "compiler_kind": "sectional_registry_state_machine",
+                "graph_execution": "langgraph_stategraph",
+                "section_scoped_prompts": True,
+                "one_shot_all_source_units_prompt": False,
+                "seed_section_count": self._seed_section_count,
+                "parallel_section_concurrency": self._parallel_section_concurrency,
+            },
+            run_id=run_id,
+            file_name=file_name,
+            model=self.model_name,
+        )
+
+    def _section_source_unit_payload(
+        self,
+        unit: RetrievalSurfaceSourceUnit,
+    ) -> JsonObject:
+        return {
+            "id": unit.id,
+            "source_unit_key": unit.source_unit_key,
+            "source_chunk_indexes": json_value_from_unknown(
+                list(unit.source_chunk_indexes)
+            ),
+            "title": unit.title,
+            "body": _limited_text(unit.body, max_chars=self._max_unit_chars),
+            "raw_text": _limited_text(unit.raw_text, max_chars=self._max_unit_chars),
+            "section_path": json_value_from_unknown(list(unit.section_path)),
+            "source_refs": json_value_from_unknown(list(unit.source_refs)),
+            "children": json_value_from_unknown(
+                [
+                    {
+                        "title": child.title,
+                        "body": _limited_text(child.body, max_chars=2000),
+                        "raw_text": _limited_text(child.raw_text, max_chars=2000),
+                        "label_kind": child.label_kind,
+                        "metadata": child.metadata,
+                    }
+                    for child in unit.children
+                ]
+            ),
+            "metadata": unit.metadata,
+        }
+
+    def _registry_snapshot(self, state: _CompilerState) -> JsonObject:
+        known_questions: list[JsonObject] = []
+        for entry in state.question_registry.values():
+            known_questions.append(
+                {
+                    "surface_key": entry.local_surface_key,
+                    "canonical_question": entry.canonical_question,
+                    "variants": json_value_from_unknown(entry.variants[:8]),
+                    "surface_kind": entry.surface_kind,
+                    "parent_surface_key": entry.parent_surface_key,
+                    "child_surface_keys": json_value_from_unknown(
+                        entry.child_surface_keys[:12]
+                    ),
+                    "short_answer": _limited_text(
+                        entry.short_answer,
+                        max_chars=360,
+                    ),
+                    "evidence_refs": json_value_from_unknown(
+                        entry.evidence_refs[:12] or entry.source_refs[:12]
+                    ),
+                }
+            )
+        return {
+            "registry_size": len(state.question_registry),
+            "known_canonical_questions": json_value_from_unknown(known_questions[:80]),
+        }
+
+    def _build_section_prompt(
+        self,
+        *,
+        stage_kind: str,
+        prompt_file: str,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        match_context: Mapping[str, object] | None = None,
+        section_findings: Sequence[_SectionFinding] = (),
+        final_reconciliation: bool = False,
+    ) -> str:
+        payload: JsonObject = {
+            "task": "faq_sectional_registry_compilation",
+            "stage": stage_kind,
+            "file_name": state.file_name,
+            "run_id": state.run_id,
+            "prompt_version": FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+            "rules": json_value_from_unknown(
+                [
+                    "You receive exactly one markdown source section.",
+                    "Never infer from the full document.",
+                    "surface means a customer-answerable intent.",
+                    "Role labels are evidence fields, not standalone surfaces.",
+                    "Forbidden standalone role labels: factual_answer_core, short_answer, customer_intent, expected_topic, test_question.",
+                    "Use compact JSON only.",
+                ]
+            ),
+            "json_contract": {
+                "match_stage": {
+                    "root_fields": ["matches", "warnings", "metrics"],
+                    "matches_item_fields": [
+                        "registry_surface_key",
+                        "relation",
+                        "confidence",
+                        "reason",
+                    ],
+                },
+                "discover_stage": {
+                    "root_fields": ["findings", "warnings", "metrics"],
+                    "findings_item_fields": [
+                        "action",
+                        "target_surface_key",
+                        "local_surface_key",
+                        "title",
+                        "canonical_question",
+                        "surface_kind",
+                        "answer",
+                        "short_answer",
+                        "answer_scope",
+                        "question_scope",
+                        "exclusion_scope",
+                        "variants",
+                        "parent_surface_key",
+                        "child_surface_keys",
+                        "source_refs",
+                        "confidence",
+                        "reason",
+                        "warnings",
+                    ],
+                },
+            },
+            "registry_snapshot": self._registry_snapshot(state),
+            "source_unit": self._section_source_unit_payload(unit),
+        }
+        if match_context is not None:
+            payload["match_context"] = json_value_from_unknown(match_context)
+        if section_findings:
+            payload["section_findings"] = json_value_from_unknown(
+                [_finding_to_json(item) for item in section_findings]
+            )
+        if final_reconciliation:
+            payload["final_reconciliation"] = True
+        node_instruction = _load_prompt(prompt_file)
+        return (
+            f"{node_instruction}\n\n"
+            "FAQ SECTION REGISTRY COMPILER NODE.\n"
+            "Return exactly one JSON object for this node contract.\n\n"
+            "SECTION_COMPILATION_INPUT_JSON:\n"
+            f"{json.dumps(payload, ensure_ascii=False)}"
+        )
+
+    async def _match_section_against_registry(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+    ) -> Mapping[str, object]:
+        await self._ensure_not_cancelled()
+        unit_text = _fingerprint(" ".join((unit.title, unit.body, unit.raw_text)))
+        matches: list[JsonObject] = []
+        for key, entry in state.question_registry.items():
+            question_fp = _fingerprint(entry.canonical_question)
+            answer_fp = _fingerprint(entry.answer)
+            if question_fp and question_fp in unit_text:
+                relation = "extends_existing_question"
+                confidence = 0.72
+            elif answer_fp and answer_fp in unit_text:
+                relation = "adds_evidence"
+                confidence = 0.68
+            else:
+                continue
+            matches.append(
+                {
+                    "registry_surface_key": key,
+                    "relation": relation,
+                    "confidence": confidence,
+                    "reason": "deterministic_registry_snapshot_match",
+                }
+            )
+        return {
+            "matches": json_value_from_unknown(matches[:12]),
+            "warnings": [],
+            "metrics": {
+                "deterministic_match": True,
+                "registry_size": len(state.question_registry),
+            },
+        }
+
+    async def _discover_section_findings(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        match_context: Mapping[str, object],
+    ) -> tuple[_SectionFinding, ...]:
+        cached = self._source_unit_result_checkpoints.get(unit.source_unit_key)
+        if isinstance(cached, tuple) and all(
+            isinstance(item, _SectionFinding) for item in cached
+        ):
+            findings = cast(tuple[_SectionFinding, ...], cached)
+            await self._emit_progress(
+                stage_kind="source_unit_checkpoint_reused",
+                status="completed",
+                input_summary=f"section={unit.source_unit_key}",
+                output_summary=f"findings={len(findings)} source=checkpoint",
+                metrics={
+                    "source_unit_key": unit.source_unit_key,
+                    "checkpoint_reused": True,
+                    "finding_count": len(findings),
+                },
+            )
+            return findings
+
+        await self._ensure_not_cancelled()
+        prompt = self._build_section_prompt(
+            stage_kind="discover_section_findings",
+            prompt_file=FAQ_SECTION_FINDINGS_PROMPT_FILE,
+            state=state,
+            unit=unit,
+            match_context=match_context,
+        )
+        _, content = await self._request_json(prompt=prompt, max_tokens=2200)
+        payload = _loads_json_object(content)
+        findings = self._parse_section_findings(payload, unit=unit)
+        return findings
+
+    def _parse_section_findings(
+        self,
+        payload: Mapping[str, object],
+        *,
+        unit: RetrievalSurfaceSourceUnit,
+    ) -> tuple[_SectionFinding, ...]:
+        raw_findings = payload.get("findings")
+        if not isinstance(raw_findings, list):
+            return ()
+
+        findings: list[_SectionFinding] = []
+        for item in raw_findings:
+            finding = _finding_from_json(item)
+            if finding is None:
+                continue
+            source_refs = finding.source_refs or unit.source_refs
+            source_chunk_indexes = (
+                finding.source_chunk_indexes or unit.source_chunk_indexes
+            )
+            findings.append(
+                _SectionFinding(
+                    local_surface_key=finding.local_surface_key,
+                    target_surface_key=finding.target_surface_key,
+                    action=finding.action,
+                    title=finding.title,
+                    canonical_question=finding.canonical_question,
+                    surface_kind=finding.surface_kind,
+                    answer=finding.answer,
+                    short_answer=finding.short_answer,
+                    answer_scope=finding.answer_scope,
+                    question_scope=finding.question_scope,
+                    exclusion_scope=finding.exclusion_scope,
+                    variants=finding.variants,
+                    parent_surface_key=finding.parent_surface_key,
+                    child_surface_keys=finding.child_surface_keys,
+                    source_refs=source_refs,
+                    source_chunk_indexes=source_chunk_indexes,
+                    confidence=finding.confidence,
+                    reason=finding.reason,
+                    warnings=finding.warnings,
+                )
+            )
+        return tuple(findings)
+
+    def _registry_updates_from_context(
+        self,
+        merge_context: Mapping[str, object],
+    ) -> tuple[Mapping[str, object], ...]:
+        raw_updates = merge_context.get("registry_updates")
+        if isinstance(raw_updates, list):
+            return tuple(item for item in raw_updates if isinstance(item, Mapping))
+
+        raw_decisions = merge_context.get("merge_decisions")
+        if not isinstance(raw_decisions, list):
+            return ()
+
+        updates: list[Mapping[str, object]] = []
+        for item in raw_decisions:
+            if not isinstance(item, Mapping):
+                continue
+            source_key = _compact_text(
+                item.get("source_local_surface_key")
+                or item.get("local_surface_key")
+                or item.get("source_surface_key")
+            )
+            target_key = _compact_text(
+                item.get("target_surface_key") or item.get("survivor_surface_key")
+            )
+            if not source_key and not target_key:
+                continue
+            updates.append(
+                {
+                    "operation": "extend" if target_key else "create",
+                    "target_surface_key": target_key,
+                    "source_local_surface_key": source_key,
+                    "append_variants": list(_text_tuple(item.get("append_variants"))),
+                    "append_source_refs": list(
+                        _text_tuple(item.get("append_source_refs"))
+                    ),
+                    "append_source_chunk_indexes": list(
+                        _int_tuple(item.get("append_source_chunk_indexes"))
+                    ),
+                    "append_evidence_quotes": list(
+                        _text_tuple(item.get("append_evidence_quotes"))
+                    ),
+                    "compatibility_source": "merge_decisions",
+                }
+            )
+        return tuple(updates)
+
+    async def _plan_registry_merge(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        findings: Sequence[_SectionFinding],
+        match_context: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        if not findings:
+            return {
+                "registry_updates": [],
+                "warnings": [],
+                "metrics": {"empty": True, "advisory": True},
+            }
+        await self._ensure_not_cancelled()
+        prompt = self._build_section_prompt(
+            stage_kind="merge_section_findings_into_registry",
+            prompt_file=FAQ_REGISTRY_MERGE_PROMPT_FILE,
+            state=state,
+            unit=unit,
+            match_context=match_context,
+            section_findings=findings,
+        )
+        try:
+            _, content = await self._request_json(prompt=prompt, max_tokens=1600)
+            return _loads_json_object(content)
+        except Exception as exc:
+            return {
+                "registry_updates": [],
+                "warnings": [f"registry_merge_advisory_ignored:{type(exc).__name__}"],
+                "metrics": {"advisory_parse_failed": True},
+            }
+
+    def _can_deterministically_merge(
+        self,
+        *,
+        existing: _RegistryEntry,
+        finding: _SectionFinding,
+    ) -> bool:
+        if existing.surface_kind in {"umbrella", "child"} or finding.surface_kind in {
+            "umbrella",
+            "child",
+        }:
+            return existing.surface_kind == finding.surface_kind
+        return True
+
+    def _deterministic_registry_target(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        finding: _SectionFinding,
+    ) -> str:
+        explicit = _compact_text(finding.target_surface_key)
+        if explicit in state.question_registry:
+            return explicit
+
+        canonical_fp = _fingerprint(finding.canonical_question)
+        if canonical_fp:
+            for key, entry in state.question_registry.items():
+                if self._can_deterministically_merge(existing=entry, finding=finding):
+                    if _fingerprint(entry.canonical_question) == canonical_fp:
+                        return key
+
+        short_fp = _fingerprint(finding.short_answer)
+        if short_fp:
+            for key, entry in state.question_registry.items():
+                if self._can_deterministically_merge(existing=entry, finding=finding):
+                    if _fingerprint(entry.short_answer) == short_fp:
+                        return key
+
+        answer_fp = _fingerprint(finding.answer)
+        if answer_fp:
+            for key, entry in state.question_registry.items():
+                if self._can_deterministically_merge(existing=entry, finding=finding):
+                    if _fingerprint(entry.answer) == answer_fp:
+                        return key
+                    if unit.source_unit_key in entry.source_unit_keys:
+                        if _fingerprint(entry.answer) == answer_fp:
+                            return key
+
+        return ""
+
+    def _new_registry_key(
+        self,
+        state: _CompilerState,
+        finding: _SectionFinding,
+    ) -> str:
+        explicit = _compact_text(finding.local_surface_key)
+        if explicit and not _is_role_label_surface(explicit):
+            candidate = explicit
+        else:
+            digest = hashlib.sha256(
+                (finding.canonical_question or finding.answer).encode("utf-8")
+            ).hexdigest()[:12]
+            candidate = f"surface:{digest}"
+
+        if candidate not in state.question_registry:
+            return candidate
+
+        suffix = 2
+        while f"{candidate}:{suffix}" in state.question_registry:
+            suffix += 1
+        return f"{candidate}:{suffix}"
+
+    def _create_registry_entry(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        finding: _SectionFinding,
+    ) -> _RegistryEntry:
+        key = self._new_registry_key(state, finding)
+        entry = _RegistryEntry(
+            registry_entry_key=key,
+            canonical_question=finding.canonical_question or finding.title,
+            question_variants=list(finding.variants),
+            surface_kind=finding.surface_kind,
+            answer=finding.answer,
+            short_answer=_limited_text(finding.short_answer, max_chars=360),
+            answer_scope=finding.answer_scope,
+            question_scope=finding.question_scope,
+            exclusion_scope=finding.exclusion_scope,
+            evidence_quotes=list(finding.evidence_quotes),
+            source_refs=list(finding.source_refs),
+            source_chunk_indexes=list(finding.source_chunk_indexes),
+            parent_keys=(
+                [finding.parent_surface_key] if finding.parent_surface_key else []
+            ),
+            child_keys=list(finding.child_surface_keys),
+            duplicate_keys=[],
+            source_unit_keys=[unit.source_unit_key],
+            role_label_metadata=dict(finding.role_label_metadata),
+            title=finding.title or finding.canonical_question,
+            confidence=finding.confidence,
+            warnings=list(finding.warnings),
+        )
+        state.question_registry[key] = entry
+        return entry
+
+    def _merge_finding_into_entry(
+        self,
+        *,
+        entry: _RegistryEntry,
+        finding: _SectionFinding,
+        unit: RetrievalSurfaceSourceUnit,
+    ) -> None:
+        if finding.answer and len(finding.answer) > len(entry.answer):
+            entry.answer = finding.answer
+        if finding.short_answer and len(finding.short_answer) <= 360:
+            entry.short_answer = finding.short_answer
+        _append_unique(entry.question_variants, finding.variants)
+        _append_unique(entry.source_refs, finding.source_refs)
+        _append_unique(entry.evidence_quotes, finding.evidence_quotes)
+        _append_unique_int(entry.source_chunk_indexes, finding.source_chunk_indexes)
+        _append_unique(entry.source_unit_keys, (unit.source_unit_key,))
+        _append_unique(entry.parent_keys, (finding.parent_surface_key,))
+        _append_unique(entry.child_keys, finding.child_surface_keys)
+        _append_unique(entry.warnings, finding.warnings)
+        entry.confidence = max(entry.confidence, finding.confidence)
+
+    def _role_label_group_surface_finding(
+        self,
+        *,
+        unit: RetrievalSurfaceSourceUnit,
+        role_label_findings: Sequence[_SectionFinding],
+    ) -> _SectionFinding | None:
+        by_kind: dict[str, list[_SectionFinding]] = {}
+        for finding in role_label_findings:
+            kind = _finding_role_label_kind(finding)
+            if kind:
+                by_kind.setdefault(kind, []).append(finding)
+
+        intents = by_kind.get("customer_intent", [])
+        answer_cores = by_kind.get("factual_answer_core", [])
+        short_answers = by_kind.get("short_answer", [])
+
+        if not intents or not (answer_cores or short_answers):
+            return None
+
+        intent = intents[0]
+        answer_core = answer_cores[0] if answer_cores else short_answers[0]
+        short_answer = short_answers[0] if short_answers else answer_core
+
+        variants: list[str] = []
+        evidence_quotes: list[str] = []
+        source_refs: list[str] = []
+        source_chunk_indexes: list[int] = []
+        role_metadata: JsonObject = {}
+
+        for finding in role_label_findings:
+            kind = _finding_role_label_kind(finding)
+            values = tuple(
+                item
+                for item in (
+                    finding.canonical_question,
+                    finding.title,
+                    finding.answer,
+                    finding.short_answer,
+                )
+                if item
+            )
+            if kind:
+                role_metadata[kind] = json_value_from_unknown(list(values))
+            if kind in {"customer_intent", "expected_topic", "test_question"}:
+                _append_unique(variants, values)
+            if kind == "factual_answer_core":
+                _append_unique(evidence_quotes, values)
+            _append_unique(source_refs, finding.source_refs)
+            _append_unique_int(source_chunk_indexes, finding.source_chunk_indexes)
+
+        digest = hashlib.sha256(unit.source_unit_key.encode("utf-8")).hexdigest()[:12]
+        canonical_question = intent.answer or intent.canonical_question or intent.title
+        answer = answer_core.answer or answer_core.short_answer or answer_core.title
+        return _SectionFinding(
+            local_surface_key=f"role_group:{digest}",
+            target_surface_key="",
+            action="create",
+            title=canonical_question,
+            canonical_question=canonical_question,
+            surface_kind="specific",
+            answer=answer,
+            short_answer=short_answer.short_answer or short_answer.answer or answer,
+            answer_scope=answer_core.answer_scope,
+            question_scope=intent.question_scope,
+            exclusion_scope="",
+            variants=tuple(variants),
+            parent_surface_key="",
+            child_surface_keys=(),
+            source_refs=tuple(source_refs or unit.source_refs),
+            source_chunk_indexes=tuple(
+                source_chunk_indexes or unit.source_chunk_indexes
+            ),
+            confidence=max(
+                (item.confidence for item in role_label_findings),
+                default=0.75,
+            ),
+            reason="deterministic_role_label_group_absorption",
+            warnings=(),
+            evidence_quotes=tuple(evidence_quotes),
+            role_label_metadata={
+                **role_metadata,
+                "absorbed_role_label_group": True,
+            },
+        )
+
+    def _absorb_role_label_into_entry(
+        self,
+        *,
+        entry: _RegistryEntry,
+        finding: _SectionFinding,
+        unit: RetrievalSurfaceSourceUnit,
+    ) -> None:
+        kind = _finding_role_label_kind(finding)
+        values = tuple(
+            item
+            for item in (
+                finding.canonical_question,
+                finding.title,
+                finding.answer,
+                finding.short_answer,
+            )
+            if item
+        )
+        if kind == "factual_answer_core":
+            if finding.answer and len(finding.answer) > len(entry.answer):
+                entry.answer = finding.answer
+            _append_unique(entry.evidence_quotes, values)
+            _put_role_label_metadata(entry, "factual_answer_core", values)
+        elif kind == "short_answer":
+            entry.short_answer = _limited_text(
+                finding.short_answer or finding.answer or finding.title,
+                max_chars=360,
+            )
+            _put_role_label_metadata(entry, "short_answer", values)
+        elif kind == "customer_intent":
+            question = finding.answer or finding.canonical_question or finding.title
+            if question:
+                if not entry.canonical_question:
+                    entry.canonical_question = question
+                elif _fingerprint(entry.canonical_question) != _fingerprint(question):
+                    _append_unique(entry.question_variants, (question,))
+            _put_role_label_metadata(entry, "customer_intent", values)
+        elif kind == "expected_topic":
+            _append_unique(entry.question_variants, values)
+            _put_role_label_metadata(entry, "expected_topic", values)
+        elif kind == "test_question":
+            _append_unique(entry.question_variants, values)
+            _put_role_label_metadata(entry, "test_question", values)
+
+        _append_unique(entry.source_refs, finding.source_refs or unit.source_refs)
+        _append_unique_int(
+            entry.source_chunk_indexes,
+            finding.source_chunk_indexes or unit.source_chunk_indexes,
+        )
+        _append_unique(entry.source_unit_keys, (unit.source_unit_key,))
+
+    def _apply_registry_update(
+        self,
+        *,
+        state: _CompilerState,
+        update: Mapping[str, object],
+        source_key_to_entry_key: Mapping[str, str],
+    ) -> None:
+        operation = _compact_text(update.get("operation"))
+        if operation not in {
+            "create",
+            "add_evidence",
+            "extend",
+            "refine",
+            "add_child",
+            "add_parent",
+            "mark_duplicate",
+            "mark_overlap",
+            "skip_role_label",
+        }:
+            return
+
+        if operation == "skip_role_label":
+            return
+
+        source_key = _compact_text(update.get("source_local_surface_key"))
+        target_key = _compact_text(
+            update.get("target_surface_key")
+        ) or source_key_to_entry_key.get(source_key, "")
+
+        if operation == "create":
+            if source_key in source_key_to_entry_key:
+                return
+            finding = _finding_from_json(update.get("new_surface"))
+            if finding is None or _finding_role_label_kind(finding):
+                return
+            if self._deterministic_registry_target(
+                state=state,
+                unit=state.source_units[0],
+                finding=finding,
+            ):
+                return
+            self._create_registry_entry(
+                state=state,
+                unit=state.source_units[0],
+                finding=finding,
+            )
+            return
+
+        if target_key not in state.question_registry:
+            return
+
+        entry = state.question_registry[target_key]
+        _append_unique(
+            entry.question_variants, _text_tuple(update.get("append_variants"))
+        )
+        _append_unique(entry.source_refs, _text_tuple(update.get("append_source_refs")))
+        _append_unique_int(
+            entry.source_chunk_indexes,
+            _int_tuple(update.get("append_source_chunk_indexes")),
+        )
+        _append_unique(
+            entry.evidence_quotes,
+            _text_tuple(update.get("append_evidence_quotes")),
+        )
+
+        answer_delta = _limited_text(update.get("append_answer_delta"), max_chars=1200)
+        if answer_delta and _fingerprint(answer_delta) not in _fingerprint(
+            entry.answer
+        ):
+            entry.answer = f"{entry.answer}\\n\\n{answer_delta}".strip()
+
+        if operation == "add_child":
+            child_key = source_key_to_entry_key.get(source_key, source_key)
+            if child_key in state.question_registry and child_key != target_key:
+                _append_unique(entry.child_keys, (child_key,))
+                _append_unique(
+                    state.question_registry[child_key].parent_keys, (target_key,)
+                )
+        elif operation == "add_parent":
+            parent_key = source_key_to_entry_key.get(source_key, source_key)
+            if parent_key in state.question_registry and parent_key != target_key:
+                _append_unique(entry.parent_keys, (parent_key,))
+                _append_unique(
+                    state.question_registry[parent_key].child_keys, (target_key,)
+                )
+        elif operation == "mark_duplicate":
+            duplicate_key = source_key_to_entry_key.get(source_key, source_key)
+            if duplicate_key and duplicate_key != target_key:
+                _append_unique(entry.duplicate_keys, (duplicate_key,))
+
+    def _apply_registry_advisory_updates(
+        self,
+        *,
+        state: _CompilerState,
+        merge_context: Mapping[str, object],
+        source_key_to_entry_key: Mapping[str, str],
+    ) -> None:
+        for update in self._registry_updates_from_context(merge_context):
+            self._apply_registry_update(
+                state=state,
+                update=update,
+                source_key_to_entry_key=source_key_to_entry_key,
+            )
+
+    def _merge_section_findings_into_registry(
+        self,
+        *,
+        state: _CompilerState,
+        unit: RetrievalSurfaceSourceUnit,
+        findings: Sequence[_SectionFinding],
+        merge_context: Mapping[str, object],
+    ) -> None:
+        if not findings:
+            state.processed_source_unit_keys.add(unit.source_unit_key)
+            if unit.source_unit_key in state.pending_source_unit_keys:
+                state.pending_source_unit_keys.remove(unit.source_unit_key)
+            return
+
+        role_label_findings = [
+            finding for finding in findings if _finding_role_label_kind(finding)
+        ]
+        surface_findings = [
+            finding for finding in findings if not _finding_role_label_kind(finding)
+        ]
+
+        if not surface_findings:
+            grouped = self._role_label_group_surface_finding(
+                unit=unit,
+                role_label_findings=role_label_findings,
+            )
+            if grouped is not None:
+                surface_findings.append(grouped)
+
+        source_key_to_entry_key: dict[str, str] = {}
+
+        for finding in surface_findings:
+            if _is_role_label_surface(finding.title) or _is_role_label_surface(
+                finding.canonical_question
+            ):
+                role_label_findings.append(finding)
+                continue
+
+            target_key = self._deterministic_registry_target(
+                state=state,
+                unit=unit,
+                finding=finding,
+            )
+
+            if target_key:
+                entry = state.question_registry[target_key]
+                self._merge_finding_into_entry(
+                    entry=entry,
+                    finding=finding,
+                    unit=unit,
+                )
+            else:
+                entry = self._create_registry_entry(
+                    state=state,
+                    unit=unit,
+                    finding=finding,
+                )
+                target_key = entry.registry_entry_key
+
+            source_key_to_entry_key[finding.local_surface_key] = target_key
+
+            if finding.parent_surface_key in state.question_registry:
+                _append_unique(entry.parent_keys, (finding.parent_surface_key,))
+                parent = state.question_registry[finding.parent_surface_key]
+                _append_unique(parent.child_keys, (target_key,))
+
+            for child_key in finding.child_surface_keys:
+                if child_key in state.question_registry:
+                    _append_unique(entry.child_keys, (child_key,))
+                    _append_unique(
+                        state.question_registry[child_key].parent_keys,
+                        (target_key,),
+                    )
+
+            state.section_findings.append(finding)
+            state.answer_drafts.append(finding)
+
+        if role_label_findings:
+            target_entry: _RegistryEntry | None = None
+            if source_key_to_entry_key:
+                target_entry = state.question_registry[
+                    next(iter(source_key_to_entry_key.values()))
+                ]
+            else:
+                for entry in reversed(tuple(state.question_registry.values())):
+                    if unit.source_unit_key in entry.source_unit_keys:
+                        target_entry = entry
+                        break
+
+            if target_entry is not None:
+                for finding in role_label_findings:
+                    self._absorb_role_label_into_entry(
+                        entry=target_entry,
+                        finding=finding,
+                        unit=unit,
+                    )
+                    state.section_findings.append(finding)
+
+        self._apply_registry_advisory_updates(
+            state=state,
+            merge_context=merge_context,
+            source_key_to_entry_key=source_key_to_entry_key,
+        )
+
+        state.processed_source_unit_keys.add(unit.source_unit_key)
+        if unit.source_unit_key in state.pending_source_unit_keys:
+            state.pending_source_unit_keys.remove(unit.source_unit_key)
+
+    async def _process_seed_section(
+        self,
+        *,
+        state: _CompilerState,
+        unit_index: int,
+        unit: RetrievalSurfaceSourceUnit,
+    ) -> _CompilerState:
+        state.current_index = unit_index
+        match_context = await self._match_section_against_registry(
+            state=state,
+            unit=unit,
+        )
+        findings = await self._discover_section_findings(
+            state=state,
+            unit=unit,
+            match_context=match_context,
+        )
+        merge_context = await self._plan_registry_merge(
+            state=state,
+            unit=unit,
+            findings=findings,
+            match_context=match_context,
+        )
+        self._merge_section_findings_into_registry(
+            state=state,
+            unit=unit,
+            findings=findings,
+            merge_context=merge_context,
+        )
+        await self._emit_progress(
+            stage_kind="process_seed_section",
+            status="completed",
+            input_summary=f"section={unit_index + 1}/{len(state.source_units)}",
+            output_summary=f"findings={len(findings)} registry={len(state.question_registry)}",
+            metrics={
+                "section_index": unit_index,
+                "total_sections": len(state.source_units),
+                "source_unit_key": unit.source_unit_key,
+                "finding_count": len(findings),
+                "registry_size": len(state.question_registry),
+                "seed_phase": True,
+            },
+            source_unit_checkpoint=self._build_source_unit_checkpoint(
+                state=state,
+                unit=unit,
+                findings=findings,
+                merge_context=merge_context,
+            ),
+        )
+        return state
+
+    async def _process_parallel_section_batch(
+        self,
+        *,
+        state: _CompilerState,
+        batch: Sequence[tuple[int, RetrievalSurfaceSourceUnit]],
+    ) -> tuple[
+        tuple[int, RetrievalSurfaceSourceUnit, tuple[_SectionFinding, ...]], ...
+    ]:
+        semaphore = asyncio.Semaphore(self._parallel_section_concurrency)
+
+        async def run_one(
+            item: tuple[int, RetrievalSurfaceSourceUnit],
+        ) -> tuple[int, RetrievalSurfaceSourceUnit, tuple[_SectionFinding, ...]]:
+            unit_index, unit = item
+            async with semaphore:
+                match_context = await self._match_section_against_registry(
+                    state=state,
+                    unit=unit,
+                )
+                findings = await self._discover_section_findings(
+                    state=state,
+                    unit=unit,
+                    match_context=match_context,
+                )
+                return unit_index, unit, findings
+
+        return tuple(await asyncio.gather(*(run_one(item) for item in batch)))
+
+    async def _reconcile_parallel_batch_results(
+        self,
+        *,
+        state: _CompilerState,
+        batch_results: Sequence[
+            tuple[int, RetrievalSurfaceSourceUnit, tuple[_SectionFinding, ...]]
+        ],
+    ) -> _CompilerState:
+        for unit_index, unit, findings in sorted(
+            batch_results, key=lambda item: item[0]
+        ):
+            match_context = await self._match_section_against_registry(
+                state=state,
+                unit=unit,
+            )
+            merge_context = await self._plan_registry_merge(
+                state=state,
+                unit=unit,
+                findings=findings,
+                match_context=match_context,
+            )
+            self._merge_section_findings_into_registry(
+                state=state,
+                unit=unit,
+                findings=findings,
+                merge_context=merge_context,
+            )
+            await self._emit_progress(
+                stage_kind="reconcile_parallel_batch_results",
+                status="completed",
+                input_summary=f"section={unit_index + 1}/{len(state.source_units)}",
+                output_summary=(
+                    f"findings={len(findings)} registry={len(state.question_registry)}"
+                ),
+                metrics={
+                    "section_index": unit_index,
+                    "total_sections": len(state.source_units),
+                    "source_unit_key": unit.source_unit_key,
+                    "finding_count": len(findings),
+                    "registry_size": len(state.question_registry),
+                    "parallel_phase": True,
+                    "max_concurrency": self._parallel_section_concurrency,
+                },
+                source_unit_checkpoint=self._build_source_unit_checkpoint(
+                    state=state,
+                    unit=unit,
+                    findings=findings,
+                    merge_context=merge_context,
+                ),
+            )
+        return state
+
+    async def _run_final_reconciliation(
+        self,
+        *,
+        state: _CompilerState,
+    ) -> None:
+        await self._ensure_not_cancelled()
+        restored_processed_keys = set(
+            _text_tuple(
+                state.metrics.get("checkpoint_restored_processed_source_unit_keys")
+            )
+        )
+        representative_unit = next(
+            (
+                unit
+                for unit in reversed(state.source_units)
+                if unit.source_unit_key not in restored_processed_keys
+            ),
+            state.source_units[-1],
+        )
+        prompt = self._build_section_prompt(
+            stage_kind="finalize_retrieval_surface_graph",
+            prompt_file=FAQ_FINAL_RECONCILIATION_PROMPT_FILE,
+            state=state,
+            unit=representative_unit,
+            final_reconciliation=True,
+        )
+        _, content = await self._request_json(prompt=prompt, max_tokens=1200)
+        payload = _loads_json_object(content)
+        raw_warnings = payload.get("warnings")
+        if isinstance(raw_warnings, list):
+            for warning in _text_tuple(raw_warnings):
+                if warning not in state.warnings:
+                    state.warnings.append(warning)
+        state.metrics["final_reconciliation_prompt_used"] = True
+        state.metrics["final_reconciliation_payload_metrics"] = json_value_from_unknown(
+            _json_object(payload.get("metrics"))
+        )
+
+    def _finalize_retrieval_surface_graph(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        state: _CompilerState,
+    ) -> RetrievalSurfaceCompilationResult:
+        if not state.question_registry:
+            raise KnowledgePreprocessingValidationError(
+                "FAQ sectional registry compiler produced no publishable surfaces"
+            )
+
+        surfaces: list[RetrievalSurfaceDraft] = []
+        ownership: list[SurfaceQuestionOwnership] = []
+        relation_pairs: set[tuple[str, str, str]] = set()
+        relations: list[RetrievalSurfaceRelation] = []
+
+        for index, entry in enumerate(state.question_registry.values()):
+            if _is_role_label_surface(entry.title) or _is_role_label_surface(
+                entry.canonical_question
+            ):
+                continue
+
+            source_chunk_indexes = tuple(sorted(entry.source_chunk_indexes))
+            source_refs = tuple(entry.source_refs) or tuple(
+                f"chunk:{item}" for item in source_chunk_indexes
+            )
+            surfaces.append(
+                RetrievalSurfaceDraft(
+                    id=_stable_uuid(state.run_id, "surface", entry.registry_entry_key),
+                    run_id=state.run_id,
+                    document_id=state.source_units[0].document_id,
+                    local_surface_key=entry.registry_entry_key,
+                    title=entry.title,
+                    canonical_question=entry.canonical_question,
+                    surface_kind=entry.surface_kind,
+                    answer_scope=_limited_text(entry.answer_scope, max_chars=1000),
+                    question_scope=_limited_text(entry.question_scope, max_chars=1000),
+                    exclusion_scope=_limited_text(
+                        entry.exclusion_scope,
+                        max_chars=1000,
+                    ),
+                    answer=_limited_text(entry.answer, max_chars=3200),
+                    short_answer=_limited_text(entry.short_answer, max_chars=360),
+                    status="draft",
+                    publication_status="unpublished",
+                    source_refs=source_refs,
+                    source_excerpt=_limited_text(entry.answer, max_chars=1200),
+                    confidence=entry.confidence,
+                    warnings=tuple(entry.warnings),
+                    metadata={
+                        "compiler": FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+                        "sectional_registry": True,
+                        "registry_entry_key": entry.registry_entry_key,
+                        "question_variants": json_value_from_unknown(
+                            entry.question_variants
+                        ),
+                        "evidence_quotes": json_value_from_unknown(
+                            entry.evidence_quotes
+                        ),
+                        "source_unit_keys": json_value_from_unknown(
+                            entry.source_unit_keys
+                        ),
+                        "role_label_metadata": entry.role_label_metadata,
+                        "duplicate_keys": json_value_from_unknown(entry.duplicate_keys),
+                    },
+                    source_chunk_indexes=source_chunk_indexes,
+                )
+            )
+            ownership.append(
+                SurfaceQuestionOwnership(
+                    id=_stable_uuid(
+                        state.run_id,
+                        "ownership",
+                        entry.registry_entry_key,
+                        entry.canonical_question,
+                    ),
+                    run_id=state.run_id,
+                    document_id=state.source_units[0].document_id,
+                    question=entry.canonical_question,
+                    owner_surface_key=entry.registry_entry_key,
+                    question_kind="faq_question",
+                    confidence=entry.confidence,
+                    reason="sectional_registry_owner",
+                    rejected_from_surface_keys=(),
+                )
+            )
+            for variant in entry.question_variants:
+                if _is_role_label_surface(variant):
+                    continue
+                ownership.append(
+                    SurfaceQuestionOwnership(
+                        id=_stable_uuid(
+                            state.run_id,
+                            "ownership",
+                            entry.registry_entry_key,
+                            variant,
+                        ),
+                        run_id=state.run_id,
+                        document_id=state.source_units[0].document_id,
+                        question=variant,
+                        owner_surface_key=entry.registry_entry_key,
+                        question_kind="generated_variant",
+                        confidence=entry.confidence,
+                        reason="sectional_registry_variant",
+                        rejected_from_surface_keys=(),
+                    )
+                )
+
+            for parent_key in entry.parent_keys:
+                relation_pairs.add(
+                    (parent_key, entry.registry_entry_key, "umbrella_contains")
+                )
+            for child_key in entry.child_keys:
+                relation_pairs.add(
+                    (entry.registry_entry_key, child_key, "umbrella_contains")
+                )
+
+        surface_keys = {surface.local_surface_key for surface in surfaces}
+        for index, (parent_key, child_key, relation_type) in enumerate(
+            sorted(relation_pairs)
+        ):
+            if parent_key not in surface_keys or child_key not in surface_keys:
+                continue
+            relations.append(
+                RetrievalSurfaceRelation(
+                    id=_stable_uuid(
+                        state.run_id, "relation", index, parent_key, child_key
+                    ),
+                    run_id=state.run_id,
+                    document_id=state.source_units[0].document_id,
+                    parent_surface_key=parent_key,
+                    child_surface_key=child_key,
+                    relation_type=cast(SurfaceRelationType, relation_type),
+                    reason="sectional_registry_relation",
+                    confidence=0.75,
+                    source_refs=(),
+                )
+            )
+
+        metrics: JsonObject = {
+            **{
+                key: json_value_from_unknown(value)
+                for key, value in state.metrics.items()
+            },
+            "source_unit_count": len(state.source_units),
+            "processed_source_unit_count": len(state.processed_source_unit_keys),
+            "pending_source_unit_count": len(state.pending_source_unit_keys),
+            "surface_count": len(surfaces),
+            "relation_count": len(relations),
+            "ownership_count": len(ownership),
+            "merge_decision_count": len(state.merge_decisions),
+            "warning_count": len(state.warnings),
+            "role_label_surfaces_forbidden": True,
+            "deterministic_registry_merge": True,
+            "llm_registry_merge_advisory_only": True,
+            "json_contract": "registry_updates_advisory",
+            "graph_nodes": json_value_from_unknown(
+                [
+                    "initialize_registry",
+                    "process_seed_section",
+                    "match_section_against_registry",
+                    "discover_section_findings",
+                    "merge_section_findings_into_registry",
+                    "process_parallel_section_batch",
+                    "reconcile_parallel_batch_results",
+                    "finalize_retrieval_surface_graph",
+                ]
+            ),
+        }
+
+        graph = RetrievalSurfaceGraph(
+            run_id=state.run_id,
+            document_id=state.source_units[0].document_id,
+            source_units=state.source_units,
+            surfaces=tuple(surfaces),
+            relations=tuple(relations),
+            ownership=tuple(ownership),
+            reassignments=(),
+            merge_decisions=tuple(state.merge_decisions),
+            metrics=metrics,
+        )
+        return RetrievalSurfaceCompilationResult(
+            mode=mode,
+            prompt_version=FAQ_RETRIEVAL_SURFACE_COMPILATION_PROMPT_VERSION,
+            model=state.model,
+            graph=graph,
+            metrics=metrics,
+        )
+
+    async def _execute_sectional_registry_stategraph(
+        self,
+        *,
+        mode: KnowledgePreprocessingMode,
+        source_units: Sequence[RetrievalSurfaceSourceUnit],
+        file_name: str,
+        run_id: str,
+    ) -> RetrievalSurfaceCompilationResult:
+        units = tuple(source_units)
+        state = self._initialize_registry(
+            source_units=units,
+            file_name=file_name,
+            run_id=run_id,
+        )
+        state = self._restore_checkpointed_state(state)
+
+        await self._ensure_not_cancelled()
+        await self._emit_progress(
+            stage_kind="initialize_registry",
+            status="completed",
+            input_summary=f"sections={len(units)}",
+            metrics={
+                "total_sections": len(units),
+                "seed_section_count": min(self._seed_section_count, len(units)),
+                "parallel_section_concurrency": self._parallel_section_concurrency,
+                "processed_source_unit_count": len(state.processed_source_unit_keys),
+                "pending_source_unit_count": len(state.pending_source_unit_keys),
+                "registry_size": len(state.question_registry),
+                "checkpoint_restore_mode": state.metrics.get(
+                    "checkpoint_restore_mode", "none"
+                ),
+                "langgraph_stategraph": True,
+            },
+        )
+
+        seed_units = units[: self._seed_section_count]
+        for unit_index, unit in enumerate(seed_units):
+            if unit.source_unit_key in state.processed_source_unit_keys:
+                continue
+            await self._ensure_not_cancelled()
+            state = await self._process_seed_section(
+                state=state,
+                unit_index=unit_index,
+                unit=unit,
+            )
+
+        remaining = tuple(
+            (unit_index, unit)
+            for unit_index, unit in enumerate(
+                units[self._seed_section_count :],
+                start=self._seed_section_count,
+            )
+            if unit.source_unit_key not in state.processed_source_unit_keys
+        )
+        for batch_start in range(0, len(remaining), self._parallel_section_concurrency):
+            await self._ensure_not_cancelled()
+            batch = remaining[
+                batch_start : batch_start + self._parallel_section_concurrency
+            ]
+            batch_results = await self._process_parallel_section_batch(
+                state=state,
+                batch=batch,
+            )
+            state = await self._reconcile_parallel_batch_results(
+                state=state,
+                batch_results=batch_results,
+            )
+
+        await self._run_final_reconciliation(state=state)
+        await self._ensure_not_cancelled()
+        result = self._finalize_retrieval_surface_graph(mode=mode, state=state)
+        await self._emit_progress(
+            stage_kind="finalize_retrieval_surface_graph",
+            status="completed",
+            output_summary=f"surfaces={len(result.graph.surfaces)}",
+            metrics=result.metrics,
+        )
+        return result
 
     async def compile_surfaces(
         self,
@@ -810,56 +2721,41 @@ class GroqKnowledgeSurfaceCompiler(KnowledgeSurfaceCompilerPort):
                 "FAQ surface compiler requires at least one source unit"
             )
 
-        prompt = self._build_prompt(
-            mode=mode,
-            source_units=source_units,
-            file_name=file_name,
-            run_id=run_id,
-        )
-        max_tokens = 6000
-        try:
-            request_model, content = await self._request_json(
-                prompt=prompt,
-                max_tokens=max_tokens,
+        async def initialize_registry(
+            graph_state: _LangGraphCompilerState,
+        ) -> _LangGraphCompilerState:
+            result = await self._execute_sectional_registry_stategraph(
+                mode=graph_state["mode"],
+                source_units=graph_state["source_units"],
+                file_name=str(graph_state["file_name"]),
+                run_id=str(graph_state["run_id"]),
             )
-            try:
-                return parse_surface_compilation_payload(
-                    content,
-                    mode=mode,
-                    model=request_model,
-                    run_id=run_id,
-                    document_id=source_units[0].document_id,
-                    source_units=source_units,
+            return {"result": result}
+
+        from langchain_core.runnables import RunnableLambda
+        from langgraph.graph import END, StateGraph
+
+        graph = StateGraph(_LangGraphCompilerState)
+        graph.add_node("initialize_registry", RunnableLambda(initialize_registry))
+        graph.set_entry_point("initialize_registry")
+        graph.add_edge("initialize_registry", END)
+        compiled_graph = graph.compile()
+
+        try:
+            final_state = await compiled_graph.ainvoke(
+                {
+                    "mode": mode,
+                    "source_units": tuple(source_units),
+                    "file_name": file_name,
+                    "run_id": run_id,
+                }
+            )
+            result = final_state.get("result")
+            if not isinstance(result, RetrievalSurfaceCompilationResult):
+                raise KnowledgePreprocessingValidationError(
+                    "FAQ StateGraph did not return RetrievalSurfaceCompilationResult"
                 )
-            except KnowledgePreprocessingValidationError as first_error:
-                repair_prompt = (
-                    f"{_load_instruction()}\n\n"
-                    "Repair the invalid JSON below. Return the same required contract only: "
-                    "surfaces[], relations[], question_ownership[], merge_decisions[]. "
-                    "Do not return fragments[]. Do not create bootstrap all-standalone surfaces.\n\n"
-                    f"VALIDATION_ERROR: {first_error}\n\nINVALID_JSON:\n{content}"
-                )
-                repair_model, repaired_content = await self._request_json(
-                    prompt=repair_prompt,
-                    max_tokens=max_tokens,
-                )
-                repaired = parse_surface_compilation_payload(
-                    repaired_content,
-                    mode=mode,
-                    model=repair_model,
-                    run_id=run_id,
-                    document_id=source_units[0].document_id,
-                    source_units=source_units,
-                )
-                metrics = dict(repaired.metrics)
-                metrics["json_repair_retry_count"] = 1
-                return RetrievalSurfaceCompilationResult(
-                    mode=repaired.mode,
-                    prompt_version=repaired.prompt_version,
-                    model=repaired.model,
-                    graph=repaired.graph,
-                    metrics=metrics,
-                )
+            return result
         except (
             APIConnectionError,
             APIError,
