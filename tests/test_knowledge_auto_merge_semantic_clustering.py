@@ -77,7 +77,9 @@ def _product_positioning_entries() -> tuple[KnowledgePreprocessingEntry, ...]:
 
 
 def test_same_intent_summary_candidates_form_cluster_before_cleanup() -> None:
-    cases = ars._answer_resolution_cases_from_entries(_product_positioning_entries())
+    cases = ars.build_answer_resolution_cases_from_entries(
+        _product_positioning_entries()
+    )
 
     assert len(cases) == 1
     assert len(cases[0].candidates) == 3
@@ -98,7 +100,7 @@ def test_same_intent_summary_survives_mechanical_cleanup_as_llm_case() -> None:
     assert len(cleanup.entries) == 2
     assert cleanup.metrics["deterministic_candidate_collapse_count"] == 1
 
-    cases = ars._answer_resolution_cases_from_entries(cleanup.entries)
+    cases = ars.build_answer_resolution_cases_from_entries(cleanup.entries)
 
     assert len(cases) == 1
     assert len(cases[0].candidates) == 2
@@ -115,13 +117,13 @@ def test_retighten_uses_same_intent_summary_candidate_generation() -> None:
         source_excerpts_by_entry=source_excerpts,
     )
 
-    retighten = retighten_helpers._deterministic_retighten_existing_document_plan(
+    retighten = retighten_helpers.plan_deterministic_existing_document_retighten(
         cleanup.entries
     )
 
     assert len(retighten.plan.entries) == 2
 
-    cases = ars._answer_resolution_cases_from_entries(retighten.plan.entries)
+    cases = ars.build_answer_resolution_cases_from_entries(retighten.plan.entries)
 
     assert len(cases) == 1
     assert len(cases[0].candidates) == 2

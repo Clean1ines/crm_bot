@@ -191,9 +191,9 @@ def test_ingestion_facade_no_longer_keeps_publication_aliases() -> None:
     )
 
     for marker in (
-        "_canonical_entries_from_preprocessing_result",
-        "_canonical_entries_from_raw_answer_candidates",
-        "_source_refs_for_compiled_answer_draft",
+        "canonical_entries_from_preprocessing_result",
+        "canonical_entries_from_raw_answer_candidates",
+        "build_source_refs_for_compiled_answer_draft",
         "_source_chunk_for_quote",
         "_final_publication_guard_collapse_exact_duplicates",
         "_merge_canonical_entries_structurally",
@@ -202,5 +202,5 @@ def test_ingestion_facade_no_longer_keeps_publication_aliases() -> None:
 
     assert "def canonical_entries_from_preprocessing_result(" in builder_source
     assert "def canonical_entries_from_raw_answer_candidates(" in builder_source
-    assert "def _source_refs_for_compiled_answer_draft(" in builder_source
+    assert "def build_source_refs_for_compiled_answer_draft(" in builder_source
     assert "def _final_publication_guard_collapse_exact_duplicates(" in builder_source

@@ -80,13 +80,13 @@ def test_kcd_stage_k7_retighten_plan_reads_existing_document_entries() -> None:
         retighten_source + "\n" + answer_resolution_source + "\n" + repository_source
     )
 
-    assert "_retighten_existing_document_plan" in retighten_source
-    assert "_deterministic_retighten_existing_document_plan" in retighten_source
+    assert "plan_existing_document_retighten" in retighten_source
+    assert "plan_deterministic_existing_document_retighten" in retighten_source
     assert (
         "current_entries = await repo.list_document_runtime_entries" in retighten_source
     )
-    assert "_preprocessing_entry_from_canonical_entry" in retighten_source
-    assert "_answer_resolution_cases_from_entries" in retighten_source
+    assert "build_preprocessing_entry_from_canonical_entry" in retighten_source
+    assert "build_answer_resolution_cases_from_entries" in retighten_source
     assert "llm_call_count" in retighten_source
 
     assert_any(

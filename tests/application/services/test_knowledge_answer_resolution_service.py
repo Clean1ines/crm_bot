@@ -8,9 +8,15 @@ import pytest
 from src.application.ports.knowledge_port import KnowledgePreprocessorPort
 from src.application.services.knowledge_answer_resolution_service import (
     KnowledgeAnswerResolutionService,
+)
+from src.application.services.knowledge_answer_resolution_service import (
     _answer_resolution_decision_is_publishable,
+)
+from src.application.services.knowledge_answer_resolution_service import (
     _apply_answer_resolution_decisions,
-    _reject_noisy_answer_resolution_decisions,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    reject_noisy_answer_resolution_decisions,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgeAnswerResolutionDecision,
@@ -60,7 +66,7 @@ def test_invalid_noisy_merge_is_rejected() -> None:
         canonical_answer="CRM bot. CRM bot. CRM bot. CRM bot. CRM bot. CRM bot.",
     )
 
-    filtered = _reject_noisy_answer_resolution_decisions((decision,))
+    filtered = reject_noisy_answer_resolution_decisions((decision,))
 
     assert len(filtered) == 1
     rejected = filtered[0]

@@ -21,7 +21,7 @@ def test_answer_resolution_progress_metrics_are_persisted_before_publication() -
         "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases"
     )
     publish_index = structured_source.index(
-        "canonical_entries = _canonical_entries_from_preprocessing_result"
+        "canonical_entries = canonical_entries_from_preprocessing_result"
     )
 
     assert progress_index < tighten_index < publish_index

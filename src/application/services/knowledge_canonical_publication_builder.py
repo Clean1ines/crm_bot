@@ -53,7 +53,7 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _answer_digest(
+def answer_digest(
     value: str,
     *,
     max_chars: int = KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS,
@@ -71,7 +71,7 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     for question in _text_tuple(entry.questions):
         if question:
             return question
-    return _answer_digest(entry.answer)
+    return answer_digest(entry.answer)
 
 
 def _metadata_text_tuple(metadata: Mapping[str, object], key: str) -> tuple[str, ...]:
@@ -160,7 +160,7 @@ def _canonical_entries_from_raw_answer_candidates(
 
 
 @dataclass(frozen=True, slots=True)
-class _CompiledAnswerEntryDraft:
+class CompiledAnswerEntryDraft:
     title: str
     answer: str
     source_excerpts: tuple[str, ...]
@@ -178,7 +178,7 @@ def _normalized_answer_topic_key(value: str) -> str:
     return " ".join(text.split())
 
 
-def _answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
+def build_answer_topic_key(entry: KnowledgePreprocessingEntry, *, index: int) -> str:
     title_key = _normalized_answer_topic_key(entry.title)
     question_key = _normalized_answer_topic_key(
         entry.canonical_question or _question_intent_primary_question(entry)
@@ -217,7 +217,7 @@ def _merge_int_tuple_values(*groups: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(result)
 
 
-def _merge_answer_text(left: str, right: str) -> str:
+def merge_answer_text(left: str, right: str) -> str:
     left_clean = _clean_optional_text(left)
     right_clean = _clean_optional_text(right)
 
@@ -236,7 +236,7 @@ def _merge_answer_text(left: str, right: str) -> str:
     if left_normalized and left_normalized in right_normalized:
         return right_clean
 
-    unit_merge = _merge_answer_units_deterministically(left_clean, right_clean)
+    unit_merge = merge_answer_units_deterministically(left_clean, right_clean)
     if unit_merge is not None:
         return _cleanup_answer_resolution_text(unit_merge.answer)
 
@@ -256,8 +256,8 @@ def _preprocessing_entry_to_compiled_draft(
     *,
     mode: KnowledgePreprocessingMode,
     index: int,
-) -> _CompiledAnswerEntryDraft:
-    return _CompiledAnswerEntryDraft(
+) -> CompiledAnswerEntryDraft:
+    return CompiledAnswerEntryDraft(
         title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
         answer=_clean_optional_text(entry.answer),
         source_excerpts=source_excerpts_from_preprocessing_entry(entry),
@@ -304,7 +304,7 @@ def _merge_compiled_source_refs(
 
 
 def _source_refs_from_compiled_answer_draft(
-    draft: _CompiledAnswerEntryDraft,
+    draft: CompiledAnswerEntryDraft,
     *,
     fallback_source_index: int,
 ) -> tuple[SourceRef, ...]:
@@ -323,9 +323,9 @@ def _source_refs_from_compiled_answer_draft(
 
 
 def _merge_compiled_answer_drafts(
-    left: _CompiledAnswerEntryDraft,
-    right: _CompiledAnswerEntryDraft,
-) -> _CompiledAnswerEntryDraft:
+    left: CompiledAnswerEntryDraft,
+    right: CompiledAnswerEntryDraft,
+) -> CompiledAnswerEntryDraft:
     left_indices = left.metadata.get("preprocessing_entry_indices")
     right_indices = right.metadata.get("preprocessing_entry_indices")
     merged_indices: list[int] = []
@@ -342,9 +342,9 @@ def _merge_compiled_answer_drafts(
     metadata["preprocessing_entry_indices"] = tuple(merged_indices)
     metadata["merged_preprocessing_entry_count"] = len(merged_indices)
 
-    return _CompiledAnswerEntryDraft(
+    return CompiledAnswerEntryDraft(
         title=left.title,
-        answer=_merge_answer_text(left.answer, right.answer),
+        answer=merge_answer_text(left.answer, right.answer),
         source_excerpts=_merge_text_tuple_values(
             left.source_excerpts,
             right.source_excerpts,
@@ -356,15 +356,15 @@ def _merge_compiled_answer_drafts(
         questions=_merge_text_tuple_values(left.questions, right.questions),
         synonyms=_merge_text_tuple_values(left.synonyms, right.synonyms),
         tags=_merge_text_tuple_values(left.tags, right.tags),
-        embedding_text=_merge_answer_text(left.embedding_text, right.embedding_text),
+        embedding_text=merge_answer_text(left.embedding_text, right.embedding_text),
         metadata=metadata,
     )
 
 
 def _compiled_answer_drafts_from_preprocessing_result(
     result: KnowledgePreprocessingResult,
-) -> tuple[_CompiledAnswerEntryDraft, ...]:
-    grouped: dict[str, _CompiledAnswerEntryDraft] = {}
+) -> tuple[CompiledAnswerEntryDraft, ...]:
+    grouped: dict[str, CompiledAnswerEntryDraft] = {}
     ordered_keys: list[str] = []
 
     for index, entry in enumerate(result.entries):
@@ -376,7 +376,7 @@ def _compiled_answer_drafts_from_preprocessing_result(
         if not draft.answer:
             continue
 
-        key = _answer_topic_key(entry, index=index)
+        key = build_answer_topic_key(entry, index=index)
         if key in grouped:
             grouped[key] = _merge_compiled_answer_drafts(grouped[key], draft)
             continue
@@ -434,9 +434,9 @@ def _source_chunk_for_quote(
     return source_chunks[0]
 
 
-def _source_refs_for_compiled_answer_draft(
+def build_source_refs_for_compiled_answer_draft(
     *,
-    draft: _CompiledAnswerEntryDraft,
+    draft: CompiledAnswerEntryDraft,
     source_chunks: Sequence[SourceChunk],
 ) -> tuple[SourceRef, ...]:
     refs: list[SourceRef] = []
@@ -626,7 +626,7 @@ def _canonical_entries_from_preprocessing_result(
     entries: list[CanonicalKnowledgeEntry] = []
 
     for index, draft in enumerate(drafts):
-        source_refs = _source_refs_for_compiled_answer_draft(
+        source_refs = build_source_refs_for_compiled_answer_draft(
             draft=draft,
             source_chunks=source_chunks,
         )
@@ -676,7 +676,7 @@ def _canonical_entries_from_preprocessing_result(
     return _final_publication_guard_collapse_exact_duplicates(entries)
 
 
-def _answer_resolution_text_fingerprint(value: str) -> str:
+def fingerprint_answer_resolution_text(value: str) -> str:
     return " ".join(
         re.sub(r"[^0-9a-zа-яё]+", " ", value.lower().replace("ё", "е")).split()
     )
@@ -704,7 +704,7 @@ class _DeterministicAnswerUnitMergeResult:
 
 
 def _answer_unit_fingerprint(value: str) -> str:
-    return _answer_resolution_text_fingerprint(value)
+    return fingerprint_answer_resolution_text(value)
 
 
 def _answer_units_by_fingerprint(value: str) -> dict[str, str]:
@@ -716,7 +716,7 @@ def _answer_units_by_fingerprint(value: str) -> dict[str, str]:
     return result
 
 
-def _merge_answer_units_deterministically(
+def merge_answer_units_deterministically(
     left: str,
     right: str,
     *,
@@ -803,7 +803,7 @@ def _cleanup_answer_resolution_text(value: str) -> str:
     fingerprints: list[str] = []
 
     for unit in units:
-        fingerprint = _answer_resolution_text_fingerprint(unit)
+        fingerprint = fingerprint_answer_resolution_text(unit)
         if not fingerprint:
             continue
 

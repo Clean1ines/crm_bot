@@ -23,7 +23,7 @@ from src.application.services.knowledge_answer_resolution_service import (
     KnowledgeAnswerResolutionService,
 )
 from src.application.services.knowledge_canonical_publication_builder import (
-    canonical_entries_from_preprocessing_result as _canonical_entries_from_preprocessing_result,
+    canonical_entries_from_preprocessing_result,
 )
 from src.application.services.knowledge_generated_entry_repair import (
     repair_generated_entry as _repair_generated_entry,
@@ -60,7 +60,7 @@ from src.application.services.knowledge_preprocessing_result_helpers import (
     source_excerpt_to_text,
 )
 from src.application.services.knowledge_retighten_planner import (
-    _existing_project_titles_for_answer_resolution,
+    list_existing_project_titles_for_answer_resolution,
 )
 from src.application.services.knowledge_stage_e_publication_helpers import (
     persist_stage_e_compiler_outputs,
@@ -587,7 +587,7 @@ class KnowledgeStructuredIngestionService:
                 source_excerpts_by_entry=source_excerpts_before_cleanup,
             )
             existing_project_titles = (
-                await _existing_project_titles_for_answer_resolution(
+                await list_existing_project_titles_for_answer_resolution(
                     repo=repo,
                     project_id=project_id,
                     document_id=document_id,
@@ -735,7 +735,7 @@ class KnowledgeStructuredIngestionService:
                     ],
                 },
             )
-            canonical_entries = _canonical_entries_from_preprocessing_result(
+            canonical_entries = canonical_entries_from_preprocessing_result(
                 project_id=project_id,
                 document_id=document_id,
                 compiler_run_id=compiler_run_id,

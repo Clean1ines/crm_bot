@@ -188,7 +188,7 @@ def test_knowledge_ingestion_service_is_stage_k_facade_after_split() -> None:
     assert "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases" not in (
         process_document_source
     )
-    assert "_canonical_entries_from_preprocessing_result" not in process_document_source
+    assert "canonical_entries_from_preprocessing_result" not in process_document_source
     assert "persist_stage_e_compiler_outputs" not in process_document_source
 
     # Compatibility aliases may remain at module level for older unit tests, but the
