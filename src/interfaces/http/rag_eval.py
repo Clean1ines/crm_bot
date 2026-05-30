@@ -8,12 +8,19 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from src.application.rag_eval.ports import RagEvalRetrieverPort
 from src.application.rag_eval.review_service import RagEvalReviewService
 from src.application.services.knowledge_edit_action_service import (
     KnowledgeEditActionExecutionResult,
     KnowledgeEditActionService,
 )
 from src.domain.project_plane.json_types import JsonValue
+from src.domain.project_plane.rag_eval_retrieval import (
+    RagEvalRetrievalMode,
+    normalize_rag_eval_retrieval_mode,
+    rag_eval_retrieval_metadata,
+    resolve_rag_eval_retrieval_policy,
+)
 from src.infrastructure.db.repositories.project import ProjectRepository
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
@@ -45,6 +52,7 @@ RAG_EVAL_PROGRESS_PAYLOAD_KEY = "rag_eval_progress"
 RAG_EVAL_CONTROL_PAYLOAD_KEY = "rag_eval_control"
 
 RagEvalModeValue = Literal["retrieval_eval", "answer_quality_eval"]
+RagEvalRetrievalModeValue = Literal["production_equivalent", "vector_debug"]
 
 ModeQuery = Annotated[
     str,
@@ -54,6 +62,18 @@ ModeQuery = Annotated[
             "answer_quality_eval additionally runs production answer generation and LLM judging."
         ),
         pattern="^(quick|standard|deep|paranoid|retrieval_eval|answer_quality_eval)$",
+    ),
+]
+
+
+RetrievalModeQuery = Annotated[
+    str,
+    Query(
+        description=(
+            "RAG eval retrieval mode. production_equivalent mirrors production "
+            "runtime retrieval; vector_debug checks vector-only embedding retrieval."
+        ),
+        pattern="^(production_equivalent|vector_debug|embedding_debug)$",
     ),
 ]
 
@@ -72,6 +92,12 @@ class RagEvalQuestionReviewRequest(BaseModel):
 
 class RagEvalQuestionEditRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
+
+
+class RagEvalRunRequest(BaseModel):
+    retrieval_mode: RagEvalRetrievalModeValue = Field(
+        default=RagEvalRetrievalMode.PRODUCTION_EQUIVALENT.value
+    )
 
 
 class DocumentHealth(TypedDict):
@@ -543,6 +569,7 @@ async def get_rag_eval_document_status(
 @router.post("/documents/{document_id}/run-full", status_code=status.HTTP_202_ACCEPTED)
 async def enqueue_full_rag_eval_for_document(
     document_id: str,
+    request: RagEvalRunRequest | None = None,
     current_user_id: str = Depends(get_current_user_id),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: ProjectRepository = Depends(get_project_repo),
@@ -574,12 +601,17 @@ async def enqueue_full_rag_eval_for_document(
             detail="Document has no retrieval surface entries",
         )
 
+    retrieval_mode = normalize_rag_eval_retrieval_mode(
+        request.retrieval_mode if request is not None else None
+    )
+
     payload: dict[str, JsonValue] = {
         "project_id": project_id,
         "document_id": resolved_document_id,
         "requested_by": current_user_id,
         "mode": "full_document",
         "eval_mode": "retrieval_eval",
+        "retrieval_mode": retrieval_mode.value,
         "retrieval_limit": 5,
     }
 
@@ -596,6 +628,7 @@ async def enqueue_full_rag_eval_for_document(
         "document": health,
         "mode": "full_document",
         "eval_mode": "retrieval_eval",
+        "retrieval_mode": retrieval_mode.value,
     }
 
 
@@ -603,6 +636,7 @@ async def enqueue_full_rag_eval_for_document(
 async def run_rag_eval_for_document(
     document_id: str,
     mode: ModeQuery = "retrieval_eval",
+    retrieval_mode: RetrievalModeQuery = RagEvalRetrievalMode.PRODUCTION_EQUIVALENT.value,
     current_user_id: str = Depends(get_current_user_id),
     pool: asyncpg.Pool = Depends(get_pool),
     project_repo: ProjectRepository = Depends(get_project_repo),
@@ -634,6 +668,10 @@ async def run_rag_eval_for_document(
         )
 
     eval_mode = _rag_eval_mode_from_query(mode)
+    retrieval_policy = resolve_rag_eval_retrieval_policy(
+        normalize_rag_eval_retrieval_mode(retrieval_mode)
+    )
+    retrieval_metadata = rag_eval_retrieval_metadata(retrieval_policy)
 
     # Lazy imports keep plain FastAPI app import light.
     from src.application.rag_eval.dataset_generator import LlmRagEvalDatasetGenerator
@@ -649,13 +687,20 @@ async def run_rag_eval_for_document(
     from src.infrastructure.rag_eval.adapters import (
         GroqRagEvalJsonLlmAdapter,
         RagServiceRagEvalRetriever,
+        VectorOnlyRagEvalRetriever,
     )
 
     knowledge_repo = KnowledgeRepository(pool)
-    rag_service = RAGService(
-        cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
-        query_expander=GroqQueryExpander(),
-    )
+    if retrieval_policy.mode == RagEvalRetrievalMode.VECTOR_DEBUG:
+        retriever: RagEvalRetrieverPort = VectorOnlyRagEvalRetriever(
+            cast(KnowledgeRuntimeRetrievalPort, knowledge_repo)
+        )
+    else:
+        rag_service = RAGService(
+            cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
+            query_expander=GroqQueryExpander(),
+        )
+        retriever = RagServiceRagEvalRetriever(rag_service)
     rag_eval_repo = RagEvalRepository(pool)
 
     question_llm = GroqRagEvalJsonLlmAdapter(
@@ -679,17 +724,19 @@ async def run_rag_eval_for_document(
             max_tokens=RAG_EVAL_JUDGE_MAX_TOKENS,
         )
         runner = RagEvalRunner(
-            retriever=RagServiceRagEvalRetriever(rag_service),
+            retriever=retriever,
             answerer=ProductionRagEvalAnswerer(),
             answer_judge=LlmRagEvalAnswerJudge(llm=judge_llm),
             mode=eval_mode,
             retrieval_limit=5,
+            retrieval_metadata=retrieval_metadata,
         )
     else:
         runner = RagEvalRunner(
-            retriever=RagServiceRagEvalRetriever(rag_service),
+            retriever=retriever,
             mode=eval_mode,
             retrieval_limit=5,
+            retrieval_metadata=retrieval_metadata,
         )
 
     service = RagEvalService(
@@ -710,6 +757,11 @@ async def run_rag_eval_for_document(
         "ok": True,
         "document": health,
         "mode": eval_mode,
+        "retrieval_mode": retrieval_policy.mode.value,
+        "retrieval_path": retrieval_policy.retrieval_path,
+        "query_expansion_enabled": retrieval_policy.query_expansion_enabled,
+        "runtime_equivalent": retrieval_policy.runtime_equivalent,
+        "diagnostic": retrieval_policy.diagnostic,
         "dataset_id": run.dataset_id,
         "run_id": run.id,
         "questions": len(run.results),
@@ -832,6 +884,12 @@ def _serialize_rag_eval_job(row: asyncpg.Record) -> dict[str, object]:
         "document_id": payload.get("document_id"),
         "requested_by": payload.get("requested_by"),
         "retrieval_limit": payload.get("retrieval_limit"),
+        "retrieval_mode": payload.get("retrieval_mode"),
+        "retrieval_path": (
+            safe_progress.get("retrieval_path")
+            if safe_progress
+            else payload.get("retrieval_path")
+        ),
         "progress_kind": "worker_payload_heartbeat"
         if safe_progress
         else "queue_coarse",

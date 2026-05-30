@@ -47,6 +47,23 @@ def _all_retrieval_eval(results: list[RagEvalResult]) -> bool:
     )
 
 
+def _retrieval_metrics(results: list[RagEvalResult]) -> JsonObject:
+    keys = (
+        "retrieval_mode",
+        "retrieval_path",
+        "query_expansion_enabled",
+        "runtime_equivalent",
+        "diagnostic",
+    )
+    for result in results:
+        metrics = {
+            key: result.judge_json[key] for key in keys if key in result.judge_json
+        }
+        if metrics:
+            return metrics
+    return {}
+
+
 class RagQualityReporter:
     def build_report(self, *, run: RagEvalRun) -> RagQualityReport:
         metrics = self._metrics(run.results)
@@ -101,6 +118,8 @@ class RagQualityReporter:
             _result_mode(result) == "retrieval_eval" for result in results
         )
 
+        retrieval_metrics = _retrieval_metrics(results)
+
         return {
             "score": round(sum(result.score for result in results) / total * 100, 2),
             "total": total,
@@ -133,6 +152,7 @@ class RagQualityReporter:
             "by_question_type": dict(
                 Counter(result.question.question_type for result in results)
             ),
+            **retrieval_metrics,
         }
 
     def _readiness(self, score: float, results: list[RagEvalResult]) -> str:

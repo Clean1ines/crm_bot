@@ -18,6 +18,7 @@ from src.application.rag_eval.dataset_generator import (
 from src.application.rag_eval.reporter import RagQualityReporter
 from src.application.rag_eval.runner import RagEvalRunner, RagEvalTechnicalAnswerError
 from src.application.rag_eval.service import RagEvalService
+from src.application.rag_eval.ports import RagEvalRetrieverPort
 from src.application.rag_eval.schemas import RagEvalRun, RagQualityReport, new_eval_id
 from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
@@ -26,10 +27,17 @@ from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.llm.groq_keyring import has_configured_groq_api_key
+from src.domain.project_plane.rag_eval_retrieval import (
+    RagEvalRetrievalMode,
+    normalize_rag_eval_retrieval_mode,
+    rag_eval_retrieval_metadata,
+    resolve_rag_eval_retrieval_policy,
+)
 from src.infrastructure.rag_eval.adapters import (
     FallbackRagEvalJsonLlmAdapter,
     GroqRagEvalJsonLlmAdapter,
     RagServiceRagEvalRetriever,
+    VectorOnlyRagEvalRetriever,
 )
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
 
@@ -52,6 +60,21 @@ def _rag_eval_mode_from_payload(value: object) -> RagEvalModeValue:
     if str(value or "").strip().lower() == "answer_quality_eval":
         return "answer_quality_eval"
     return "retrieval_eval"
+
+
+def _build_rag_eval_retriever(
+    *,
+    knowledge_repo: KnowledgeRuntimeRetrievalPort,
+    retrieval_mode: RagEvalRetrievalMode,
+) -> RagEvalRetrieverPort:
+    if retrieval_mode == RagEvalRetrievalMode.VECTOR_DEBUG:
+        return VectorOnlyRagEvalRetriever(knowledge_repo)
+
+    rag_service = RAGService(
+        knowledge_repo,
+        query_expander=GroqQueryExpander(),
+    )
+    return RagServiceRagEvalRetriever(rag_service)
 
 
 def _json_metric_int(value: object) -> int:
@@ -600,11 +623,15 @@ async def _run_full_document_rag_eval(
         maximum=6144,
     )
     eval_mode = _rag_eval_mode_from_payload(payload.get("eval_mode"))
+    retrieval_policy = resolve_rag_eval_retrieval_policy(
+        normalize_rag_eval_retrieval_mode(payload.get("retrieval_mode"))
+    )
+    retrieval_metadata = rag_eval_retrieval_metadata(retrieval_policy)
 
     knowledge_repo = KnowledgeRepository(db_pool)
-    rag_service = RAGService(
-        cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
-        query_expander=GroqQueryExpander(),
+    retriever = _build_rag_eval_retriever(
+        knowledge_repo=cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
+        retrieval_mode=retrieval_policy.mode,
     )
 
     question_llm = GroqRagEvalJsonLlmAdapter(
@@ -663,17 +690,19 @@ async def _run_full_document_rag_eval(
             max_tokens=judge_max_tokens,
         )
         runner = RagEvalRunner(
-            retriever=RagServiceRagEvalRetriever(rag_service),
+            retriever=retriever,
             answerer=ProductionRagEvalAnswerer(),
             answer_judge=LlmRagEvalAnswerJudge(llm=judge_llm),
             mode=eval_mode,
             retrieval_limit=retrieval_limit,
+            retrieval_metadata=retrieval_metadata,
         )
     else:
         runner = RagEvalRunner(
-            retriever=RagServiceRagEvalRetriever(rag_service),
+            retriever=retriever,
             mode=eval_mode,
             retrieval_limit=retrieval_limit,
+            retrieval_metadata=retrieval_metadata,
         )
 
     service = RagEvalService(
@@ -701,6 +730,7 @@ async def _run_full_document_rag_eval(
         "target_questions": full_document_target,
         "retrieval_limit": retrieval_limit,
         "eval_mode": eval_mode,
+        **retrieval_metadata,
         "question_model": RAG_EVAL_QUESTION_MODEL,
         "question_fallback_model": RAG_EVAL_QUESTION_FALLBACK_MODEL,
         "entries_total": source_entry_count,

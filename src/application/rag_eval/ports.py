@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from src.application.rag_eval.schemas import (
@@ -63,6 +63,17 @@ class RagEvalRetrieverPort(Protocol):
         question: str,
         limit: int,
     ) -> list[RagEvalEvidenceEntry]: ...
+
+
+class RagEvalSearchWithExpansionPort(Protocol):
+    async def search_with_expansion(
+        self,
+        project_id: str,
+        query: str,
+        thread_id: str | None = None,
+        limit_per_query: int | None = None,
+        final_limit: int | None = None,
+    ) -> Sequence[Mapping[str, object]]: ...
 
 
 class RagEvalAnswererPort(Protocol):

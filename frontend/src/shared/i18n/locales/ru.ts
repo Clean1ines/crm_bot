@@ -1138,4 +1138,11 @@ export const ru: TranslationDictionary = {
   'knowledge.reviewInbox.action.openDocuments': 'Открыть документы',
   'knowledge.reviewInbox.action.uploadDocument': 'Загрузить документ',
 
+  'ragEval.retrievalMode.label': 'Режим retrieval',
+  'ragEval.retrievalMode.productionEquivalent.label': 'Как в продакшне',
+  'ragEval.retrievalMode.productionEquivalent.description': 'Проверяет то, как бот реально будет искать ответы: production-safe surface, hybrid retrieval и текущий runtime-equivalent путь.',
+  'ragEval.retrievalMode.vectorDebug.label': 'Только embeddings / vector debug',
+  'ragEval.retrievalMode.vectorDebug.description': 'Диагностирует качество embedding_text и vector similarity без lexical/hybrid эффектов, query expansion и production rerank.',
+  'ragEval.progress.stats.retrievalMode': 'Режим retrieval',
+  'ragEval.progress.stats.retrievalPath': 'Retrieval path',
 };

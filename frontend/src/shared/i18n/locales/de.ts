@@ -1139,4 +1139,11 @@ export const de: TranslationDictionary = {
   'knowledge.reviewInbox.action.openDocuments': 'Dokumente öffnen',
   'knowledge.reviewInbox.action.uploadDocument': 'Dokument hochladen',
 
+  'ragEval.retrievalMode.label': 'Retrieval-Modus',
+  'ragEval.retrievalMode.productionEquivalent.label': 'Wie in Produktion',
+  'ragEval.retrievalMode.productionEquivalent.description': 'Prüft, wie der Bot Antworten tatsächlich sucht: production-safe Surface, Hybrid-Retrieval und aktueller runtime-equivalent Pfad.',
+  'ragEval.retrievalMode.vectorDebug.label': 'Nur Embeddings / Vector Debug',
+  'ragEval.retrievalMode.vectorDebug.description': 'Diagnostiziert embedding_text und Vector-Similarity ohne lexical/hybrid Effekte, Query Expansion oder Production Rerank.',
+  'ragEval.progress.stats.retrievalMode': 'Retrieval-Modus',
+  'ragEval.progress.stats.retrievalPath': 'Retrieval-Pfad',
 };
