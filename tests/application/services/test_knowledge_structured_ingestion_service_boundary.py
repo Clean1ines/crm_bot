@@ -35,7 +35,7 @@ def test_structured_ingestion_service_contains_non_faq_processing_flow() -> None
     assert "build_technical_chunk_batches_for_answer_compiler" in source
     assert "build_raw_answer_candidates_from_preprocessing_entries" in source
     assert "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases" in source
-    assert "_canonical_entries_from_preprocessing_result" in source
+    assert "canonical_entries_from_preprocessing_result" in source
     assert "persist_stage_e_compiler_outputs" in source
     assert "PREPROCESSING_STATUS_COMPLETED" in source
     assert "PREPROCESSING_STATUS_FAILED" in source
@@ -82,7 +82,7 @@ def test_ingestion_process_document_is_wrapper_around_structured_service() -> No
         "process_compiler_batch",
         "build_technical_chunk_batches_for_answer_compiler",
         "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases",
-        "_canonical_entries_from_preprocessing_result",
+        "canonical_entries_from_preprocessing_result",
         "persist_stage_e_compiler_outputs",
         "CommercialPriceIngestionService",
     )

@@ -7,15 +7,27 @@ from collections.abc import (
 )
 from dataclasses import dataclass
 from src.application.services.knowledge_answer_resolution_service import (
-    _answer_resolution_text_fingerprint,
-    _answer_resolution_token_similarity,
-    _answer_resolution_tokens_from_text,
-    _cleanup_answer_resolution_text_with_metrics,
-    _merge_answer_text,
-    _merge_answer_units_deterministically,
-    _merge_entry_fields_deterministically,
+    fingerprint_answer_resolution_text,
 )
-from src.application.services.knowledge_generated_entry_repair import _answer_digest
+from src.application.services.knowledge_answer_resolution_service import (
+    calculate_answer_resolution_token_similarity,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    tokenize_answer_resolution_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    cleanup_answer_resolution_text_with_metrics,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    merge_answer_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    merge_answer_units_deterministically,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    merge_entry_fields_deterministically,
+)
+from src.application.services.knowledge_generated_entry_repair import answer_digest
 from src.domain.project_plane.json_types import (
     JsonObject,
     JsonValue,
@@ -54,19 +66,19 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     for question in _text_tuple(entry.questions):
         if question:
             return question
-    return _answer_digest(entry.answer)
+    return answer_digest(entry.answer)
 
 
 def _question_intent_tokens_from_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _answer_resolution_tokens_from_text(
+    return tokenize_answer_resolution_text(
         " ".join(
             part
             for part in (
                 _question_intent_primary_question(entry),
                 " ".join(_text_tuple(entry.questions)),
-                _answer_digest(entry.answer),
+                answer_digest(entry.answer),
             )
             if part
         )
@@ -148,14 +160,14 @@ def cleanup_compiled_entries_mechanically(
         cleaned_entries, cleaned_source_excerpts, strict=True
     ):
         source_fingerprint = " | ".join(
-            _answer_resolution_text_fingerprint(excerpt)
+            fingerprint_answer_resolution_text(excerpt)
             for excerpt in entry_source_excerpts
-            if _answer_resolution_text_fingerprint(excerpt)
+            if fingerprint_answer_resolution_text(excerpt)
         )
         exact_key = (
-            _answer_resolution_text_fingerprint(entry.title),
-            _answer_resolution_text_fingerprint(entry.canonical_question),
-            _answer_resolution_text_fingerprint(entry.answer),
+            fingerprint_answer_resolution_text(entry.title),
+            fingerprint_answer_resolution_text(entry.canonical_question),
+            fingerprint_answer_resolution_text(entry.answer),
             source_fingerprint,
         )
         existing_index = index_by_exact_key.get(exact_key)
@@ -184,7 +196,7 @@ def cleanup_compiled_entries_mechanically(
 
         existing_entry = retained_entries[existing_index]
         if deterministic_reason == "exact_candidate_key":
-            merged_entry = _merge_entry_fields_deterministically(
+            merged_entry = merge_entry_fields_deterministically(
                 existing_entry=existing_entry,
                 incoming_entry=entry,
                 merged_answer=existing_entry.answer,
@@ -236,7 +248,7 @@ def _entry_question_intent_fingerprints(
         _question_intent_primary_question(entry),
         *_text_tuple(entry.questions),
     ):
-        fingerprint = _answer_resolution_text_fingerprint(value)
+        fingerprint = fingerprint_answer_resolution_text(value)
         if fingerprint and fingerprint not in values:
             values.append(fingerprint)
     return tuple(values)
@@ -267,7 +279,7 @@ def _retighten_deduped_text_tuple(
         if not cleaned:
             continue
 
-        fingerprint = _answer_resolution_text_fingerprint(cleaned)
+        fingerprint = fingerprint_answer_resolution_text(cleaned)
         if not fingerprint:
             continue
 
@@ -288,8 +300,8 @@ def _retighten_entry_with_deduped_fields(
     synonyms, duplicate_synonym_count = _retighten_deduped_text_tuple(entry.synonyms)
     tags, duplicate_tag_count = _retighten_deduped_text_tuple(entry.tags)
 
-    answer_cleanup = _cleanup_answer_resolution_text_with_metrics(entry.answer)
-    embedding_cleanup = _cleanup_answer_resolution_text_with_metrics(
+    answer_cleanup = cleanup_answer_resolution_text_with_metrics(entry.answer)
+    embedding_cleanup = cleanup_answer_resolution_text_with_metrics(
         entry.embedding_text
     )
 
@@ -316,7 +328,7 @@ def _retighten_entry_with_deduped_fields(
 def _retighten_entry_intent_fingerprint(
     entry: KnowledgePreprocessingEntry,
 ) -> str:
-    return _answer_resolution_text_fingerprint(
+    return fingerprint_answer_resolution_text(
         " ".join(
             part
             for part in (
@@ -331,7 +343,7 @@ def _retighten_entry_intent_fingerprint(
 
 
 def _retighten_answer_fingerprint(entry: KnowledgePreprocessingEntry) -> str:
-    return _answer_resolution_text_fingerprint(entry.answer)
+    return fingerprint_answer_resolution_text(entry.answer)
 
 
 def _retighten_answer_contains(
@@ -362,7 +374,7 @@ def _retighten_deterministic_duplicate_reason(
     left_intent = _retighten_entry_intent_fingerprint(left)
     right_intent = _retighten_entry_intent_fingerprint(right)
     if _entries_have_exact_question_intent(left, right):
-        answer_unit_merge = _merge_answer_units_deterministically(
+        answer_unit_merge = merge_answer_units_deterministically(
             left.answer,
             right.answer,
             allow_disjoint_union=True,
@@ -371,9 +383,9 @@ def _retighten_deterministic_duplicate_reason(
             return answer_unit_merge.strategy
 
     if left_intent and right_intent and left_intent == right_intent:
-        answer_score = _answer_resolution_token_similarity(
-            _answer_resolution_tokens_from_text(left.answer),
-            _answer_resolution_tokens_from_text(right.answer),
+        answer_score = calculate_answer_resolution_token_similarity(
+            tokenize_answer_resolution_text(left.answer),
+            tokenize_answer_resolution_text(right.answer),
         )
         if answer_score >= 0.72:
             return "exact_intent_high_answer_overlap"
@@ -403,7 +415,7 @@ def _retighten_merge_entries_deterministically(
     survivor = incoming_entry if incoming_score > existing_score else existing_entry
     absorbed = existing_entry if survivor is incoming_entry else incoming_entry
 
-    answer_unit_merge = _merge_answer_units_deterministically(
+    answer_unit_merge = merge_answer_units_deterministically(
         existing_entry.answer,
         incoming_entry.answer,
         allow_disjoint_union=reason == "same_intent_complementary_answer_unit_union",
@@ -417,11 +429,11 @@ def _retighten_merge_entries_deterministically(
     ):
         survivor_answer = survivor.answer
     else:
-        survivor_answer = _merge_answer_text(
+        survivor_answer = merge_answer_text(
             existing_entry.answer, incoming_entry.answer
         )
 
-    merged = _merge_entry_fields_deterministically(
+    merged = merge_entry_fields_deterministically(
         existing_entry=survivor,
         incoming_entry=absorbed,
         merged_answer=survivor_answer,

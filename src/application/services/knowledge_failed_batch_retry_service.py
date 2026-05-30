@@ -8,7 +8,7 @@ from src.application.services.knowledge_answer_compiler_batching import (
     build_technical_chunk_batches_for_answer_compiler,
 )
 from src.application.services.knowledge_canonical_publication_builder import (
-    canonical_entries_from_raw_answer_candidates as _canonical_entries_from_raw_answer_candidates,
+    canonical_entries_from_raw_answer_candidates,
 )
 from src.application.ports.knowledge_port import (
     KnowledgePreprocessorFactoryPort,
@@ -213,7 +213,7 @@ class KnowledgeFailedBatchRetryService:
         canonical_entries: tuple[CanonicalKnowledgeEntry, ...] = ()
 
         if all_batches_completed:
-            canonical_entries = _canonical_entries_from_raw_answer_candidates(
+            canonical_entries = canonical_entries_from_raw_answer_candidates(
                 project_id=project_id,
                 document_id=document_id,
                 compiler_run_id=updated_batches[0].compiler_run_id,

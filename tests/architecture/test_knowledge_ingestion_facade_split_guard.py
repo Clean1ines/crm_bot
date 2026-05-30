@@ -296,3 +296,138 @@ def test_application_services_do_not_import_old_private_compiled_cleanup_helpers
                     offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
 
     assert offenders == []
+
+
+def test_application_services_do_not_alias_canonical_publication_builders_to_private_names() -> (
+    None
+):
+    module = "src.application.services.knowledge_canonical_publication_builder"
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module != module:
+                continue
+            for alias in node.names:
+                if alias.asname and alias.asname.startswith("_canonical_entries_from"):
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{alias.name} as {alias.asname}"
+                    )
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_retighten_planner_api() -> None:
+    forbidden_names = {
+        "_preprocessing_" + "entry_from_canonical_entry",
+        "_deterministic_" + "retighten_existing_document_plan",
+        "_retighten_" + "existing_document_plan",
+        "_compose_" + "retighten_existing_document_plans",
+        "_existing_" + "project_titles_for_answer_resolution",
+        "_retighten_" + "updated_canonical_entries",
+        "_retighten_" + "archived_entry_ids",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module != "src.application.services.knowledge_retighten_planner":
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_answer_resolution_api() -> None:
+    module = "src.application.services.knowledge_answer_resolution_service"
+    forbidden_names = {
+        "_answer_" + "resolution_cases_from_entries",
+        "_answer_" + "resolution_decision_is_too_noisy",
+        "_answer_" + "resolution_decisions_with_case_candidate_ids",
+        "_cleanup_" + "answer_resolution_text_with_metrics",
+        "_limit_" + "compiled_text",
+        "_reject_" + "noisy_answer_resolution_decisions",
+        "_answer_" + "resolution_text_fingerprint",
+        "_answer_" + "resolution_tokens_from_text",
+        "_answer_" + "resolution_token_similarity",
+        "_merge_" + "answer_text",
+        "_merge_" + "answer_units_deterministically",
+        "_merge_" + "entry_fields_deterministically",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module != module:
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_production_code_does_not_import_private_application_service_symbols() -> None:
+    scan_roots = (
+        ROOT / "src/application/services",
+        ROOT / "src/infrastructure/queue/handlers",
+    )
+
+    # Keep this empty by default. Add a tuple only for a consciously accepted,
+    # temporary exception with a follow-up task to remove it.
+    allowlist: set[tuple[str, str, str]] = set()
+
+    offenders: list[str] = []
+
+    for scan_root in scan_roots:
+        for path in sorted(scan_root.glob("*.py")):
+            if path.name == "__init__.py":
+                continue
+
+            relative_path = path.relative_to(ROOT).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.ImportFrom):
+                    continue
+                if node.module is None:
+                    continue
+                if not node.module.startswith("src.application.services."):
+                    continue
+
+                for alias in node.names:
+                    if alias.name == "*":
+                        offenders.append(
+                            f"{relative_path}: wildcard import from {node.module}"
+                        )
+                        continue
+
+                    if not alias.name.startswith("_"):
+                        continue
+                    if alias.name.startswith("__"):
+                        continue
+
+                    key = (relative_path, node.module, alias.name)
+                    if key in allowlist:
+                        continue
+
+                    rendered_import = alias.name
+                    if alias.asname:
+                        rendered_import += f" as {alias.asname}"
+
+                    offenders.append(
+                        f"{relative_path}: from {node.module} import {rendered_import}"
+                    )
+
+    assert offenders == []

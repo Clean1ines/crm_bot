@@ -64,7 +64,7 @@ def test_ingestion_keeps_only_publish_ready_wrapper() -> None:
         "returnawaitKnowledgeReadyAnswerPublicationService(self.pool).publish_ready_answers"
         in compact_method_slice
     )
-    assert "_canonical_entries_from_raw_answer_candidates" not in method_slice
+    assert "canonical_entries_from_raw_answer_candidates" not in method_slice
     assert "persist_stage_e_compiler_outputs" not in method_slice
     assert '"published_answer_count"' not in method_slice
     assert '"partial_publish"' not in method_slice

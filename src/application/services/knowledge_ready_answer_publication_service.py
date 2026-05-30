@@ -5,7 +5,7 @@ from src.application.ports.knowledge.ready_answer_publication import (
     KnowledgeReadyAnswerPublicationRepositoryFactoryPort,
 )
 from src.application.services.knowledge_canonical_publication_builder import (
-    canonical_entries_from_raw_answer_candidates as _canonical_entries_from_raw_answer_candidates,
+    canonical_entries_from_raw_answer_candidates,
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_stage_e_publication_helpers import (
@@ -88,7 +88,7 @@ class KnowledgeReadyAnswerPublicationService:
         canonical_entries = (
             runtime_entries
             if runtime_entries
-            else _canonical_entries_from_raw_answer_candidates(
+            else canonical_entries_from_raw_answer_candidates(
                 project_id=project_id,
                 document_id=document_id,
                 compiler_run_id=compiler_run_id,

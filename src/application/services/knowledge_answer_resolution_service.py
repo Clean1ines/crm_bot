@@ -86,7 +86,7 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _answer_digest(
+def answer_digest(
     value: str, *, max_chars: int = KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS
 ) -> str:
     text = _clean_optional_text(value)
@@ -102,7 +102,7 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     for question in _text_tuple(entry.questions):
         if question:
             return question
-    return _answer_digest(entry.answer)
+    return answer_digest(entry.answer)
 
 
 def json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
@@ -143,7 +143,7 @@ def _normalized_answer_topic_key(value: str) -> str:
     return " ".join(text.split())
 
 
-def _merge_answer_text(left: str, right: str) -> str:
+def merge_answer_text(left: str, right: str) -> str:
     left_clean = _clean_optional_text(left)
     right_clean = _clean_optional_text(right)
 
@@ -162,7 +162,7 @@ def _merge_answer_text(left: str, right: str) -> str:
     if left_normalized and left_normalized in right_normalized:
         return right_clean
 
-    unit_merge = _merge_answer_units_deterministically(left_clean, right_clean)
+    unit_merge = merge_answer_units_deterministically(left_clean, right_clean)
     if unit_merge is not None:
         return _cleanup_answer_resolution_text(unit_merge.answer)
 
@@ -182,7 +182,7 @@ def _merge_source_excerpt_text(
     return "\n\n".join(excerpts)
 
 
-def _limit_compiled_text(value: str, *, max_chars: int) -> str:
+def limit_compiled_text(value: str, *, max_chars: int) -> str:
     cleaned = _clean_optional_text(value)
     if len(cleaned) <= max_chars:
         return cleaned
@@ -196,19 +196,19 @@ def _merge_limited_text_tuple_values(
     return _merge_text_tuple_values(*groups)[:limit]
 
 
-def _merge_entry_fields_deterministically(
+def merge_entry_fields_deterministically(
     *,
     existing_entry: KnowledgePreprocessingEntry,
     incoming_entry: KnowledgePreprocessingEntry,
     merged_answer: str,
     merged_question_variants: tuple[str, ...] = (),
 ) -> KnowledgePreprocessingEntry:
-    answer = _limit_compiled_text(
+    answer = limit_compiled_text(
         merged_answer
-        or _merge_answer_text(existing_entry.answer, incoming_entry.answer),
+        or merge_answer_text(existing_entry.answer, incoming_entry.answer),
         max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
     )
-    source_excerpt = _limit_compiled_text(
+    source_excerpt = limit_compiled_text(
         _merge_source_excerpt_text(existing_entry, incoming_entry),
         max_chars=KCD_STAGE_K_MERGED_SOURCE_EXCERPT_MAX_CHARS,
     )
@@ -239,7 +239,7 @@ def _merge_entry_fields_deterministically(
         canonical_question=existing_entry.canonical_question
         or _question_intent_primary_question(existing_entry),
     )
-    embedding_text = _limit_compiled_text(
+    embedding_text = limit_compiled_text(
         build_embedding_text(compatibility_entry),
         max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
     )
@@ -283,7 +283,7 @@ def _answer_resolution_candidate_id(index: int) -> str:
     return f"entry-{index}"
 
 
-def _answer_resolution_candidate_index(candidate_id: str) -> int | None:
+def build_answer_resolution_candidate_index(candidate_id: str) -> int | None:
     prefix = "entry-"
     if not candidate_id.startswith(prefix):
         return None
@@ -295,7 +295,7 @@ def _answer_resolution_candidate_index(candidate_id: str) -> int | None:
     return int(raw_index)
 
 
-def _answer_resolution_tokens_from_text(value: str) -> tuple[str, ...]:
+def tokenize_answer_resolution_text(value: str) -> tuple[str, ...]:
     text = value.lower().replace("ё", "е")
     tokens = (
         token
@@ -320,10 +320,10 @@ def _answer_resolution_entry_text(entry: KnowledgePreprocessingEntry) -> str:
 def _answer_resolution_entry_tokens(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _answer_resolution_tokens_from_text(_answer_resolution_entry_text(entry))
+    return tokenize_answer_resolution_text(_answer_resolution_entry_text(entry))
 
 
-def _answer_resolution_token_similarity(
+def calculate_answer_resolution_token_similarity(
     left: tuple[str, ...],
     right: tuple[str, ...],
 ) -> float:
@@ -356,9 +356,9 @@ def _answer_resolution_primary_intent_tokens(
         entry.canonical_question or _question_intent_primary_question(entry)
     )
     if primary_intent:
-        return _answer_resolution_tokens_from_text(primary_intent)
+        return tokenize_answer_resolution_text(primary_intent)
 
-    return _answer_resolution_tokens_from_text(entry.title)
+    return tokenize_answer_resolution_text(entry.title)
 
 
 def _answer_resolution_same_intent_summary_score(
@@ -378,8 +378,8 @@ def _answer_resolution_same_intent_summary_score(
     if not left_answer or not right_answer:
         return 0.0
 
-    left_answer_tokens = _answer_resolution_tokens_from_text(left_answer)
-    right_answer_tokens = _answer_resolution_tokens_from_text(right_answer)
+    left_answer_tokens = tokenize_answer_resolution_text(left_answer)
+    right_answer_tokens = tokenize_answer_resolution_text(right_answer)
     if len(left_answer_tokens) < 4 or len(right_answer_tokens) < 4:
         return 0.0
 
@@ -429,7 +429,7 @@ def _answer_resolution_question_intent_text(entry: KnowledgePreprocessingEntry) 
 def _answer_resolution_question_intent_tokens(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
-    return _answer_resolution_tokens_from_text(
+    return tokenize_answer_resolution_text(
         _answer_resolution_question_intent_text(entry)
     )
 
@@ -450,15 +450,15 @@ def _answer_resolution_entry_pair_score(
     ):
         return 0.92
 
-    title_score = _answer_resolution_token_similarity(
-        _answer_resolution_tokens_from_text(left_title),
-        _answer_resolution_tokens_from_text(right_title),
+    title_score = calculate_answer_resolution_token_similarity(
+        tokenize_answer_resolution_text(left_title),
+        tokenize_answer_resolution_text(right_title),
     )
-    question_score = _answer_resolution_token_similarity(
+    question_score = calculate_answer_resolution_token_similarity(
         _answer_resolution_question_intent_tokens(left),
         _answer_resolution_question_intent_tokens(right),
     )
-    full_score = _answer_resolution_token_similarity(
+    full_score = calculate_answer_resolution_token_similarity(
         _answer_resolution_entry_tokens(left),
         _answer_resolution_entry_tokens(right),
     )
@@ -481,7 +481,7 @@ def _answer_resolution_limited_text_tuple(
 ) -> tuple[str, ...]:
     result: list[str] = []
     for item in _text_tuple(value):
-        cleaned = _limit_compiled_text(item, max_chars=max_chars)
+        cleaned = limit_compiled_text(item, max_chars=max_chars)
         if cleaned and cleaned not in result:
             result.append(cleaned)
         if len(result) >= limit:
@@ -498,11 +498,11 @@ def _answer_resolution_candidate_from_entry(
 
     return KnowledgeAnswerResolutionCandidate(
         candidate_id=_answer_resolution_candidate_id(index),
-        answer=_limit_compiled_text(
+        answer=limit_compiled_text(
             _clean_optional_text(entry.answer),
             max_chars=KCD_STAGE_K8_ANSWER_RESOLUTION_CANDIDATE_ANSWER_MAX_CHARS,
         ),
-        source_excerpt=_limit_compiled_text(
+        source_excerpt=limit_compiled_text(
             _merge_source_excerpt_text(entry),
             max_chars=KCD_STAGE_K8_ANSWER_RESOLUTION_CANDIDATE_ANSWER_MAX_CHARS,
         ),
@@ -521,7 +521,7 @@ def _answer_resolution_question_intent(
         for value in (primary, title):
             if value and value not in intent_parts:
                 intent_parts.append(value)
-    return _limit_compiled_text(
+    return limit_compiled_text(
         " / ".join(intent_parts),
         max_chars=280,
     )
@@ -613,7 +613,7 @@ def _answer_resolution_case_components_from_pairs(
     )
 
 
-def _answer_resolution_cases_from_entries(
+def build_answer_resolution_cases_from_entries(
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> tuple[KnowledgeAnswerResolutionCase, ...]:
     if len(entries) < 2:
@@ -654,7 +654,7 @@ def _answer_resolution_cases_from_entries(
     return tuple(cases)
 
 
-def _answer_resolution_survivor_index(
+def build_answer_resolution_survivor_index(
     *,
     decision: KnowledgeAnswerResolutionDecision,
     candidate_indexes: tuple[int, ...],
@@ -663,7 +663,7 @@ def _answer_resolution_survivor_index(
     return candidate_indexes[0]
 
 
-def _answer_resolution_text_fingerprint(value: str) -> str:
+def fingerprint_answer_resolution_text(value: str) -> str:
     return " ".join(
         re.sub(r"[^0-9a-zа-яё]+", " ", value.lower().replace("ё", "е")).split()
     )
@@ -681,7 +681,7 @@ def _answer_resolution_text_units(value: str) -> tuple[str, ...]:
 
 
 def _answer_unit_fingerprint(value: str) -> str:
-    return _answer_resolution_text_fingerprint(value)
+    return fingerprint_answer_resolution_text(value)
 
 
 def _answer_units_by_fingerprint(value: str) -> dict[str, str]:
@@ -693,7 +693,7 @@ def _answer_units_by_fingerprint(value: str) -> dict[str, str]:
     return result
 
 
-def _merge_answer_units_deterministically(
+def merge_answer_units_deterministically(
     left: str,
     right: str,
     *,
@@ -769,7 +769,7 @@ def _merge_answer_units_deterministically(
     )
 
 
-def _cleanup_answer_resolution_text_with_metrics(
+def cleanup_answer_resolution_text_with_metrics(
     value: str,
 ) -> _AnswerResolutionCleanupResult:
     units = _answer_resolution_text_units(value)
@@ -802,7 +802,7 @@ def _cleanup_answer_resolution_text(value: str) -> str:
     fingerprints: list[str] = []
 
     for unit in units:
-        fingerprint = _answer_resolution_text_fingerprint(unit)
+        fingerprint = fingerprint_answer_resolution_text(unit)
         if not fingerprint:
             continue
 
@@ -827,13 +827,13 @@ def _cleanup_answer_resolution_text(value: str) -> str:
     return _clean_optional_text(" ".join(kept))
 
 
-def _answer_resolution_decision_is_too_noisy(
+def is_noisy_answer_resolution_decision(
     decision: KnowledgeAnswerResolutionDecision,
 ) -> bool:
     if not decision.is_merge or not decision.canonical_answer:
         return False
 
-    cleanup = _cleanup_answer_resolution_text_with_metrics(decision.canonical_answer)
+    cleanup = cleanup_answer_resolution_text_with_metrics(decision.canonical_answer)
     if cleanup.original_unit_count < 3:
         return False
 
@@ -842,13 +842,13 @@ def _answer_resolution_decision_is_too_noisy(
     ) >= KCD_STAGE_K8_REJECT_MERGE_REMOVED_UNIT_RATIO
 
 
-def _reject_noisy_answer_resolution_decisions(
+def reject_noisy_answer_resolution_decisions(
     decisions: Sequence[KnowledgeAnswerResolutionDecision],
 ) -> tuple[KnowledgeAnswerResolutionDecision, ...]:
     filtered: list[KnowledgeAnswerResolutionDecision] = []
 
     for decision in decisions:
-        if not _answer_resolution_decision_is_too_noisy(decision):
+        if not is_noisy_answer_resolution_decision(decision):
             filtered.append(decision)
             continue
 
@@ -864,12 +864,12 @@ def _reject_noisy_answer_resolution_decisions(
     return tuple(filtered)
 
 
-def _entry_with_answer_resolution_decision(
+def apply_answer_resolution_decision_to_entry(
     *,
     entry: KnowledgePreprocessingEntry,
     decision: KnowledgeAnswerResolutionDecision,
 ) -> KnowledgePreprocessingEntry:
-    answer = _limit_compiled_text(
+    answer = limit_compiled_text(
         _clean_optional_text(decision.canonical_answer) or entry.answer,
         max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
     )
@@ -882,7 +882,7 @@ def _entry_with_answer_resolution_decision(
         tags=entry.tags,
         canonical_question=entry.canonical_question,
     )
-    embedding_text = _limit_compiled_text(
+    embedding_text = limit_compiled_text(
         build_embedding_text(compatibility_entry),
         max_chars=KCD_STAGE_K_MERGED_EMBEDDING_TEXT_MAX_CHARS,
     )
@@ -912,7 +912,7 @@ def _answer_resolution_decision_is_publishable(
 
     candidate_entries: list[KnowledgePreprocessingEntry] = []
     for candidate_id in decision.candidate_ids:
-        index = _answer_resolution_candidate_index(candidate_id)
+        index = build_answer_resolution_candidate_index(candidate_id)
         if index is None or index < 0 or index >= len(entries):
             continue
         candidate_entries.append(entries[index])
@@ -988,7 +988,7 @@ def _apply_answer_resolution_decisions(
 
         candidate_indexes: list[int] = []
         for candidate_id in decision.candidate_ids:
-            index = _answer_resolution_candidate_index(candidate_id)
+            index = build_answer_resolution_candidate_index(candidate_id)
             if index is None or index < 0 or index >= len(entries):
                 continue
             if index in candidate_indexes or index in removed_indexes:
@@ -999,7 +999,7 @@ def _apply_answer_resolution_decisions(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
-        survivor_index = _answer_resolution_survivor_index(
+        survivor_index = build_answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
             entries=entries,
@@ -1009,7 +1009,7 @@ def _apply_answer_resolution_decisions(
         for index in ordered_indexes:
             if index == survivor_index:
                 continue
-            merged_entry = _merge_entry_fields_deterministically(
+            merged_entry = merge_entry_fields_deterministically(
                 existing_entry=merged_entry,
                 incoming_entry=updated_entries[index],
                 merged_answer="",
@@ -1018,7 +1018,7 @@ def _apply_answer_resolution_decisions(
         merged_source_excerpts = _merge_text_tuple_values(
             *(updated_source_excerpts[index] for index in ordered_indexes)
         )
-        updated_entries[survivor_index] = _entry_with_answer_resolution_decision(
+        updated_entries[survivor_index] = apply_answer_resolution_decision_to_entry(
             entry=merged_entry,
             decision=decision,
         )
@@ -1072,7 +1072,7 @@ def _answer_resolution_trace_row(
     }
 
 
-def _answer_resolution_decisions_with_case_candidate_ids(
+def attach_case_candidate_ids_to_answer_resolution_decisions(
     *,
     answer_case: KnowledgeAnswerResolutionCase,
     decisions: Sequence[KnowledgeAnswerResolutionDecision],
@@ -1103,7 +1103,7 @@ async def _resolve_compiled_answer_cases(
     tuple[tuple[str, ...], ...],
     JsonObject,
 ]:
-    groups = _answer_resolution_cases_from_entries(entries)
+    groups = build_answer_resolution_cases_from_entries(entries)
     source_excerpts = tuple(source_excerpts_by_entry)
     if len(source_excerpts) != len(entries):
         source_excerpts = tuple(
@@ -1150,7 +1150,7 @@ async def _resolve_compiled_answer_cases(
                 existing_project_titles=existing_project_titles,
             )
             metrics["llm_call_count"] = json_metric_int(metrics, "llm_call_count") + 1
-            case_decisions = _answer_resolution_decisions_with_case_candidate_ids(
+            case_decisions = attach_case_candidate_ids_to_answer_resolution_decisions(
                 answer_case=group,
                 decisions=execution.result.decisions,
             )

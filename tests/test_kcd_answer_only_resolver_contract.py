@@ -6,9 +6,15 @@ import json
 import pytest
 
 from src.application.services.knowledge_answer_resolution_service import (
-    _answer_resolution_cases_from_entries,
-    _answer_resolution_decisions_with_case_candidate_ids,
+    build_answer_resolution_cases_from_entries,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    attach_case_candidate_ids_to_answer_resolution_decisions,
+)
+from src.application.services.knowledge_answer_resolution_service import (
     _apply_answer_resolution_decisions,
+)
+from src.application.services.knowledge_answer_resolution_service import (
     _resolve_compiled_answer_cases,
 )
 from src.application.services.knowledge_compiled_entry_cleanup import (
@@ -98,7 +104,7 @@ def test_answer_only_group_payload_excludes_entry_enrichment_and_retrieval_field
         embedding_text="Вернёте деньги Решение по возврату принимает менеджер.",
     )
 
-    groups = _answer_resolution_cases_from_entries((left, right))
+    groups = build_answer_resolution_cases_from_entries((left, right))
 
     assert len(groups) == 1
     payload = groups[0].to_payload()
@@ -139,7 +145,7 @@ def test_llm_prompt_payload_contains_only_answer_resolution_cases() -> None:
             embedding_text="another retrieval text must not leak",
         ),
     )
-    groups = _answer_resolution_cases_from_entries(entries)
+    groups = build_answer_resolution_cases_from_entries(entries)
     preprocessor = GroqKnowledgePreprocessor(client=object(), model="test-model")
 
     prompt = preprocessor._build_answer_resolution_prompt(
@@ -389,7 +395,7 @@ def test_answer_resolution_parser_rejects_candidate_ids_from_resolver_output() -
 
 
 def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
-    group = _answer_resolution_cases_from_entries(
+    group = build_answer_resolution_cases_from_entries(
         (
             _entry(
                 title="Возврат",
@@ -410,7 +416,7 @@ def test_answer_only_case_id_is_mapped_back_to_original_candidate_ids() -> None:
         canonical_answer="Итоговый ответ.",
     )
 
-    mapped = _answer_resolution_decisions_with_case_candidate_ids(
+    mapped = attach_case_candidate_ids_to_answer_resolution_decisions(
         answer_case=group,
         decisions=(decision,),
     )

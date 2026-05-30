@@ -19,7 +19,7 @@ def _clean_optional_text(value: object) -> str:
     return " ".join(value.strip().split())
 
 
-def _answer_digest(
+def answer_digest(
     value: str,
     *,
     max_chars: int = KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS,
@@ -31,7 +31,7 @@ def _answer_digest(
     return trimmed or text[:max_chars].strip()
 
 
-def _answer_resolution_tokens_from_text(value: str) -> tuple[str, ...]:
+def tokenize_answer_resolution_text(value: str) -> tuple[str, ...]:
     text = value.lower().replace("ё", "е")
     tokens = (
         token
@@ -42,8 +42,8 @@ def _answer_resolution_tokens_from_text(value: str) -> tuple[str, ...]:
 
 
 def _source_answer_coverage_ratio(answer: str, source_excerpt: str) -> float:
-    answer_tokens = set(_answer_resolution_tokens_from_text(answer))
-    source_tokens = set(_answer_resolution_tokens_from_text(source_excerpt))
+    answer_tokens = set(tokenize_answer_resolution_text(answer))
+    source_tokens = set(tokenize_answer_resolution_text(source_excerpt))
     if not source_tokens:
         return 1.0
     if not answer_tokens:
@@ -199,7 +199,7 @@ def repair_generated_entry(
         repaired_source_excerpt = _clean_optional_text(source_excerpt)
         warnings.append("generated_source_excerpt_empty_after_repair_warning")
     if not repaired_answer:
-        fallback_answer = _answer_digest(repaired_source_excerpt or source_excerpt)
+        fallback_answer = answer_digest(repaired_source_excerpt or source_excerpt)
         repaired_answer = fallback_answer
         warnings.append("generated_answer_empty_after_repair_warning")
 

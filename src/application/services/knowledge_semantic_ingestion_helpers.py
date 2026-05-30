@@ -10,11 +10,11 @@ from src.application.services.knowledge_answer_compiler_batching import (
     KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL,
 )
 from src.application.services.knowledge_answer_resolution_service import (
-    _merge_answer_text,
+    merge_answer_text,
 )
 from src.application.services.knowledge_canonical_publication_builder import (
-    _CompiledAnswerEntryDraft,
-    _answer_topic_key,
+    CompiledAnswerEntryDraft,
+    build_answer_topic_key,
 )
 from src.application.services.knowledge_source_material_builder import chunk_content
 from src.domain.project_plane.embedding_text import CANONICAL_EMBEDDING_TEXT_VERSION
@@ -454,8 +454,8 @@ def _preprocessing_entry_to_compiled_draft(
     *,
     mode: KnowledgePreprocessingMode,
     index: int,
-) -> _CompiledAnswerEntryDraft:
-    return _CompiledAnswerEntryDraft(
+) -> CompiledAnswerEntryDraft:
+    return CompiledAnswerEntryDraft(
         title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
         answer=_clean_optional_text(entry.answer),
         source_excerpts=source_excerpts_from_preprocessing_entry(entry),
@@ -502,9 +502,9 @@ def _merge_compiled_source_refs(
 
 
 def _merge_compiled_answer_drafts(
-    left: _CompiledAnswerEntryDraft,
-    right: _CompiledAnswerEntryDraft,
-) -> _CompiledAnswerEntryDraft:
+    left: CompiledAnswerEntryDraft,
+    right: CompiledAnswerEntryDraft,
+) -> CompiledAnswerEntryDraft:
     left_indices = left.metadata.get("preprocessing_entry_indices")
     right_indices = right.metadata.get("preprocessing_entry_indices")
     merged_indices: list[int] = []
@@ -521,9 +521,9 @@ def _merge_compiled_answer_drafts(
     metadata["preprocessing_entry_indices"] = tuple(merged_indices)
     metadata["merged_preprocessing_entry_count"] = len(merged_indices)
 
-    return _CompiledAnswerEntryDraft(
+    return CompiledAnswerEntryDraft(
         title=left.title,
-        answer=_merge_answer_text(left.answer, right.answer),
+        answer=merge_answer_text(left.answer, right.answer),
         source_excerpts=_merge_text_tuple_values(
             left.source_excerpts,
             right.source_excerpts,
@@ -535,15 +535,15 @@ def _merge_compiled_answer_drafts(
         questions=_merge_text_tuple_values(left.questions, right.questions),
         synonyms=_merge_text_tuple_values(left.synonyms, right.synonyms),
         tags=_merge_text_tuple_values(left.tags, right.tags),
-        embedding_text=_merge_answer_text(left.embedding_text, right.embedding_text),
+        embedding_text=merge_answer_text(left.embedding_text, right.embedding_text),
         metadata=metadata,
     )
 
 
 def _compiled_answer_drafts_from_preprocessing_result(
     result: KnowledgePreprocessingResult,
-) -> tuple[_CompiledAnswerEntryDraft, ...]:
-    grouped: dict[str, _CompiledAnswerEntryDraft] = {}
+) -> tuple[CompiledAnswerEntryDraft, ...]:
+    grouped: dict[str, CompiledAnswerEntryDraft] = {}
     ordered_keys: list[str] = []
 
     for index, entry in enumerate(result.entries):
@@ -555,7 +555,7 @@ def _compiled_answer_drafts_from_preprocessing_result(
         if not draft.answer:
             continue
 
-        key = _answer_topic_key(entry, index=index)
+        key = build_answer_topic_key(entry, index=index)
         if key in grouped:
             grouped[key] = _merge_compiled_answer_drafts(grouped[key], draft)
             continue

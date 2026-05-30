@@ -5,19 +5,39 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
 from src.application.services.knowledge_answer_resolution_service import (
-    _answer_resolution_candidate_index,
-    _answer_resolution_survivor_index,
-    _answer_resolution_text_fingerprint,
-    _answer_resolution_token_similarity,
-    _answer_resolution_tokens_from_text,
-    _cleanup_answer_resolution_text_with_metrics,
-    _entry_with_answer_resolution_decision,
-    _limit_compiled_text,
-    _merge_answer_text,
-    _merge_answer_units_deterministically,
-    _merge_entry_fields_deterministically,
+    build_answer_resolution_candidate_index,
 )
-from src.application.services.knowledge_generated_entry_repair import _answer_digest
+from src.application.services.knowledge_answer_resolution_service import (
+    build_answer_resolution_survivor_index,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    fingerprint_answer_resolution_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    calculate_answer_resolution_token_similarity,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    tokenize_answer_resolution_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    cleanup_answer_resolution_text_with_metrics,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    apply_answer_resolution_decision_to_entry,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    limit_compiled_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    merge_answer_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    merge_answer_units_deterministically,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    merge_entry_fields_deterministically,
+)
+from src.application.services.knowledge_generated_entry_repair import answer_digest
 from src.domain.project_plane.embedding_text import CANONICAL_EMBEDDING_TEXT_VERSION
 from src.domain.project_plane.json_types import (
     JsonObject,
@@ -68,7 +88,7 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     for question in _text_tuple(entry.questions):
         if question:
             return question
-    return _answer_digest(entry.answer)
+    return answer_digest(entry.answer)
 
 
 def source_excerpts_from_preprocessing_entry(
@@ -109,7 +129,7 @@ def _entry_question_intent_fingerprints(
         _question_intent_primary_question(entry),
         *_text_tuple(entry.questions),
     ):
-        fingerprint = _answer_resolution_text_fingerprint(value)
+        fingerprint = fingerprint_answer_resolution_text(value)
         if fingerprint and fingerprint not in values:
             values.append(fingerprint)
     return tuple(values)
@@ -128,7 +148,7 @@ def _entries_have_exact_question_intent(
     )
 
 
-async def _existing_project_titles_for_answer_resolution(
+async def list_existing_project_titles_for_answer_resolution(
     *,
     repo: KnowledgeRuntimeRetrievalPort,
     project_id: str,
@@ -196,7 +216,7 @@ def _retighten_deduped_text_tuple(
         if not cleaned:
             continue
 
-        fingerprint = _answer_resolution_text_fingerprint(cleaned)
+        fingerprint = fingerprint_answer_resolution_text(cleaned)
         if not fingerprint:
             continue
 
@@ -217,8 +237,8 @@ def _retighten_entry_with_deduped_fields(
     synonyms, duplicate_synonym_count = _retighten_deduped_text_tuple(entry.synonyms)
     tags, duplicate_tag_count = _retighten_deduped_text_tuple(entry.tags)
 
-    answer_cleanup = _cleanup_answer_resolution_text_with_metrics(entry.answer)
-    embedding_cleanup = _cleanup_answer_resolution_text_with_metrics(
+    answer_cleanup = cleanup_answer_resolution_text_with_metrics(entry.answer)
+    embedding_cleanup = cleanup_answer_resolution_text_with_metrics(
         entry.embedding_text
     )
 
@@ -245,7 +265,7 @@ def _retighten_entry_with_deduped_fields(
 def _retighten_entry_intent_fingerprint(
     entry: KnowledgePreprocessingEntry,
 ) -> str:
-    return _answer_resolution_text_fingerprint(
+    return fingerprint_answer_resolution_text(
         " ".join(
             part
             for part in (
@@ -260,7 +280,7 @@ def _retighten_entry_intent_fingerprint(
 
 
 def _retighten_answer_fingerprint(entry: KnowledgePreprocessingEntry) -> str:
-    return _answer_resolution_text_fingerprint(entry.answer)
+    return fingerprint_answer_resolution_text(entry.answer)
 
 
 def _retighten_answer_contains(
@@ -291,7 +311,7 @@ def _retighten_deterministic_duplicate_reason(
     left_intent = _retighten_entry_intent_fingerprint(left)
     right_intent = _retighten_entry_intent_fingerprint(right)
     if _entries_have_exact_question_intent(left, right):
-        answer_unit_merge = _merge_answer_units_deterministically(
+        answer_unit_merge = merge_answer_units_deterministically(
             left.answer,
             right.answer,
             allow_disjoint_union=True,
@@ -300,9 +320,9 @@ def _retighten_deterministic_duplicate_reason(
             return answer_unit_merge.strategy
 
     if left_intent and right_intent and left_intent == right_intent:
-        answer_score = _answer_resolution_token_similarity(
-            _answer_resolution_tokens_from_text(left.answer),
-            _answer_resolution_tokens_from_text(right.answer),
+        answer_score = calculate_answer_resolution_token_similarity(
+            tokenize_answer_resolution_text(left.answer),
+            tokenize_answer_resolution_text(right.answer),
         )
         if answer_score >= 0.72:
             return "exact_intent_high_answer_overlap"
@@ -332,7 +352,7 @@ def _retighten_merge_entries_deterministically(
     survivor = incoming_entry if incoming_score > existing_score else existing_entry
     absorbed = existing_entry if survivor is incoming_entry else incoming_entry
 
-    answer_unit_merge = _merge_answer_units_deterministically(
+    answer_unit_merge = merge_answer_units_deterministically(
         existing_entry.answer,
         incoming_entry.answer,
         allow_disjoint_union=reason == "same_intent_complementary_answer_unit_union",
@@ -346,11 +366,11 @@ def _retighten_merge_entries_deterministically(
     ):
         survivor_answer = survivor.answer
     else:
-        survivor_answer = _merge_answer_text(
+        survivor_answer = merge_answer_text(
             existing_entry.answer, incoming_entry.answer
         )
 
-    merged = _merge_entry_fields_deterministically(
+    merged = merge_entry_fields_deterministically(
         existing_entry=survivor,
         incoming_entry=absorbed,
         merged_answer=survivor_answer,
@@ -370,7 +390,7 @@ def _retighten_entry_is_suspicious_meta(
     return False
 
 
-def _deterministic_retighten_existing_document_plan(
+def plan_deterministic_existing_document_retighten(
     entries: Sequence[KnowledgePreprocessingEntry],
 ) -> _DeterministicRetightenResult:
     working_entries: list[KnowledgePreprocessingEntry] = []
@@ -407,8 +427,8 @@ def _deterministic_retighten_existing_document_plan(
             if len(suspicious_examples) < 5:
                 suspicious_examples.append(
                     {
-                        "title": _limit_compiled_text(entry.title, max_chars=120),
-                        "answer_preview": _limit_compiled_text(
+                        "title": limit_compiled_text(entry.title, max_chars=120),
+                        "answer_preview": limit_compiled_text(
                             entry.answer,
                             max_chars=180,
                         ),
@@ -516,7 +536,7 @@ def _deterministic_retighten_existing_document_plan(
     )
 
 
-def _compose_retighten_existing_document_plans(
+def compose_existing_document_retighten_plans(
     *,
     base: _RetightenExistingDocumentPlan,
     overlay: _RetightenExistingDocumentPlan,
@@ -557,7 +577,7 @@ def _compose_retighten_existing_document_plans(
     )
 
 
-def _preprocessing_entry_from_canonical_entry(
+def build_preprocessing_entry_from_canonical_entry(
     entry: CanonicalKnowledgeEntry,
 ) -> KnowledgePreprocessingEntry:
     source_excerpt = "\n\n".join(
@@ -575,7 +595,7 @@ def _preprocessing_entry_from_canonical_entry(
     )
 
 
-def _retighten_existing_document_plan(
+def plan_existing_document_retighten(
     *,
     entries: Sequence[KnowledgePreprocessingEntry],
     decisions: Sequence[KnowledgeAnswerResolutionDecision],
@@ -590,7 +610,7 @@ def _retighten_existing_document_plan(
 
         candidate_indexes: list[int] = []
         for candidate_id in decision.candidate_ids:
-            index = _answer_resolution_candidate_index(candidate_id)
+            index = build_answer_resolution_candidate_index(candidate_id)
             if index is None or index < 0 or index >= len(entries):
                 continue
             if index in candidate_indexes or index in removed_indexes:
@@ -601,7 +621,7 @@ def _retighten_existing_document_plan(
             continue
 
         ordered_indexes = tuple(sorted(candidate_indexes))
-        survivor_index = _answer_resolution_survivor_index(
+        survivor_index = build_answer_resolution_survivor_index(
             decision=decision,
             candidate_indexes=ordered_indexes,
             entries=entries,
@@ -611,7 +631,7 @@ def _retighten_existing_document_plan(
         for index in ordered_indexes:
             if index == survivor_index:
                 continue
-            merged_entry = _merge_entry_fields_deterministically(
+            merged_entry = merge_entry_fields_deterministically(
                 existing_entry=merged_entry,
                 incoming_entry=updated_entries[index],
                 merged_answer=decision.canonical_answer,
@@ -623,7 +643,7 @@ def _retighten_existing_document_plan(
                 if source_index not in merged_indexes_for_survivor:
                     merged_indexes_for_survivor.append(source_index)
 
-        updated_entries[survivor_index] = _entry_with_answer_resolution_decision(
+        updated_entries[survivor_index] = apply_answer_resolution_decision_to_entry(
             entry=merged_entry,
             decision=decision,
         )
@@ -706,7 +726,7 @@ def _retightened_canonical_entry(
     )
 
 
-def _retighten_updated_canonical_entries(
+def build_retightened_canonical_entries(
     *,
     plan: _RetightenExistingDocumentPlan,
     current_entries: Sequence[CanonicalKnowledgeEntry],
@@ -733,7 +753,7 @@ def _retighten_updated_canonical_entries(
     return tuple(updated_entries)
 
 
-def _retighten_archived_entry_ids(
+def build_retighten_archived_entry_ids(
     *,
     plan: _RetightenExistingDocumentPlan,
     current_entries: Sequence[CanonicalKnowledgeEntry],
@@ -763,13 +783,13 @@ __all__ = [
     "_retighten_entry_richness_score",
     "_retighten_merge_entries_deterministically",
     "_retighten_entry_is_suspicious_meta",
-    "_deterministic_retighten_existing_document_plan",
-    "_compose_retighten_existing_document_plans",
-    "_preprocessing_entry_from_canonical_entry",
-    "_retighten_existing_document_plan",
+    "plan_deterministic_existing_document_retighten",
+    "compose_existing_document_retighten_plans",
+    "build_preprocessing_entry_from_canonical_entry",
+    "plan_existing_document_retighten",
     "_merge_source_refs_for_existing_entry_indexes",
     "_retightened_canonical_entry",
-    "_retighten_updated_canonical_entries",
-    "_retighten_archived_entry_ids",
-    "_existing_project_titles_for_answer_resolution",
+    "build_retightened_canonical_entries",
+    "build_retighten_archived_entry_ids",
+    "list_existing_project_titles_for_answer_resolution",
 ]

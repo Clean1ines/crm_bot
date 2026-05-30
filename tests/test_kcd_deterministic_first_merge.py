@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.application.services.knowledge_answer_resolution_service import (
-    _merge_answer_text,
+    merge_answer_text,
 )
 from src.application.services.knowledge_compiled_entry_cleanup import (
     cleanup_compiled_entries_mechanically,
@@ -32,7 +32,7 @@ def _entry(
 
 
 def test_merge_answer_text_keeps_superset_answer_units() -> None:
-    merged = _merge_answer_text(
+    merged = merge_answer_text(
         "Условия возврата зависят от ситуации.",
         ("Условия возврата зависят от ситуации. Лучше передать вопрос менеджеру."),
     )

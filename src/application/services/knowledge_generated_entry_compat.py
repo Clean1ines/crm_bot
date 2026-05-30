@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from src.application.services.knowledge_generated_entry_repair import _answer_digest
+from src.application.services.knowledge_generated_entry_repair import answer_digest
 from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingEntry
 
 
@@ -13,7 +13,7 @@ def _regenerate_entry_from_source_excerpt(
         for line in source_excerpt.splitlines()
         if not line.lstrip().startswith("#")
     ).strip()
-    rebuilt_answer = _answer_digest(
+    rebuilt_answer = answer_digest(
         sanitized_source or source_excerpt,
         max_chars=KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS,
     )
@@ -36,5 +36,5 @@ KCD_STAGE_K_MERGED_ANSWER_MAX_CHARS = 3600
 
 __all__ = [
     "_regenerate_entry_from_source_excerpt",
-    "_answer_digest",
+    "answer_digest",
 ]

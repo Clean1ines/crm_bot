@@ -11,21 +11,31 @@ from src.application.ports.knowledge_port import (
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_answer_resolution_service import (
-    _answer_resolution_cases_from_entries,
-    _answer_resolution_decision_is_too_noisy,
-    _answer_resolution_decisions_with_case_candidate_ids,
-    _cleanup_answer_resolution_text_with_metrics,
-    _limit_compiled_text,
-    _reject_noisy_answer_resolution_decisions,
+    build_answer_resolution_cases_from_entries,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    is_noisy_answer_resolution_decision,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    attach_case_candidate_ids_to_answer_resolution_decisions,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    cleanup_answer_resolution_text_with_metrics,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    limit_compiled_text,
+)
+from src.application.services.knowledge_answer_resolution_service import (
+    reject_noisy_answer_resolution_decisions,
 )
 from src.application.services.knowledge_retighten_planner import (
-    _compose_retighten_existing_document_plans,
-    _deterministic_retighten_existing_document_plan,
-    _existing_project_titles_for_answer_resolution,
-    _preprocessing_entry_from_canonical_entry,
-    _retighten_archived_entry_ids,
-    _retighten_existing_document_plan,
-    _retighten_updated_canonical_entries,
+    compose_existing_document_retighten_plans,
+    plan_deterministic_existing_document_retighten,
+    list_existing_project_titles_for_answer_resolution,
+    build_preprocessing_entry_from_canonical_entry,
+    build_retighten_archived_entry_ids,
+    plan_existing_document_retighten,
+    build_retightened_canonical_entries,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import MODE_PRICE_LIST
@@ -68,18 +78,18 @@ class KnowledgeRetightenService:
             return metrics
 
         preprocessing_entries = tuple(
-            _preprocessing_entry_from_canonical_entry(entry)
+            build_preprocessing_entry_from_canonical_entry(entry)
             for entry in current_entries
         )
 
-        deterministic_result = _deterministic_retighten_existing_document_plan(
+        deterministic_result = plan_deterministic_existing_document_retighten(
             preprocessing_entries
         )
         deterministic_plan = deterministic_result.plan
         preprocessing_entries = deterministic_plan.entries
         metrics.update(deterministic_result.metrics)
 
-        groups = _answer_resolution_cases_from_entries(preprocessing_entries)
+        groups = build_answer_resolution_cases_from_entries(preprocessing_entries)
         metrics["candidate_case_count"] = len(groups)
         metrics["llm_candidate_case_count"] = len(groups)
 
@@ -104,11 +114,11 @@ class KnowledgeRetightenService:
             result = await repo.apply_document_answer_resolution_retightening(
                 project_id=project_id,
                 document_id=document_id,
-                updated_entries=_retighten_updated_canonical_entries(
+                updated_entries=build_retightened_canonical_entries(
                     plan=deterministic_plan,
                     current_entries=current_entries,
                 ),
-                archived_entry_ids=_retighten_archived_entry_ids(
+                archived_entry_ids=build_retighten_archived_entry_ids(
                     plan=deterministic_plan,
                     current_entries=current_entries,
                 ),
@@ -129,10 +139,12 @@ class KnowledgeRetightenService:
             return result
 
         preprocessor = preprocessor_factory()
-        existing_project_titles = await _existing_project_titles_for_answer_resolution(
-            repo=repo,
-            project_id=project_id,
-            document_id=document_id,
+        existing_project_titles = (
+            await list_existing_project_titles_for_answer_resolution(
+                repo=repo,
+                project_id=project_id,
+                document_id=document_id,
+            )
         )
         llm_call_count = 0
         usage_event_count = 0
@@ -144,7 +156,7 @@ class KnowledgeRetightenService:
                 existing_project_titles=existing_project_titles,
             )
             llm_call_count = 1
-            decisions = _answer_resolution_decisions_with_case_candidate_ids(
+            decisions = attach_case_candidate_ids_to_answer_resolution_decisions(
                 answer_case=groups[0],
                 decisions=first_execution.result.decisions,
             )
@@ -171,7 +183,7 @@ class KnowledgeRetightenService:
                 llm_call_count += 1
                 decisions = (
                     *decisions,
-                    *_answer_resolution_decisions_with_case_candidate_ids(
+                    *attach_case_candidate_ids_to_answer_resolution_decisions(
                         answer_case=group,
                         decisions=execution.result.decisions,
                     ),
@@ -218,11 +230,11 @@ class KnowledgeRetightenService:
             result = await repo.apply_document_answer_resolution_retightening(
                 project_id=project_id,
                 document_id=document_id,
-                updated_entries=_retighten_updated_canonical_entries(
+                updated_entries=build_retightened_canonical_entries(
                     plan=deterministic_plan,
                     current_entries=current_entries,
                 ),
-                archived_entry_ids=_retighten_archived_entry_ids(
+                archived_entry_ids=build_retighten_archived_entry_ids(
                     plan=deterministic_plan,
                     current_entries=current_entries,
                 ),
@@ -231,9 +243,7 @@ class KnowledgeRetightenService:
             return result
 
         rejected_noisy_resolved_answer_count = sum(
-            1
-            for decision in decisions
-            if _answer_resolution_decision_is_too_noisy(decision)
+            1 for decision in decisions if is_noisy_answer_resolution_decision(decision)
         )
         rejected_noisy_resolution_examples: tuple[JsonObject, ...] = tuple(
             cast(
@@ -241,12 +251,12 @@ class KnowledgeRetightenService:
                 {
                     "group_id": decision.group_id,
                     "candidate_ids": tuple(decision.candidate_ids),
-                    "canonical_answer_preview": _limit_compiled_text(
+                    "canonical_answer_preview": limit_compiled_text(
                         decision.canonical_answer,
                         max_chars=240,
                     ),
                     "cleanup_original_unit_count": (
-                        cleanup := _cleanup_answer_resolution_text_with_metrics(
+                        cleanup := cleanup_answer_resolution_text_with_metrics(
                             decision.canonical_answer
                         )
                     ).original_unit_count,
@@ -254,21 +264,21 @@ class KnowledgeRetightenService:
                 },
             )
             for decision in decisions
-            if _answer_resolution_decision_is_too_noisy(decision)
+            if is_noisy_answer_resolution_decision(decision)
         )[:5]
-        decisions = _reject_noisy_answer_resolution_decisions(decisions)
+        decisions = reject_noisy_answer_resolution_decisions(decisions)
 
-        llm_plan = _retighten_existing_document_plan(
+        llm_plan = plan_existing_document_retighten(
             entries=preprocessing_entries,
             decisions=decisions,
         )
-        plan = _compose_retighten_existing_document_plans(
+        plan = compose_existing_document_retighten_plans(
             base=deterministic_plan,
             overlay=llm_plan,
         )
 
         cleanup_results = tuple(
-            _cleanup_answer_resolution_text_with_metrics(decision.canonical_answer)
+            cleanup_answer_resolution_text_with_metrics(decision.canonical_answer)
             for decision in decisions
             if decision.is_merge and decision.canonical_answer
         )
@@ -309,11 +319,11 @@ class KnowledgeRetightenService:
         result = await repo.apply_document_answer_resolution_retightening(
             project_id=project_id,
             document_id=document_id,
-            updated_entries=_retighten_updated_canonical_entries(
+            updated_entries=build_retightened_canonical_entries(
                 plan=plan,
                 current_entries=current_entries,
             ),
-            archived_entry_ids=_retighten_archived_entry_ids(
+            archived_entry_ids=build_retighten_archived_entry_ids(
                 plan=plan,
                 current_entries=current_entries,
             ),

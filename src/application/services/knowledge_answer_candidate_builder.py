@@ -4,9 +4,9 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from src.application.services.knowledge_canonical_publication_builder import (
-    _CompiledAnswerEntryDraft,
-    _answer_topic_key,
-    _source_refs_for_compiled_answer_draft,
+    CompiledAnswerEntryDraft,
+    build_answer_topic_key,
+    build_source_refs_for_compiled_answer_draft,
 )
 from src.domain.project_plane.knowledge_compilation import (
     AnswerCandidate,
@@ -90,10 +90,10 @@ def build_raw_answer_candidates_from_preprocessing_entries(
                 document_id=document_id,
                 project_id=project_id,
                 compiler_run_id=compiler_run_id,
-                topic_key=_answer_topic_key(entry, index=fragment_index - 1),
+                topic_key=build_answer_topic_key(entry, index=fragment_index - 1),
                 title=draft.title,
                 candidate_answer=draft.answer,
-                source_refs=_source_refs_for_compiled_answer_draft(
+                source_refs=build_source_refs_for_compiled_answer_draft(
                     draft=draft,
                     source_chunks=source_chunks,
                 ),
@@ -129,8 +129,8 @@ def _preprocessing_entry_to_compiled_draft(
     *,
     mode: KnowledgePreprocessingMode,
     index: int,
-) -> _CompiledAnswerEntryDraft:
-    return _CompiledAnswerEntryDraft(
+) -> CompiledAnswerEntryDraft:
+    return CompiledAnswerEntryDraft(
         title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
         answer=_clean_optional_text(entry.answer),
         source_excerpts=source_excerpts_from_preprocessing_entry(entry),
