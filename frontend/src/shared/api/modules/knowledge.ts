@@ -2,6 +2,7 @@ import { t } from '../../i18n';
 import { authedJsonRequest, authedMultipartRequest } from '../core/http';
 
 export type KnowledgePreprocessingMode = 'faq' | 'price_list';
+export type KnowledgePreviewRetrievalMode = 'runtime_equivalent' | 'lexical_debug';
 
 export type KnowledgePreprocessingModeOption = {
   value: KnowledgePreprocessingMode;
@@ -58,6 +59,9 @@ export type KnowledgePreviewResponse = {
   best_result: KnowledgePreviewResult | null;
   top_results: KnowledgePreviewResult[];
   is_empty: boolean;
+  retrieval_mode: KnowledgePreviewRetrievalMode;
+  method: string;
+  trace: Record<string, unknown>;
 };
 
 
@@ -471,12 +475,20 @@ export const knowledgeApi = {
       },
     ),
 
-  preview: (projectId: string, question: string, limit = 5) =>
-    authedJsonRequest<KnowledgePreviewResponse, { question: string; limit: number }>(
+  preview: (
+    projectId: string,
+    question: string,
+    limit = 5,
+    retrievalMode: KnowledgePreviewRetrievalMode = 'runtime_equivalent',
+  ) =>
+    authedJsonRequest<
+      KnowledgePreviewResponse,
+      { question: string; limit: number; retrieval_mode: KnowledgePreviewRetrievalMode }
+    >(
       `/api/projects/${projectId}/knowledge/preview`,
       {
         method: 'POST',
-        body: { question, limit },
+        body: { question, limit, retrieval_mode: retrievalMode },
       },
     ),
 

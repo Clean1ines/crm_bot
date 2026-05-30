@@ -16,8 +16,11 @@ from groq import (
     RateLimitError,
 )
 
+from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+from src.application.rag_eval.ports import RagEvalSearchWithExpansionPort
 from src.application.rag_eval.schemas import JsonObject, RagEvalEvidenceEntry
 from src.domain.project_plane.knowledge_views import (
+    KnowledgeSearchResultView,
     SourceRefView,
     source_refs_from_excerpt,
 )
@@ -342,7 +345,7 @@ class FallbackRagEvalJsonLlmAdapter:
 class RagServiceRagEvalRetriever:
     """RagEval retriever adapter over the production RAGService."""
 
-    def __init__(self, rag_service: object) -> None:
+    def __init__(self, rag_service: RagEvalSearchWithExpansionPort) -> None:
         self._rag_service = rag_service
 
     async def retrieve(
@@ -352,23 +355,47 @@ class RagServiceRagEvalRetriever:
         question: str,
         limit: int,
     ) -> list[RagEvalEvidenceEntry]:
-        search = getattr(self._rag_service, "search_with_expansion")
-        rows = await search(
+        rows = await self._rag_service.search_with_expansion(
             project_id=project_id,
             query=question,
             final_limit=limit,
         )
-        if not isinstance(rows, list):
-            return []
 
         chunks: list[RagEvalEvidenceEntry] = []
         for index, row in enumerate(rows):
-            if isinstance(row, Mapping):
-                chunk = _entry_from_mapping(row, fallback_id=f"retrieved_{index}")
-                if chunk is not None:
-                    chunks.append(chunk)
+            chunk = _entry_from_mapping(row, fallback_id=f"retrieved_{index}")
+            if chunk is not None:
+                chunks.append(chunk)
 
         return chunks
+
+
+class VectorOnlyRagEvalRetriever:
+    """Diagnostic vector-only RAG eval retriever.
+
+    This calls the production-safe repository surface with hybrid_fallback=False,
+    so it uses RUNTIME_VECTOR_SEARCH_SQL and avoids lexical/hybrid ranking,
+    query expansion, and RAGService rerank side effects.
+    """
+
+    def __init__(self, retrieval: KnowledgeRuntimeRetrievalPort) -> None:
+        self._retrieval = retrieval
+
+    async def retrieve(
+        self,
+        *,
+        project_id: str,
+        question: str,
+        limit: int,
+    ) -> list[RagEvalEvidenceEntry]:
+        rows = await self._retrieval.search(
+            project_id=project_id,
+            query=question,
+            limit=limit,
+            hybrid_fallback=False,
+            thread_id=None,
+        )
+        return [_entry_from_knowledge_view(row) for row in rows]
 
 
 class LocalRagEvalReportSink:
@@ -424,6 +451,29 @@ def _strip_json_fence(text: str) -> str:
     if stripped.startswith("json"):
         return stripped[4:].strip()
     return stripped
+
+
+def _entry_from_knowledge_view(row: KnowledgeSearchResultView) -> RagEvalEvidenceEntry:
+    return RagEvalEvidenceEntry(
+        id=row.id,
+        content=row.content,
+        document_id=row.document_id,
+        source=row.source,
+        score=row.score,
+        source_refs=row.source_refs,
+        metadata={
+            "score": row.score,
+            "method": row.method,
+            "title": row.title,
+            "document_status": row.document_status,
+            "entry_kind": row.entry_kind,
+            "source_excerpt": row.source_excerpt,
+            "source_refs": [source_ref.to_dict() for source_ref in row.source_refs],
+            "questions": row.questions,
+            "synonyms": row.synonyms,
+            "tags": row.tags,
+        },
+    )
 
 
 def _entry_from_mapping(

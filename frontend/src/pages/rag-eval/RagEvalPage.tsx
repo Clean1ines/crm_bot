@@ -36,6 +36,7 @@ import {
   type RagEvalReviewGroup,
   type RagEvalReviewPayload,
   type RagEvalReviewQuestion,
+  type RagEvalRetrievalMode,
 } from '@shared/api/modules/ragEval';
 
 interface Document {
@@ -129,6 +130,11 @@ const statusLabel = (status: string): string => {
   if (status === 'cancelled') return t('ragEval.stage.cancelled');
   if (status === 'failed') return t('ragEval.stage.failed');
   return status || t('ragEval.stage.waiting');
+};
+
+const retrievalModeLabel = (mode: string): string => {
+  if (mode === 'vector_debug') return t('ragEval.retrievalMode.vectorDebug.label');
+  return t('ragEval.retrievalMode.productionEquivalent.label');
 };
 
 const progressMessage = (progress: RagEvalProgressPayload, stage: string): string => {
@@ -1114,6 +1120,12 @@ const JobProgressCard: React.FC<{
   const providerFailures = asNumber(mergedProgress.provider_failures);
   const retryCount = asNumber(mergedProgress.retry_count);
   const failedRetrievalCount = asNumber(mergedProgress.failed_retrieval_count);
+  const retrievalMode = typeof mergedProgress.retrieval_mode === 'string'
+    ? mergedProgress.retrieval_mode
+    : '';
+  const retrievalPath = typeof mergedProgress.retrieval_path === 'string'
+    ? mergedProgress.retrieval_path
+    : '';
   const startedAt = timestampMs(job.created_at);
   const observedAt = timestampMs(mergedProgress.updated_at) ?? timestampMs(job.updated_at) ?? timestampMs(job.locked_at);
   const elapsedMs = startedAt === null || observedAt === null ? 0 : observedAt - startedAt;
@@ -1199,6 +1211,8 @@ const JobProgressCard: React.FC<{
         <StatPill label={t('ragEval.progress.stats.questionsChecked')} value={totalQuestions ? `${processedQuestions}/${totalQuestions}` : processedQuestions} />
         <StatPill label={t('ragEval.progress.stats.questionsQueued')} value={queuedQuestions} />
         <StatPill label={t('ragEval.progress.stats.activeRetrievalChecks')} value={activeRetrievalWorkers} />
+        <StatPill label={t('ragEval.progress.stats.retrievalMode')} value={retrievalMode ? retrievalModeLabel(retrievalMode) : '—'} />
+        <StatPill label={t('ragEval.progress.stats.retrievalPath')} value={retrievalPath || '—'} />
         <StatPill label={t('ragEval.progress.stats.searchProblems')} value={failedRetrievalCount} />
         <StatPill label={t('ragEval.progress.stats.proposedImprovements')} value={actionableImprovementsCount} />
         <StatPill label={t('ragEval.progress.stats.questionsPerMinute')} value={questionsPerMinute || '—'} />
@@ -1228,6 +1242,7 @@ export const RagEvalPage: React.FC = () => {
   const queryClient = useQueryClient();
 
   const [selectedDocumentId, setSelectedDocumentId] = useState('');
+  const [retrievalMode, setRetrievalMode] = useState<RagEvalRetrievalMode>('production_equivalent');
   const [lastQueued, setLastQueued] = useState<RagEvalFullRunAcceptedResponse | null>(null);
   const [lastActionExecutionSummary, setLastActionExecutionSummary] = useState<KnowledgeEditActionExecutionSummary | null>(null);
   const [reviewFilter, setReviewFilter] = useState<EvalReviewFilter>('all');
@@ -1368,7 +1383,9 @@ export const RagEvalPage: React.FC = () => {
     mutationFn: async () => {
       if (!activeDocumentId) throw new Error(t('ragEval.error.noProcessedDocument'));
 
-        return await ragEvalApi.runFullDocumentEval(activeDocumentId);
+        return await ragEvalApi.runFullDocumentEval(activeDocumentId, {
+          retrieval_mode: retrievalMode,
+        });
     },
     onSuccess: async (result) => {
       setLastQueued(result);
@@ -1568,7 +1585,7 @@ export const RagEvalPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+        <div className="grid gap-4 lg:grid-cols-[1fr_1fr_auto]">
           <label className="block">
             <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">{t('ragEval.run.documentLabel')}</span>
             <select
@@ -1587,7 +1604,28 @@ export const RagEvalPage: React.FC = () => {
             </select>
           </label>
 
-
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
+              {t('ragEval.retrievalMode.label')}
+            </span>
+            <select
+              value={retrievalMode}
+              onChange={(event) => setRetrievalMode(event.target.value as RagEvalRetrievalMode)}
+              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+            >
+              <option value="production_equivalent">
+                {t('ragEval.retrievalMode.productionEquivalent.label')}
+              </option>
+              <option value="vector_debug">
+                {t('ragEval.retrievalMode.vectorDebug.label')}
+              </option>
+            </select>
+            <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+              {retrievalMode === 'vector_debug'
+                ? t('ragEval.retrievalMode.vectorDebug.description')
+                : t('ragEval.retrievalMode.productionEquivalent.description')}
+            </p>
+          </label>
 
           <button
             type="button"

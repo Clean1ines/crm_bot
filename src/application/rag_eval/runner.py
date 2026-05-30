@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
+from collections.abc import Mapping
 from typing import Literal, TypeAlias
 
 from src.application.rag_eval.failure_classification import (
@@ -18,7 +19,9 @@ from src.application.rag_eval.ports import (
 from src.application.rag_eval.schemas import (
     RagEvalEvidenceEntry,
     RagEvalQuestion,
+    JsonObject,
     RagEvalResult,
+    json_value,
     new_eval_id,
 )
 
@@ -71,12 +74,22 @@ class RagEvalRunner:
         answer_judge: RagEvalAnswerJudgePort | None = None,
         mode: RagEvalMode = "retrieval_eval",
         retrieval_limit: int = 5,
+        retrieval_metadata: Mapping[str, object] | None = None,
     ) -> None:
         self._retriever = retriever
         self._answerer = answerer
         self._answer_judge = answer_judge
         self._mode = mode
         self._retrieval_limit = retrieval_limit
+        self._retrieval_metadata: JsonObject = {
+            str(key): json_value(value)
+            for key, value in dict(retrieval_metadata or {}).items()
+        }
+
+    def _judge_json(self, payload: Mapping[str, object]) -> JsonObject:
+        result = {str(key): json_value(value) for key, value in payload.items()}
+        result.update(self._retrieval_metadata)
+        return result
 
     async def run_question(
         self,
@@ -160,7 +173,9 @@ class RagEvalRunner:
             classification=judge.classification,
             notes=judge.notes,
             latency_ms=latency_ms,
-            judge_json=judge.to_json() | {"mode": "answer_quality_eval"},
+            judge_json=self._judge_json(
+                judge.to_json() | {"mode": "answer_quality_eval"}
+            ),
         )
 
     def failed_result(
@@ -193,13 +208,15 @@ class RagEvalRunner:
             score=0.0,
             notes=notes[:1000],
             latency_ms=0,
-            judge_json={
-                "error": error_message,
-                "error_type": error_type,
-                "stage": stage,
-                "mode": self._mode,
-                "recovered": True,
-            },
+            judge_json=self._judge_json(
+                {
+                    "error": error_message,
+                    "error_type": error_type,
+                    "stage": stage,
+                    "mode": self._mode,
+                    "recovered": True,
+                }
+            ),
         )
 
     def _retrieval_only_result(
@@ -259,13 +276,15 @@ class RagEvalRunner:
             proposed_actions=proposed_actions,
             notes=notes,
             latency_ms=latency_ms,
-            judge_json={
-                "mode": "retrieval_eval",
-                "score_source": "deterministic_retrieval",
-                "expected_entry_ids": list(retrieval.expected_ids),
-                "retrieved_entry_ids": list(retrieval.retrieved_ids),
-                "expected_entry_rank": retrieval.expected_entry_rank,
-            },
+            judge_json=self._judge_json(
+                {
+                    "mode": "retrieval_eval",
+                    "score_source": "deterministic_retrieval",
+                    "expected_entry_ids": list(retrieval.expected_ids),
+                    "retrieved_entry_ids": list(retrieval.retrieved_ids),
+                    "expected_entry_rank": retrieval.expected_entry_rank,
+                }
+            ),
         )
 
     def _evaluate_retrieval(

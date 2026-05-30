@@ -1,11 +1,14 @@
 import { authedJsonRequest } from '@shared/api/core/http';
 
+export type RagEvalRetrievalMode = 'production_equivalent' | 'vector_debug';
+
 export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
   queued: boolean;
   job_id: string;
   document: Record<string, unknown>;
   mode: string;
+  retrieval_mode: RagEvalRetrievalMode;
 }
 
 export interface RagEvalDocumentStatusResponse {
@@ -100,6 +103,11 @@ export interface RagEvalProgressPayload {
   judge_tokens_total?: number;
   updated_at?: string;
   message?: string;
+  retrieval_mode?: RagEvalRetrievalMode;
+  retrieval_path?: string;
+  query_expansion_enabled?: boolean;
+  runtime_equivalent?: boolean;
+  diagnostic?: boolean;
   [key: string]: unknown;
 }
 
@@ -122,6 +130,8 @@ export interface RagEvalJob {
   document_id?: unknown;
   requested_by?: unknown;
   retrieval_limit?: unknown;
+  retrieval_mode?: unknown;
+  retrieval_path?: unknown;
 }
 
 export interface RagEvalJobsResponse {
@@ -317,6 +327,7 @@ export interface RagEvalApplyAcceptedResponse {
 
 interface RunDocumentEvalOptions {
   mode?: 'quick' | 'standard' | 'deep' | 'paranoid' | 'retrieval_eval' | 'answer_quality_eval';
+  retrieval_mode?: RagEvalRetrievalMode;
 }
 
 const encode = (value: string): string => encodeURIComponent(value);
@@ -450,11 +461,19 @@ export const ragEvalApi = {
     );
   },
 
-  async runFullDocumentEval(documentId: string): Promise<RagEvalFullRunAcceptedResponse> {
+  async runFullDocumentEval(
+    documentId: string,
+    options: Pick<RunDocumentEvalOptions, 'retrieval_mode'> = {},
+  ): Promise<RagEvalFullRunAcceptedResponse> {
     return unwrap(
       authedJsonRequest<RagEvalFullRunAcceptedResponse>(
         `/api/rag-eval/documents/${encode(documentId)}/run-full`,
-        { method: 'POST' },
+        {
+          method: 'POST',
+          body: {
+            retrieval_mode: options.retrieval_mode ?? 'production_equivalent',
+          },
+        },
       ),
     );
   },
@@ -468,6 +487,7 @@ export const ragEvalApi = {
     if (options.mode) {
       query.set('mode', options.mode);
     }
+    query.set('retrieval_mode', options.retrieval_mode ?? 'production_equivalent');
 
     const suffix = query.toString() ? `?${query.toString()}` : '';
 
