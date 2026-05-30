@@ -64,8 +64,6 @@ STRICT_JSON_SYSTEM_MESSAGE = (
 )
 GROQ_INSTANT_MODEL_ID = "llama-3.1-8b-instant"
 GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID = "meta-llama/llama-4-scout-17b-16e-instruct"
-GROQ_INSTANT_FREE_TPM_LIMIT = 6000
-
 SURFACE_KIND_VALUES: frozenset[str] = frozenset(
     {
         "umbrella",
@@ -120,10 +118,6 @@ SHORT_ANSWER_LABEL_FINGERPRINTS: frozenset[str] = frozenset(
         "client short answer",
     }
 )
-
-
-def _estimate_request_tokens(*, prompt: str, max_tokens: int) -> int:
-    return max(1, (len(STRICT_JSON_SYSTEM_MESSAGE) + len(prompt) + 2) // 3) + max_tokens
 
 
 def _compact_text(value: object) -> str:
@@ -751,12 +745,8 @@ class GroqKnowledgeSurfaceCompiler(KnowledgeSurfaceCompilerPort):
         return self._model
 
     def _model_for_request(self, *, prompt: str, max_tokens: int) -> str:
-        if (
-            self._model == GROQ_INSTANT_MODEL_ID
-            and _estimate_request_tokens(prompt=prompt, max_tokens=max_tokens)
-            > GROQ_INSTANT_FREE_TPM_LIMIT
-        ):
-            return GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID
+        # Provider response is the source of truth. Keep instant-first routing;
+        # GroqModelRouter reacts to provider failures.
         return self._model
 
     def _build_prompt(

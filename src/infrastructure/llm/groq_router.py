@@ -42,6 +42,19 @@ CHEAP_SMALL_CHAIN: tuple[str, ...] = (
     GROQ_MODEL_GPT_OSS_20B,
 )
 
+# Known relative completion capacity order only.
+# This is not an output-token prediction and not a task-kind budget table.
+# Provider errors remain the source of truth; this order is used only after
+# the provider explicitly reports a max-completion/output-size failure.
+KNOWN_COMPLETION_CAPACITY_ASC: tuple[str, ...] = (
+    GROQ_MODEL_LLAMA_31_8B,
+    GROQ_MODEL_GPT_OSS_20B,
+    GROQ_MODEL_QWEN3_32B,
+    GROQ_MODEL_LLAMA_4_SCOUT,
+    GROQ_MODEL_LLAMA_33_70B,
+    GROQ_MODEL_GPT_OSS_120B,
+)
+
 DISALLOWED_COMPILER_MODELS: frozenset[str] = frozenset(
     {
         "meta-llama/llama-prompt-guard-2-22m",
@@ -58,6 +71,7 @@ class GroqLimitKind(StrEnum):
     NONE = "none"
     REQUEST_TOO_LARGE = "request_too_large"
     CONTEXT_LIMIT = "context_limit"
+    OUTPUT_TOO_LARGE = "output_too_large"
     TPM = "tpm"
     RPM = "rpm"
     TPD = "tpd"
@@ -68,6 +82,7 @@ class GroqLimitKind(StrEnum):
 
 class GroqRouteFailureType(StrEnum):
     INPUT_TOO_LARGE = "input_too_large"
+    OUTPUT_TOO_LARGE = "output_too_large"
     QUOTA_EXHAUSTED = "groq_quota_exhausted"
     ALL_FALLBACKS_EXHAUSTED = "all_fallbacks_exhausted"
 
@@ -155,23 +170,6 @@ def classify_groq_exception(exc: BaseException) -> GroqLimitKind:
     text = _exception_text(exc)
     type_name = type(exc).__name__.lower()
 
-    request_too_large_markers = (
-        "request too large",
-        "request_too_large",
-        "too large for model",
-        "payload too large",
-        "maximum context length",
-        "context length",
-        "context_limit",
-        "context window",
-        "tokens requested",
-        "reduce the length",
-    )
-    if any(marker in text for marker in request_too_large_markers):
-        if "context" in text:
-            return GroqLimitKind.CONTEXT_LIMIT
-        return GroqLimitKind.REQUEST_TOO_LARGE
-
     if status_code == 429 or "ratelimit" in type_name:
         if "tokens per day" in text or "tpd" in text or "daily token" in text:
             return GroqLimitKind.TPD
@@ -184,6 +182,42 @@ def classify_groq_exception(exc: BaseException) -> GroqLimitKind:
         if "requests per minute" in text or "rpm" in text:
             return GroqLimitKind.RPM
         return GroqLimitKind.RATE_LIMIT
+
+    output_too_large_markers = (
+        "max_completion_tokens",
+        "max completion tokens",
+        "maximum completion",
+        "completion limit",
+        "completion tokens limit",
+        "output too large",
+        "output tokens",
+        "generated output",
+        "response too large",
+        "reduce max_tokens",
+        "reduce max tokens",
+        "max_tokens is too large",
+        "max tokens is too large",
+    )
+    if any(marker in text for marker in output_too_large_markers):
+        return GroqLimitKind.OUTPUT_TOO_LARGE
+
+    request_too_large_markers = (
+        "request too large",
+        "request_too_large",
+        "too large for model",
+        "payload too large",
+        "maximum context length",
+        "context length",
+        "context_limit",
+        "context window",
+        "reduce the length",
+    )
+    if status_code == 413 or any(
+        marker in text for marker in request_too_large_markers
+    ):
+        if "context" in text:
+            return GroqLimitKind.CONTEXT_LIMIT
+        return GroqLimitKind.REQUEST_TOO_LARGE
 
     temporary_markers = (
         "timeout",
@@ -219,6 +253,33 @@ def is_daily_groq_quota(kind: GroqLimitKind) -> bool:
 
 def is_groq_input_too_large(kind: GroqLimitKind) -> bool:
     return kind in {GroqLimitKind.REQUEST_TOO_LARGE, GroqLimitKind.CONTEXT_LIMIT}
+
+
+def is_groq_output_too_large(kind: GroqLimitKind) -> bool:
+    return kind == GroqLimitKind.OUTPUT_TOO_LARGE
+
+
+def _completion_capacity_rank(model: str) -> int:
+    try:
+        return KNOWN_COMPLETION_CAPACITY_ASC.index(model)
+    except ValueError:
+        return -1
+
+
+def _larger_completion_capacity_models(
+    *,
+    current_model: str,
+    candidates: Iterable[str],
+) -> tuple[str, ...]:
+    current_rank = _completion_capacity_rank(current_model)
+    if current_rank < 0:
+        return ()
+    ordered = tuple(
+        model
+        for model in KNOWN_COMPLETION_CAPACITY_ASC
+        if _completion_capacity_rank(model) > current_rank and model in set(candidates)
+    )
+    return _dedupe_models(ordered)
 
 
 def _dedupe_models(models: Iterable[str]) -> tuple[str, ...]:
@@ -325,6 +386,9 @@ class _RouteStateStore:
             daily_exhausted=state.daily_exhausted,
             unsuitable_for_payload=True,
         )
+
+    def mark_unsuitable_for_output(self, model: str) -> None:
+        self.mark_unsuitable_for_payload(model)
 
     def mark_daily_exhausted(self, model: str) -> None:
         state = self.states[model]
@@ -490,6 +554,31 @@ class GroqModelRouter:
                     )
                     continue
 
+                if is_groq_output_too_large(last_limit_kind):
+                    store.mark_unsuitable_for_output(model)
+                    larger_models = _larger_completion_capacity_models(
+                        current_model=model,
+                        candidates=(
+                            *self._policy.cheap_small_chain,
+                            *self._policy.primary_chain,
+                            *self._policy.large_request_chain,
+                        ),
+                    )
+                    store.append_models(larger_models)
+                    logger.warning(
+                        "Groq model rejected completion size; trying larger known completion-capacity routes",
+                        extra={
+                            "operation": operation_name,
+                            "model": model,
+                            "limit_kind": last_limit_kind.value,
+                            "chain": chain_name.value,
+                            "larger_completion_capacity_route_count": len(
+                                larger_models
+                            ),
+                        },
+                    )
+                    continue
+
                 if is_daily_groq_quota(last_limit_kind):
                     store.mark_daily_exhausted(model)
                     logger.warning(
@@ -555,6 +644,8 @@ class GroqModelRouter:
     ) -> GroqFallbackExhaustedError:
         if is_groq_input_too_large(last_limit_kind):
             failure_type = GroqRouteFailureType.INPUT_TOO_LARGE
+        elif is_groq_output_too_large(last_limit_kind):
+            failure_type = GroqRouteFailureType.OUTPUT_TOO_LARGE
         elif is_daily_groq_quota(last_limit_kind):
             failure_type = GroqRouteFailureType.QUOTA_EXHAUSTED
         else:

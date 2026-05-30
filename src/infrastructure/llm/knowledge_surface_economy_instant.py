@@ -474,6 +474,7 @@ class GroqEconomyInstantKnowledgeSurfaceGraphCompiler(
         except GroqFallbackExhaustedError as exc:
             if exc.failure_type not in {
                 GroqRouteFailureType.INPUT_TOO_LARGE,
+                GroqRouteFailureType.OUTPUT_TOO_LARGE,
                 GroqRouteFailureType.QUOTA_EXHAUSTED,
                 GroqRouteFailureType.ALL_FALLBACKS_EXHAUSTED,
             }:

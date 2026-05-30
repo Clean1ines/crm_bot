@@ -27,6 +27,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceRejectedQuestion,
     SurfaceRelationType,
 )
+from src.infrastructure.llm.groq_router import GroqLimitKind, classify_groq_exception
 from src.infrastructure.llm.knowledge_surface_compiler import (
     GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
     GroqKnowledgeSurfaceCompiler,
@@ -94,13 +95,11 @@ QUESTION_KINDS = frozenset(
 
 
 def _is_large_request_error(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return (
-        "413" in text
-        or "request too large" in text
-        or "tokens per minute" in text
-        or "tpm" in text
-    )
+    limit_kind = classify_groq_exception(exc)
+    return limit_kind in {
+        GroqLimitKind.REQUEST_TOO_LARGE,
+        GroqLimitKind.CONTEXT_LIMIT,
+    }
 
 
 class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
