@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.application.services.knowledge_answer_candidate_builder import (
-    _raw_answer_candidates_from_preprocessing_entries,
+    build_raw_answer_candidates_from_preprocessing_entries,
 )
 from src.application.services.knowledge_answer_resolution_service import (
     _apply_answer_resolution_decisions,
@@ -177,7 +177,7 @@ def test_raw_candidates_are_built_before_merge_publication() -> None:
         ),
     )
 
-    candidates = _raw_answer_candidates_from_preprocessing_entries(
+    candidates = build_raw_answer_candidates_from_preprocessing_entries(
         project_id="project",
         document_id="doc",
         compiler_run_id="run",

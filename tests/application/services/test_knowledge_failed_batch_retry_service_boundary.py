@@ -37,7 +37,7 @@ def test_failed_batch_retry_service_keeps_mode_faq_guard_and_core_flow() -> None
     assert "delete_raw_answer_candidates_for_batch" in source
     assert "add_answer_candidates" in source
     assert "_canonical_entries_from_raw_answer_candidates" in source
-    assert "_persist_stage_e_compiler_outputs" in source
+    assert "persist_stage_e_compiler_outputs" in source
     assert 'await repo.update_document_status(document_id, "processed")' in source
     assert '"Some compiler batches still failed after retry"' in source
 

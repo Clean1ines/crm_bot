@@ -44,7 +44,7 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _raw_answer_candidate_id(
+def build_raw_answer_candidate_id(
     *,
     compiler_run_id: str,
     batch_index: int,
@@ -58,7 +58,7 @@ def _raw_answer_candidate_id(
     )
 
 
-def _raw_answer_candidates_from_preprocessing_entries(
+def build_raw_answer_candidates_from_preprocessing_entries(
     *,
     project_id: str,
     document_id: str,
@@ -82,7 +82,7 @@ def _raw_answer_candidates_from_preprocessing_entries(
 
         candidates.append(
             AnswerCandidate(
-                id=_raw_answer_candidate_id(
+                id=build_raw_answer_candidate_id(
                     compiler_run_id=compiler_run_id,
                     batch_index=batch_index,
                     fragment_index=fragment_index,
@@ -156,6 +156,6 @@ def _preprocessing_entry_to_compiled_draft(
 
 
 __all__ = [
-    "_raw_answer_candidate_id",
-    "_raw_answer_candidates_from_preprocessing_entries",
+    "build_raw_answer_candidate_id",
+    "build_raw_answer_candidates_from_preprocessing_entries",
 ]
