@@ -9,16 +9,16 @@ SURFACE = Path("src/application/services/knowledge_surface_ingestion_service.py"
 BUILDER = Path("src/application/services/knowledge_source_material_builder.py")
 
 MOVED_HELPERS = {
-    "_chunk_content",
+    "chunk_content",
     "_is_separator_chunk",
     "_looks_like_broken_fragment",
-    "_indexable_chunks",
-    "_source_chunk_optional_int",
+    "filter_indexable_chunks",
+    "source_chunk_optional_int",
     "_source_chunk_text",
     "_source_chunk_index",
-    "_source_chunks_from_json_chunks",
-    "_json_chunks_from_source_chunks",
-    "_compiler_source_chunks_for_preprocessing",
+    "build_source_chunks_from_json_chunks",
+    "build_json_chunks_from_source_chunks",
+    "build_compiler_source_chunks_for_preprocessing",
 }
 
 
@@ -55,8 +55,8 @@ def test_surface_service_does_not_import_private_helpers_from_ingestion() -> Non
     assert "knowledge_source_material_builder" in source
 
     for helper_name in (
-        "_compiler_source_chunks_for_preprocessing",
-        "_indexable_chunks",
-        "_source_chunks_from_json_chunks",
+        "build_compiler_source_chunks_for_preprocessing",
+        "filter_indexable_chunks",
+        "build_source_chunks_from_json_chunks",
     ):
         assert helper_name in source

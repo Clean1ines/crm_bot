@@ -4,7 +4,7 @@ from src.application.services.knowledge_answer_resolution_service import (
     _merge_answer_text,
 )
 from src.application.services.knowledge_compiled_entry_cleanup import (
-    _mechanically_cleanup_compiled_entries,
+    cleanup_compiled_entries_mechanically,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
@@ -60,7 +60,7 @@ def test_mechanical_cleanup_unions_overlapping_answer_units() -> None:
         tags=("деньги",),
     )
 
-    result = _mechanically_cleanup_compiled_entries(
+    result = cleanup_compiled_entries_mechanically(
         entries=(left, right),
         source_excerpts_by_entry=((left.source_excerpt,), (right.source_excerpt,)),
     )
@@ -93,7 +93,7 @@ def test_mechanical_cleanup_unions_complementary_same_intent_answers() -> None:
         questions=("Сколько стоит продукт?", "Какая цена?"),
     )
 
-    result = _mechanically_cleanup_compiled_entries(
+    result = cleanup_compiled_entries_mechanically(
         entries=(left, right),
         source_excerpts_by_entry=((left.source_excerpt,), (right.source_excerpt,)),
     )
@@ -118,7 +118,7 @@ def test_mechanical_cleanup_keeps_different_intents_separate() -> None:
         answer="Запуск занимает несколько рабочих дней.",
     )
 
-    result = _mechanically_cleanup_compiled_entries(
+    result = cleanup_compiled_entries_mechanically(
         entries=(price, launch),
         source_excerpts_by_entry=((price.source_excerpt,), (launch.source_excerpt,)),
     )

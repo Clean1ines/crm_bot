@@ -32,7 +32,7 @@ def test_structured_ingestion_service_contains_non_faq_processing_flow() -> None
     assert "await repo.cleanup_document_artifacts(" in source
     assert "CommercialPriceIngestionService" in source
     assert "await repo.create_compiler_run(" in source
-    assert "_technical_chunk_batches_for_answer_compiler" in source
+    assert "build_technical_chunk_batches_for_answer_compiler" in source
     assert "build_raw_answer_candidates_from_preprocessing_entries" in source
     assert "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases" in source
     assert "_canonical_entries_from_preprocessing_result" in source
@@ -51,7 +51,7 @@ def test_structured_ingestion_service_uses_extracted_builders_not_internals() ->
     assert "knowledge_answer_resolution_service" in source
 
     forbidden_definitions = (
-        "def _technical_chunk_batches_for_answer_compiler",
+        "def build_technical_chunk_batches_for_answer_compiler",
         "def repair_generated_entry",
         "def canonical_entries_from_preprocessing_result",
         "async def _resolve_compiled_answer_cases",
@@ -80,7 +80,7 @@ def test_ingestion_process_document_is_wrapper_around_structured_service() -> No
 
     forbidden_markers = (
         "process_compiler_batch",
-        "_technical_chunk_batches_for_answer_compiler",
+        "build_technical_chunk_batches_for_answer_compiler",
         "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases",
         "_canonical_entries_from_preprocessing_result",
         "persist_stage_e_compiler_outputs",

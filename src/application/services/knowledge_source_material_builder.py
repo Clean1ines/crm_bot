@@ -22,7 +22,7 @@ from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocess
 _MIN_INDEXABLE_CHUNK_CHARS = 1
 
 
-def _chunk_content(chunk: JsonObject) -> str:
+def chunk_content(chunk: JsonObject) -> str:
     return str(chunk.get("content") or "").strip()
 
 
@@ -50,15 +50,15 @@ def _looks_like_broken_fragment(content: str) -> bool:
     return False
 
 
-def _indexable_chunks(chunks: list[JsonObject]) -> list[JsonObject]:
+def filter_indexable_chunks(chunks: list[JsonObject]) -> list[JsonObject]:
     return [
         chunk
         for chunk in chunks
-        if not _looks_like_broken_fragment(_chunk_content(chunk))
+        if not _looks_like_broken_fragment(chunk_content(chunk))
     ]
 
 
-def _source_chunk_optional_int(value: object) -> int | None:
+def source_chunk_optional_int(value: object) -> int | None:
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -79,11 +79,11 @@ def _source_chunk_text(value: object) -> str:
 
 
 def _source_chunk_index(chunk: JsonObject, fallback_index: int) -> int:
-    raw_index = _source_chunk_optional_int(chunk.get("index"))
+    raw_index = source_chunk_optional_int(chunk.get("index"))
     return raw_index if raw_index is not None else fallback_index
 
 
-def _source_chunks_from_json_chunks(
+def build_source_chunks_from_json_chunks(
     *,
     project_id: str,
     document_id: str,
@@ -93,7 +93,7 @@ def _source_chunks_from_json_chunks(
     used_indices: set[int] = set()
 
     for fallback_index, chunk in enumerate(chunks):
-        content = _chunk_content(chunk)
+        content = chunk_content(chunk)
         if not content:
             continue
 
@@ -112,12 +112,12 @@ def _source_chunks_from_json_chunks(
                 project_id=project_id,
                 source_index=source_index,
                 content=content,
-                page=_source_chunk_optional_int(chunk.get("page")),
+                page=source_chunk_optional_int(chunk.get("page")),
                 section_title=_source_chunk_text(
                     chunk.get("section_title") or chunk.get("title")
                 ),
-                start_offset=_source_chunk_optional_int(chunk.get("start_offset")),
-                end_offset=_source_chunk_optional_int(chunk.get("end_offset")),
+                start_offset=source_chunk_optional_int(chunk.get("start_offset")),
+                end_offset=source_chunk_optional_int(chunk.get("end_offset")),
                 checksum=checksum,
                 metadata=metadata,
             )
@@ -126,7 +126,7 @@ def _source_chunks_from_json_chunks(
     return tuple(source_chunks)
 
 
-def _json_chunks_from_source_chunks(
+def build_json_chunks_from_source_chunks(
     source_chunks: Sequence[SourceChunk],
 ) -> list[JsonObject]:
     chunks: list[JsonObject] = []
@@ -148,14 +148,14 @@ def _json_chunks_from_source_chunks(
     return chunks
 
 
-def _is_markdown_file(file_name: str) -> bool:
+def is_markdown_file(file_name: str) -> bool:
     return file_name.lower().strip().endswith(".md")
 
 
 def _source_text_from_json_chunks(chunks: Sequence[JsonObject]) -> str:
     parts: list[str] = []
     for chunk in chunks:
-        content = _chunk_content(chunk)
+        content = chunk_content(chunk)
         if content:
             parts.append(content)
     return "\n\n".join(parts).strip()
@@ -179,7 +179,7 @@ def _json_object_from_metadata(metadata: Mapping[str, object]) -> JsonObject:
     return result
 
 
-def _json_array_field_item_count(
+def count_json_array_field_items(
     chunks: Sequence[JsonObject],
     field_name: str,
 ) -> int:
@@ -252,13 +252,13 @@ def _markdown_semantic_source_chunks(
     ]
 
 
-def _compiler_source_chunks_for_preprocessing(
+def build_compiler_source_chunks_for_preprocessing(
     *,
     file_name: str,
     chunks: list[JsonObject],
     mode: KnowledgePreprocessingMode,
 ) -> list[JsonObject]:
     del mode
-    if not _is_markdown_file(file_name):
+    if not is_markdown_file(file_name):
         return chunks
     return _markdown_semantic_source_chunks(file_name=file_name, chunks=chunks)

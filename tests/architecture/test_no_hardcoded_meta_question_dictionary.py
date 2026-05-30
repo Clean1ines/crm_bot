@@ -10,7 +10,7 @@ def test_no_hardcoded_meta_question_dictionary() -> None:
         encoding="utf-8",
     )
     section = source[
-        source.index("def _mechanically_cleanup_compiled_entries") : source.index(
+        source.index("def cleanup_compiled_entries_mechanically") : source.index(
             "def _entry_question_intent_fingerprints"
         )
     ]

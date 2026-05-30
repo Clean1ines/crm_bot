@@ -86,11 +86,11 @@ def test_same_intent_summary_candidates_form_cluster_before_cleanup() -> None:
 def test_same_intent_summary_survives_mechanical_cleanup_as_llm_case() -> None:
     entries = _product_positioning_entries()
     source_excerpts = tuple(
-        cleanup_helpers._source_excerpts_from_preprocessing_entry(entry)
+        cleanup_helpers.source_excerpts_from_preprocessing_entry(entry)
         for entry in entries
     )
 
-    cleanup = cleanup_helpers._mechanically_cleanup_compiled_entries(
+    cleanup = cleanup_helpers.cleanup_compiled_entries_mechanically(
         entries=entries,
         source_excerpts_by_entry=source_excerpts,
     )
@@ -107,10 +107,10 @@ def test_same_intent_summary_survives_mechanical_cleanup_as_llm_case() -> None:
 def test_retighten_uses_same_intent_summary_candidate_generation() -> None:
     entries = _product_positioning_entries()
     source_excerpts = tuple(
-        cleanup_helpers._source_excerpts_from_preprocessing_entry(entry)
+        cleanup_helpers.source_excerpts_from_preprocessing_entry(entry)
         for entry in entries
     )
-    cleanup = cleanup_helpers._mechanically_cleanup_compiled_entries(
+    cleanup = cleanup_helpers.cleanup_compiled_entries_mechanically(
         entries=entries,
         source_excerpts_by_entry=source_excerpts,
     )

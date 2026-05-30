@@ -17,7 +17,7 @@ from src.application.ports.knowledge.structured_ingestion import (
 from src.application.services.knowledge_answer_compiler_batching import (
     KCD_STAGE_K_TECHNICAL_CHUNKS_PER_LLM_CALL,
     KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
-    _technical_chunk_batches_for_answer_compiler,
+    build_technical_chunk_batches_for_answer_compiler,
 )
 from src.application.services.knowledge_answer_resolution_service import (
     KnowledgeAnswerResolutionService,
@@ -37,8 +37,8 @@ from src.application.services.knowledge_answer_candidate_builder import (
     build_raw_answer_candidates_from_preprocessing_entries,
 )
 from src.application.services.knowledge_compiled_entry_cleanup import (
-    _mechanically_cleanup_compiled_entries,
-    _source_excerpts_from_preprocessing_entry,
+    cleanup_compiled_entries_mechanically,
+    source_excerpts_from_preprocessing_entry,
 )
 from src.application.services.knowledge_compiler_batch_builder import (
     KCD_STAGE_K_CANCELLED_ERROR,
@@ -54,10 +54,10 @@ from src.application.services.knowledge_ingestion_contracts import (
     KnowledgeDocumentProcessingResult,
 )
 from src.application.services.knowledge_preprocessing_result_helpers import (
-    _json_metric_int,
-    _preprocessing_failure_status_message,
-    _preprocessing_result_from_entries,
-    _source_excerpt_to_text,
+    json_metric_int,
+    build_preprocessing_failure_status_message,
+    build_preprocessing_result_from_entries,
+    source_excerpt_to_text,
 )
 from src.application.services.knowledge_retighten_planner import (
     _existing_project_titles_for_answer_resolution,
@@ -73,11 +73,11 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingResult,
 )
 from src.application.services.knowledge_source_material_builder import (
-    _compiler_source_chunks_for_preprocessing,
-    _indexable_chunks,
-    _is_markdown_file,
-    _json_array_field_item_count,
-    _source_chunks_from_json_chunks,
+    build_compiler_source_chunks_for_preprocessing,
+    filter_indexable_chunks,
+    is_markdown_file,
+    count_json_array_field_items,
+    build_source_chunks_from_json_chunks,
 )
 from src.domain.project_plane.knowledge_artifact_cleanup import (
     build_document_reset_cleanup_plan,
@@ -124,18 +124,18 @@ class KnowledgeStructuredIngestionService:
             )
         )
 
-        indexable_chunks = _indexable_chunks(chunks)
+        indexable_chunks = filter_indexable_chunks(chunks)
         if not indexable_chunks:
             message = "No indexable knowledge chunks after filtering"
             await repo.update_document_status(document_id, "error", message)
             raise ValidationError(message)
 
-        compiler_source_chunks = _compiler_source_chunks_for_preprocessing(
+        compiler_source_chunks = build_compiler_source_chunks_for_preprocessing(
             file_name=file_name,
             chunks=indexable_chunks,
             mode=mode,
         )
-        source_chunks = _source_chunks_from_json_chunks(
+        source_chunks = build_source_chunks_from_json_chunks(
             project_id=project_id,
             document_id=document_id,
             chunks=indexable_chunks,
@@ -212,7 +212,9 @@ class KnowledgeStructuredIngestionService:
             preprocessor = preprocessor_factory()
             active_model = preprocessor.model_name
             technical_batches = tuple(
-                _technical_chunk_batches_for_answer_compiler(compiler_source_chunks)
+                build_technical_chunk_batches_for_answer_compiler(
+                    compiler_source_chunks
+                )
             )
             compiler_batches = build_compiler_batches_from_technical_batches(
                 project_id=project_id,
@@ -253,19 +255,19 @@ class KnowledgeStructuredIngestionService:
                     "raw_source_chunk_count": len(indexable_chunks),
                     "markdown_semantic_units_total": (
                         len(compiler_source_chunks)
-                        if _is_markdown_file(file_name)
+                        if is_markdown_file(file_name)
                         else 0
                     ),
                     "markdown_semantic_units_processed": 0,
                     "markdown_child_sections_total": (
-                        _json_array_field_item_count(
+                        count_json_array_field_items(
                             compiler_source_chunks,
                             "children",
                         )
-                        if _is_markdown_file(file_name)
+                        if is_markdown_file(file_name)
                         else 0
                     ),
-                    "markdown_section_aware_batching": _is_markdown_file(file_name),
+                    "markdown_section_aware_batching": is_markdown_file(file_name),
                     "technical_compiler_total_count": len(technical_batches),
                     "technical_source_char_budget": (
                         KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET
@@ -473,11 +475,11 @@ class KnowledgeStructuredIngestionService:
                             "raw_source_chunk_count": len(indexable_chunks),
                             "markdown_semantic_units_total": (
                                 len(compiler_source_chunks)
-                                if _is_markdown_file(file_name)
+                                if is_markdown_file(file_name)
                                 else 0
                             ),
                             "markdown_semantic_units_processed": completed_batch_count,
-                            "markdown_section_aware_batching": _is_markdown_file(
+                            "markdown_section_aware_batching": is_markdown_file(
                                 file_name
                             ),
                             "technical_compiler_total_count": len(technical_batches),
@@ -577,10 +579,10 @@ class KnowledgeStructuredIngestionService:
                 raise ValidationError("Knowledge preprocessing produced no results")
 
             source_excerpts_before_cleanup = tuple(
-                _source_excerpts_from_preprocessing_entry(entry)
+                source_excerpts_from_preprocessing_entry(entry)
                 for entry in compiled_entries
             )
-            cleanup_result = _mechanically_cleanup_compiled_entries(
+            cleanup_result = cleanup_compiled_entries_mechanically(
                 entries=compiled_entries,
                 source_excerpts_by_entry=source_excerpts_before_cleanup,
             )
@@ -677,7 +679,7 @@ class KnowledgeStructuredIngestionService:
                     if idx < len(tightened_source_excerpts)
                     else (generated_entry.source_excerpt,)
                 )
-                source_text = _source_excerpt_to_text(raw_source_excerpt)
+                source_text = source_excerpt_to_text(raw_source_excerpt)
                 repaired_entry, repair_warnings = _repair_generated_entry(
                     generated_entry,
                     source_excerpt=source_text,
@@ -694,14 +696,14 @@ class KnowledgeStructuredIngestionService:
                     tightened_entries
                 )
                 answer_resolution_metrics["raw_draft_count"] = raw_candidate_count
-            llm_answer_resolution_call_count = _json_metric_int(
+            llm_answer_resolution_call_count = json_metric_int(
                 answer_resolution_metrics, "llm_call_count"
             )
-            answer_resolution_keep_separate_count = _json_metric_int(
+            answer_resolution_keep_separate_count = json_metric_int(
                 answer_resolution_metrics, "kept_separate_count"
             )
 
-            result = _preprocessing_result_from_entries(
+            result = build_preprocessing_result_from_entries(
                 mode=mode,
                 template=latest_result,
                 entries=tightened_entries,
@@ -774,21 +776,21 @@ class KnowledgeStructuredIngestionService:
             preprocessing_metrics: JsonObject = dict(result.metrics)
             preprocessing_metrics["raw_source_chunk_count"] = len(indexable_chunks)
             preprocessing_metrics["markdown_semantic_units_total"] = (
-                len(compiler_source_chunks) if _is_markdown_file(file_name) else 0
+                len(compiler_source_chunks) if is_markdown_file(file_name) else 0
             )
             preprocessing_metrics["markdown_semantic_units_processed"] = (
-                len(compiler_source_chunks) if _is_markdown_file(file_name) else 0
+                len(compiler_source_chunks) if is_markdown_file(file_name) else 0
             )
             preprocessing_metrics["markdown_child_sections_total"] = (
-                _json_array_field_item_count(
+                count_json_array_field_items(
                     compiler_source_chunks,
                     "children",
                 )
-                if _is_markdown_file(file_name)
+                if is_markdown_file(file_name)
                 else 0
             )
-            preprocessing_metrics["markdown_section_aware_batching"] = (
-                _is_markdown_file(file_name)
+            preprocessing_metrics["markdown_section_aware_batching"] = is_markdown_file(
+                file_name
             )
             preprocessing_metrics["llm_entry_count"] = len(result.entries)
             preprocessing_metrics["canonical_entry_count"] = len(canonical_entries)
@@ -839,7 +841,7 @@ class KnowledgeStructuredIngestionService:
             preprocessing_metrics["extraction_concurrency"] = extraction_concurrency
             preprocessing_metrics["raw_draft_count"] = raw_candidate_count
             preprocessing_metrics["duplicates_collapsed_safely_count"] = (
-                _json_metric_int(
+                json_metric_int(
                     cleanup_result.metrics, "exact_duplicate_candidate_collapse_count"
                 )
             )
@@ -924,7 +926,7 @@ class KnowledgeStructuredIngestionService:
                 metrics={
                     "answer_compiler": KCD_STAGE_K_COMPILER_VERSION,
                     "stage": "failed",
-                    "status_message": _preprocessing_failure_status_message(exc),
+                    "status_message": build_preprocessing_failure_status_message(exc),
                     "error_type": type(exc).__name__,
                     "fallback": "disabled",
                     "source_chunk_count": len(indexable_chunks),
