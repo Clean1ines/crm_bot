@@ -69,6 +69,13 @@ from src.application.ports.knowledge.surface_publication import (
     KnowledgeSurfacePublicationPort,
 )
 
+from src.application.ports.knowledge.production_retrieval import (
+    ProductionRetrievalPort,
+    ProductionRetrievalRequest,
+    ProductionRetrievalResult,
+    ProductionRetrievalResultItem,
+)
+
 __all__ = [
     "KnowledgeStructuredIngestionRepositoryPort",
     "KnowledgeStructuredIngestionRepositoryFactoryPort",
@@ -106,4 +113,8 @@ __all__ = [
     "KnowledgeSurfaceReconciliationPort",
     "KnowledgeSurfaceRelationPort",
     "KnowledgeSurfaceSourceUnitPort",
+    "ProductionRetrievalPort",
+    "ProductionRetrievalRequest",
+    "ProductionRetrievalResult",
+    "ProductionRetrievalResultItem",
 ]

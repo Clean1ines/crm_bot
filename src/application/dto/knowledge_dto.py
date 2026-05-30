@@ -27,6 +27,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
     normalize_preprocessing_mode,
 )
+from src.domain.project_plane.production_retrieval import ProductionRetrievalMode
+
+KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT = "runtime_equivalent"
+KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG = (
+    ProductionRetrievalMode.LEXICAL_DEBUG.value
+)
 
 
 @dataclass(slots=True)
@@ -149,12 +155,29 @@ class KnowledgeUploadRequestDto:
 class KnowledgePreviewRequestDto:
     question: str
     limit: int = 5
+    retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
 
     def normalized_question(self) -> str:
         return self.question.strip()
 
     def normalized_limit(self) -> int:
         return max(1, min(int(self.limit), 10))
+
+    def normalized_retrieval_mode_value(self) -> str:
+        value = str(
+            self.retrieval_mode or KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
+        ).strip()
+        if value == KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG:
+            return KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG
+        return KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
+
+    def normalized_production_retrieval_mode(self) -> ProductionRetrievalMode:
+        if (
+            self.normalized_retrieval_mode_value()
+            == KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG
+        ):
+            return ProductionRetrievalMode.LEXICAL_DEBUG
+        return ProductionRetrievalMode.RUNTIME_EQUIVALENT_PREVIEW
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,10 +355,28 @@ class KnowledgePreviewResponseDto:
     best_result: KnowledgePreviewResultDto | None
     top_results: list[KnowledgePreviewResultDto]
     is_empty: bool
+    retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
+    method: str = "production_runtime_search"
+    trace: dict[str, object] | None = None
 
     @classmethod
-    def empty(cls, *, query: str) -> "KnowledgePreviewResponseDto":
-        return cls(query=query, best_result=None, top_results=[], is_empty=True)
+    def empty(
+        cls,
+        *,
+        query: str,
+        retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT,
+        method: str = "production_runtime_search",
+        trace: dict[str, object] | None = None,
+    ) -> "KnowledgePreviewResponseDto":
+        return cls(
+            query=query,
+            best_result=None,
+            top_results=[],
+            is_empty=True,
+            retrieval_mode=retrieval_mode,
+            method=method,
+            trace=trace,
+        )
 
     @classmethod
     def from_results(
@@ -343,6 +384,9 @@ class KnowledgePreviewResponseDto:
         *,
         query: str,
         results: list[KnowledgeSearchResultView],
+        retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT,
+        method: str = "production_runtime_search",
+        trace: dict[str, object] | None = None,
     ) -> "KnowledgePreviewResponseDto":
         preview_results = [
             KnowledgePreviewResultDto.from_search_result(result) for result in results
@@ -352,6 +396,9 @@ class KnowledgePreviewResponseDto:
             best_result=preview_results[0] if preview_results else None,
             top_results=preview_results,
             is_empty=not preview_results,
+            retrieval_mode=retrieval_mode,
+            method=method,
+            trace=trace,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -360,6 +407,9 @@ class KnowledgePreviewResponseDto:
             "best_result": self.best_result.to_dict() if self.best_result else None,
             "top_results": [result.to_dict() for result in self.top_results],
             "is_empty": self.is_empty,
+            "retrieval_mode": self.retrieval_mode,
+            "method": self.method,
+            "trace": self.trace or {},
         }
 
 
