@@ -26,7 +26,7 @@ from src.application.services.knowledge_canonical_publication_builder import (
     canonical_entries_from_preprocessing_result,
 )
 from src.application.services.knowledge_generated_entry_repair import (
-    repair_generated_entry as _repair_generated_entry,
+    repair_generated_entry,
 )
 from src.application.ports.knowledge_port import (
     KnowledgePreprocessorFactoryPort,
@@ -680,7 +680,7 @@ class KnowledgeStructuredIngestionService:
                     else (generated_entry.source_excerpt,)
                 )
                 source_text = source_excerpt_to_text(raw_source_excerpt)
-                repaired_entry, repair_warnings = _repair_generated_entry(
+                repaired_entry, repair_warnings = repair_generated_entry(
                     generated_entry,
                     source_excerpt=source_text,
                 )

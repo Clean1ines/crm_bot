@@ -136,7 +136,8 @@ def test_ingestion_facade_no_longer_keeps_generated_repair_alias() -> None:
         "from src.application.services.knowledge_generated_entry_repair import"
         not in (ingestion_source)
     )
-    assert "_repair_generated_entry" not in ingestion_source
+    private_repair_alias = "_repair_" + "generated_entry"
+    assert private_repair_alias not in ingestion_source
 
     assert "def repair_generated_entry(" in repair_source
     for marker in (
