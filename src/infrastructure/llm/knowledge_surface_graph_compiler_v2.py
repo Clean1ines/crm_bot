@@ -10,6 +10,7 @@ from groq import APIError, RateLimitError
 from src.application.services.knowledge_surface_prompt_versions import (
     FAQ_RETRIEVAL_SURFACE_GRAPH_PROMPT_VERSION,
 )
+from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingValidationError,
 )
@@ -31,6 +32,7 @@ from src.infrastructure.llm.groq_router import GroqLimitKind, classify_groq_exce
 from src.infrastructure.llm.knowledge_surface_compiler import (
     GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
     GroqKnowledgeSurfaceCompiler,
+    ProgressCallback,
     PROMPTS_DIR,
     _compact_text,
     _confidence,
@@ -338,7 +340,7 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
 
     def set_progress_callback(
         self,
-        callback: SurfaceGraphProgressCallback | None,
+        callback: ProgressCallback | None,
     ) -> None:
         self._progress_callback = callback
 
@@ -352,11 +354,12 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
         metrics: Mapping[str, object] | None = None,
         error_type: str | None = None,
         error_message: str | None = None,
+        source_unit_checkpoint: JsonObject | None = None,
     ) -> None:
         callback = getattr(self, "_progress_callback", None)
         if callback is None:
             return
-        await callback(
+        result = callback(
             {
                 "stage_kind": stage_kind,
                 "status": status,
@@ -367,6 +370,8 @@ class GroqKnowledgeSurfaceGraphCompilerV2(GroqKnowledgeSurfaceCompiler):
                 "error_message": error_message or "",
             }
         )
+        if result is not None:
+            await result
 
     def _candidate(
         self,

@@ -9,6 +9,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     RetrievalSurfaceCompilationResult,
     RetrievalSurfaceSourceUnit,
 )
+from src.infrastructure.llm.knowledge_surface_compiler import ProgressCallback
 from src.infrastructure.llm.knowledge_surface_economy_instant import (
     GroqEconomyInstantKnowledgeSurfaceGraphCompiler,
 )
@@ -37,7 +38,7 @@ class GroqQualityGatedKnowledgeSurfaceCompiler(
 
     def set_progress_callback(
         self,
-        callback: SurfaceProgressCallback | None,
+        callback: ProgressCallback | None,
     ) -> None:
         if callback is None:
             super().set_progress_callback(None)
@@ -46,7 +47,7 @@ class GroqQualityGatedKnowledgeSurfaceCompiler(
         async def callback_with_route_metrics(event: Mapping[str, object]) -> None:
             raw_metrics = event.get("metrics")
             metrics = dict(raw_metrics) if isinstance(raw_metrics, Mapping) else {}
-            await callback(
+            result = callback(
                 {
                     **dict(event),
                     "metrics": {
@@ -55,6 +56,8 @@ class GroqQualityGatedKnowledgeSurfaceCompiler(
                     },
                 }
             )
+            if result is not None:
+                await result
 
         super().set_progress_callback(callback_with_route_metrics)
 
