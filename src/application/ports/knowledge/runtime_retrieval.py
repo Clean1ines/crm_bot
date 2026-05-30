@@ -20,7 +20,13 @@ class KnowledgeRuntimeRetrievalPort(Protocol):
         project_id: str,
         query: str,
         limit: int = 10,
-    ) -> list[KnowledgeSearchResultView]: ...
+    ) -> list[KnowledgeSearchResultView]:
+        """Deprecated debug-only lexical preview path.
+
+        Default knowledge preview must use runtime-equivalent production retrieval
+        through search().
+        """
+        ...
 
     async def list_runtime_entry_titles(
         self,

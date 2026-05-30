@@ -2,7 +2,7 @@
 API endpoints for managing knowledge base (uploading documents).
 """
 
-from typing import cast
+from typing import Literal, cast
 
 import jwt
 from fastapi import (
@@ -85,6 +85,9 @@ class KnowledgePriceFactsActionRequestModel(BaseModel):
 class KnowledgePreviewRequestModel(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     limit: int = Field(default=5, ge=1, le=10)
+    retrieval_mode: Literal["runtime_equivalent", "lexical_debug"] = Field(
+        default="runtime_equivalent"
+    )
 
 
 class PyJwtDecoder:
@@ -376,7 +379,11 @@ async def preview_knowledge(
     )
     result = await service.preview_query(
         project_id,
-        KnowledgePreviewRequestDto(question=request.question, limit=request.limit),
+        KnowledgePreviewRequestDto(
+            question=request.question,
+            limit=request.limit,
+            retrieval_mode=request.retrieval_mode,
+        ),
         authorization,
         knowledge_repo_factory=make_knowledge_repo,
         logger=logger,

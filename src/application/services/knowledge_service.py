@@ -56,6 +56,9 @@ from src.application.services.knowledge_chunk_normalizer import (
 from src.application.services.knowledge_processing_report_builder import (
     build_knowledge_processing_report,
 )
+from src.application.services.knowledge_preview_retrieval_service import (
+    KnowledgePreviewProductionRetrievalService,
+)
 from src.domain.project_plane.json_types import (
     JsonObject,
     JsonValue,
@@ -87,6 +90,7 @@ from src.domain.project_plane.knowledge_document_lifecycle import (
 from src.domain.project_plane.knowledge_faq_resume_policy import (
     should_reuse_faq_surface_run,
 )
+from src.domain.project_plane.production_retrieval import ProductionRetrievalMode
 
 
 class CommercialPriceKnowledgeFactoryPort(Protocol):
@@ -1155,23 +1159,68 @@ class KnowledgeService:
         await self._ensure_project_exists(project_id, logger)
 
         query = request.normalized_question()
+        retrieval_mode = request.normalized_retrieval_mode_value()
+        production_mode = request.normalized_production_retrieval_mode()
+        method = (
+            "lexical_debug_preview_search"
+            if production_mode == ProductionRetrievalMode.LEXICAL_DEBUG
+            else "production_runtime_search"
+        )
+        trace: dict[str, object] = {
+            "retrieval_mode": retrieval_mode,
+            "method": method,
+            "runtime_equivalent": production_mode
+            == ProductionRetrievalMode.RUNTIME_EQUIVALENT_PREVIEW,
+            "diagnostic": production_mode == ProductionRetrievalMode.LEXICAL_DEBUG,
+            "production_safe": production_mode
+            == ProductionRetrievalMode.RUNTIME_EQUIVALENT_PREVIEW,
+        }
+
         if not query:
-            return KnowledgePreviewResponseDto.empty(query=query)
+            return KnowledgePreviewResponseDto.empty(
+                query=query,
+                retrieval_mode=retrieval_mode,
+                method=method,
+                trace={**trace, "result_count": 0},
+            )
 
         repo = knowledge_repo_factory(self.pool)
-        results = _dedupe_preview_results_by_exact_answer(
-            await repo.preview_search(
+        limit = request.normalized_limit()
+        candidate_limit = max(limit * 2, limit)
+
+        if production_mode == ProductionRetrievalMode.LEXICAL_DEBUG:
+            # Explicit debug-only lexical path. Do not use for default preview.
+            raw_results = await repo.preview_search(
                 project_id=project_id,
                 query=query,
-                limit=max(request.normalized_limit() * 2, request.normalized_limit()),
+                limit=candidate_limit,
             )
-        )[: request.normalized_limit()]
+        else:
+            raw_results = await KnowledgePreviewProductionRetrievalService(repo).search(
+                project_id=project_id,
+                query=query,
+                limit=limit,
+            )
+
+        results = _dedupe_preview_results_by_exact_answer(raw_results)[:limit]
+        trace["result_count"] = len(results)
 
         logger.info(
             "Knowledge preview search completed",
-            extra={"project_id": project_id, "result_count": len(results)},
+            extra={
+                "project_id": project_id,
+                "result_count": len(results),
+                "retrieval_mode": retrieval_mode,
+                "method": method,
+            },
         )
-        return KnowledgePreviewResponseDto.from_results(query=query, results=results)
+        return KnowledgePreviewResponseDto.from_results(
+            query=query,
+            results=results,
+            retrieval_mode=retrieval_mode,
+            method=method,
+            trace=trace,
+        )
 
     async def delete_document(
         self,

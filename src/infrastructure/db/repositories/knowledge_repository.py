@@ -742,6 +742,11 @@ class KnowledgeRepository:
         query: str,
         limit: int = 10,
     ) -> list[KnowledgeSearchResultView]:
+        """Deprecated debug-only lexical preview path.
+
+        Default /knowledge/preview uses search() via runtime-equivalent production
+        retrieval. Keep this method only for explicit lexical_debug diagnostics.
+        """
         if limit <= 0:
             return []
 
