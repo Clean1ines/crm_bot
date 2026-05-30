@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import cast
-from groq import APIError, RateLimitError
 
 from src.application.services.knowledge_surface_graph_quality import (
     validate_faq_surface_graph_quality,
@@ -31,10 +29,7 @@ from src.domain.project_plane.retrieval_surface_compilation import (
     SurfaceQuestionReassignment,
     SurfaceRelationType,
 )
-from src.infrastructure.llm.knowledge_surface_compiler import (
-    GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
-    STRICT_JSON_SYSTEM_MESSAGE,
-)
+from src.infrastructure.llm.knowledge_surface_compiler import STRICT_JSON_SYSTEM_MESSAGE
 from src.infrastructure.llm.knowledge_surface_full_graph_compiler import (
     GroqFullKnowledgeSurfaceGraphCompiler,
     _dedupe_reassignments,
@@ -51,7 +46,6 @@ from src.infrastructure.llm.knowledge_surface_full_graph_compiler import (
 from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
 from src.infrastructure.llm.knowledge_surface_graph_compiler_v2 import (
     GRAPH_PROMPT_VERSION,
-    _is_large_request_error,
 )
 
 
@@ -355,24 +349,18 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
         prompt: str,
         max_tokens: int,
     ) -> tuple[str, str]:
-        request_model = self._model_for_request(prompt=prompt, max_tokens=max_tokens)
+        # Reactive routing lives in GroqModelRouter/RotatingAsyncGroq.
+        # Do not predict output size, do not jump to large models here.
         try:
             return await self._request_json_for_model(
-                model=request_model,
+                model=self._model,
                 prompt=prompt,
                 max_tokens=max_tokens,
-                fallback=request_model == GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
+                fallback=False,
             )
-        except (APIError, RateLimitError) as exc:
+        except Exception:
             self._llm_error_count = int(getattr(self, "_llm_error_count", 0)) + 1
-            if not _is_large_request_error(exc):
-                raise
-            return await self._request_json_for_model(
-                model=GROQ_LARGE_REQUEST_FALLBACK_MODEL_ID,
-                prompt=prompt,
-                max_tokens=max_tokens,
-                fallback=True,
-            )
+            raise
 
     async def _request_json_for_model(
         self,
@@ -413,15 +401,9 @@ class GroqParallelKnowledgeSurfaceGraphCompiler(GroqFullKnowledgeSurfaceGraphCom
             return 0
 
     def _concurrency(self) -> int:
-        key_count = self._configured_key_count()
-        raw_value = os.getenv("FAQ_SURFACE_GRAPH_CONCURRENCY", "").strip()
-        if not raw_value or raw_value.lower() == "auto":
-            return max(1, min(key_count or DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY, 8))
-        try:
-            parsed = int(raw_value)
-        except ValueError:
-            return max(1, min(key_count or DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY, 8))
-        return max(1, min(max(parsed, key_count), 8))
+        # Hard product/runtime invariant for FAQ compiler.
+        # No adaptive scheduler and no key-count/env based concurrency changes.
+        return DEFAULT_FAQ_SURFACE_GRAPH_CONCURRENCY
 
     async def compile_surfaces(
         self,

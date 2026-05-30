@@ -414,6 +414,7 @@ class _RotatingChatCompletionsProxy:
         key_slot_counts: dict[str, int] = {}
         actual_model_counts: dict[str, int] = {}
         fallback_reason_counts: dict[str, int] = {}
+        limit_kind_counts: dict[str, int] = {}
         for event in successful_events:
             key = f"{event.key_index + 1}/{event.key_count}"
             key_slot_counts[key] = key_slot_counts.get(key, 0) + 1
@@ -423,6 +424,12 @@ class _RotatingChatCompletionsProxy:
         for event in fallback_events:
             fallback_reason_counts[event.fallback_reason] = (
                 fallback_reason_counts.get(event.fallback_reason, 0) + 1
+            )
+        for event in self._route_events:
+            if not event.limit_kind:
+                continue
+            limit_kind_counts[event.limit_kind] = (
+                limit_kind_counts.get(event.limit_kind, 0) + 1
             )
 
         return {
@@ -434,6 +441,7 @@ class _RotatingChatCompletionsProxy:
             "groq_key_slot_counts": key_slot_counts,
             "groq_actual_model_counts": actual_model_counts,
             "groq_fallback_reason_counts": fallback_reason_counts,
+            "groq_limit_kind_counts": limit_kind_counts,
             "groq_last_route_event": events[-1] if events else {},
             "groq_route_events": events[-20:],
         }

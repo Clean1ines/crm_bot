@@ -49,7 +49,6 @@ GROQ_FORBIDDEN_COMPILER_MODELS: frozenset[str] = frozenset(
         "groq/compound-mini",
     }
 )
-GROQ_INSTANT_FREE_TPM_LIMIT = 6000
 
 
 class GroqChatCompletions(Protocol):
@@ -156,12 +155,6 @@ class GroqAllFallbacksExhaustedError(GroqRouterError):
     pass
 
 
-def estimate_groq_request_tokens(
-    *, system_message: str, prompt: str, max_tokens: int
-) -> int:
-    return max(1, (len(system_message) + len(prompt) + 2) // 3) + max_tokens
-
-
 def classify_groq_limit_error(exc: BaseException) -> GroqLimitKind:
     status_code = _status_code(exc)
     text = _error_text(exc)
@@ -234,11 +227,6 @@ class GroqModelRouter:
     ) -> GroqRouteResult:
         active_chain, fallback_reason = self._initial_chain(
             chain_name=chain_name,
-            estimated_tokens=estimate_groq_request_tokens(
-                system_message=system_message,
-                prompt=prompt,
-                max_tokens=max_tokens,
-            ),
         )
         attempts: list[GroqRouteAttempt] = []
         last_error: BaseException | None = None
@@ -339,10 +327,10 @@ class GroqModelRouter:
             )
 
     def _initial_chain(
-        self, *, chain_name: GroqRouteChainName, estimated_tokens: int
+        self, *, chain_name: GroqRouteChainName
     ) -> tuple[GroqRouteChainName, str]:
-        if chain_name == "primary" and estimated_tokens > GROQ_INSTANT_FREE_TPM_LIMIT:
-            return "large_request", "estimated_request_token_budget"
+        # Provider response is the source of truth. Do not estimate output
+        # tokens or jump to large models before a provider failure.
         return chain_name, ""
 
     def _chain(self, chain_name: GroqRouteChainName) -> tuple[str, ...]:
