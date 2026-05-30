@@ -77,11 +77,9 @@ def test_knowledge_repository_port_remains_temporary_aggregate_without_methods()
 
 def test_stage_e_publication_helper_uses_minimal_publication_port() -> None:
     helper_source = (
-        ROOT / "src/application/services/knowledge_stage_k_shared_helpers.py"
-    ).read_text(encoding="utf-8")
-    wrapper_source = (
         ROOT / "src/application/services/knowledge_stage_e_publication_helpers.py"
     ).read_text(encoding="utf-8")
+    wrapper_source = helper_source
     facade_source = (
         ROOT / "src/application/services/knowledge_ingestion_service.py"
     ).read_text(encoding="utf-8")

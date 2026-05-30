@@ -78,3 +78,30 @@ def test_queue_handlers_do_not_import_knowledge_ingestion_service() -> None:
             "from src.application.services.knowledge_ingestion_service import"
             not in source
         )
+
+
+def _legacy_stage_k_helper_module_name() -> str:
+    return "_".join(("knowledge_stage_k", "shared_helpers"))
+
+
+def test_stage_k_shared_helper_file_is_removed() -> None:
+    helper_path = (
+        ROOT / "src/application/services" / f"{_legacy_stage_k_helper_module_name()}.py"
+    )
+
+    assert not helper_path.exists()
+
+
+def test_application_services_do_not_import_stage_k_shared_helper() -> None:
+    helper_module_name = _legacy_stage_k_helper_module_name()
+    services_dir = ROOT / "src/application/services"
+
+    for path in services_dir.glob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert helper_module_name not in source, path
+
+
+def test_knowledge_ingestion_service_has_no_stage_k_helper_import() -> None:
+    source = INGESTION.read_text(encoding="utf-8")
+
+    assert _legacy_stage_k_helper_module_name() not in source
