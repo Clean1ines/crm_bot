@@ -105,7 +105,7 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     return _answer_digest(entry.answer)
 
 
-def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
+def json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
     value = metrics.get(key)
     if isinstance(value, int):
         return value
@@ -175,7 +175,7 @@ def _merge_source_excerpt_text(
     excerpts: list[str] = []
 
     for entry in entries:
-        for excerpt in _source_excerpts_from_preprocessing_entry(entry):
+        for excerpt in source_excerpts_from_preprocessing_entry(entry):
             if excerpt and excerpt not in excerpts:
                 excerpts.append(excerpt)
 
@@ -261,7 +261,7 @@ def _merge_entry_fields_deterministically(
     )
 
 
-def _source_excerpt_to_text(value: object) -> str:
+def source_excerpt_to_text(value: object) -> str:
     if isinstance(value, tuple):
         return "\n\n".join(
             _clean_optional_text(str(part))
@@ -271,7 +271,7 @@ def _source_excerpt_to_text(value: object) -> str:
     return _clean_optional_text(str(value or ""))
 
 
-def _source_excerpts_from_preprocessing_entry(
+def source_excerpts_from_preprocessing_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
     normalized = entry.source_excerpt.replace("\r\n", "\n").replace("\r", "\n")
@@ -963,12 +963,12 @@ def _apply_answer_resolution_decisions(
     updated_source_excerpts: list[tuple[str, ...]] = (
         list(source_excerpts_by_entry)
         if source_excerpts_by_entry is not None
-        else [_source_excerpts_from_preprocessing_entry(entry) for entry in entries]
+        else [source_excerpts_from_preprocessing_entry(entry) for entry in entries]
     )
 
     if len(updated_source_excerpts) != len(updated_entries):
         updated_source_excerpts = [
-            _source_excerpts_from_preprocessing_entry(entry) for entry in entries
+            source_excerpts_from_preprocessing_entry(entry) for entry in entries
         ]
 
     if not decisions:
@@ -1107,7 +1107,7 @@ async def _resolve_compiled_answer_cases(
     source_excerpts = tuple(source_excerpts_by_entry)
     if len(source_excerpts) != len(entries):
         source_excerpts = tuple(
-            _source_excerpts_from_preprocessing_entry(entry) for entry in entries
+            source_excerpts_from_preprocessing_entry(entry) for entry in entries
         )
 
     metrics: JsonObject = {
@@ -1149,7 +1149,7 @@ async def _resolve_compiled_answer_cases(
                 cases=(group,),
                 existing_project_titles=existing_project_titles,
             )
-            metrics["llm_call_count"] = _json_metric_int(metrics, "llm_call_count") + 1
+            metrics["llm_call_count"] = json_metric_int(metrics, "llm_call_count") + 1
             case_decisions = _answer_resolution_decisions_with_case_candidate_ids(
                 answer_case=group,
                 decisions=execution.result.decisions,
@@ -1165,7 +1165,7 @@ async def _resolve_compiled_answer_cases(
             )
             metrics["decision_trace"] = decision_trace[-200:]
             metrics["processed_case_count"] = (
-                _json_metric_int(metrics, "processed_case_count") + 1
+                json_metric_int(metrics, "processed_case_count") + 1
             )
             metrics["decision_count"] = len(decisions)
             metrics["resolved_answer_count"] = sum(

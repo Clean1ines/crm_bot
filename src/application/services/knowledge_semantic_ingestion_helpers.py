@@ -16,7 +16,7 @@ from src.application.services.knowledge_canonical_publication_builder import (
     _CompiledAnswerEntryDraft,
     _answer_topic_key,
 )
-from src.application.services.knowledge_source_material_builder import _chunk_content
+from src.application.services.knowledge_source_material_builder import chunk_content
 from src.domain.project_plane.embedding_text import CANONICAL_EMBEDDING_TEXT_VERSION
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_chunks import (
@@ -142,7 +142,7 @@ def _has_semantic_chunk_metadata(chunk: JsonObject) -> bool:
     if entry_kind:
         return True
 
-    content = _chunk_content(chunk)
+    content = chunk_content(chunk)
     for field in SEMANTIC_CHUNK_METADATA_FIELDS:
         value = chunk.get(field)
         if field == "embedding_text":
@@ -172,7 +172,7 @@ def _draft_from_json_chunk(
     *,
     file_name: str,
 ) -> KnowledgeChunkDraft | None:
-    content = _chunk_content(chunk)
+    content = chunk_content(chunk)
     if not content:
         return None
 
@@ -225,7 +225,7 @@ def _document_from_json_chunks(
                 drafts.append(draft)
             continue
 
-        content = _chunk_content(chunk)
+        content = chunk_content(chunk)
         if not content:
             continue
 
@@ -276,7 +276,7 @@ def _raw_chunks_for_structured_persistence(
     )
 
     for chunk in chunks:
-        content = _chunk_content(chunk)
+        content = chunk_content(chunk)
         if not content:
             continue
 
@@ -441,7 +441,7 @@ def _merge_text_tuple_values(
     return tuple(result)
 
 
-def _source_excerpts_from_preprocessing_entry(
+def source_excerpts_from_preprocessing_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
     normalized = entry.source_excerpt.replace("\r\n", "\n").replace("\r", "\n")
@@ -458,7 +458,7 @@ def _preprocessing_entry_to_compiled_draft(
     return _CompiledAnswerEntryDraft(
         title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
         answer=_clean_optional_text(entry.answer),
-        source_excerpts=_source_excerpts_from_preprocessing_entry(entry),
+        source_excerpts=source_excerpts_from_preprocessing_entry(entry),
         source_refs=tuple(
             SourceRef(
                 source_index=index,
@@ -466,7 +466,7 @@ def _preprocessing_entry_to_compiled_draft(
                 source_chunk_id=None,
                 confidence=1.0,
             )
-            for source_excerpt in _source_excerpts_from_preprocessing_entry(entry)
+            for source_excerpt in source_excerpts_from_preprocessing_entry(entry)
         ),
         questions=_text_tuple(entry.questions),
         synonyms=_text_tuple(entry.synonyms),

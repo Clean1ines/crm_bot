@@ -5,7 +5,7 @@ from src.application.ports.knowledge.failed_batch_retry import (
     KnowledgeFailedBatchRetryRepositoryFactoryPort,
 )
 from src.application.services.knowledge_answer_compiler_batching import (
-    _technical_chunk_batches_for_answer_compiler,
+    build_technical_chunk_batches_for_answer_compiler,
 )
 from src.application.services.knowledge_canonical_publication_builder import (
     canonical_entries_from_raw_answer_candidates as _canonical_entries_from_raw_answer_candidates,
@@ -24,7 +24,7 @@ from src.application.services.knowledge_stage_e_publication_helpers import (
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import CanonicalKnowledgeEntry
 from src.application.services.knowledge_source_material_builder import (
-    _json_chunks_from_source_chunks,
+    build_json_chunks_from_source_chunks,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     MODE_FAQ,
@@ -84,9 +84,9 @@ class KnowledgeFailedBatchRetryService:
                 "document_id": document_id,
             }
 
-        source_json_chunks = _json_chunks_from_source_chunks(source_chunks)
+        source_json_chunks = build_json_chunks_from_source_chunks(source_chunks)
         technical_batches = tuple(
-            _technical_chunk_batches_for_answer_compiler(source_json_chunks)
+            build_technical_chunk_batches_for_answer_compiler(source_json_chunks)
         )
         preprocessor = preprocessor_factory()
         await repo.update_document_preprocessing_status(

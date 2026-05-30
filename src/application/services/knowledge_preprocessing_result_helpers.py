@@ -28,7 +28,7 @@ def _clean_optional_text(value: object) -> str:
 KCD_STAGE_K_CANCELLED_ERROR = "Knowledge preprocessing cancelled by operator"
 
 
-def _source_excerpt_to_text(value: object) -> str:
+def source_excerpt_to_text(value: object) -> str:
     if isinstance(value, tuple):
         return "\n\n".join(
             _clean_optional_text(str(part))
@@ -38,7 +38,7 @@ def _source_excerpt_to_text(value: object) -> str:
     return _clean_optional_text(str(value or ""))
 
 
-def _preprocessing_failure_status_message(exc: Exception) -> str:
+def build_preprocessing_failure_status_message(exc: Exception) -> str:
     if str(exc) == KCD_STAGE_K_CANCELLED_ERROR:
         return (
             "Обработка остановлена: прогресс до последнего завершённого шага сохранён"
@@ -52,7 +52,7 @@ def _preprocessing_failure_status_message(exc: Exception) -> str:
     return "Ошибка предобработки: pipeline остановлен до публикации результатов"
 
 
-def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
+def json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
     value = metrics.get(key)
     if isinstance(value, int):
         return value
@@ -63,7 +63,7 @@ def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
     return 0
 
 
-def _preprocessing_result_from_entries(
+def build_preprocessing_result_from_entries(
     *,
     mode: KnowledgePreprocessingMode,
     template: KnowledgePreprocessingResult,
@@ -80,8 +80,8 @@ def _preprocessing_result_from_entries(
 
 
 __all__ = [
-    "_source_excerpt_to_text",
-    "_preprocessing_failure_status_message",
-    "_json_metric_int",
-    "_preprocessing_result_from_entries",
+    "source_excerpt_to_text",
+    "build_preprocessing_failure_status_message",
+    "json_metric_int",
+    "build_preprocessing_result_from_entries",
 ]

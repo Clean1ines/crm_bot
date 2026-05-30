@@ -116,7 +116,7 @@ def build_raw_answer_candidates_from_preprocessing_entries(
     return tuple(candidates)
 
 
-def _source_excerpts_from_preprocessing_entry(
+def source_excerpts_from_preprocessing_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
     normalized = entry.source_excerpt.replace("\r\n", "\n").replace("\r", "\n")
@@ -133,7 +133,7 @@ def _preprocessing_entry_to_compiled_draft(
     return _CompiledAnswerEntryDraft(
         title=_clean_optional_text(entry.title) or f"Answer entry {index + 1}",
         answer=_clean_optional_text(entry.answer),
-        source_excerpts=_source_excerpts_from_preprocessing_entry(entry),
+        source_excerpts=source_excerpts_from_preprocessing_entry(entry),
         source_refs=tuple(
             SourceRef(
                 source_index=index,
@@ -141,7 +141,7 @@ def _preprocessing_entry_to_compiled_draft(
                 source_chunk_id=None,
                 confidence=1.0,
             )
-            for source_excerpt in _source_excerpts_from_preprocessing_entry(entry)
+            for source_excerpt in source_excerpts_from_preprocessing_entry(entry)
         ),
         questions=_text_tuple(entry.questions),
         synonyms=_text_tuple(entry.synonyms),

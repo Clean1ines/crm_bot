@@ -7,7 +7,7 @@ from src.application.services.knowledge_answer_resolution_service import (
     _apply_answer_resolution_decisions,
 )
 from src.application.services.knowledge_source_material_builder import (
-    _compiler_source_chunks_for_preprocessing,
+    build_compiler_source_chunks_for_preprocessing,
 )
 from src.application.services.markdown_structure_extractor import (
     MarkdownStructureExtractor,
@@ -65,7 +65,7 @@ def test_markdown_semantic_chunks_keep_test_suite_as_one_parent_unit() -> None:
 Ожидаемая тема:
 Описание продукта...
 """
-    chunks = _compiler_source_chunks_for_preprocessing(
+    chunks = build_compiler_source_chunks_for_preprocessing(
         file_name="test.md",
         chunks=[_json_chunk(source)],
         mode="faq",
@@ -90,7 +90,7 @@ def test_markdown_semantic_chunks_keep_rag_rule_examples_inside_section() -> Non
 - возврат средств и отключение сервиса;
 - цену и сроки внедрения;
 """
-    chunks = _compiler_source_chunks_for_preprocessing(
+    chunks = build_compiler_source_chunks_for_preprocessing(
         file_name="rules.md",
         chunks=[_json_chunk(source)],
         mode="faq",

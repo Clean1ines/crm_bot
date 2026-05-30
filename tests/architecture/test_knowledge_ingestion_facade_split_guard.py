@@ -13,7 +13,7 @@ FORBIDDEN_HELPER_DEFS = {
     "build_compiler_batches_from_technical_batches",
     "build_raw_answer_candidates_from_preprocessing_entries",
     "persist_stage_e_compiler_outputs",
-    "_mechanically_cleanup_compiled_entries",
+    "cleanup_compiled_entries_mechanically",
 }
 
 SERVICE_FILES = (
@@ -179,6 +179,116 @@ def test_application_services_do_not_import_old_private_answer_candidate_builder
             if (
                 node.module
                 != "src.application.services.knowledge_answer_candidate_builder"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_source_material_builders() -> (
+    None
+):
+    forbidden_names = {
+        "_" + "chunk_content",
+        "_" + "source_chunk_optional_int",
+        "_" + "indexable_chunks",
+        "_" + "source_chunks_from_json_chunks",
+        "_" + "json_chunks_from_source_chunks",
+        "_compiler_" + "source_chunks_for_preprocessing",
+        "_" + "is_markdown_file",
+        "_json_array_" + "field_item_count",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_source_material_builder"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_answer_compiler_batching() -> (
+    None
+):
+    forbidden_name = "_technical_" + "chunk_batches_for_answer_compiler"
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_answer_compiler_batching"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name == forbidden_name:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_preprocessing_result_helpers() -> (
+    None
+):
+    forbidden_names = {
+        "_" + "source_excerpt_to_text",
+        "_preprocessing_" + "failure_status_message",
+        "_json_" + "metric_int",
+        "_preprocessing_" + "result_from_entries",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_preprocessing_result_helpers"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_compiled_cleanup_helpers() -> (
+    None
+):
+    forbidden_names = {
+        "_Mechanical" + "CleanupCompiledEntriesResult",
+        "_mechanically_" + "cleanup_compiled_entries",
+        "_source_" + "excerpts_from_preprocessing_entry",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_compiled_entry_cleanup"
             ):
                 continue
             for alias in node.names:

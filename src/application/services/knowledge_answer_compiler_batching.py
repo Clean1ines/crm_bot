@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from src.application.services.knowledge_source_material_builder import _chunk_content
+from src.application.services.knowledge_source_material_builder import chunk_content
 from src.domain.project_plane.json_types import JsonObject, json_value_from_unknown
 
 
@@ -65,13 +65,13 @@ def _technical_chunk_part(
     return technical_chunk
 
 
-def _technical_chunk_batches_for_answer_compiler(
+def build_technical_chunk_batches_for_answer_compiler(
     chunks: list[JsonObject],
 ) -> tuple[list[JsonObject], ...]:
     batches: list[list[JsonObject]] = []
 
     for chunk in chunks:
-        content = _chunk_content(chunk)
+        content = chunk_content(chunk)
         if not content:
             continue
 

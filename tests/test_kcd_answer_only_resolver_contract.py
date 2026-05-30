@@ -12,13 +12,13 @@ from src.application.services.knowledge_answer_resolution_service import (
     _resolve_compiled_answer_cases,
 )
 from src.application.services.knowledge_compiled_entry_cleanup import (
-    _mechanically_cleanup_compiled_entries,
+    cleanup_compiled_entries_mechanically,
 )
 from src.application.services.knowledge_generated_entry_compat import (
     _regenerate_entry_from_source_excerpt,
 )
 from src.application.services.knowledge_preprocessing_result_helpers import (
-    _source_excerpt_to_text,
+    source_excerpt_to_text,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingEntry,
@@ -440,7 +440,7 @@ def test_deterministic_cleanup_collapses_exact_answers_before_llm_resolver() -> 
         question="Как оформить возврат?",
         answer="Возврат зависит от ситуации.",
     )
-    cleanup = _mechanically_cleanup_compiled_entries(
+    cleanup = cleanup_compiled_entries_mechanically(
         entries=(left, right),
         source_excerpts_by_entry=((left.source_excerpt,), (right.source_excerpt,)),
     )
@@ -462,8 +462,8 @@ def test_deterministic_cleanup_collapses_exact_answers_before_llm_resolver() -> 
 
 
 def test_source_excerpt_to_text_accepts_tuple_and_string() -> None:
-    assert _source_excerpt_to_text(("A", "B")) == "A\n\nB"
-    assert _source_excerpt_to_text("A") == "A"
+    assert source_excerpt_to_text(("A", "B")) == "A\n\nB"
+    assert source_excerpt_to_text("A") == "A"
 
 
 def test_regenerate_entry_strips_markdown_headings_from_fallback_answer() -> None:

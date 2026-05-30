@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from src.application.services.knowledge_answer_compiler_batching import (
     KCD_STAGE_K_TECHNICAL_SOURCE_CHAR_BUDGET,
-    _technical_chunk_batches_for_answer_compiler,
+    build_technical_chunk_batches_for_answer_compiler,
 )
 
 
@@ -10,7 +10,7 @@ def test_plain_chunk_over_char_budget_splits_by_paragraphs() -> None:
     first = "A" * 420
     second = "B" * 420
 
-    batches = _technical_chunk_batches_for_answer_compiler(
+    batches = build_technical_chunk_batches_for_answer_compiler(
         [
             {
                 "content": f"{first}\n\n{second}",
@@ -41,7 +41,7 @@ def test_plain_chunk_over_char_budget_splits_by_paragraphs() -> None:
 def test_markdown_semantic_chunk_does_not_split_even_over_char_budget() -> None:
     content = ("# Heading\n\n" + "semantic text " * 80).strip()
 
-    batches = _technical_chunk_batches_for_answer_compiler(
+    batches = build_technical_chunk_batches_for_answer_compiler(
         [
             {
                 "content": content,
@@ -59,7 +59,7 @@ def test_markdown_semantic_chunk_does_not_split_even_over_char_budget() -> None:
 
 
 def test_empty_chunks_are_skipped() -> None:
-    batches = _technical_chunk_batches_for_answer_compiler(
+    batches = build_technical_chunk_batches_for_answer_compiler(
         [
             {"content": ""},
             {"content": "   \n\t "},
@@ -71,7 +71,7 @@ def test_empty_chunks_are_skipped() -> None:
 
 
 def test_technical_metadata_is_added_without_dropping_source_metadata() -> None:
-    batches = _technical_chunk_batches_for_answer_compiler(
+    batches = build_technical_chunk_batches_for_answer_compiler(
         [
             {
                 "id": "chunk-1",

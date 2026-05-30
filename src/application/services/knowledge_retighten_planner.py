@@ -71,7 +71,7 @@ def _question_intent_primary_question(entry: KnowledgePreprocessingEntry) -> str
     return _answer_digest(entry.answer)
 
 
-def _source_excerpts_from_preprocessing_entry(
+def source_excerpts_from_preprocessing_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
     normalized = entry.source_excerpt.replace("\r\n", "\n").replace("\r", "\n")
@@ -315,7 +315,7 @@ def _retighten_entry_richness_score(
 ) -> tuple[int, int, int, int]:
     return (
         len(_clean_optional_text(entry.answer)),
-        len(_source_excerpts_from_preprocessing_entry(entry)),
+        len(source_excerpts_from_preprocessing_entry(entry)),
         len(_text_tuple(entry.questions)),
         len(_clean_optional_text(entry.embedding_text)),
     )

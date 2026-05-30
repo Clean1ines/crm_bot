@@ -58,5 +58,5 @@ def test_ingestion_keeps_only_failed_batch_retry_wrapper() -> None:
         "return await KnowledgeFailedBatchRetryService(self.pool).retry_failed_batches"
         in (method_slice)
     )
-    assert "_technical_chunk_batches_for_answer_compiler" not in method_slice
+    assert "build_technical_chunk_batches_for_answer_compiler" not in method_slice
     assert "delete_raw_answer_candidates_for_batch" not in method_slice

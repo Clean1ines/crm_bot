@@ -4,8 +4,8 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from src.application.services.knowledge_source_material_builder import (
-    _chunk_content,
-    _source_chunk_optional_int,
+    chunk_content,
+    source_chunk_optional_int,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import (
@@ -45,13 +45,13 @@ def _source_chunk_for_technical_chunk(
     if not source_chunks:
         return None
 
-    raw_index = _source_chunk_optional_int(technical_chunk.get("index"))
+    raw_index = source_chunk_optional_int(technical_chunk.get("index"))
     if raw_index is not None:
         for source_chunk in source_chunks:
             if source_chunk.source_index == raw_index:
                 return source_chunk
 
-    content = _chunk_content(technical_chunk)
+    content = chunk_content(technical_chunk)
     if content:
         for source_chunk in source_chunks:
             if content in source_chunk.content or source_chunk.content in content:

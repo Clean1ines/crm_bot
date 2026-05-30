@@ -57,7 +57,7 @@ def test_faq_surface_resume_paths_preserve_artifacts() -> None:
         "started_at = datetime.now(timezone.utc)",
     )
 
-    assert "indexable_chunks = _indexable_chunks(chunks)" in validation_slice
+    assert "indexable_chunks = filter_indexable_chunks(chunks)" in validation_slice
     assert "source_units = _source_units_from_chunks(" in validation_slice
     assert "await repo.cleanup_document_artifacts(" not in validation_slice
 

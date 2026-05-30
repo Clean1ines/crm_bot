@@ -152,7 +152,7 @@ def test_stage_k_ingestion_records_answer_resolution_compiler_metrics() -> None:
     assert "status_message" in structured_source
     assert "model" in structured_source
 
-    assert "_technical_chunk_batches_for_answer_compiler" in batching_source
+    assert "build_technical_chunk_batches_for_answer_compiler" in batching_source
     assert "canonical_entries_from_preprocessing_result" in canonical_publication_source
     assert "resolve_compiled_answer_cases" in answer_resolution_source
 
@@ -181,7 +181,10 @@ def test_knowledge_ingestion_service_is_stage_k_facade_after_split() -> None:
         in compact_process_document_source
     )
 
-    assert "_technical_chunk_batches_for_answer_compiler" not in process_document_source
+    assert (
+        "build_technical_chunk_batches_for_answer_compiler"
+        not in process_document_source
+    )
     assert "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases" not in (
         process_document_source
     )

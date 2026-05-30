@@ -17,9 +17,9 @@ from src.application.services.knowledge_ingestion_contracts import (
     KnowledgeIngestionRepositoryFactoryPort,
 )
 from src.application.services.knowledge_source_material_builder import (
-    _compiler_source_chunks_for_preprocessing,
-    _indexable_chunks,
-    _source_chunks_from_json_chunks,
+    build_compiler_source_chunks_for_preprocessing,
+    filter_indexable_chunks,
+    build_source_chunks_from_json_chunks,
 )
 from src.domain.project_plane.knowledge_artifact_cleanup import (
     KnowledgeArtifactCleanupPlan,
@@ -670,18 +670,18 @@ class KnowledgeFaqSurfaceIngestionService:
 
         run_id = resume_run.id if resume_run is not None else str(uuid.uuid4())
 
-        indexable_chunks = _indexable_chunks(chunks)
+        indexable_chunks = filter_indexable_chunks(chunks)
         if not indexable_chunks:
             message = "No indexable FAQ source units after filtering"
             await repo.update_document_status(document_id, "error", message)
             raise ValidationError(message)
 
-        compiler_source_chunks = _compiler_source_chunks_for_preprocessing(
+        compiler_source_chunks = build_compiler_source_chunks_for_preprocessing(
             file_name=file_name,
             chunks=indexable_chunks,
             mode=FAQ_MODE,
         )
-        source_chunks = _source_chunks_from_json_chunks(
+        source_chunks = build_source_chunks_from_json_chunks(
             project_id=project_id,
             document_id=document_id,
             chunks=compiler_source_chunks,

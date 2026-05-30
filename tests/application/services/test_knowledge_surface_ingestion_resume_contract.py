@@ -32,7 +32,7 @@ def test_faq_surface_ingestion_cleans_up_only_when_no_resume_run_exists() -> Non
     validation_slice = source[run_id_start:cleanup_start]
     cleanup_slice = source[cleanup_start:cleanup_end]
 
-    assert "indexable_chunks = _indexable_chunks(chunks)" in validation_slice
+    assert "indexable_chunks = filter_indexable_chunks(chunks)" in validation_slice
     assert "source_units = _source_units_from_chunks(" in validation_slice
     assert "await repo.cleanup_document_artifacts(" not in validation_slice
 

@@ -85,7 +85,7 @@ def _merge_text_tuple_values(
     return tuple(result)
 
 
-def _source_excerpts_from_preprocessing_entry(
+def source_excerpts_from_preprocessing_entry(
     entry: KnowledgePreprocessingEntry,
 ) -> tuple[str, ...]:
     normalized = entry.source_excerpt.replace("\r\n", "\n").replace("\r", "\n")
@@ -93,7 +93,7 @@ def _source_excerpts_from_preprocessing_entry(
     return _text_tuple(parts)
 
 
-def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
+def json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
     value = metrics.get(key)
     if isinstance(value, int):
         return value
@@ -105,21 +105,21 @@ def _json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
 
 
 @dataclass(frozen=True, slots=True)
-class _MechanicalCleanupCompiledEntriesResult:
+class MechanicalCleanupCompiledEntriesResult:
     entries: tuple[KnowledgePreprocessingEntry, ...]
     source_excerpts_by_entry: tuple[tuple[str, ...], ...]
     metrics: JsonObject
 
 
-def _mechanically_cleanup_compiled_entries(
+def cleanup_compiled_entries_mechanically(
     *,
     entries: Sequence[KnowledgePreprocessingEntry],
     source_excerpts_by_entry: Sequence[tuple[str, ...]],
-) -> _MechanicalCleanupCompiledEntriesResult:
+) -> MechanicalCleanupCompiledEntriesResult:
     source_excerpts = tuple(source_excerpts_by_entry)
     if len(source_excerpts) != len(entries):
         source_excerpts = tuple(
-            _source_excerpts_from_preprocessing_entry(entry) for entry in entries
+            source_excerpts_from_preprocessing_entry(entry) for entry in entries
         )
 
     deduped_question_variant_count = 0
@@ -130,13 +130,11 @@ def _mechanically_cleanup_compiled_entries(
 
     for entry, entry_source_excerpts in zip(entries, source_excerpts, strict=True):
         deduped_entry, field_metrics = _retighten_entry_with_deduped_fields(entry)
-        deduped_question_variant_count += _json_metric_int(
+        deduped_question_variant_count += json_metric_int(
             field_metrics, "deduped_question_variant_count"
         )
-        deduped_synonym_count += _json_metric_int(
-            field_metrics, "deduped_synonym_count"
-        )
-        deduped_tag_count += _json_metric_int(field_metrics, "deduped_tag_count")
+        deduped_synonym_count += json_metric_int(field_metrics, "deduped_synonym_count")
+        deduped_tag_count += json_metric_int(field_metrics, "deduped_tag_count")
         cleaned_entries.append(deduped_entry)
         cleaned_source_excerpts.append(entry_source_excerpts)
 
@@ -222,7 +220,7 @@ def _mechanically_cleanup_compiled_entries(
             JsonValue, retained_merged_entry_counts
         ),
     }
-    return _MechanicalCleanupCompiledEntriesResult(
+    return MechanicalCleanupCompiledEntriesResult(
         entries=tuple(retained_entries),
         source_excerpts_by_entry=tuple(retained_source_excerpts),
         metrics=metrics,
@@ -388,7 +386,7 @@ def _retighten_entry_richness_score(
 ) -> tuple[int, int, int, int]:
     return (
         len(_clean_optional_text(entry.answer)),
-        len(_source_excerpts_from_preprocessing_entry(entry)),
+        len(source_excerpts_from_preprocessing_entry(entry)),
         len(_text_tuple(entry.questions)),
         len(_clean_optional_text(entry.embedding_text)),
     )
@@ -435,9 +433,9 @@ def _retighten_merge_entries_deterministically(
 __all__ = [
     "_question_intent_primary_question",
     "_question_intent_tokens_from_entry",
-    "_MechanicalCleanupCompiledEntriesResult",
-    "_mechanically_cleanup_compiled_entries",
-    "_source_excerpts_from_preprocessing_entry",
+    "MechanicalCleanupCompiledEntriesResult",
+    "cleanup_compiled_entries_mechanically",
+    "source_excerpts_from_preprocessing_entry",
     "_entry_question_intent_fingerprints",
     "_entries_have_exact_question_intent",
 ]
