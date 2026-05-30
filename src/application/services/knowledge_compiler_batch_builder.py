@@ -69,7 +69,7 @@ def _compiler_batch_id(*, compiler_run_id: str, batch_index: int) -> str:
     )
 
 
-def _compiler_batches_from_technical_batches(
+def build_compiler_batches_from_technical_batches(
     *,
     project_id: str,
     document_id: str,
@@ -119,7 +119,7 @@ def _compiler_batches_from_technical_batches(
 KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT = 3
 
 
-def _stage_e_compiler_run_id(
+def build_stage_e_compiler_run_id(
     *,
     document_id: str,
     mode: KnowledgePreprocessingMode,
@@ -132,7 +132,7 @@ def _stage_e_compiler_run_id(
     )
 
 
-def _stage_e_compiler_run(
+def build_stage_e_compiler_run(
     *,
     project_id: str,
     document_id: str,
@@ -140,7 +140,7 @@ def _stage_e_compiler_run(
     source_chunk_count: int,
 ) -> CompilerRun:
     return CompilerRun(
-        id=_stage_e_compiler_run_id(document_id=document_id, mode=mode),
+        id=build_stage_e_compiler_run_id(document_id=document_id, mode=mode),
         project_id=project_id,
         document_id=document_id,
         mode=str(mode),
@@ -159,7 +159,7 @@ __all__ = [
     "KCD_STAGE_K_ANSWER_DIGEST_MAX_CHARS",
     "KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT",
     "_compiler_batch_id",
-    "_compiler_batches_from_technical_batches",
-    "_stage_e_compiler_run_id",
-    "_stage_e_compiler_run",
+    "build_compiler_batches_from_technical_batches",
+    "build_stage_e_compiler_run_id",
+    "build_stage_e_compiler_run",
 ]

@@ -142,7 +142,7 @@ def test_ingestion_creates_compiler_run_before_outputs() -> None:
 
     create_run_index = source.index("await repo.create_compiler_run(")
     create_batches_index = source.index("repo.create_compiler_batches")
-    persist_outputs_index = source.index("_persist_stage_e_compiler_outputs(")
+    persist_outputs_index = source.index("persist_stage_e_compiler_outputs(")
 
     assert create_run_index < create_batches_index < persist_outputs_index
 

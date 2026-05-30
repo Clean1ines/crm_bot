@@ -21,7 +21,7 @@ from src.domain.project_plane.knowledge_compilation import (
 KCD_STAGE_K_COMPILER_VERSION = "kcd_v1_stage_k_answer_compiler"
 
 
-def _stage_e_answer_candidates_from_entries(
+def build_stage_e_answer_candidates_from_entries(
     entries: Sequence[CanonicalKnowledgeEntry],
 ) -> tuple[AnswerCandidate, ...]:
     candidates: list[AnswerCandidate] = []
@@ -56,7 +56,7 @@ def _stage_e_answer_candidates_from_entries(
     return tuple(candidates)
 
 
-def _stage_e_candidate_clusters_from_entries(
+def build_stage_e_candidate_clusters_from_entries(
     *,
     entries: Sequence[CanonicalKnowledgeEntry],
     candidates: Sequence[AnswerCandidate],
@@ -90,7 +90,7 @@ def _stage_e_candidate_clusters_from_entries(
     return tuple(clusters)
 
 
-def _stage_e_compilation_metrics(
+def build_stage_e_compilation_metrics(
     *,
     source_chunks: Sequence[SourceChunk],
     entries: Sequence[CanonicalKnowledgeEntry],
@@ -128,7 +128,7 @@ def _stage_e_compilation_metrics(
     )
 
 
-async def _persist_stage_e_compiler_outputs(
+async def persist_stage_e_compiler_outputs(
     *,
     repo: KnowledgeStageEPublicationPort,
     project_id: str,
@@ -138,8 +138,8 @@ async def _persist_stage_e_compiler_outputs(
     entries: Sequence[CanonicalKnowledgeEntry],
     complete_run: bool = True,
 ) -> None:
-    candidates = _stage_e_answer_candidates_from_entries(entries)
-    clusters = _stage_e_candidate_clusters_from_entries(
+    candidates = build_stage_e_answer_candidates_from_entries(entries)
+    clusters = build_stage_e_candidate_clusters_from_entries(
         entries=entries,
         candidates=candidates,
     )
@@ -163,7 +163,7 @@ async def _persist_stage_e_compiler_outputs(
         if complete_run:
             await repo.complete_compiler_run(
                 compiler_run_id,
-                _stage_e_compilation_metrics(
+                build_stage_e_compilation_metrics(
                     source_chunks=source_chunks,
                     entries=entries,
                     candidates=candidates,
@@ -176,8 +176,8 @@ async def _persist_stage_e_compiler_outputs(
 
 
 __all__ = [
-    "_stage_e_answer_candidates_from_entries",
-    "_stage_e_candidate_clusters_from_entries",
-    "_stage_e_compilation_metrics",
-    "_persist_stage_e_compiler_outputs",
+    "build_stage_e_answer_candidates_from_entries",
+    "build_stage_e_candidate_clusters_from_entries",
+    "build_stage_e_compilation_metrics",
+    "persist_stage_e_compiler_outputs",
 ]

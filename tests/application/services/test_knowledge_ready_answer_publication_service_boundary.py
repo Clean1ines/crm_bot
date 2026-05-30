@@ -44,7 +44,7 @@ def test_ready_publication_service_preserves_metrics_and_builder_usage() -> None
     ):
         assert marker in source
 
-    assert "_persist_stage_e_compiler_outputs" in source
+    assert "persist_stage_e_compiler_outputs" in source
     assert "complete_run=all_batches_completed" in source
     assert 'await repo.update_document_status(document_id, "processed")' in source
 
@@ -65,6 +65,6 @@ def test_ingestion_keeps_only_publish_ready_wrapper() -> None:
         in compact_method_slice
     )
     assert "_canonical_entries_from_raw_answer_candidates" not in method_slice
-    assert "_persist_stage_e_compiler_outputs" not in method_slice
+    assert "persist_stage_e_compiler_outputs" not in method_slice
     assert '"published_answer_count"' not in method_slice
     assert '"partial_publish"' not in method_slice

@@ -9,7 +9,7 @@ from src.application.services.knowledge_canonical_publication_builder import (
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_stage_e_publication_helpers import (
-    _persist_stage_e_compiler_outputs,
+    persist_stage_e_compiler_outputs,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -99,7 +99,7 @@ class KnowledgeReadyAnswerPublicationService:
         if not canonical_entries:
             raise ValidationError("Knowledge document has no publishable answer drafts")
 
-        await _persist_stage_e_compiler_outputs(
+        await persist_stage_e_compiler_outputs(
             repo=repo,
             project_id=project_id,
             document_id=document_id,

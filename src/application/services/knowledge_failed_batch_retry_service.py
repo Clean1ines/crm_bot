@@ -16,10 +16,10 @@ from src.application.ports.knowledge_port import (
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_answer_candidate_builder import (
-    _raw_answer_candidates_from_preprocessing_entries,
+    build_raw_answer_candidates_from_preprocessing_entries,
 )
 from src.application.services.knowledge_stage_e_publication_helpers import (
-    _persist_stage_e_compiler_outputs,
+    persist_stage_e_compiler_outputs,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import CanonicalKnowledgeEntry
@@ -136,7 +136,7 @@ class KnowledgeFailedBatchRetryService:
                     usage_event_count += 1
 
                 safe_entries = tuple(execution.result.entries)
-                raw_candidates = _raw_answer_candidates_from_preprocessing_entries(
+                raw_candidates = build_raw_answer_candidates_from_preprocessing_entries(
                     project_id=project_id,
                     document_id=document_id,
                     compiler_run_id=batch.compiler_run_id,
@@ -224,7 +224,7 @@ class KnowledgeFailedBatchRetryService:
                 raise ValidationError(
                     "Knowledge retry produced no grounded answer entries"
                 )
-            await _persist_stage_e_compiler_outputs(
+            await persist_stage_e_compiler_outputs(
                 repo=repo,
                 project_id=project_id,
                 document_id=document_id,

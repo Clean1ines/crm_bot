@@ -34,7 +34,7 @@ from src.application.ports.knowledge_port import (
 )
 from src.application.ports.logger_port import LoggerPort
 from src.application.services.knowledge_answer_candidate_builder import (
-    _raw_answer_candidates_from_preprocessing_entries,
+    build_raw_answer_candidates_from_preprocessing_entries,
 )
 from src.application.services.knowledge_compiled_entry_cleanup import (
     _mechanically_cleanup_compiled_entries,
@@ -44,9 +44,9 @@ from src.application.services.knowledge_compiler_batch_builder import (
     KCD_STAGE_K_CANCELLED_ERROR,
     KCD_STAGE_K_COMPILER_VERSION,
     KCD_STAGE_K_EXTRACTION_CONCURRENCY_DEFAULT,
-    _compiler_batches_from_technical_batches,
-    _stage_e_compiler_run,
-    _stage_e_compiler_run_id,
+    build_compiler_batches_from_technical_batches,
+    build_stage_e_compiler_run,
+    build_stage_e_compiler_run_id,
 )
 from src.application.services.knowledge_ingestion_contracts import (
     CommercialPriceAcquisitionServiceFactoryPort,
@@ -63,7 +63,7 @@ from src.application.services.knowledge_retighten_planner import (
     _existing_project_titles_for_answer_resolution,
 )
 from src.application.services.knowledge_stage_e_publication_helpers import (
-    _persist_stage_e_compiler_outputs,
+    persist_stage_e_compiler_outputs,
 )
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_compilation import CompilerBatch
@@ -169,9 +169,11 @@ class KnowledgeStructuredIngestionService:
                 },
             )
 
-        compiler_run_id = _stage_e_compiler_run_id(document_id=document_id, mode=mode)
+        compiler_run_id = build_stage_e_compiler_run_id(
+            document_id=document_id, mode=mode
+        )
         await repo.create_compiler_run(
-            _stage_e_compiler_run(
+            build_stage_e_compiler_run(
                 project_id=project_id,
                 document_id=document_id,
                 mode=mode,
@@ -212,7 +214,7 @@ class KnowledgeStructuredIngestionService:
             technical_batches = tuple(
                 _technical_chunk_batches_for_answer_compiler(compiler_source_chunks)
             )
-            compiler_batches = _compiler_batches_from_technical_batches(
+            compiler_batches = build_compiler_batches_from_technical_batches(
                 project_id=project_id,
                 document_id=document_id,
                 compiler_run_id=compiler_run_id,
@@ -355,7 +357,7 @@ class KnowledgeStructuredIngestionService:
                         safe_entries = list(execution.result.entries)
 
                         raw_candidates = (
-                            _raw_answer_candidates_from_preprocessing_entries(
+                            build_raw_answer_candidates_from_preprocessing_entries(
                                 project_id=project_id,
                                 document_id=document_id,
                                 compiler_run_id=compiler_run_id,
@@ -760,7 +762,7 @@ class KnowledgeStructuredIngestionService:
                 },
             )
 
-            await _persist_stage_e_compiler_outputs(
+            await persist_stage_e_compiler_outputs(
                 repo=repo,
                 project_id=project_id,
                 document_id=document_id,

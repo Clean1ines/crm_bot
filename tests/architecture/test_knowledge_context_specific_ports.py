@@ -86,7 +86,7 @@ def test_stage_e_publication_helper_uses_minimal_publication_port() -> None:
 
     assert "KnowledgeStageEPublicationPort" in helper_source
     assert "repo: KnowledgeStageEPublicationPort" in helper_source
-    assert "_persist_stage_e_compiler_outputs" in wrapper_source
+    assert "persist_stage_e_compiler_outputs" in wrapper_source
     assert "KnowledgeStageEPublicationPort" not in facade_source
 
 

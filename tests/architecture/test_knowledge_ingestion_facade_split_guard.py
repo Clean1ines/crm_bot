@@ -10,9 +10,9 @@ INGESTION = ROOT / "src/application/services/knowledge_ingestion_service.py"
 FORBIDDEN_HELPER_DEFS = {
     "_apply_answer_resolution_decisions",
     "_resolve_compiled_answer_cases",
-    "_compiler_batches_from_technical_batches",
-    "_raw_answer_candidates_from_preprocessing_entries",
-    "_persist_stage_e_compiler_outputs",
+    "build_compiler_batches_from_technical_batches",
+    "build_raw_answer_candidates_from_preprocessing_entries",
+    "persist_stage_e_compiler_outputs",
     "_mechanically_cleanup_compiled_entries",
 }
 
@@ -105,3 +105,84 @@ def test_knowledge_ingestion_service_has_no_stage_k_helper_import() -> None:
     source = INGESTION.read_text(encoding="utf-8")
 
     assert _legacy_stage_k_helper_module_name() not in source
+
+
+def test_application_services_do_not_import_old_private_compiler_batch_builders() -> (
+    None
+):
+    forbidden_names = {
+        "_compiler_batches_from_" + "technical_batches",
+        "_" + "stage_e_compiler_run_id",
+        "_" + "stage_e_compiler_run",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_compiler_batch_builder"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_stage_e_publication_helpers() -> (
+    None
+):
+    forbidden_names = {
+        "_persist_" + "stage_e_compiler_outputs",
+        "_stage_e_answer_" + "candidates_from_entries",
+        "_stage_e_candidate_" + "clusters_from_entries",
+        "_stage_e_" + "compilation_metrics",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_stage_e_publication_helpers"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []
+
+
+def test_application_services_do_not_import_old_private_answer_candidate_builders() -> (
+    None
+):
+    forbidden_names = {
+        "_raw_" + "answer_candidate_id",
+        "_raw_" + "answer_candidates_from_preprocessing_entries",
+    }
+    offenders: list[str] = []
+
+    for path in (ROOT / "src/application/services").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (
+                node.module
+                != "src.application.services.knowledge_answer_candidate_builder"
+            ):
+                continue
+            for alias in node.names:
+                if alias.name in forbidden_names:
+                    offenders.append(f"{path.relative_to(ROOT)}:{alias.name}")
+
+    assert offenders == []

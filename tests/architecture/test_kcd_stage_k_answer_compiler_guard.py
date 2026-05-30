@@ -186,7 +186,7 @@ def test_knowledge_ingestion_service_is_stage_k_facade_after_split() -> None:
         process_document_source
     )
     assert "_canonical_entries_from_preprocessing_result" not in process_document_source
-    assert "_persist_stage_e_compiler_outputs" not in process_document_source
+    assert "persist_stage_e_compiler_outputs" not in process_document_source
 
     # Compatibility aliases may remain at module level for older unit tests, but the
     # primary process_document path must not pull Stage K business logic back into

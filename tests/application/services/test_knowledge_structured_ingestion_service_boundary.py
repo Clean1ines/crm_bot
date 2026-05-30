@@ -33,10 +33,10 @@ def test_structured_ingestion_service_contains_non_faq_processing_flow() -> None
     assert "CommercialPriceIngestionService" in source
     assert "await repo.create_compiler_run(" in source
     assert "_technical_chunk_batches_for_answer_compiler" in source
-    assert "_raw_answer_candidates_from_preprocessing_entries" in source
+    assert "build_raw_answer_candidates_from_preprocessing_entries" in source
     assert "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases" in source
     assert "_canonical_entries_from_preprocessing_result" in source
-    assert "_persist_stage_e_compiler_outputs" in source
+    assert "persist_stage_e_compiler_outputs" in source
     assert "PREPROCESSING_STATUS_COMPLETED" in source
     assert "PREPROCESSING_STATUS_FAILED" in source
 
@@ -83,7 +83,7 @@ def test_ingestion_process_document_is_wrapper_around_structured_service() -> No
         "_technical_chunk_batches_for_answer_compiler",
         "KnowledgeAnswerResolutionService().resolve_compiled_answer_cases",
         "_canonical_entries_from_preprocessing_result",
-        "_persist_stage_e_compiler_outputs",
+        "persist_stage_e_compiler_outputs",
         "CommercialPriceIngestionService",
     )
     for marker in forbidden_markers:
