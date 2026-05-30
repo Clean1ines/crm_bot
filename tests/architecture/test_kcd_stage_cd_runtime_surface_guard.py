@@ -54,7 +54,7 @@ def test_structured_ingestion_writes_source_chunks_then_canonical_entries() -> N
         "src/application/services/knowledge_structured_ingestion_service.py"
     )
     publication_source = _read(
-        "src/application/services/knowledge_stage_k_shared_helpers.py"
+        "src/application/services/knowledge_stage_e_publication_helpers.py"
     )
     canonical_builder_source = _read(
         "src/application/services/knowledge_canonical_publication_builder.py"
