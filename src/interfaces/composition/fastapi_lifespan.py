@@ -30,7 +30,6 @@ from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.db.repositories.commercial_price_repository import (
     CommercialPriceRepository,
 )
-from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.db.repositories.project import (
     ProjectMemberRepository,
@@ -49,17 +48,6 @@ from src.infrastructure.db.repositories.thread.runtime_state import (
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.telegram.http_client import HttpTelegramClient
 from src.tools import tool_registry
-from src.tools.builtins import (
-    CRMCollectProfileTool,
-    CRMCreateUserTool,
-    CRMGetUserTool,
-    CommercialPriceLookupTool,
-    EscalateTool,
-    SearchKnowledgeTool,
-    TelegramSendMessageTool,
-    TicketCreateTool,
-)
-from src.tools.http_tool import HTTPTool
 
 logger = get_logger(__name__)
 
@@ -75,10 +63,26 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     adapters, LLM services, and the process-wide tool registry together.
     """
     from src.infrastructure.llm.query_expander import GroqQueryExpander
-    from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+    from src.application.ports.knowledge.runtime_search import (
+        KnowledgeRuntimeRetrievalPort,
+    )
     from src.infrastructure.llm.rag_service import RAGService
+    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
+        WorkbenchRuntimeRetrievalRepository,
+    )
+    from src.tools.builtins import (
+        CRMCollectProfileTool,
+        CRMCreateUserTool,
+        CRMGetUserTool,
+        CommercialPriceLookupTool,
+        EscalateTool,
+        SearchKnowledgeTool,
+        TelegramSendMessageTool,
+        TicketCreateTool,
+    )
+    from src.tools.http_tool import HTTPTool
 
-    knowledge_repo = KnowledgeRepository(db_pool)
+    runtime_retrieval = WorkbenchRuntimeRetrievalRepository(db_pool)
     commercial_price_repo = CommercialPriceRepository(db_pool)
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     queue_repo = QueueRepository(db_pool)
@@ -86,7 +90,7 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     project_members = ProjectMemberRepository(db_pool)
 
     rag_service = RAGService(
-        cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
+        cast(KnowledgeRuntimeRetrievalPort, runtime_retrieval),
         query_expander=GroqQueryExpander(),
     )
 

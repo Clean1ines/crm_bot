@@ -197,4 +197,6 @@ def test_telegram_knowledge_upload_uses_application_upload_boundary() -> None:
     violations = [marker for marker in forbidden if marker in source]
 
     assert violations == []
-    assert "upload_platform_admin_knowledge_file" in source
+    assert "upload_faq_workbench_knowledge_file" in source
+    assert "src.interfaces.composition.knowledge_upload" not in source
+    assert "upload_platform_admin_knowledge_file" not in source

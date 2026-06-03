@@ -43,3 +43,7 @@ htmlcov/
 frontend/openapi.json
 *.tsbuildinfo
 .env.local
+coverage.json
+
+# generated local reports/caches
+.mypy_cache/

@@ -5,9 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from src.domain.project_plane.knowledge_retrieval_surface import (
-    RUNTIME_ENTRY_KIND_VALUES,
-)
+from src.domain.project_plane.knowledge_entry_kind import RUNTIME_ENTRY_KIND_VALUES
 from src.domain.project_plane.knowledge_views import KnowledgeSearchTraceView
 
 

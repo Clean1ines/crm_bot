@@ -1,0 +1,5 @@
+-- D4C6-real-15a
+-- Intentionally no-op after destructive empty-DB cutover.
+--
+-- Prompt C produces fact_registry snapshots/artifacts directly.
+-- Old registry-update proposal rows are not part of the target schema.

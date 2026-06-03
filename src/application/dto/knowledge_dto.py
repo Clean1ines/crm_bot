@@ -13,15 +13,8 @@ from src.domain.project_plane.knowledge_import_quality import (
     DocumentImportIssue,
     DocumentImportQualityReport,
 )
-from src.domain.project_plane.knowledge_compilation import (
-    AnswerCandidate,
-    SourceChunk,
-    SourceRef,
-)
 from src.domain.project_plane.knowledge_views import (
-    KnowledgeSearchResultView,
     KnowledgeSearchTraceView,
-    SourceRefView,
 )
 from src.domain.project_plane.knowledge_preprocessing import (
     KnowledgePreprocessingMode,
@@ -33,6 +26,46 @@ KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT = "runtime_equivalent"
 KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG = (
     ProductionRetrievalMode.LEXICAL_DEBUG.value
 )
+
+
+def _metadata_text_list(metadata: Mapping[str, object], key: str) -> list[str]:
+    value = metadata.get(key)
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list | tuple):
+        return [str(item) for item in value if str(item).strip()]
+    return []
+
+
+def _metadata_int(metadata: Mapping[str, object], key: str) -> int | None:
+    value = metadata.get(key)
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _metadata_int_list(metadata: Mapping[str, object], key: str) -> tuple[int, ...]:
+    value = metadata.get(key)
+    if isinstance(value, list | tuple):
+        result: list[int] = []
+        for item in value:
+            if isinstance(item, bool) or item is None:
+                continue
+            if isinstance(item, int):
+                result.append(item)
+            elif isinstance(item, float) and item.is_integer():
+                result.append(int(item))
+            elif isinstance(item, str) and item.strip().isdigit():
+                result.append(int(item.strip()))
+        return tuple(result)
+    single = _metadata_int(metadata, key)
+    return (single,) if single is not None else ()
 
 
 @dataclass(slots=True)
@@ -152,40 +185,11 @@ class KnowledgeUploadRequestDto:
 
 
 @dataclass(frozen=True, slots=True)
-class KnowledgePreviewRequestDto:
-    question: str
-    limit: int = 5
-    retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
-
-    def normalized_question(self) -> str:
-        return self.question.strip()
-
-    def normalized_limit(self) -> int:
-        return max(1, min(int(self.limit), 10))
-
-    def normalized_retrieval_mode_value(self) -> str:
-        value = str(
-            self.retrieval_mode or KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
-        ).strip()
-        if value == KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG:
-            return KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG
-        return KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
-
-    def normalized_production_retrieval_mode(self) -> ProductionRetrievalMode:
-        if (
-            self.normalized_retrieval_mode_value()
-            == KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_LEXICAL_DEBUG
-        ):
-            return ProductionRetrievalMode.LEXICAL_DEBUG
-        return ProductionRetrievalMode.RUNTIME_EQUIVALENT_PREVIEW
-
-
-@dataclass(frozen=True, slots=True)
 class KnowledgeSearchTraceDto:
     matched_fields: tuple[str, ...]
     lexical_score: float
     vector_score: float
-    exact_question_match: bool
+    exact_claim_match: bool
     title_match: bool
     length_penalty: float
     final_score: float
@@ -199,7 +203,7 @@ class KnowledgeSearchTraceDto:
             matched_fields=trace.matched_fields,
             lexical_score=trace.lexical_score,
             vector_score=trace.vector_score,
-            exact_question_match=trace.exact_question_match,
+            exact_claim_match=trace.exact_claim_match,
             title_match=trace.title_match,
             length_penalty=trace.length_penalty,
             final_score=trace.final_score,
@@ -213,424 +217,13 @@ class KnowledgeSearchTraceDto:
             "matched_fields": list(self.matched_fields),
             "lexical_score": self.lexical_score,
             "vector_score": self.vector_score,
-            "exact_question_match": self.exact_question_match,
+            "exact_claim_match": self.exact_claim_match,
             "title_match": self.title_match,
             "length_penalty": self.length_penalty,
             "final_score": self.final_score,
             "retrieval_surface_role": self.retrieval_surface_role,
             "displayed_field": self.displayed_field,
             "is_production_safe": self.is_production_safe,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class SourceRefDto:
-    quote: str
-    source_index: int | None = None
-    source_chunk_id: str | None = None
-    start_offset: int | None = None
-    end_offset: int | None = None
-    confidence: float | None = None
-
-    @classmethod
-    def from_view(cls, source_ref: SourceRefView) -> "SourceRefDto":
-        return cls(
-            quote=source_ref.quote,
-            source_index=source_ref.source_index,
-            source_chunk_id=source_ref.source_chunk_id,
-            start_offset=source_ref.start_offset,
-            end_offset=source_ref.end_offset,
-            confidence=source_ref.confidence,
-        )
-
-    @classmethod
-    def from_domain(cls, source_ref: SourceRef) -> "SourceRefDto":
-        return cls(
-            quote=source_ref.quote,
-            source_index=source_ref.source_index,
-            source_chunk_id=source_ref.source_chunk_id,
-            start_offset=source_ref.start_offset,
-            end_offset=source_ref.end_offset,
-            confidence=source_ref.confidence,
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        payload: dict[str, object] = {"quote": self.quote}
-        if self.source_index is not None:
-            payload["source_index"] = self.source_index
-        if self.source_chunk_id is not None:
-            payload["source_chunk_id"] = self.source_chunk_id
-        if self.start_offset is not None:
-            payload["start_offset"] = self.start_offset
-        if self.end_offset is not None:
-            payload["end_offset"] = self.end_offset
-        if self.confidence is not None:
-            payload["confidence"] = self.confidence
-        return payload
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgePreviewResultDto:
-    id: str
-    content: str
-    score: float
-    method: str
-    source: str | None
-    document_id: str | None
-    document_status: str | None
-    entry_kind: str | None = None
-    title: str | None = None
-    source_excerpt: str | None = None
-    source_refs: tuple[SourceRefDto, ...] = ()
-    questions: object | None = None
-    synonyms: object | None = None
-    tags: object | None = None
-    trace: KnowledgeSearchTraceDto | None = None
-
-    @classmethod
-    def from_search_result(
-        cls,
-        result: KnowledgeSearchResultView,
-    ) -> "KnowledgePreviewResultDto":
-        return cls(
-            id=result.id,
-            content=result.content,
-            score=result.score,
-            method=result.method,
-            source=result.source,
-            document_id=result.document_id,
-            document_status=result.document_status,
-            entry_kind=result.entry_kind,
-            title=result.title,
-            source_excerpt=result.source_excerpt,
-            source_refs=tuple(
-                SourceRefDto.from_view(ref) for ref in result.source_refs
-            ),
-            questions=result.questions,
-            synonyms=result.synonyms,
-            tags=result.tags,
-            trace=(
-                KnowledgeSearchTraceDto.from_view(result.trace)
-                if result.trace is not None
-                else None
-            ),
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "id": self.id,
-            "content": self.content,
-            "answer": self.content,
-            "score": self.score,
-            "method": self.method,
-            "source": self.source,
-            "document_id": self.document_id,
-            "document_status": self.document_status,
-        }
-
-        if self.source_refs:
-            payload["source_refs"] = [
-                source_ref.to_dict() for source_ref in self.source_refs
-            ]
-
-        optional_fields = {
-            "entry_kind": self.entry_kind,
-            "title": self.title,
-            "source_excerpt": self.source_excerpt,
-            "questions": self.questions,
-            "synonyms": self.synonyms,
-            "tags": self.tags,
-            "trace": self.trace.to_dict() if self.trace is not None else None,
-        }
-        for key, value in optional_fields.items():
-            if value is not None:
-                payload[key] = value
-
-        return payload
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgePreviewResponseDto:
-    query: str
-    best_result: KnowledgePreviewResultDto | None
-    top_results: list[KnowledgePreviewResultDto]
-    is_empty: bool
-    retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT
-    method: str = "production_runtime_search"
-    trace: dict[str, object] | None = None
-
-    @classmethod
-    def empty(
-        cls,
-        *,
-        query: str,
-        retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT,
-        method: str = "production_runtime_search",
-        trace: dict[str, object] | None = None,
-    ) -> "KnowledgePreviewResponseDto":
-        return cls(
-            query=query,
-            best_result=None,
-            top_results=[],
-            is_empty=True,
-            retrieval_mode=retrieval_mode,
-            method=method,
-            trace=trace,
-        )
-
-    @classmethod
-    def from_results(
-        cls,
-        *,
-        query: str,
-        results: list[KnowledgeSearchResultView],
-        retrieval_mode: str = KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT,
-        method: str = "production_runtime_search",
-        trace: dict[str, object] | None = None,
-    ) -> "KnowledgePreviewResponseDto":
-        preview_results = [
-            KnowledgePreviewResultDto.from_search_result(result) for result in results
-        ]
-        return cls(
-            query=query,
-            best_result=preview_results[0] if preview_results else None,
-            top_results=preview_results,
-            is_empty=not preview_results,
-            retrieval_mode=retrieval_mode,
-            method=method,
-            trace=trace,
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "query": self.query,
-            "best_result": self.best_result.to_dict() if self.best_result else None,
-            "top_results": [result.to_dict() for result in self.top_results],
-            "is_empty": self.is_empty,
-            "retrieval_mode": self.retrieval_mode,
-            "method": self.method,
-            "trace": self.trace or {},
-        }
-
-
-def _metadata_text_list(metadata: Mapping[str, object], key: str) -> list[str]:
-    value = metadata.get(key)
-    if isinstance(value, str):
-        values: tuple[object, ...] = (value,)
-    elif isinstance(value, list | tuple):
-        values = tuple(value)
-    else:
-        return []
-
-    result: list[str] = []
-    for item in values:
-        text = " ".join(str(item or "").strip().split())
-        if text and text not in result:
-            result.append(text)
-    return result
-
-
-def _metadata_int(metadata: Mapping[str, object], key: str) -> int | None:
-    value = metadata.get(key)
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return None
-
-
-def _metadata_int_list(metadata: Mapping[str, object], key: str) -> tuple[int, ...]:
-    value = metadata.get(key)
-    if isinstance(value, list | tuple):
-        values: tuple[object, ...] = tuple(value)
-    else:
-        parsed = _metadata_int(metadata, key)
-        return () if parsed is None else (parsed,)
-
-    result: list[int] = []
-    for item in values:
-        parsed = _metadata_int({"value": item}, "value")
-        if parsed is not None and parsed not in result:
-            result.append(parsed)
-    return tuple(result)
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeAnswerDraftDto:
-    id: str
-    title: str
-    answer: str
-    status: str
-    batch_id: str
-    batch_index: int | None
-    fragment_index: int | None
-    canonical_question: str
-    question_variants: tuple[str, ...]
-    synonyms: tuple[str, ...]
-    tags: tuple[str, ...]
-    source_chunk_indexes: tuple[int, ...]
-    source_refs: tuple[SourceRefDto, ...]
-    rejection_reason: str = ""
-
-    @classmethod
-    def from_candidate(cls, candidate: AnswerCandidate) -> "KnowledgeAnswerDraftDto":
-        metadata = candidate.metadata
-        return cls(
-            id=candidate.id,
-            title=candidate.title,
-            answer=candidate.candidate_answer,
-            status=str(candidate.status),
-            batch_id=str(metadata.get("batch_id") or ""),
-            batch_index=_metadata_int(metadata, "batch_index"),
-            fragment_index=_metadata_int(metadata, "fragment_index"),
-            canonical_question=str(metadata.get("canonical_question") or ""),
-            question_variants=tuple(_metadata_text_list(metadata, "question_variants")),
-            synonyms=tuple(_metadata_text_list(metadata, "synonyms")),
-            tags=tuple(_metadata_text_list(metadata, "tags")),
-            source_chunk_indexes=_metadata_int_list(metadata, "source_chunk_indexes"),
-            source_refs=tuple(
-                SourceRefDto.from_domain(source_ref)
-                for source_ref in candidate.source_refs
-            ),
-            rejection_reason=candidate.rejection_reason,
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "id": self.id,
-            "title": self.title,
-            "answer": self.answer,
-            "status": self.status,
-            "batch_id": self.batch_id,
-            "batch_index": self.batch_index,
-            "fragment_index": self.fragment_index,
-            "canonical_question": self.canonical_question,
-            "question_variants": list(self.question_variants),
-            "synonyms": list(self.synonyms),
-            "tags": list(self.tags),
-            "source_chunk_indexes": list(self.source_chunk_indexes),
-            "source_refs": [source_ref.to_dict() for source_ref in self.source_refs],
-            "rejection_reason": self.rejection_reason,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeAnswerDraftsResponseDto:
-    document_id: str
-    drafts: tuple[KnowledgeAnswerDraftDto, ...]
-    total_count: int
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "document_id": self.document_id,
-            "drafts": [draft.to_dict() for draft in self.drafts],
-            "total_count": self.total_count,
-        }
-
-
-def _candidate_source_indexes(candidate: AnswerCandidate) -> tuple[int, ...]:
-    indexes: list[int] = []
-    for index in _metadata_int_list(candidate.metadata, "source_chunk_indexes"):
-        if index not in indexes:
-            indexes.append(index)
-
-    for source_ref in candidate.source_refs:
-        if (
-            source_ref.source_index is not None
-            and source_ref.source_index not in indexes
-        ):
-            indexes.append(source_ref.source_index)
-
-    return tuple(indexes)
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeSourceUnitDto:
-    id: str
-    source_index: int
-    title: str
-    content: str
-    page: int | None
-    start_offset: int | None
-    end_offset: int | None
-    metadata: JsonObject
-    draft_count: int
-    draft_titles: tuple[str, ...]
-    draft_ids: tuple[str, ...]
-
-    @classmethod
-    def from_source_chunk(
-        cls,
-        source_chunk: SourceChunk,
-        *,
-        related_candidates: tuple[AnswerCandidate, ...] = (),
-    ) -> "KnowledgeSourceUnitDto":
-        draft_titles: list[str] = []
-        draft_ids: list[str] = []
-        for candidate in related_candidates:
-            title = " ".join((candidate.title or candidate.topic_key).strip().split())
-            if title and title not in draft_titles:
-                draft_titles.append(title)
-            if candidate.id not in draft_ids:
-                draft_ids.append(candidate.id)
-
-        metadata: JsonObject = {
-            str(key): json_value_from_unknown(value)
-            for key, value in source_chunk.metadata.items()
-        }
-
-        return cls(
-            id=source_chunk.id,
-            source_index=source_chunk.source_index,
-            title=source_chunk.section_title
-            or f"Source unit {source_chunk.source_index}",
-            content=source_chunk.content,
-            page=source_chunk.page,
-            start_offset=source_chunk.start_offset,
-            end_offset=source_chunk.end_offset,
-            metadata=metadata,
-            draft_count=len(related_candidates),
-            draft_titles=tuple(draft_titles),
-            draft_ids=tuple(draft_ids),
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        payload: dict[str, object] = {
-            "id": self.id,
-            "source_index": self.source_index,
-            "title": self.title,
-            "content": self.content,
-            "metadata": self.metadata,
-            "draft_count": self.draft_count,
-            "draft_titles": list(self.draft_titles),
-            "draft_ids": list(self.draft_ids),
-        }
-        if self.page is not None:
-            payload["page"] = self.page
-        if self.start_offset is not None:
-            payload["start_offset"] = self.start_offset
-        if self.end_offset is not None:
-            payload["end_offset"] = self.end_offset
-        return payload
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeSourceUnitsResponseDto:
-    document_id: str
-    source_units: tuple[KnowledgeSourceUnitDto, ...]
-    total_count: int
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "document_id": self.document_id,
-            "source_units": [
-                source_unit.to_dict() for source_unit in self.source_units
-            ],
-            "total_count": self.total_count,
         }
 
 
@@ -741,30 +334,6 @@ class KnowledgeProcessingActionDto:
             "label": self.label,
             "kind": self.kind,
             "enabled": self.enabled,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeProcessingReportDto:
-    document_id: str
-    status: str
-    title: str
-    message: str
-    recoverable: bool
-    steps: tuple[KnowledgeProcessingStepDto, ...]
-    actions: tuple[KnowledgeProcessingActionDto, ...]
-    metrics: JsonObject
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "document_id": self.document_id,
-            "status": self.status,
-            "title": self.title,
-            "message": self.message,
-            "recoverable": self.recoverable,
-            "steps": [step.to_dict() for step in self.steps],
-            "actions": [action.to_dict() for action in self.actions],
-            "metrics": self.metrics,
         }
 
 
@@ -1049,13 +618,13 @@ class RetrievalSurfaceDto:
     id: str
     run_id: str
     surface_key: str
-    surface_kind: str
+    claim_kind: str
     title: str
-    canonical_question: str
+    claim: str
     answer: str
     short_answer: str
     answer_scope: str
-    question_scope: str
+    retrieval_scope: str
     exclusion_scope: str
     status: str
     publication_status: str

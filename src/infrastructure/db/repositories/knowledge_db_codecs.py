@@ -1,45 +1,48 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import datetime
+from typing import cast
 
-from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_compilation import (
-    CanonicalKnowledgeEntry,
-    SourceRef,
-)
 from src.domain.project_plane.knowledge_views import SourceRefView
 
 
-def normalize_timestamp(value: object) -> str | None:
-    """
-    Keep test strings unchanged and serialize real datetime-like values only
-    when the repository owns the DB-row normalization boundary.
-    """
+def normalize_timestamp(value: object) -> datetime | None:
     if value is None:
         return None
-    if isinstance(value, str):
+    if isinstance(value, datetime):
         return value
-    if hasattr(value, "isoformat"):
-        return str(value.isoformat())
-    return str(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
 
 
-def jsonb_object_payload(value: Mapping[str, object]) -> str:
-    return json.dumps(dict(value), ensure_ascii=False, default=str)
+def jsonb_object_payload(value: object) -> str:
+    if isinstance(value, Mapping):
+        return json.dumps(dict(value), ensure_ascii=False, default=str)
+    return "{}"
 
 
-def pg_vector_text(embedding: list[float]) -> str:
-    return "[" + ",".join(str(x) for x in embedding) + "]"
+def pg_vector_text(values: Sequence[float]) -> str:
+    return "[" + ",".join(str(float(value)) for value in values) + "]"
 
 
-def json_object_from_db(value: object) -> JsonObject:
+def json_object_from_db(value: object) -> dict[str, object]:
     if isinstance(value, Mapping):
         return {str(key): item for key, item in value.items()}
+
     if isinstance(value, str) and value.strip():
-        parsed = json.loads(value)
-        if isinstance(parsed, Mapping):
-            return {str(key): item for key, item in parsed.items()}
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if isinstance(decoded, Mapping):
+            return {str(key): item for key, item in decoded.items()}
+
     return {}
 
 
@@ -48,10 +51,15 @@ def json_list_from_db(value: object) -> list[object]:
         return value
     if isinstance(value, tuple):
         return list(value)
+
     if isinstance(value, str) and value.strip():
-        parsed = json.loads(value)
-        if isinstance(parsed, list):
-            return parsed
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        if isinstance(decoded, list):
+            return decoded
+
     return []
 
 
@@ -60,10 +68,11 @@ def optional_int(value: object) -> int | None:
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
+    if isinstance(value, float | str):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
     return None
 
 
@@ -79,91 +88,119 @@ def optional_float(value: object) -> float | None:
 
 
 def text_tuple_from_json(value: object) -> tuple[str, ...]:
-    if isinstance(value, str):
-        values: Sequence[object] = (value,)
-    elif isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
-        values = value
-    else:
-        return ()
-
-    result: list[str] = []
-    for item in values:
-        cleaned = " ".join(str(item or "").strip().split())
-        if cleaned and cleaned not in result:
-            result.append(cleaned)
-    return tuple(result)
-
-
-def source_ref_from_mapping(payload: Mapping[str, object]) -> SourceRef:
-    source_chunk_value = payload.get("source_chunk_id")
-    return SourceRef(
-        source_index=optional_int(payload.get("source_index")),
-        quote=" ".join(str(payload.get("quote") or "").strip().split()),
-        source_chunk_id=str(source_chunk_value) if source_chunk_value else None,
-        start_offset=optional_int(payload.get("start_offset")),
-        end_offset=optional_int(payload.get("end_offset")),
-        confidence=optional_float(payload.get("confidence")),
+    items = json_list_from_db(value)
+    return tuple(
+        normalized
+        for item in items
+        if isinstance(item, str)
+        for normalized in (" ".join(item.split()),)
+        if normalized
     )
 
 
-def source_refs_from_db(value: object) -> tuple[SourceRef, ...]:
-    refs: list[SourceRef] = []
-    for item in json_list_from_db(value):
-        if not isinstance(item, Mapping):
-            continue
-        ref = source_ref_from_mapping(item)
-        if ref.quote:
-            refs.append(ref)
-    return tuple(refs)
+def _clean_quote(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())
 
 
-def source_ref_payload(ref: SourceRef) -> dict[str, object]:
-    payload: dict[str, object] = {"quote": ref.quote}
-    if ref.source_index is not None:
-        payload["source_index"] = ref.source_index
-    if ref.source_chunk_id is not None:
-        payload["source_chunk_id"] = ref.source_chunk_id
-    if ref.start_offset is not None:
-        payload["start_offset"] = ref.start_offset
-    if ref.end_offset is not None:
-        payload["end_offset"] = ref.end_offset
-    if ref.confidence is not None:
-        payload["confidence"] = ref.confidence
-    return payload
+def _mapping_source_ref_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    quote = _clean_quote(payload.get("quote"))
+    if not quote:
+        return {}
+
+    result: dict[str, object] = {
+        "source_index": optional_int(payload.get("source_index")) or 0,
+        "quote": quote,
+    }
+
+    source_chunk_id = payload.get("source_chunk_id")
+    if source_chunk_id:
+        result["source_chunk_id"] = str(source_chunk_id)
+
+    start_offset = optional_int(payload.get("start_offset"))
+    if start_offset is not None:
+        result["start_offset"] = start_offset
+
+    end_offset = optional_int(payload.get("end_offset"))
+    if end_offset is not None:
+        result["end_offset"] = end_offset
+
+    confidence = optional_float(payload.get("confidence"))
+    if confidence is not None:
+        result["confidence"] = confidence
+
+    return result
 
 
-def source_refs_payload(entry: CanonicalKnowledgeEntry) -> list[dict[str, object]]:
-    return [source_ref_payload(ref) for ref in entry.source_refs]
+def source_ref_payload(ref: SourceRefView | Mapping[str, object]) -> dict[str, object]:
+    if isinstance(ref, SourceRefView):
+        payload: dict[str, object] = {
+            "source_index": ref.source_index,
+            "quote": ref.quote,
+        }
+        if ref.source_chunk_id:
+            payload["source_chunk_id"] = ref.source_chunk_id
+        if ref.start_offset is not None:
+            payload["start_offset"] = ref.start_offset
+        if ref.end_offset is not None:
+            payload["end_offset"] = ref.end_offset
+        if ref.confidence is not None:
+            payload["confidence"] = ref.confidence
+        return payload
+
+    return _mapping_source_ref_payload(ref)
 
 
 def source_ref_view_from_mapping(payload: Mapping[str, object]) -> SourceRefView:
-    quote = " ".join(str(payload.get("quote") or "").strip().split())
-    source_chunk_id_value = payload.get("source_chunk_id")
+    normalized = _mapping_source_ref_payload(payload)
+    if not normalized:
+        raise ValueError("source ref payload requires non-empty quote")
+
     return SourceRefView(
-        source_index=optional_int(payload.get("source_index")),
-        quote=quote,
-        source_chunk_id=str(source_chunk_id_value) if source_chunk_id_value else None,
-        start_offset=optional_int(payload.get("start_offset")),
-        end_offset=optional_int(payload.get("end_offset")),
-        confidence=optional_float(payload.get("confidence")),
+        source_index=cast(int, normalized["source_index"]),
+        quote=cast(str, normalized["quote"]),
+        source_chunk_id=cast(str | None, normalized.get("source_chunk_id")),
+        start_offset=cast(int | None, normalized.get("start_offset")),
+        end_offset=cast(int | None, normalized.get("end_offset")),
+        confidence=cast(float | None, normalized.get("confidence")),
     )
 
 
 def source_ref_views_from_payload(value: object) -> tuple[SourceRefView, ...]:
-    if not isinstance(value, list):
+    if not isinstance(value, Iterable) or isinstance(value, str | bytes | Mapping):
         return ()
 
     refs: list[SourceRefView] = []
     for item in value:
-        if isinstance(item, Mapping):
-            ref = source_ref_view_from_mapping(item)
-            if ref.quote:
-                refs.append(ref)
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            refs.append(source_ref_view_from_mapping(item))
+        except ValueError:
+            continue
     return tuple(refs)
 
 
 def first_source_excerpt(source_refs: tuple[SourceRefView, ...]) -> str | None:
-    for source_ref in source_refs:
-        if source_ref.quote:
-            return source_ref.quote
+    for ref in source_refs:
+        quote = _clean_quote(ref.quote)
+        if quote:
+            return quote
     return None
+
+
+__all__ = [
+    "first_source_excerpt",
+    "json_list_from_db",
+    "json_object_from_db",
+    "jsonb_object_payload",
+    "normalize_timestamp",
+    "optional_float",
+    "optional_int",
+    "pg_vector_text",
+    "source_ref_payload",
+    "source_ref_view_from_mapping",
+    "source_ref_views_from_payload",
+    "text_tuple_from_json",
+]

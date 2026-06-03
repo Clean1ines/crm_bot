@@ -9,7 +9,7 @@ IMPORT_QUALITY_STATUS_GOOD = "good"
 IMPORT_QUALITY_STATUS_NEEDS_REVIEW = "needs_review"
 IMPORT_QUALITY_STATUS_UNSAFE = "unsafe"
 
-IMPORT_QUALITY_ACTION_CONTINUE = "continue_to_knowledge_compilation"
+IMPORT_QUALITY_ACTION_CONTINUE = "continue_to_workbench_processing"
 IMPORT_QUALITY_ACTION_REVIEW_SOURCE_UNITS = "review_source_units"
 IMPORT_QUALITY_ACTION_WAIT_FOR_PROCESSING = "wait_for_processing"
 IMPORT_QUALITY_ACTION_REPLACE_OR_REVIEW_DOCUMENT = "replace_or_review_document"

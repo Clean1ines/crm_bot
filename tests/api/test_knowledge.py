@@ -1,652 +1,348 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from io import BytesIO
+from pathlib import Path
+from typing import Any
+
 import pytest
-from src.domain.control_plane.project_views import ProjectSummaryView
-from src.domain.project_plane.model_usage_views import ModelUsageSummaryView
-from unittest.mock import AsyncMock, MagicMock, patch
-from fastapi.testclient import TestClient
-from datetime import UTC, datetime
-from uuid import uuid4
+from fastapi import HTTPException
+from starlette.datastructures import UploadFile
 
-from src.interfaces.http.app import (
-    KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES,
-    app,
-)
-from src.interfaces.http.dependencies import (
-    get_project_repo,
-    get_pool,
-    get_queue_repo,
-    get_user_repository,
-)
-from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
-from src.interfaces.http.knowledge import UPLOAD_TOO_LARGE_DETAIL
+from src.interfaces.http import dependencies, knowledge
 
 
-TEST_USER_ID = "knowledge-user-id"
-TEST_DOCUMENT_ID = "00000000-0000-0000-0000-000000000001"
+@dataclass(slots=True)
+class _FakeProjectRepo:
+    exists: bool = True
+    has_role: bool = True
 
+    async def project_exists(self, project_id: str) -> bool:
+        return self.exists
 
-@pytest.fixture
-def mock_project_repo():
-    repo = AsyncMock()
-    repo.project_exists = AsyncMock()
-    repo.user_has_project_role = AsyncMock(return_value=True)
-    return repo
-
-
-@pytest.fixture
-def mock_user_repo():
-    repo = AsyncMock()
-    repo.is_platform_admin = AsyncMock(return_value=False)
-    return repo
-
-
-@pytest.fixture
-def mock_pool():
-    pool = AsyncMock()
-    mock_conn = AsyncMock()
-    mock_cm = MagicMock()
-    mock_cm.__aenter__.return_value = mock_conn
-    mock_cm.__aexit__.return_value = None
-    pool.acquire = MagicMock(return_value=mock_cm)
-    return pool
-
-
-@pytest.fixture
-def mock_queue_repo():
-    repo = AsyncMock()
-    repo.enqueue = AsyncMock(return_value="job-1")
-    return repo
-
-
-@pytest.fixture(autouse=True)
-def override_dependencies(
-    mock_project_repo, mock_pool, mock_user_repo, mock_queue_repo
-):
-    original_overrides = app.dependency_overrides.copy()
-    app.dependency_overrides[get_project_repo] = lambda: mock_project_repo
-    app.dependency_overrides[get_pool] = lambda: mock_pool
-    app.dependency_overrides[get_user_repository] = lambda: mock_user_repo
-    app.dependency_overrides[get_queue_repo] = lambda: mock_queue_repo
-    yield
-    app.dependency_overrides.clear()
-    app.dependency_overrides.update(original_overrides)
-
-
-@pytest.fixture
-def client():
-    return TestClient(app)
-
-
-class TestKnowledgeUpload:
-    """Тесты для POST /api/projects/{project_id}/knowledge"""
-
-    def test_upload_success_txt(
-        self, client, mock_project_repo, mock_pool, mock_queue_repo
-    ):
-        """Успешная загрузка .txt файла"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        chunks = [
-            {"content": "chunk 1", "metadata": {}},
-            {"content": "chunk 2", "metadata": {}},
-        ]
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(return_value=chunks)
-
-            with patch(
-                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
-            ) as MockRepo:
-                mock_repo = AsyncMock()
-                MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
-                mock_repo.update_document_preprocessing_status = AsyncMock()
-
-                with patch(
-                    "src.interfaces.http.knowledge.jwt.decode",
-                    return_value={"sub": TEST_USER_ID},
-                ):
-                    files = {"file": ("test.txt", b"Test content", "text/plain")}
-                    headers = {"Authorization": "Bearer valid-token"}
-
-                    response = client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files=files,
-                        headers=headers,
-                    )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["message"] == "Queued 2 chunks for FAQ surface compilation"
-        assert data["chunks"] == 2
-
-        mock_project_repo.project_exists.assert_awaited_once_with(project_id)
-        mock_chunker.process_file.assert_awaited_once()
-        mock_repo.create_document.assert_awaited_once_with(
-            project_id=project_id,
-            file_name="test.txt",
-            file_size=len(b"Test content"),
-            uploaded_by=TEST_USER_ID,
-        )
-        mock_repo.update_document_status.assert_awaited_once_with(
-            TEST_DOCUMENT_ID, "processing"
-        )
-        mock_queue_repo.enqueue.assert_awaited_once_with(
-            TASK_PROCESS_KNOWLEDGE_UPLOAD,
-            payload={
-                "project_id": project_id,
-                "document_id": TEST_DOCUMENT_ID,
-                "file_name": "test.txt",
-                "preprocessing_mode": "faq",
-                "chunks": chunks,
-            },
-        )
-
-    def test_upload_success_pdf(self, client, mock_project_repo, mock_pool):
-        """Успешная загрузка PDF файла"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(
-                return_value=[{"content": "pdf chunk"}]
-            )
-
-            with patch(
-                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
-            ) as MockRepo:
-                mock_repo = AsyncMock()
-                MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
-                mock_repo.update_document_preprocessing_status = AsyncMock()
-
-                with patch(
-                    "src.interfaces.http.knowledge.jwt.decode",
-                    return_value={"sub": TEST_USER_ID},
-                ):
-                    files = {"file": ("test.pdf", b"%PDF-1.4...", "application/pdf")}
-                    headers = {"Authorization": "Bearer valid-token"}
-
-                    response = client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files=files,
-                        headers=headers,
-                    )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["chunks"] == 1
-
-    def test_upload_success_json(self, client, mock_project_repo, mock_pool):
-        """Успешная загрузка .json файла"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(
-                return_value=[{"content": "## value_proposition\nanswer: useful"}]
-            )
-
-            with patch(
-                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
-            ) as MockRepo:
-                mock_repo = AsyncMock()
-                MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
-                mock_repo.update_document_preprocessing_status = AsyncMock()
-
-                with patch(
-                    "src.interfaces.http.knowledge.jwt.decode",
-                    return_value={"sub": TEST_USER_ID},
-                ):
-                    files = {
-                        "file": (
-                            "knowledge.json",
-                            b'{"intents":{}}',
-                            "application/json",
-                        )
-                    }
-                    headers = {"Authorization": "Bearer valid-token"}
-
-                    response = client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files=files,
-                        headers=headers,
-                    )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["chunks"] == 1
-
-    def test_upload_empty_text(self, client, mock_project_repo, mock_pool):
-        """Загрузка файла без текста"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(return_value=[])
-
-            with patch(
-                "src.interfaces.http.knowledge.jwt.decode",
-                return_value={"sub": TEST_USER_ID},
-            ):
-                files = {"file": ("empty.txt", b"", "text/plain")}
-                headers = {"Authorization": "Bearer valid-token"}
-
-                response = client.post(
-                    f"/api/projects/{project_id}/knowledge",
-                    files=files,
-                    headers=headers,
-                )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["message"] == "No text extracted"
-        assert data["chunks"] == 0
-
-    def test_upload_project_not_found(self, client, mock_project_repo):
-        """Проект не найден"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = False
-
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode",
-            return_value={"sub": TEST_USER_ID},
-        ):
-            files = {"file": ("test.txt", b"test", "text/plain")}
-            headers = {"Authorization": "Bearer valid-token"}
-
-            response = client.post(
-                f"/api/projects/{project_id}/knowledge", files=files, headers=headers
-            )
-
-        assert response.status_code == 404
-        assert response.json()["detail"] == "Project not found"
-
-    def test_upload_missing_file(self, client):
-        """Файл не передан"""
-        project_id = str(uuid4())
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode",
-            return_value={"sub": TEST_USER_ID},
-        ):
-            headers = {"Authorization": "Bearer valid-token"}
-
-            response = client.post(
-                f"/api/projects/{project_id}/knowledge", headers=headers
-            )
-
-        assert response.status_code == 422
-        errors = response.json()["detail"]
-        assert any(err["loc"] == ["body", "file"] for err in errors)
-
-    def test_upload_unsupported_file_type(self, client, mock_project_repo):
-        """Неподдерживаемый тип файла"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(
-                side_effect=ValueError("Unsupported file type: test.exe")
-            )
-
-            with patch(
-                "src.interfaces.http.knowledge.jwt.decode",
-                return_value={"sub": TEST_USER_ID},
-            ):
-                files = {"file": ("test.exe", b"binary", "application/octet-stream")}
-                headers = {"Authorization": "Bearer valid-token"}
-
-                response = client.post(
-                    f"/api/projects/{project_id}/knowledge",
-                    files=files,
-                    headers=headers,
-                )
-
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Unsupported file type: test.exe"
-
-    def test_upload_file_read_error(self, client, mock_project_repo):
-        """Ошибка чтения файла"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        # Патчим read метод UploadFile, чтобы выбросить исключение
-        with patch(
-            "starlette.datastructures.UploadFile.read",
-            side_effect=Exception("read error"),
-        ):
-            with patch(
-                "src.interfaces.http.knowledge.jwt.decode",
-                return_value={"sub": TEST_USER_ID},
-            ):
-                with patch("src.interfaces.http.knowledge.logger") as mock_logger:
-                    files = {"file": ("test.txt", b"content", "text/plain")}
-                    headers = {"Authorization": "Bearer valid-token"}
-
-                    response = client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files=files,
-                        headers=headers,
-                    )
-
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Could not read file"
-        mock_logger.error.assert_called_once()
-
-    def test_upload_rejects_oversized_file(self, client, mock_project_repo):
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-        oversized = b"a" * (8 * 1024 * 1024 + 1)
-
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode",
-            return_value={"sub": TEST_USER_ID},
-        ):
-            response = client.post(
-                f"/api/projects/{project_id}/knowledge",
-                files={"file": ("large.txt", oversized, "text/plain")},
-                headers={"Authorization": "Bearer valid-token"},
-            )
-
-        assert response.status_code == 413
-        assert response.json()["detail"] == UPLOAD_TOO_LARGE_DETAIL
-
-    def test_upload_rejects_request_too_large_before_multipart_parsing(
-        self, client, mock_project_repo
-    ):
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        oversized = b"a" * (
-            8 * 1024 * 1024 + KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES + 1
-        )
-
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode",
-            return_value={"sub": TEST_USER_ID},
-        ):
-            with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-                response = client.post(
-                    f"/api/projects/{project_id}/knowledge",
-                    files={"file": ("huge.txt", oversized, "text/plain")},
-                    headers={"Authorization": "Bearer valid-token"},
-                )
-
-        assert response.status_code == 413
-        assert response.json()["detail"] == UPLOAD_TOO_LARGE_DETAIL
-        MockChunker.assert_not_called()
-
-    def test_upload_chunking_error(self, client, mock_project_repo):
-        """Ошибка при разбиении на чанки"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(
-                side_effect=ValueError("Invalid PDF structure")
-            )
-
-            with patch(
-                "src.interfaces.http.knowledge.jwt.decode",
-                return_value={"sub": TEST_USER_ID},
-            ):
-                files = {"file": ("test.pdf", b"%PDF-1.4...", "application/pdf")}
-                headers = {"Authorization": "Bearer valid-token"}
-
-                response = client.post(
-                    f"/api/projects/{project_id}/knowledge",
-                    files=files,
-                    headers=headers,
-                )
-
-        assert response.status_code == 400
-        assert response.json()["detail"] == "Invalid PDF structure"
-
-    def test_upload_persistence_error(self, client, mock_project_repo, mock_pool):
-        """Ошибка сохранения knowledge"""
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-        error_client = TestClient(app, raise_server_exceptions=False)
-
-        with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-            mock_chunker = AsyncMock()
-            MockChunker.return_value = mock_chunker
-            mock_chunker.process_file = AsyncMock(return_value=[{"content": "chunk"}])
-
-            with patch(
-                "src.interfaces.http.knowledge_surface.KnowledgeRepository"
-            ) as MockRepo:
-                mock_repo = AsyncMock()
-                MockRepo.return_value = mock_repo
-                mock_repo.create_document = AsyncMock(side_effect=Exception("DB error"))
-
-                with patch(
-                    "src.interfaces.http.knowledge.jwt.decode",
-                    return_value={"sub": TEST_USER_ID},
-                ):
-                    files = {"file": ("test.txt", b"content", "text/plain")}
-                    headers = {"Authorization": "Bearer valid-token"}
-
-                    response = error_client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files=files,
-                        headers=headers,
-                    )
-
-        assert response.status_code == 500
-
-    def test_upload_unauthorized_missing_token(self, client):
-        """Отсутствует токен"""
-        project_id = str(uuid4())
-        files = {"file": ("test.txt", b"content", "text/plain")}
-        response = client.post(f"/api/projects/{project_id}/knowledge", files=files)
-        assert response.status_code == 401
-        assert response.json()["detail"] == "Authorization header required"
-
-    def test_upload_unauthorized_invalid_token(self, client):
-        """Неверный токен"""
-        project_id = str(uuid4())
-        files = {"file": ("test.txt", b"content", "text/plain")}
-        headers = {"Authorization": "Bearer wrong-token"}
-        response = client.post(
-            f"/api/projects/{project_id}/knowledge", files=files, headers=headers
-        )
-        assert response.status_code == 401
-        assert response.json()["detail"] == "Invalid token"
-
-    def test_upload_authorized_via_project_owner_jwt(
-        self, client, mock_project_repo, mock_pool
-    ):
-        project_id = str(uuid4())
-        user_id = str(uuid4())
-        mock_project_repo.user_has_project_role = AsyncMock(return_value=True)
-
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode", return_value={"sub": user_id}
-        ):
-            with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-                mock_chunker = AsyncMock()
-                MockChunker.return_value = mock_chunker
-                mock_chunker.process_file = AsyncMock(
-                    return_value=[{"content": "chunk"}]
-                )
-
-                with patch(
-                    "src.interfaces.http.knowledge_surface.KnowledgeRepository"
-                ) as MockRepo:
-                    mock_repo = AsyncMock()
-                    MockRepo.return_value = mock_repo
-                    mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
-                    mock_repo.update_document_preprocessing_status = AsyncMock()
-
-                    response = client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files={"file": ("test.txt", b"content", "text/plain")},
-                        headers={"Authorization": "Bearer jwt-token"},
-                    )
-
-        assert response.status_code == 200
-        mock_project_repo.user_has_project_role.assert_awaited_once_with(
-            project_id, user_id, ["owner", "admin"]
-        )
-        mock_repo.create_document.assert_awaited_once_with(
-            project_id=project_id,
-            file_name="test.txt",
-            file_size=len(b"content"),
-            uploaded_by=user_id,
-        )
-
-    def test_upload_authorized_via_platform_admin_jwt(
+    async def user_has_project_role(
         self,
-        client,
-        mock_project_repo,
-        mock_user_repo,
+        project_id: str,
+        user_id: str,
+        allowed_roles: tuple[str, ...],
+    ) -> bool:
+        return self.has_role
+
+
+@dataclass(slots=True)
+class _FakeUserRepo:
+    platform_admin: bool = False
+
+    async def is_platform_admin(self, user_id: str) -> bool:
+        return self.platform_admin
+
+
+class _Result:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def to_dict(self) -> dict[str, object]:
+        return self._payload
+
+
+def _upload_file(
+    *,
+    file_name: str = "faq.md",
+    content: bytes = b"# FAQ\nAnswer",
+) -> UploadFile:
+    return UploadFile(filename=file_name, file=BytesIO(content))
+
+
+def _source() -> str:
+    return Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_upload_success_uses_workbench_upload_composition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        assert authorization == "Bearer valid-token"
+        return "user-1"
+
+    calls: dict[str, object] = {}
+
+    async def fake_workbench_upload(**kwargs: Any) -> _Result:
+        calls.update(kwargs)
+        return _Result(
+            {
+                "document_id": "document-1",
+                "status": "queued",
+                "preprocessing_mode": "faq",
+            }
+        )
+
+    import src.interfaces.composition.faq_workbench_upload as upload_composition
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        upload_composition,
+        "upload_faq_workbench_knowledge_file",
+        fake_workbench_upload,
+    )
+
+    response = await knowledge.upload_knowledge(
+        project_id="project-1",
+        file=_upload_file(),
+        preprocessing_mode="faq",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        queue_repo=object(),
+        user_repo=_FakeUserRepo(),
+    )
+
+    assert response == {
+        "document_id": "document-1",
+        "status": "queued",
+        "preprocessing_mode": "faq",
+    }
+    assert calls["project_id"] == "project-1"
+    assert calls["file_name"] == "faq.md"
+    assert calls["file_content"] == b"# FAQ\nAnswer"
+
+
+@pytest.mark.asyncio
+async def test_upload_missing_token_uses_shared_auth_contract() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge._require_project_access(
+            project_id="project-1",
+            authorization=None,
+            project_repo=_FakeProjectRepo(),
+            user_repo=_FakeUserRepo(),
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Authorization header required"
+
+
+@pytest.mark.asyncio
+async def test_upload_invalid_token_uses_shared_auth_contract() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge._require_project_access(
+            project_id="project-1",
+            authorization="Bearer wrong-token",
+            project_repo=_FakeProjectRepo(),
+            user_repo=_FakeUserRepo(),
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid token"
+
+
+@pytest.mark.asyncio
+async def test_upload_authorized_via_project_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    await knowledge._require_project_access(
+        project_id="project-1",
+        authorization="Bearer valid-token",
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_FakeUserRepo(platform_admin=False),
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_authorized_via_platform_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "admin-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    await knowledge._require_project_access(
+        project_id="project-1",
+        authorization="Bearer valid-token",
+        project_repo=_FakeProjectRepo(has_role=False),
+        user_repo=_FakeUserRepo(platform_admin=True),
+    )
+
+
+@pytest.mark.asyncio
+async def test_upload_forbidden_for_non_owner_non_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge._require_project_access(
+            project_id="project-1",
+            authorization="Bearer valid-token",
+            project_repo=_FakeProjectRepo(has_role=False),
+            user_repo=_FakeUserRepo(platform_admin=False),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Insufficient permissions"
+
+
+@pytest.mark.asyncio
+async def test_upload_project_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge._require_project_access(
+            project_id="missing-project",
+            authorization="Bearer valid-token",
+            project_repo=_FakeProjectRepo(exists=False),
+            user_repo=_FakeUserRepo(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Project not found"
+
+
+def test_upload_rejects_unsupported_file_type() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        knowledge._validate_workbench_upload_file_name("test.exe")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Unsupported file type: test.exe"
+
+
+def test_upload_accepts_supported_workbench_source_file_types() -> None:
+    for file_name in (
+        "faq.txt",
+        "faq.md",
+        "faq.markdown",
+        "faq.pdf",
+        "faq.json",
+        None,
+        "",
+        "upload",
     ):
-        project_id = str(uuid4())
-        user_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-        mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
-        mock_user_repo.is_platform_admin = AsyncMock(return_value=True)
+        knowledge._validate_workbench_upload_file_name(file_name)
 
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode", return_value={"sub": user_id}
-        ):
-            with patch("src.interfaces.http.knowledge.ChunkerService") as MockChunker:
-                mock_chunker = AsyncMock()
-                MockChunker.return_value = mock_chunker
-                mock_chunker.process_file = AsyncMock(
-                    return_value=[{"content": "chunk"}]
-                )
 
-                with patch(
-                    "src.interfaces.http.knowledge_surface.KnowledgeRepository"
-                ) as MockRepo:
-                    mock_repo = AsyncMock()
-                    MockRepo.return_value = mock_repo
-                    mock_repo.create_document = AsyncMock(return_value=TEST_DOCUMENT_ID)
-                    mock_repo.update_document_preprocessing_status = AsyncMock()
+@pytest.mark.asyncio
+async def test_upload_rejects_oversized_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(knowledge.settings, "KNOWLEDGE_UPLOAD_MAX_BYTES", 3)
+    monkeypatch.setattr(knowledge.settings, "KNOWLEDGE_UPLOAD_READ_CHUNK_BYTES", 2)
 
-                    response = client.post(
-                        f"/api/projects/{project_id}/knowledge",
-                        files={"file": ("test.txt", b"content", "text/plain")},
-                        headers={"Authorization": "Bearer jwt-token"},
-                    )
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge._read_upload_bytes(_upload_file(content=b"abcd"))
 
-        assert response.status_code == 200
-        mock_user_repo.is_platform_admin.assert_awaited_once_with(user_id)
-        mock_project_repo.user_has_project_role.assert_not_awaited()
-        mock_repo.create_document.assert_awaited_once_with(
-            project_id=project_id,
-            file_name="test.txt",
-            file_size=len(b"content"),
-            uploaded_by=user_id,
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == knowledge.UPLOAD_TOO_LARGE_DETAIL
+
+
+@pytest.mark.asyncio
+async def test_upload_file_read_error_maps_to_http_400(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenUpload:
+        filename = "broken.md"
+
+        async def read(self, size: int = -1) -> bytes:
+            raise RuntimeError("read error")
+
+    with pytest.raises(HTTPException) as exc_info:
+        try:
+            await knowledge._read_upload_bytes(BrokenUpload())  # type: ignore[arg-type]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Could not read file") from exc
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Could not read file"
+
+
+@pytest.mark.asyncio
+async def test_non_faq_upload_modes_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="project-1",
+            file=_upload_file(file_name="legacy.txt"),
+            preprocessing_mode="plain",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            queue_repo=object(),
+            user_repo=_FakeUserRepo(),
         )
 
-    def test_upload_forbidden_for_non_owner_non_admin(self, client, mock_project_repo):
-        project_id = str(uuid4())
-        user_id = str(uuid4())
-        mock_project_repo.user_has_project_role = AsyncMock(return_value=False)
-        mock_project_repo.get_project_view = AsyncMock(
-            return_value=ProjectSummaryView(
-                id=project_id,
-                name="Test",
-                is_pro_mode=False,
-                user_id=str(uuid4()),
-                client_bot_username=None,
-                manager_bot_username=None,
-                access_role=None,
-            )
+    assert exc_info.value.status_code == 422
+    assert "Only FAQ Workbench uploads are supported" in str(exc_info.value.detail)
+
+
+def test_upload_boundary_has_no_legacy_patch_points() -> None:
+    source = _source()
+
+    assert not hasattr(knowledge, "ChunkerService")
+    assert not hasattr(knowledge, "jwt")
+
+    forbidden = (
+        "src.interfaces.composition.knowledge_upload",
+        "upload_knowledge_file",
+        "KnowledgeService(",
+        "process_knowledge_upload",
+        "TASK_PROCESS_KNOWLEDGE_UPLOAD",
+    )
+    for marker in forbidden:
+        assert marker not in source
+
+
+def test_clear_knowledge_uses_workbench_clear_composition() -> None:
+    source = _source()
+
+    assert "clear_workbench_project" in source
+    assert "src.interfaces.composition.faq_workbench_clear" in source
+    assert "clear_project_knowledge(" not in source
+
+
+def test_usage_endpoint_uses_model_usage_read_side_without_knowledge_service() -> None:
+    source = _source()
+
+    assert "ModelUsageRepository" in source
+    assert "ModelUsageSummaryDto" in source
+    assert "KnowledgeService(" not in source
+
+
+@pytest.mark.asyncio
+async def test_unknown_upload_mode_also_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="project-1",
+            file=_upload_file(file_name="legacy.txt"),
+            preprocessing_mode="instruction",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            queue_repo=object(),
+            user_repo=_FakeUserRepo(),
         )
 
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode", return_value={"sub": user_id}
-        ):
-            response = client.post(
-                f"/api/projects/{project_id}/knowledge",
-                files={"file": ("test.txt", b"content", "text/plain")},
-                headers={"Authorization": "Bearer jwt-token"},
-            )
-
-        assert response.status_code == 403
-        assert response.json()["detail"] == "Insufficient permissions"
-
-    def test_clear_knowledge_success(self, client, mock_project_repo):
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-        mock_repo = AsyncMock()
-        mock_repo.clear_project_knowledge = AsyncMock()
-
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode",
-            return_value={"sub": TEST_USER_ID},
-        ):
-            with patch(
-                "src.interfaces.http.knowledge.make_knowledge_repo",
-                return_value=mock_repo,
-            ):
-                response = client.delete(
-                    f"/api/projects/{project_id}/knowledge",
-                    headers={"Authorization": "Bearer valid-token"},
-                )
-
-        assert response.status_code == 200
-        assert response.json() == {"status": "cleared"}
-        mock_repo.clear_project_knowledge.assert_awaited_once_with(project_id)
-
-    def test_clear_knowledge_requires_auth(self, client):
-        response = client.delete(f"/api/projects/{uuid4()}/knowledge")
-        assert response.status_code == 401
-        assert response.json()["detail"] == "Authorization header required"
-
-    def test_knowledge_usage_success(self, client, mock_project_repo):
-        project_id = str(uuid4())
-        mock_project_repo.project_exists.return_value = True
-
-        with patch(
-            "src.interfaces.http.knowledge.jwt.decode",
-            return_value={"sub": TEST_USER_ID},
-        ):
-            with patch(
-                "src.interfaces.http.knowledge.ModelUsageRepository"
-            ) as MockUsageRepo:
-                usage_repo = AsyncMock()
-                MockUsageRepo.return_value = usage_repo
-                usage_repo.get_project_usage_summary = AsyncMock(
-                    return_value=ModelUsageSummaryView(
-                        project_id=project_id,
-                        month_start=datetime(2026, 5, 1, tzinfo=UTC),
-                        month_end=datetime(2026, 6, 1, tzinfo=UTC),
-                        today_start=datetime(2026, 5, 2, tzinfo=UTC),
-                        tokens_month_total=1200,
-                        tokens_today_total=300,
-                        estimated_cost_month_usd=1.25,
-                        monthly_budget_tokens=200000000,
-                        remaining_tokens=199998800,
-                        breakdown=(),
-                        daily=(),
-                    )
-                )
-
-                response = client.get(
-                    f"/api/projects/{project_id}/knowledge/usage",
-                    headers={"Authorization": "Bearer valid-token"},
-                )
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["counter_enabled"] is True
-        assert payload["tokens_month_total"] == 1200
-        assert payload["tokens_today_total"] == 300
-        assert payload["remaining_tokens"] == 199998800
+    assert exc_info.value.status_code == 422
+    assert "Only FAQ Workbench uploads are supported" in str(exc_info.value.detail)

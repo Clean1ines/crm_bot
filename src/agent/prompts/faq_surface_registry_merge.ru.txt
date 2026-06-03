@@ -1,67 +1,111 @@
-FAQ_REGISTRY_MERGE_NODE_PROMPT_V2
+NODE: faq_fact_registry_canonicalization
+Prompt C — controlled canonical fact graph canonicalization
 
-Ты — advisory node merge_section_findings_into_registry для FAQ Sectional Registry Compiler.
+Ты получаешь JSON input:
 
-Важно:
-- Deterministic merge rules уже выполняются в коде и являются источником истины.
-- Твой ответ НЕ должен быть единственным источником merge decision.
-- Не пытайся переиграть obvious exact duplicates.
-- Не превращай role labels в surfaces.
-
-Role labels:
-- factual_answer_core => answer/evidence/answer_core
-- short_answer => short_answer
-- customer_intent => canonical_question/variant
-- expected_topic => variant/topic hint
-- test_question => variant/test question
-
-Вход:
-- ровно один source_unit;
-- compact registry_snapshot;
-- section_findings для этой секции;
-- match_context.
-
-Production JSON schema:
 {
-  "registry_updates": [
-    {
-      "operation": "create|add_evidence|extend|refine|add_child|add_parent|mark_duplicate|mark_overlap|skip_role_label",
-      "target_surface_key": "",
-      "source_local_surface_key": "",
-      "new_surface": {
-        "local_surface_key": "",
-        "title": "",
-        "canonical_question": "",
-        "surface_kind": "umbrella|child|specific|standalone|definition|procedural|safety|handoff|integration|channel|document_upload|curation|retrieval_quality|service_limits|other",
+  "canonicalization_unit": {},
+  "registry_snapshot_payload": {},
+  "relevant_registry_state": {},
+  "canonical_facts": []
+}
+
+Задача:
+превратить одну canonicalization_unit в обновление canonical fact registry.
+
+Смысл входов:
+
+canonicalization_unit:
+  Группа local claims после document-level retrieval/clustering.
+  Это не секция документа и не весь документ.
+  members — локальные claims с evidence, triples, possible_questions, scope,
+  exclusion_scope и local_relations.
+  similarity_edges — детерминированные связи похожести между members.
+
+registry_snapshot_payload:
+  Текущий registry snapshot/state. Его нужно сохранить как основу нового snapshot.
+
+relevant_registry_state:
+  Только релевантные уже существующие registry fragments/candidate facts,
+  найденные кодом. Не рассматривай это как весь свободный registry для merge.
+
+canonical_facts:
+  Текущие canonical facts, переданные кодом как релевантное состояние.
+
+Правила обработки:
+
+1. Верни полный updated fact_registry snapshot.
+   Неизменённые canonical_facts и fact_relations из registry_snapshot_payload должны сохраниться.
+
+2. Работай только с claims внутри canonicalization_unit.members и с relevant_registry_state.
+   Не выдумывай весь project registry.
+
+3. Singleton canonicalization_unit тоже валиден.
+   Если в группе один member и нет подходящего existing fact, это кандидат на новый canonical fact.
+
+4. Если members выражают одно и то же знание:
+   создай или обнови один canonical fact;
+   сохрани evidence/mentions всех members;
+   объедини question_variants;
+   уточни scope/exclusion_scope.
+
+5. Если members не должны схлопываться в один fact:
+   создай отдельные canonical facts или сохрани существующие;
+   добавь fact_relations, если relation подтверждена evidence или similarity_edges.
+
+6. При update/refine/extend existing fact:
+   сохрани старое полезное содержание;
+   добавь новое evidence/mentions;
+   обнови question_variants;
+   уточни scope/exclusion_scope;
+   добавь derived_fact_notes, если были сделаны выводы или уточнения.
+
+7. Relation должен быть одним из:
+   part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for
+
+8. Если claim не может быть надёжно внесён в registry, не выдумывай факт.
+   Добавь warning с причиной.
+
+JSON output:
+{
+  "fact_registry": {
+    "version": 1,
+    "canonical_facts": [
+      {
+        "fact_id": "",
+        "fact_key": "",
+        "claim": "",
+        "claim_kind": "",
+        "granularity": "atomic | composite",
+        "triples": [],
+        "mentions": [],
+        "question_variants": [],
         "answer": "",
-        "short_answer": "",
-        "answer_scope": "",
-        "question_scope": "",
+        "scope": "",
         "exclusion_scope": "",
-        "variants": [],
         "source_refs": [],
-        "source_chunk_indexes": [],
-        "evidence_quotes": [],
-        "confidence": 0.0,
+        "evidence": [],
+        "derived_fact_notes": [],
+        "metadata": {},
+        "status": "active"
+      }
+    ],
+    "fact_relations": [
+      {
+        "source_fact_id": "",
+        "target_fact_id": "",
+        "relation": "part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for",
         "reason": "",
-        "warnings": []
-      },
-      "append_answer_delta": "",
-      "append_variants": [],
-      "append_source_refs": [],
-      "append_source_chunk_indexes": [],
-      "append_evidence_quotes": [],
-      "confidence": 0.0,
-      "reason": ""
-    }
-  ],
+        "evidence_refs": []
+      }
+    ]
+  },
+  "registry_update_summary": {
+    "created_fact_count": 0,
+    "updated_fact_count": 0,
+    "created_relation_count": 0,
+    "notes": []
+  },
   "warnings": [],
   "metrics": {}
 }
-
-Rules:
-- Use registry_updates[], not merge_decisions[].
-- For a role label, prefer skip_role_label or add_evidence/extend to an existing target.
-- For evidence-only content, use add_evidence.
-- For umbrella/child, use add_parent/add_child; do not mark it as duplicate.
-- Return empty registry_updates[] when deterministic rules are sufficient.

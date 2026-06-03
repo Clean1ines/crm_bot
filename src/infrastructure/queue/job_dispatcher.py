@@ -2,41 +2,34 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
-from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.application.ports.project_port import ProjectNotificationPort
 from src.application.ports.thread_port import ThreadReadPort
+from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.infrastructure.queue.handlers.metrics import (
     handle_aggregate_metrics,
     handle_update_metrics,
 )
-from src.infrastructure.queue.handlers.knowledge_upload import (
-    handle_process_knowledge_upload,
-)
-from src.infrastructure.queue.handlers.knowledge_retighten import (
-    handle_retighten_knowledge_document,
-)
-from src.infrastructure.queue.handlers.knowledge_failed_batches import (
-    handle_retry_knowledge_failed_batches,
-)
-from src.infrastructure.queue.handlers.knowledge_publish_ready import (
-    handle_publish_knowledge_ready_answers,
-)
-from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
 from src.infrastructure.queue.handlers.notify_manager import (
     RedisGetter,
     handle_notify_manager,
+)
+from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
+from src.infrastructure.queue.handlers.workbench_document import (
+    handle_process_workbench_document,
+)
+from src.infrastructure.queue.handlers.workbench_parallel_processing import (
+    handle_workbench_parallel_processing_job_from_connection,
 )
 from src.infrastructure.queue.job_exceptions import PermanentJobError
 from src.infrastructure.queue.job_types import (
     TASK_AGGREGATE_METRICS,
     TASK_NOTIFY_MANAGER,
-    TASK_PROCESS_KNOWLEDGE_UPLOAD,
-    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
-    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
-    TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
+    TASK_PROCESS_WORKBENCH_DOCUMENT,
+    TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
     TASK_RUN_FULL_RAG_EVAL,
     TASK_UPDATE_METRICS,
 )
@@ -82,31 +75,17 @@ class JobDispatcher:
             )
             return
 
-        if task_type == TASK_PROCESS_KNOWLEDGE_UPLOAD:
-            await handle_process_knowledge_upload(
+        if task_type == TASK_PROCESS_WORKBENCH_DOCUMENT:
+            await handle_process_workbench_document(
                 job,
                 db_pool=self.db_pool,
             )
             return
 
-        if task_type == TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT:
-            await handle_retighten_knowledge_document(
-                job,
-                db_pool=self.db_pool,
-            )
-            return
-
-        if task_type == TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS:
-            await handle_publish_knowledge_ready_answers(
-                job,
-                db_pool=self.db_pool,
-            )
-            return
-
-        if task_type == TASK_RETRY_KNOWLEDGE_FAILED_BATCHES:
-            await handle_retry_knowledge_failed_batches(
-                job,
-                db_pool=self.db_pool,
+        if task_type == TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING:
+            await handle_workbench_parallel_processing_job_from_connection(
+                payload=_job_payload(job),
+                connection=self.db_pool,
             )
             return
 
@@ -118,3 +97,20 @@ class JobDispatcher:
             return
 
         raise PermanentJobError(f"Unknown task type: {task_type}")
+
+
+def _job_payload(job: Mapping[str, object]) -> Mapping[str, object]:
+    payload = job.get("payload")
+
+    if isinstance(payload, Mapping):
+        return payload
+
+    if isinstance(payload, str):
+        try:
+            decoded = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise PermanentJobError("Invalid JSON payload for queued job") from exc
+        if isinstance(decoded, Mapping):
+            return decoded
+
+    return job

@@ -407,14 +407,14 @@ async def apply_accepted_rag_eval_questions(
         user_repo=user_repo,
     )
 
-    from src.infrastructure.db.repositories.knowledge_repository import (
-        KnowledgeRepository,
+    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
+        WorkbenchRuntimeRetrievalRepository,
     )
 
     try:
         summary = await RagEvalReviewService(
             rag_eval_repo,
-            knowledge_repo=KnowledgeRepository(pool),
+            knowledge_repo=WorkbenchRuntimeRetrievalRepository(pool),
             queue_repo=queue_repo,
             rerun_eval_task_type=TASK_RUN_FULL_RAG_EVAL,
         ).apply_accepted_questions(
@@ -467,13 +467,13 @@ async def execute_rag_eval_result_actions(
         user_repo=user_repo,
     )
 
-    from src.infrastructure.db.repositories.knowledge_repository import (
-        KnowledgeRepository,
+    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
+        WorkbenchRuntimeRetrievalRepository,
     )
 
     service = KnowledgeEditActionService(
         action_source=action_source,
-        knowledge_repo=KnowledgeRepository(pool),
+        knowledge_repo=WorkbenchRuntimeRetrievalRepository(pool),
         queue_repo=queue_repo,
     )
 
@@ -678,11 +678,13 @@ async def run_rag_eval_for_document(
     from src.application.rag_eval.reporter import RagQualityReporter
     from src.application.rag_eval.runner import RagEvalRunner
     from src.application.rag_eval.service import RagEvalService
-    from src.infrastructure.db.repositories.knowledge_repository import (
-        KnowledgeRepository,
+    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
+        WorkbenchRuntimeRetrievalRepository,
     )
     from src.infrastructure.llm.query_expander import GroqQueryExpander
-    from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+    from src.application.ports.knowledge.runtime_search import (
+        KnowledgeRuntimeRetrievalPort,
+    )
     from src.infrastructure.llm.rag_service import RAGService
     from src.infrastructure.rag_eval.adapters import (
         GroqRagEvalJsonLlmAdapter,
@@ -690,14 +692,14 @@ async def run_rag_eval_for_document(
         VectorOnlyRagEvalRetriever,
     )
 
-    knowledge_repo = KnowledgeRepository(pool)
+    runtime_retrieval = WorkbenchRuntimeRetrievalRepository(pool)
     if retrieval_policy.mode == RagEvalRetrievalMode.VECTOR_DEBUG:
         retriever: RagEvalRetrieverPort = VectorOnlyRagEvalRetriever(
-            cast(KnowledgeRuntimeRetrievalPort, knowledge_repo)
+            cast(KnowledgeRuntimeRetrievalPort, runtime_retrieval)
         )
     else:
         rag_service = RAGService(
-            cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
+            cast(KnowledgeRuntimeRetrievalPort, runtime_retrieval),
             query_expander=GroqQueryExpander(),
         )
         retriever = RagServiceRagEvalRetriever(rag_service)

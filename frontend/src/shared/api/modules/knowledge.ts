@@ -92,6 +92,135 @@ export type KnowledgeProcessingReport = {
   metrics: Record<string, unknown>;
 };
 
+export type WorkbenchDocumentCardMessageSeverity =
+  | 'info'
+  | 'success'
+  | 'warning'
+  | 'error'
+  | string;
+
+export type WorkbenchDocumentCardActionTone =
+  | 'primary'
+  | 'secondary'
+  | 'warning'
+  | 'danger'
+  | string;
+
+export type WorkbenchDocumentCardUserMessage = {
+  code: string;
+  severity: WorkbenchDocumentCardMessageSeverity;
+  i18n_key: string;
+  default_message: string;
+  debug_ref?: string | null;
+};
+
+export type WorkbenchDocumentCardErrorView = {
+  reason_code: string;
+  user_message: WorkbenchDocumentCardUserMessage;
+  recoverable: boolean;
+  retry_available: boolean;
+  internal_error_ref?: string | null;
+};
+
+export type WorkbenchDocumentCardTimerView = {
+  mode: 'running' | 'paused' | 'stopped' | 'completed' | 'published' | string;
+  active_elapsed_seconds: number;
+  wall_elapsed_seconds: number;
+  current_active_started_at?: string | null;
+  i18n_key: string;
+  default_label: string;
+};
+
+export type WorkbenchDocumentCardUsageView = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  llm_call_count: number;
+  i18n_key?: string;
+};
+
+export type WorkbenchDocumentCardSectionSummaryView = {
+  total: number;
+  processed: number;
+  failed: number;
+  pending: number;
+};
+
+export type WorkbenchDocumentCardRegistrySummaryView = {
+  entry_count: number;
+  final_snapshot_id?: string | null;
+  retained: boolean;
+};
+
+export type WorkbenchDocumentCardSurfaceSummaryView = {
+  draft_count: number;
+  ready_count: number;
+  published_count: number;
+  rejected_count: number;
+};
+
+export type WorkbenchDocumentCardRuntimeSummaryView = {
+  publication_id?: string | null;
+  runtime_entry_count: number;
+};
+
+export type WorkbenchDocumentCardRecoveryView = {
+  mode: 'none' | 'scheduled_auto_resume' | 'manual_only' | 'forbidden' | string;
+  scheduled_at?: string | null;
+  can_cancel_scheduled_resume: boolean;
+  reason_code: string;
+  i18n_key: string;
+  default_message: string;
+};
+
+export type WorkbenchDocumentCardActionView = {
+  action_id:
+    | 'cancel_processing'
+    | 'resume_processing'
+    | 'cancel_scheduled_recovery'
+    | 'delete_document'
+    | 'open_workbench'
+    | 'open_curation'
+    | 'publish_ready'
+    | 'open_published_surfaces'
+    | 'reprocess_fresh'
+    | string;
+  visible: boolean;
+  enabled: boolean;
+  tone: WorkbenchDocumentCardActionTone;
+  i18n_key: string;
+  default_label: string;
+  reason_code?: string | null;
+  confirmation_i18n_key?: string | null;
+  default_confirmation?: string | null;
+};
+
+export type WorkbenchDocumentCardView = {
+  document_id: string;
+  project_id: string;
+  file_name: string;
+  source_type: string;
+  lifecycle_state: string;
+  retention_state: string;
+  transient_purged: boolean;
+  resume_available: boolean;
+  status_i18n_key: string;
+  default_status_label: string;
+  status_description_i18n_key: string;
+  default_status_description: string;
+  timer: WorkbenchDocumentCardTimerView;
+  usage: WorkbenchDocumentCardUsageView;
+  sections: WorkbenchDocumentCardSectionSummaryView;
+  registry: WorkbenchDocumentCardRegistrySummaryView;
+  surfaces: WorkbenchDocumentCardSurfaceSummaryView;
+  runtime: WorkbenchDocumentCardRuntimeSummaryView;
+  recovery: WorkbenchDocumentCardRecoveryView;
+  actions: WorkbenchDocumentCardActionView[];
+  messages: WorkbenchDocumentCardUserMessage[];
+  error?: WorkbenchDocumentCardErrorView | null;
+  metadata?: Record<string, unknown>;
+};
+
 export type KnowledgeProcessingOverviewDocument = Record<string, unknown>;
 
 export type KnowledgeProcessingOverviewResponse = {
@@ -336,7 +465,7 @@ export type KnowledgeDocumentDeleteResponse = {
 
 export const knowledgeApi = {
   list: (projectId: string) =>
-    authedJsonRequest(`/api/projects/${projectId}/knowledge`, {
+    authedJsonRequest<{ documents?: Array<Record<string, unknown>>; items?: Array<Record<string, unknown>> }>(`/api/projects/${projectId}/knowledge`, {
       method: 'GET',
     }),
 

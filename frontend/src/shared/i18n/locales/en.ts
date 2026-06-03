@@ -1008,7 +1008,7 @@ export const en: TranslationDictionary = {
   'knowledge.importQuality.status.good': 'Good',
   'knowledge.importQuality.status.needsReview': 'Needs review',
   'knowledge.importQuality.status.unsafe': 'Unsafe',
-  'knowledge.importQuality.action.continue': 'Continue to knowledge compilation.',
+  'knowledge.importQuality.action.continue': 'Continue to workbench review.',
   'knowledge.importQuality.action.reviewSourceUnits': 'Review source units before publishing.',
   'knowledge.importQuality.action.waitForProcessing': 'Wait for processing to finish.',
   'knowledge.importQuality.action.replaceOrReview': 'Replace the document or review extraction manually.',

@@ -24,9 +24,6 @@ from src.application.rag_eval.schemas import (
     RagEvalStatus,
     RagQualityReport,
 )
-from src.domain.project_plane.knowledge_retrieval_surface import (
-    RUNTIME_ENTRY_KIND_VALUES,
-)
 from src.domain.project_plane.knowledge_views import SourceRefView
 
 
@@ -155,16 +152,34 @@ def _source_ref_views_from_payload(value: object) -> tuple[SourceRefView, ...]:
         return ()
 
     refs: list[SourceRefView] = []
-    for item in value:
+    for index, item in enumerate(value):
+        if isinstance(item, str):
+            quote = " ".join(item.strip().split())
+            if not quote:
+                continue
+            refs.append(
+                SourceRefView(
+                    source_index=index,
+                    quote=quote,
+                    source_chunk_id=None,
+                    start_offset=None,
+                    end_offset=None,
+                    confidence=None,
+                )
+            )
+            continue
+
         if not isinstance(item, Mapping):
             continue
+
         quote = " ".join(str(item.get("quote") or "").strip().split())
         if not quote:
             continue
+
         source_chunk_id = item.get("source_chunk_id")
         refs.append(
             SourceRefView(
-                source_index=_row_int_value(item, "source_index", 0),
+                source_index=_row_int_value(item, "source_index", index),
                 quote=quote,
                 source_chunk_id=str(source_chunk_id) if source_chunk_id else None,
                 start_offset=_row_int_value(item, "start_offset", 0)
@@ -179,9 +194,6 @@ def _source_ref_views_from_payload(value: object) -> tuple[SourceRefView, ...]:
             )
         )
     return tuple(refs)
-
-
-RAG_EVAL_SOURCE_ENTRY_KINDS = tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
 
 
 def _is_actionable_result(result: RagEvalResult) -> bool:
@@ -289,29 +301,27 @@ class RagEvalRepository:
             rows = await conn.fetch(
                 """
                 SELECT
-                    rs.entry_id AS id,
-                    rs.answer AS content,
-                    rs.document_id,
-                    d.file_name AS source,
-                    rs.entry_kind,
-                    rs.title,
-                    rs.source_refs,
-                    rs.enrichment->'questions' AS questions,
-                    rs.enrichment->'synonyms' AS synonyms,
-                    rs.enrichment->'tags' AS tags
-                FROM knowledge_retrieval_surface AS rs
-                JOIN knowledge_documents AS d ON d.id = rs.document_id
-                WHERE rs.project_id = $1::uuid
-                  AND rs.document_id = $2::uuid
-                  AND rs.entry_kind = ANY($3::text[])
-                  AND rs.status = 'published'
-                  AND rs.visibility = 'runtime'
-                  AND d.status = 'processed'
-                ORDER BY rs.created_at ASC NULLS LAST, rs.entry_id ASC
+                    re.runtime_entry_id AS id,
+                    re.answer AS content,
+                    s.document_id::text AS document_id,
+                    COALESCE(s.title, re.claim) AS source,
+                    'faq_workbench_surface' AS entry_kind,
+                    re.claim AS title,
+                    re.source_refs,
+                    re.question_variants AS questions,
+                    '[]'::jsonb AS synonyms,
+                    '["faq_workbench", "runtime"]'::jsonb AS tags
+                FROM knowledge_workbench_runtime_retrieval_entries AS re
+                JOIN knowledge_workbench_surfaces AS s
+                  ON s.surface_id = re.surface_id
+                WHERE re.project_id = $1::uuid
+                  AND s.document_id = $2::uuid
+                  AND re.status = 'published'
+                  AND re.visibility = 'runtime'
+                ORDER BY re.created_at ASC NULLS LAST, re.runtime_entry_id ASC
                 """,
                 project_id,
                 document_id,
-                list(RAG_EVAL_SOURCE_ENTRY_KINDS),
             )
 
         return [self._entry_from_row(row) for row in rows]

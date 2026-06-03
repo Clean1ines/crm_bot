@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+from src.application.ports.knowledge.runtime_search import (
+    KnowledgeRuntimeRetrievalPort,
+)
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 
 

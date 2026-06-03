@@ -8,10 +8,12 @@ import uuid
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_dispatcher import JobDispatcher
+from src.infrastructure.queue.job_types import (
+    TASK_PROCESS_WORKBENCH_DOCUMENT,
+)
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
-from src.infrastructure.queue.job_types import TASK_PROCESS_KNOWLEDGE_UPLOAD
-from src.infrastructure.queue.handlers.knowledge_upload import (
-    mark_process_knowledge_upload_exhausted,
+from src.infrastructure.queue.handlers.workbench_document import (
+    mark_process_workbench_document_exhausted,
 )
 from src.infrastructure.queue.retry_policy import build_retry_decision
 from src.infrastructure.queue.stale_recovery import recover_stale_jobs
@@ -89,34 +91,18 @@ async def run_worker_loop(
                     increment_attempt=True,
                     retry_delay_seconds=decision.backoff_seconds,
                 )
-
-                if decision.should_retry:
-                    logger.info(
-                        "Job will be retried",
-                        extra={
-                            "job_id": job_id,
-                            "task_type": task_type,
-                            "backoff_seconds": decision.backoff_seconds,
-                        },
+                if decision.exhausted and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT:
+                    await mark_process_workbench_document_exhausted(
+                        job_record,
+                        db_pool=dispatcher.db_pool,
+                        error=decision.error,
                     )
-                else:
-                    logger.warning(
-                        "Job retry attempts exhausted",
-                        extra={"job_id": job_id, "task_type": task_type},
-                    )
-                    if task_type == TASK_PROCESS_KNOWLEDGE_UPLOAD:
-                        await mark_process_knowledge_upload_exhausted(
-                            job_record,
-                            db_pool=dispatcher.db_pool,
-                        )
             else:
                 await queue_repo.complete_job(job_id, success=True)
-
-        except asyncio.CancelledError:
-            logger.info(
-                "Worker loop cancelled", extra={"worker_id": resolved_worker_id}
-            )
-            break
+                logger.info(
+                    "Job completed successfully",
+                    extra={"job_id": job_id, "task_type": task_type},
+                )
         except Exception as exc:
             logger.error(
                 "Unexpected worker loop error",

@@ -21,6 +21,7 @@ import {
   type KnowledgePriceFactsResponse,
   type KnowledgeCommercialTruthReviewResponse,
   type KnowledgeCommercialTruthReviewPolicy,
+  type WorkbenchDocumentCardView,
 } from "@shared/api/modules/knowledge";
 import { BaseModal } from "@shared/ui";
 import { t } from "@shared/i18n";
@@ -103,6 +104,7 @@ interface Document {
   llm_tokens_total?: number;
   llm_usage_events_count?: number;
   llm_models?: string | null;
+  card_view?: WorkbenchDocumentCardView | null;
 }
 
 const formatSize = (bytes: number) => {
@@ -256,6 +258,10 @@ const documentIssueText = (doc: Document): string | null => {
 };
 
 const isDocumentCancelled = (doc: Document): boolean => {
+  if (doc.card_view) {
+    return ["cancelled", "paused_manual"].includes(doc.card_view.lifecycle_state);
+  }
+
   const issueText = rawDocumentIssueText(doc)?.toLowerCase() || "";
 
   return (
@@ -267,15 +273,22 @@ const isDocumentCancelled = (doc: Document): boolean => {
   );
 };
 
-const isDocumentFailed = (doc: Document): boolean =>
-  doc.status === "error" || doc.preprocessing_status === "failed";
+const isDocumentFailed = (doc: Document): boolean => {
+  if (doc.card_view) return doc.card_view.lifecycle_state === "failed";
+  return doc.status === "error" || doc.preprocessing_status === "failed";
+};
 
-const isDocumentProcessing = (doc: Document): boolean =>
-  !isDocumentCancelled(doc) &&
-  !isDocumentFailed(doc) &&
-  (doc.status === "pending" ||
-    doc.status === "processing" ||
-    doc.preprocessing_status === "processing");
+const isDocumentProcessing = (doc: Document): boolean => {
+  if (doc.card_view) return doc.card_view.lifecycle_state === "processing";
+
+  return (
+    !isDocumentCancelled(doc) &&
+    !isDocumentFailed(doc) &&
+    (doc.status === "pending" ||
+      doc.status === "processing" ||
+      doc.preprocessing_status === "processing")
+  );
+};
 
 const isDocumentRetightenable = (doc: Document): boolean =>
   doc.status === "processed" &&
@@ -1212,6 +1225,11 @@ export const KnowledgePage: React.FC = () => {
   const deleteDocument = deleteDocumentId
     ? (documents.find((doc) => doc.id === deleteDocumentId) ?? null)
     : null;
+  const deleteDocumentConfirmation =
+    deleteDocument?.card_view?.actions.find(
+      (action) => action.action_id === "delete_document",
+    )?.default_confirmation ||
+    `Документ «${deleteDocument?.file_name || "этот документ"}» и все связанные артефакты будут удалены из базы. Это действие нельзя отменить.`;
 
   const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
@@ -2237,6 +2255,38 @@ export const KnowledgePage: React.FC = () => {
                     cancelProcessingMutation.mutate(doc.id)
                   }
                   onOpenCuration={() => setCurationDocumentId(doc.id)}
+                  onCardAction={(actionId) => {
+                    if (actionId === "cancel_processing") {
+                      cancelProcessingMutation.mutate(doc.id);
+                      return;
+                    }
+                    if (actionId === "cancel_scheduled_recovery") {
+                      cancelProcessingMutation.mutate(doc.id);
+                      return;
+                    }
+                    if (actionId === "resume_processing") {
+                      resumeProcessingMutation.mutate(doc.id);
+                      return;
+                    }
+                    if (actionId === "publish_ready") {
+                      publishReadyMutation.mutate(doc.id);
+                      return;
+                    }
+                    if (
+                      actionId === "open_curation" ||
+                      actionId === "open_published_surfaces"
+                    ) {
+                      setCurationDocumentId(doc.id);
+                      return;
+                    }
+                    if (actionId === "delete_document") {
+                      setDeleteDocumentId(doc.id);
+                      return;
+                    }
+                    if (actionId === "open_workbench") {
+                      setCurationDocumentId(doc.id);
+                    }
+                  }}
                   statusNode={
                     <DocumentStatusBlock
                       doc={doc}
@@ -2320,8 +2370,7 @@ export const KnowledgePage: React.FC = () => {
         cancelLabel={t("common.actions.cancel")}
       >
         <p className="text-sm leading-relaxed text-[var(--text-primary)]">
-          Документ «{deleteDocument?.file_name || "этот документ"}» и все связанные
-          артефакты будут удалены из базы. Это действие нельзя отменить.
+          {deleteDocumentConfirmation}
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <button

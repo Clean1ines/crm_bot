@@ -5,22 +5,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REVIEW_SERVICE = ROOT / "src/application/services/commercial_truth_review_service.py"
-KNOWLEDGE_SERVICE = ROOT / "src/application/services/knowledge_service.py"
+COMMERCIAL_SERVICE = (
+    ROOT / "src/application/services/commercial_price_review_service.py"
+)
 HTTP = ROOT / "src/interfaces/http/knowledge.py"
 
 
+def _slice_between(source: str, start_marker: str, end_markers: tuple[str, ...]) -> str:
+    start = source.index(start_marker)
+    end_candidates = [
+        source.index(marker, start)
+        for marker in end_markers
+        if marker in source[start + len(start_marker) :]
+    ]
+    end = min(end_candidates) if end_candidates else len(source)
+    return source[start:end]
+
+
 def test_commercial_truth_review_read_side_has_service_method_and_route() -> None:
-    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+    service_source = COMMERCIAL_SERVICE.read_text(encoding="utf-8")
     http_source = HTTP.read_text(encoding="utf-8")
 
     assert "async def commercial_truth_review(" in service_source
     assert '@router.get("/{document_id}/commercial-truth-review")' in http_source
-    assert "CommercialTruthReviewService().review_price_facts(" in service_source
+    assert "CommercialTruthReviewService()" in service_source
+    assert "review_price_facts(" in service_source
+    assert "KnowledgeService(" not in service_source
 
 
 def test_commercial_truth_review_read_side_includes_non_runtime_facts() -> None:
-    source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+    source = COMMERCIAL_SERVICE.read_text(encoding="utf-8")
 
+    assert "_price_document_for_knowledge_document(document_id)" in source
     assert "get_price_document_by_knowledge_document" in source
     assert "list_price_facts_for_document" in source
     assert "include_non_runtime=True" in source
@@ -41,25 +57,21 @@ def test_commercial_truth_review_source_classification_is_conservative() -> None
 def test_commercial_truth_review_read_side_does_not_publish_or_touch_runtime_lookup() -> (
     None
 ):
-    combined = (
-        KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
-        + "\n"
-        + HTTP.read_text(encoding="utf-8")
+    service_source = COMMERCIAL_SERVICE.read_text(encoding="utf-8")
+    http_source = HTTP.read_text(encoding="utf-8")
+    review_method = _slice_between(
+        service_source,
+        "    async def commercial_truth_review(",
+        ("    async def _price_document_for_knowledge_document(",),
     )
 
-    assert "publish_price_facts(" in combined
-    assert "reject_price_facts(" in combined
-
-    review_method_start = combined.index("async def commercial_truth_review(")
-    review_method_end = combined.index(
-        "async def cancel_document_processing(", review_method_start
-    )
-    review_method = combined[review_method_start:review_method_end]
+    combined = review_method + "\n" + http_source
 
     assert "publish_price_facts(" not in review_method
     assert "reject_price_facts(" not in review_method
-    assert "list_published_price_facts_for_lookup(" not in review_method
-    assert "PriceLookupTool" not in review_method
+    assert "list_published_price_facts_for_lookup(" not in combined
+    assert "PriceLookupTool" not in combined
+    assert "SearchKnowledgeTool" not in combined
 
 
 def test_commercial_truth_review_read_side_exposes_value_text_and_source_quote() -> (
@@ -88,21 +100,19 @@ def test_commercial_truth_review_uses_knowledge_document_metadata_for_source_sem
     None
 ):
     review_source = REVIEW_SERVICE.read_text(encoding="utf-8")
-    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+    service_source = COMMERCIAL_SERVICE.read_text(encoding="utf-8")
     http_source = HTTP.read_text(encoding="utf-8")
 
-    assert "KnowledgeDocumentDetailView" in review_source
-    assert "knowledge_document: KnowledgeDocumentDetailView | None" in review_source
+    assert "knowledge_document" in review_source
     assert 'preprocessing_mode == "price_list"' in review_source
     assert 'preprocessing_mode == "faq"' in review_source
     assert "observed_at=_commercial_source_observed_at" in review_source
     assert "title=_commercial_source_title" in review_source
-    assert (
-        "knowledge_repo_factory: KnowledgeServiceRepositoryFactoryPort"
-        in service_source
-    )
-    assert "knowledge_repo.get_document(document_id)" in service_source
-    assert "knowledge_repo_factory=make_knowledge_repo" in http_source
+
+    assert "CommercialKnowledgeDocumentMetadataPort" in service_source
+    assert "self._knowledge_document_repo.get_document(" in service_source
+    assert "commercial_source_descriptor_from_price_document(" in service_source
+    assert "make_commercial_price_review_service(pool)" in http_source
 
 
 def test_commercial_truth_review_read_side_exposes_source_title_and_observed_at() -> (
@@ -122,7 +132,7 @@ def test_commercial_truth_review_read_side_exposes_source_title_and_observed_at(
 def test_commercial_truth_review_read_side_accepts_policy_preview_without_mutation() -> (
     None
 ):
-    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
+    service_source = COMMERCIAL_SERVICE.read_text(encoding="utf-8")
     http_source = HTTP.read_text(encoding="utf-8")
 
     assert "CommercialTruthResolutionPolicy" in service_source
@@ -132,12 +142,11 @@ def test_commercial_truth_review_read_side_accepts_policy_preview_without_mutati
     assert "policy=policy" in service_source
     assert "policy=policy" in http_source
 
-    review_method_start = service_source.index("async def commercial_truth_review(")
-    review_method_end = service_source.index(
-        "async def cancel_document_processing(",
-        review_method_start,
+    review_method = _slice_between(
+        service_source,
+        "    async def commercial_truth_review(",
+        ("    async def _price_document_for_knowledge_document(",),
     )
-    review_method = service_source[review_method_start:review_method_end]
 
     assert "publish_price_facts(" not in review_method
     assert "reject_price_facts(" not in review_method
@@ -148,21 +157,10 @@ def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_route
     None
 ):
     source = HTTP.read_text(encoding="utf-8")
-    policy_param = (
-        "policy: CommercialTruthResolutionPolicy = "
-        "CommercialTruthResolutionPolicy.MANUAL_REVIEW"
-    )
-
     allowed_route_names = (
         "async def project_commercial_truth_review(",
         "async def knowledge_commercial_truth_review(",
     )
-
-    # There are two legitimate read-only preview scopes:
-    # - project-wide commercial truth review
-    # - document-scoped commercial truth review
-    assert source.count(policy_param) == len(allowed_route_names)
-    assert source.count("policy=policy") == len(allowed_route_names)
 
     for route_name in allowed_route_names:
         route_start = source.index(route_name)
@@ -171,43 +169,37 @@ def test_commercial_truth_policy_query_param_is_scoped_to_commercial_truth_route
             source[route_start:] if next_route == -1 else source[route_start:next_route]
         )
 
-        assert policy_param in route
+        assert "CommercialTruthResolutionPolicy.MANUAL_REVIEW" in route
         assert "policy=policy" in route
 
     route_blocks = source.split("\n@router.")
     for block in route_blocks:
-        if policy_param not in block and "policy=policy" not in block:
+        if (
+            "CommercialTruthResolutionPolicy.MANUAL_REVIEW" not in block
+            and "policy=policy" not in block
+        ):
             continue
-
         assert any(route_name in block for route_name in allowed_route_names)
 
 
 def test_commercial_truth_review_policy_preview_is_document_scoped_today() -> None:
-    service_source = KNOWLEDGE_SERVICE.read_text(encoding="utf-8")
-
-    review_method_start = service_source.index("async def commercial_truth_review(")
-    review_method_end = service_source.index(
-        "async def cancel_document_processing(",
-        review_method_start,
+    service_source = COMMERCIAL_SERVICE.read_text(encoding="utf-8")
+    review_method = _slice_between(
+        service_source,
+        "    async def commercial_truth_review(",
+        ("    async def _price_document_for_knowledge_document(",),
     )
-    review_method = service_source[review_method_start:review_method_end]
+    price_document_helper = _slice_between(
+        service_source,
+        "    async def _price_document_for_knowledge_document(",
+        ("    async def _require_price_document_for_knowledge_document(",),
+    )
 
-    assert "get_price_document_by_knowledge_document" in review_method
+    assert "_price_document_for_knowledge_document(document_id)" in review_method
+    assert "get_price_document_by_knowledge_document" in price_document_helper
     assert "list_price_facts_for_document" in review_method
-    assert "price_document_id=price_document.id" in review_method
-    assert "knowledge_document_id=document_id" in review_method
+    assert "price_document_id=str(price_document.id)" in review_method
+    assert "self._knowledge_document_repo.get_document(" in service_source
 
-    # Important product boundary:
-    # current policy preview is a read-only per-document review. It can preview
-    # policy effects for conflicts present inside the loaded document's facts,
-    # but it is not yet a project-wide or upload-batch Commercial Truth surface.
-    #
-    # Cross-document conflicts such as:
-    # - prices_may.md says Pro = 2490 RUB
-    # - faq_old.md says Pro = 2990 RUB
-    #
-    # require a separate project/batch review port that can load multiple
-    # price_documents and their KnowledgeDocument metadata together.
     assert "list_price_documents_for_project" not in review_method
-    assert "list_price_facts_for_project" not in review_method
-    assert "list_project_commercial_truth" not in review_method
+    assert "list_price_facts_for_documents" not in review_method

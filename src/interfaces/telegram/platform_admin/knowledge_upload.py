@@ -13,8 +13,12 @@ from src.domain.project_plane.knowledge_preprocessing import (
 )
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
-from src.interfaces.composition.knowledge_upload import (
-    upload_platform_admin_knowledge_file,
+from src.domain.project_plane.knowledge_preprocessing import (
+    MODE_FAQ,
+)
+from src.infrastructure.db.repositories.queue_repository import QueueRepository
+from src.interfaces.composition.faq_workbench_upload import (
+    upload_faq_workbench_knowledge_file,
 )
 from src.interfaces.telegram.platform_admin.handlers import _get_project_menu_keyboard
 from src.interfaces.telegram.platform_admin.state import (
@@ -131,12 +135,27 @@ async def _queue_knowledge_upload(
     file_content: bytes,
     preprocessing_mode: str,
 ) -> KnowledgeUploadResultDto:
-    return await upload_platform_admin_knowledge_file(
+    try:
+        mode = normalize_preprocessing_mode(preprocessing_mode)
+    except KnowledgePreprocessingValidationError as exc:
+        raise ValueError(
+            "Only FAQ Workbench uploads are supported by the platform admin bot "
+            "until legacy non-FAQ modes have first-class Workbench implementations."
+        ) from exc
+
+    if mode != MODE_FAQ:
+        raise ValueError(
+            "Only FAQ Workbench uploads are supported by the platform admin bot "
+            "until legacy non-FAQ modes have first-class Workbench implementations."
+        )
+
+    queue_repo = QueueRepository(pool)
+    return await upload_faq_workbench_knowledge_file(
         pool=pool,
+        queue_repo=queue_repo,
         project_id=project_id,
         file_name=filename,
-        file_content=file_content,
-        preprocessing_mode=preprocessing_mode,
+        file_content=bytes(file_content),
         logger=logger,
     )
 

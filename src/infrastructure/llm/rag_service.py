@@ -19,7 +19,9 @@ import json
 import re
 from typing import Mapping
 
-from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+from src.application.ports.knowledge.runtime_search import (
+    KnowledgeRuntimeRetrievalPort,
+)
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.infrastructure.llm.rag_contract import (
     QueryExpander,

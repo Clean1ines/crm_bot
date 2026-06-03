@@ -1,0 +1,6 @@
+-- D4C6-real-16f
+-- Intentionally no-op.
+--
+-- Old answer/compiler batch persistence was removed during the Workbench
+-- fact-registry cutover. Runtime document processing now uses Workbench
+-- processing node artifacts and fact-registry snapshots.

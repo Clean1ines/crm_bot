@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parents[2]
 PORT = ROOT / "src/application/ports/commercial_price.py"
 REPO = ROOT / "src/infrastructure/db/repositories/commercial_price_repository.py"
-SERVICE = ROOT / "src/application/services/knowledge_service.py"
+SERVICE = ROOT / "src/application/services/commercial_price_review_service.py"
 HTTP = ROOT / "src/interfaces/http/knowledge.py"
 
 
@@ -42,13 +43,22 @@ def test_project_commercial_truth_review_service_loads_all_project_price_documen
         "    async def project_commercial_truth_review(",
         ("    async def commercial_truth_review(",),
     )
+    source_helper = _slice_between(
+        service_source,
+        "    async def _sources_by_price_document_id(",
+        ("def _price_facts_empty_response(",),
+    )
 
     assert "list_price_documents_for_project(" in method
     assert "list_price_facts_for_documents(" in method
     assert "include_non_runtime=True" in method
-    assert "knowledge_repo.get_document(" in method
+    assert "_sources_by_price_document_id(" in method
     assert "sources_by_price_document_id" in method
-    assert "CommercialTruthReviewService().review_price_facts(" in method
+
+    assert "self._knowledge_document_repo.get_document(" in source_helper
+    assert "commercial_source_descriptor_from_price_document(" in source_helper
+    assert "CommercialTruthReviewService()" in service_source
+    assert "review_price_facts(" in method
     assert "policy=policy" in method
 
 
@@ -88,3 +98,4 @@ def test_project_commercial_truth_review_does_not_publish_or_touch_runtime_looku
     assert "reject_price_facts(" not in combined
     assert "list_published_price_facts_for_lookup(" not in combined
     assert "commercial_price_lookup" not in combined
+    assert "PriceLookupTool" not in combined

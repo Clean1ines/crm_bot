@@ -3,17 +3,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from src.application.ports.knowledge import (
-    KnowledgeAnswerCandidatePort,
-    KnowledgeCanonicalEntryPort,
-    KnowledgeCompilationTracePort,
-    KnowledgeCurationPort,
-    KnowledgeDbPoolPort,
-    KnowledgeDocumentPort,
-    KnowledgeDocumentRuntimeEntries,
-    KnowledgeRuntimeRetrievalPort,
-    KnowledgeSourceMaterialPort,
-)
+from src.application.ports.knowledge.curation import KnowledgeCurationPort
+from src.application.ports.knowledge.runtime_search import KnowledgeRuntimeRetrievalPort
+
+
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_preprocessing import (
@@ -26,20 +19,22 @@ from src.domain.project_plane.model_usage_views import (
     ModelUsageEventCreate,
     ModelUsageSummaryView,
 )
-from src.domain.project_plane.retrieval_surface_compilation import (
-    LocalRelationPlanningResult,
-    LocalSurfaceRelation,
-    RetrievalSurfaceCandidate,
-    RetrievalSurfaceCompilationResult,
-    RetrievalSurfaceSourceUnit,
-    SurfaceAnswerDraft,
-    SurfaceDiscoveryResult,
-    SurfaceGraphReconciliationResult,
-    SurfaceQuestionOwnership,
-    SurfaceQuestionOwnershipResult,
-    SurfaceRelationClusterContext,
-    SurfaceRelationJudgeResult,
-)
+
+
+class KnowledgeDbPoolPort(Protocol):
+    """Minimal DB pool protocol kept local to avoid importing legacy documents.py.
+
+    Kept local so cleanup repository factories do not import retired
+    knowledge port tails or compiler/candidate ports.
+    """
+
+
+class KnowledgeDocumentPort(Protocol):
+    """Temporary narrow document marker for the legacy aggregate port.
+
+    Do not add compiler/candidate methods here. New FAQ Workbench code must use
+    src.application.ports.knowledge_workbench instead.
+    """
 
 
 class KnowledgeProjectAccessPort(Protocol):
@@ -116,88 +111,6 @@ class KnowledgePreprocessorFactoryPort(Protocol):
     def __call__(self) -> KnowledgePreprocessorPort: ...
 
 
-class KnowledgeSurfaceCompilerPort(Protocol):
-    @property
-    def model_name(self) -> str: ...
-
-    async def compile_surfaces(
-        self,
-        *,
-        mode: KnowledgePreprocessingMode,
-        source_units: Sequence[RetrievalSurfaceSourceUnit],
-        file_name: str,
-        run_id: str,
-    ) -> RetrievalSurfaceCompilationResult: ...
-
-
-class KnowledgeSurfaceGraphCompilerPort(Protocol):
-    @property
-    def model_name(self) -> str: ...
-
-    async def discover_surfaces_for_source_unit(
-        self,
-        *,
-        source_unit: RetrievalSurfaceSourceUnit,
-        file_name: str,
-        run_id: str,
-    ) -> SurfaceDiscoveryResult: ...
-
-    async def plan_local_relations(
-        self,
-        *,
-        source_unit: RetrievalSurfaceSourceUnit,
-        candidates: Sequence[RetrievalSurfaceCandidate],
-        file_name: str,
-        run_id: str,
-    ) -> LocalRelationPlanningResult: ...
-
-    async def synthesize_surface_answer(
-        self,
-        *,
-        source_unit: RetrievalSurfaceSourceUnit,
-        candidate: RetrievalSurfaceCandidate,
-        local_relations: Sequence[LocalSurfaceRelation],
-        related_candidates: Sequence[RetrievalSurfaceCandidate],
-        file_name: str,
-        run_id: str,
-    ) -> SurfaceAnswerDraft: ...
-
-    async def assign_surface_questions(
-        self,
-        *,
-        source_unit: RetrievalSurfaceSourceUnit,
-        answer_draft: SurfaceAnswerDraft,
-        candidate: RetrievalSurfaceCandidate,
-        local_relations: Sequence[LocalSurfaceRelation],
-        related_candidates: Sequence[RetrievalSurfaceCandidate],
-        file_name: str,
-        run_id: str,
-    ) -> SurfaceQuestionOwnershipResult: ...
-
-    async def judge_relation_cluster(
-        self,
-        *,
-        candidates: Sequence[SurfaceAnswerDraft],
-        existing_relations: Sequence[LocalSurfaceRelation],
-        cluster_context: SurfaceRelationClusterContext,
-        run_id: str,
-    ) -> SurfaceRelationJudgeResult: ...
-
-    async def reconcile_global_graph(
-        self,
-        *,
-        candidates: Sequence[SurfaceAnswerDraft],
-        local_relations: Sequence[LocalSurfaceRelation],
-        question_ownership: Sequence[SurfaceQuestionOwnership],
-        relation_judgements: Sequence[SurfaceRelationJudgeResult],
-        run_id: str,
-    ) -> SurfaceGraphReconciliationResult: ...
-
-
-class KnowledgeSurfaceCompilerFactoryPort(Protocol):
-    def __call__(self) -> KnowledgeSurfaceCompilerPort: ...
-
-
 class ModelUsageRepositoryPort(Protocol):
     async def record_event(self, event: ModelUsageEventCreate) -> None: ...
 
@@ -218,10 +131,6 @@ class ModelUsageRepositoryFactoryPort(Protocol):
 
 class KnowledgeRepositoryPort(
     KnowledgeDocumentPort,
-    KnowledgeSourceMaterialPort,
-    KnowledgeCompilationTracePort,
-    KnowledgeAnswerCandidatePort,
-    KnowledgeCanonicalEntryPort,
     KnowledgeRuntimeRetrievalPort,
     KnowledgeCurationPort,
     Protocol,
@@ -239,15 +148,11 @@ class KnowledgeRepositoryFactoryPort(Protocol):
 
 __all__ = [
     "JwtDecoderPort",
-    "KnowledgeAnswerCandidatePort",
-    "KnowledgeCanonicalEntryPort",
     "KnowledgeChunkerFactoryPort",
     "KnowledgeChunkerPort",
-    "KnowledgeCompilationTracePort",
     "KnowledgeCurationPort",
     "KnowledgeDbPoolPort",
     "KnowledgeDocumentPort",
-    "KnowledgeDocumentRuntimeEntries",
     "KnowledgePreprocessorFactoryPort",
     "KnowledgePreprocessorPort",
     "KnowledgeProjectAccessPort",
@@ -255,10 +160,6 @@ __all__ = [
     "KnowledgeRepositoryFactoryPort",
     "KnowledgeRepositoryPort",
     "KnowledgeRuntimeRetrievalPort",
-    "KnowledgeSourceMaterialPort",
-    "KnowledgeSurfaceCompilerFactoryPort",
-    "KnowledgeSurfaceCompilerPort",
-    "KnowledgeSurfaceGraphCompilerPort",
     "ModelUsageRepositoryFactoryPort",
     "ModelUsageRepositoryPort",
     "PlatformUserAdminPort",

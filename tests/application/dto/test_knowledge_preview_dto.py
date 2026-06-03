@@ -1,4 +1,4 @@
-from src.application.dto.knowledge_dto import (
+from src.application.dto.knowledge_preview_dto import (
     KnowledgePreviewRequestDto,
     KnowledgePreviewResponseDto,
 )
@@ -62,10 +62,14 @@ def test_preview_response_serializes_best_and_top_results_with_retrieval_metadat
     assert payload["trace"] == {"runtime_equivalent": True}
     assert payload["best_result"] == {
         "id": "chunk-1",
+        "title": "",
         "content": "Возврат доступен в течение 14 дней.",
         "answer": "Возврат доступен в течение 14 дней.",
         "score": 0.91,
         "method": "hybrid",
+        "questions": [],
+        "synonyms": [],
+        "tags": [],
         "source": "faq.md",
         "document_id": "doc-1",
         "document_status": "processed",
@@ -83,5 +87,4 @@ def test_preview_response_empty_is_safe() -> None:
         "is_empty": True,
         "retrieval_mode": "runtime_equivalent",
         "method": "production_runtime_search",
-        "trace": {},
     }

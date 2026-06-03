@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DTO_FILE = ROOT / "src/application/dto/knowledge_dto.py"
-SERVICE_FILE = ROOT / "src/application/services/knowledge_service.py"
+SERVICE_FILE = ROOT / "src/application/services/commercial_price_review_service.py"
 HTTP_FILE = ROOT / "src/interfaces/http/knowledge.py"
 
 
@@ -41,11 +41,16 @@ def test_price_facts_review_read_side_includes_non_runtime_facts() -> None:
         (
             "    async def publish_price_facts(",
             "    async def reject_price_facts(",
-            "    async def cancel_document_processing(",
         ),
     )
+    helper = _slice_between(
+        service_source,
+        "    async def _price_document_for_knowledge_document(",
+        ("    async def _require_price_document_for_knowledge_document(",),
+    )
 
-    assert "get_price_document_by_knowledge_document" in read_method
+    assert "_price_document_for_knowledge_document(document_id)" in read_method
+    assert "get_price_document_by_knowledge_document" in helper
     assert "list_price_facts_for_document" in read_method
     assert "include_non_runtime=True" in read_method
 
@@ -61,7 +66,6 @@ def test_price_facts_review_read_side_does_not_publish_or_touch_runtime_lookup()
         (
             "    async def publish_price_facts(",
             "    async def reject_price_facts(",
-            "    async def cancel_document_processing(",
         ),
     )
     read_route = _slice_between(
@@ -70,12 +74,12 @@ def test_price_facts_review_read_side_does_not_publish_or_touch_runtime_lookup()
         (
             '@router.post("/{document_id}/price-facts/publish")',
             '@router.post("/{document_id}/price-facts/reject")',
-            '@router.post("/{document_id}/retighten")',
         ),
     )
     combined = read_method + "\n" + read_route
 
-    assert "publish_price_facts(" not in combined
-    assert "reject_price_facts(" not in combined
+    assert "publish_price_facts(" not in read_method
+    assert "reject_price_facts(" not in read_method
     assert "list_published_price_facts_for_lookup(" not in combined
     assert "PriceLookupTool" not in combined
+    assert "SearchKnowledgeTool" not in combined

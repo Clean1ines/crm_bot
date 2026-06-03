@@ -16,7 +16,9 @@ from groq import (
     RateLimitError,
 )
 
-from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+from src.application.ports.knowledge.runtime_search import (
+    KnowledgeRuntimeRetrievalPort,
+)
 from src.application.rag_eval.ports import RagEvalSearchWithExpansionPort
 from src.application.rag_eval.schemas import JsonObject, RagEvalEvidenceEntry
 from src.domain.project_plane.knowledge_views import (

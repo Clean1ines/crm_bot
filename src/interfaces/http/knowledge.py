@@ -1,10 +1,13 @@
 """
-API endpoints for managing knowledge base (uploading documents).
+Workbench-first API boundary for project knowledge.
+
+This router must stay safe to import without loading the old FAQ compiler path.
+FAQ uploads are delegated lazily to the Workbench upload composition.
 """
 
-from typing import Literal, cast
+from __future__ import annotations
 
-import jwt
+from dataclasses import asdict, is_dataclass
 from fastapi import (
     APIRouter,
     Depends,
@@ -15,55 +18,11 @@ from fastapi import (
     Query,
     UploadFile,
 )
-from pydantic import BaseModel, Field
 
-from src.application.dto.knowledge_dto import (
-    KnowledgePreviewRequestDto,
-    KnowledgeUploadRequestDto,
-)
-from src.application.ports.commercial_price import CommercialPriceKnowledgePort
-from src.application.ports.knowledge_port import (
-    JwtDecoderPort,
-    KnowledgeChunkerPort,
-    KnowledgeDbPoolPort,
-    KnowledgePreprocessorPort,
-    ModelUsageRepositoryPort,
-)
-from src.application.services.knowledge_processing_report_builder import (
-    build_knowledge_processing_report,
-)
-from src.application.services.knowledge_service import (
-    KnowledgeService,
-    KnowledgeServiceConfig,
-    KnowledgeServiceRepositoryPort,
-)
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
-from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_preprocessing import (
-    MODE_FAQ,
-    normalize_preprocessing_mode,
-)
 from src.infrastructure.config.settings import settings
-from src.infrastructure.db.repositories.commercial_price_repository import (
-    CommercialPriceRepository,
-)
-from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
-from src.infrastructure.db.repositories.model_usage_repository import (
-    ModelUsageRepository,
-)
 from src.infrastructure.db.repositories.user_repository import UserRepository
-from src.infrastructure.llm.chunker import ChunkerService
-from src.application.services.knowledge_surface_prompt_versions import (
-    GRAPH_PROMPT_VERSION,
-)
-from src.infrastructure.llm.knowledge_preprocessor import GroqKnowledgePreprocessor
 from src.infrastructure.logging.logger import get_logger
-from src.infrastructure.queue.job_types import (
-    TASK_PROCESS_KNOWLEDGE_UPLOAD,
-    TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
-    TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
-    TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
-)
 from src.interfaces.http.dependencies import (
     get_pool,
     get_project_repo,
@@ -76,66 +35,80 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 
+async def _maybe_await(value: object) -> object:
+    import inspect
 
-class KnowledgePriceFactsActionRequestModel(BaseModel):
-    fact_ids: list[str] = Field(default_factory=list)
-    reason: str = Field(default="")
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
+_ALLOWED_WORKBENCH_UPLOAD_EXTENSIONS = frozenset(
+    {".txt", ".md", ".markdown", ".pdf", ".json"}
+)
 
-class KnowledgePreviewRequestModel(BaseModel):
-    question: str = Field(min_length=1, max_length=1000)
-    limit: int = Field(default=5, ge=1, le=10)
-    retrieval_mode: Literal["runtime_equivalent", "lexical_debug"] = Field(
-        default="runtime_equivalent"
-    )
+def _validate_workbench_upload_file_name(file_name: str | None) -> None:
+    normalized = (file_name or "").strip()
+    if not normalized:
+        return
 
+    if "." not in normalized:
+        return
 
-class PyJwtDecoder:
-    ExpiredSignatureError: type[Exception] = cast(
-        type[Exception], jwt.ExpiredSignatureError
-    )
-    InvalidTokenError: type[Exception] = cast(type[Exception], jwt.InvalidTokenError)
-
-    def decode(
-        self,
-        token: str,
-        secret: str,
-        algorithms: list[str],
-    ) -> JsonObject:
-        return cast(JsonObject, jwt.decode(token, secret, algorithms=algorithms))
-
-
-jwt_decoder: JwtDecoderPort = PyJwtDecoder()
-
-
-def make_chunker() -> KnowledgeChunkerPort:
-    return cast(KnowledgeChunkerPort, ChunkerService())
-
-
-def make_knowledge_repo(pool: KnowledgeDbPoolPort) -> KnowledgeServiceRepositoryPort:
-    return cast(KnowledgeServiceRepositoryPort, KnowledgeRepository(pool))
-
-
-def make_commercial_price_repo(
-    pool: KnowledgeDbPoolPort,
-) -> CommercialPriceKnowledgePort:
-    return cast(CommercialPriceKnowledgePort, CommercialPriceRepository(pool))
-
-
-def make_knowledge_preprocessor(
-    *, preprocessing_mode: str
-) -> KnowledgePreprocessorPort:
-    mode = normalize_preprocessing_mode(preprocessing_mode)
-    if mode == MODE_FAQ:
-        raise ValueError(
-            "Legacy FAQ preprocessor factory is forbidden; FAQ must use surface compiler"
+    suffix = "." + normalized.rsplit(".", 1)[-1].lower()
+    if suffix not in _ALLOWED_WORKBENCH_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {normalized}",
         )
-    return cast(KnowledgePreprocessorPort, GroqKnowledgePreprocessor())
 
+async def _project_exists_for_workbench(project_repo: object, project_id: str) -> bool:
+    project_exists = getattr(project_repo, "project_exists", None)
+    if project_exists is not None:
+        return bool(await _maybe_await(project_exists(project_id)))
 
-def make_model_usage_repo(pool: KnowledgeDbPoolPort) -> ModelUsageRepositoryPort:
-    return cast(ModelUsageRepositoryPort, ModelUsageRepository(pool))
+    get_project_view = getattr(project_repo, "get_project_view", None)
+    if get_project_view is not None:
+        return await _maybe_await(get_project_view(project_id)) is not None
 
+    return True
+
+async def _user_is_platform_admin_for_workbench(
+    user_repo: UserRepository,
+    user_id: str,
+) -> bool:
+    is_platform_admin = getattr(user_repo, "is_platform_admin", None)
+    if is_platform_admin is None:
+        return False
+    return bool(await _maybe_await(is_platform_admin(user_id)))
+
+async def _user_has_workbench_project_role(
+    project_repo: object,
+    *,
+    project_id: str,
+    user_id: str,
+) -> bool:
+    user_has_project_role = getattr(project_repo, "user_has_project_role", None)
+    if user_has_project_role is None:
+        return False
+
+    allowed_roles = ("owner", "admin", "manager")
+
+    try:
+        return bool(
+            await _maybe_await(
+                user_has_project_role(project_id, user_id, allowed_roles)
+            )
+        )
+    except TypeError:
+        return bool(
+            await _maybe_await(
+                user_has_project_role(
+                    project_id=project_id,
+                    user_id=user_id,
+                    allowed_roles=allowed_roles,
+                )
+            )
+        )
 
 async def _read_upload_bytes(file: UploadFile) -> bytearray:
     buffer = bytearray()
@@ -151,87 +124,91 @@ async def _read_upload_bytes(file: UploadFile) -> bytearray:
         if len(buffer) > max_bytes:
             raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
 
+def _jsonable(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {key: _jsonable(item) for key, item in asdict(value).items()}
+    if isinstance(value, (tuple, list)):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    enum_value = getattr(value, "value", None)
+    if isinstance(enum_value, str):
+        return enum_value
+    return value
 
-def _json_int(value: object) -> int:
-    if isinstance(value, bool) or value is None:
-        return 0
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    return 0
+async def _require_project_access(
+    *,
+    project_id: str,
+    authorization: str | None,
+    project_repo: object,
+    user_repo: UserRepository,
+) -> None:
+    """Fail-closed Workbench project access.
 
+    The boundary uses the shared HTTP auth dependency and project/user
+    repositories directly. It must not expose local JWT patch points or route
+    upload authorization through the retired KnowledgeService facade.
+    """
 
-def _json_dict(value: object) -> JsonObject:
-    return dict(value) if isinstance(value, dict) else {}
+    from src.interfaces.http.dependencies import get_current_user_id
 
+    current_user_id = await get_current_user_id(authorization)
 
-def _overview_is_reportable_document(document: object) -> bool:
-    status = str(getattr(document, "status", "") or "")
-    preprocessing_status = str(getattr(document, "preprocessing_status", "") or "")
-    structured_entries = getattr(document, "structured_entries", 0) or 0
-    return (
-        status in {"pending", "processing", "error", "cancelled"}
-        or preprocessing_status in {"processing", "failed", "cancelled"}
-        or int(structured_entries) > 0
+    if not await _project_exists_for_workbench(project_repo, project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if await _user_is_platform_admin_for_workbench(user_repo, current_user_id):
+        return
+
+    if await _user_has_workbench_project_role(
+        project_repo,
+        project_id=project_id,
+        user_id=current_user_id,
+    ):
+        return
+
+    for method_name in (
+        "require_project_access",
+        "ensure_project_access",
+        "require_access",
+    ):
+        method = getattr(project_repo, method_name, None)
+        if method is None:
+            continue
+
+        try:
+            result = await _maybe_await(method(project_id, authorization))
+        except TypeError:
+            try:
+                result = await _maybe_await(
+                    method(
+                        project_id=project_id,
+                        authorization=authorization,
+                    )
+                )
+            except TypeError:
+                continue
+
+        if result is False:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return
+
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+def _legacy_endpoint_gone(*, capability: str, target: str) -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "status": "removed_legacy_knowledge_endpoint",
+            "capability": capability,
+            "target": target,
+            "message": (
+                "This endpoint belonged to the old knowledge workflow. "
+                "Reintroduce it only as a Workbench read model, Workbench command, "
+                "or a separate bounded context."
+            ),
+        },
     )
-
-
-def _overview_source_unit_summary(document: object, metrics: JsonObject) -> JsonObject:
-    source_unit_count = (
-        _json_int(metrics.get("source_unit_count"))
-        or _json_int(metrics.get("source_chunk_count"))
-        or _json_int(metrics.get("raw_source_chunk_count"))
-        or int(getattr(document, "chunk_count", 0) or 0)
-    )
-    return {
-        "source_unit_count": source_unit_count,
-        "source_chunk_count": _json_int(metrics.get("source_chunk_count")),
-        "raw_source_chunk_count": _json_int(metrics.get("raw_source_chunk_count")),
-    }
-
-
-def _overview_groq_route_summary(metrics: JsonObject) -> JsonObject:
-    return {
-        key: value
-        for key, value in metrics.items()
-        if key.startswith("groq_")
-        or key
-        in {
-            "key_slot",
-            "actual_model",
-            "requested_model",
-            "fallback_reason",
-            "limit_kind",
-            "retry_after_seconds",
-            "cooldown_until_epoch",
-            "remaining_requests",
-            "remaining_tokens",
-            "reset_requests_epoch",
-            "reset_tokens_epoch",
-        }
-    }
-
-
-def _overview_economy_summary(metrics: JsonObject) -> JsonObject:
-    return {
-        key: metrics.get(key)
-        for key in (
-            "economy_mode",
-            "economy_reason",
-            "economy_source_unit_count",
-            "economy_source_unit_split_count",
-            "economy_subunit_count",
-            "economy_completed_subunit_count",
-            "economy_quality_warning",
-            "quality_mode",
-            "quality_warning",
-        )
-        if key in metrics
-    }
-
 
 @router.get("")
 async def list_knowledge_documents(
@@ -243,712 +220,17 @@ async def list_knowledge_documents(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """
-    Lists uploaded knowledge documents for a project.
-    """
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
+    """Lists FAQ Workbench documents for a project."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
     )
-    await service.require_access(project_id, authorization)
-
-    repo = KnowledgeRepository(pool)
-    documents = await repo.get_documents(project_id, limit=limit, offset=offset)
-    return {"documents": documents, "items": documents}
-
-
-@router.get("/processing-overview")
-async def knowledge_processing_overview(
-    project_id: str,
-    authorization: str | None = Header(default=None),
-    limit: int = Query(200, ge=1, le=200),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns one lightweight polling payload for processing knowledge documents."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
+    from src.interfaces.composition.faq_workbench_documents import (
+        fetch_workbench_documents,
     )
-    await service.require_access(project_id, authorization)
-
-    repo = KnowledgeRepository(pool)
-    documents = await repo.get_documents(project_id, limit=limit, offset=0)
-
-    processing_reports: dict[str, JsonObject] = {}
-    partial_surface_count: dict[str, int] = {}
-    source_unit_summary: dict[str, JsonObject] = {}
-    groq_route_summary: dict[str, JsonObject] = {}
-    economy_mode_summary: dict[str, JsonObject] = {}
-
-    for document in documents:
-        document_id = str(getattr(document, "id", ""))
-        if not document_id or not _overview_is_reportable_document(document):
-            continue
-
-        batches = await repo.list_document_compiler_batches(
-            project_id=project_id,
-            document_id=document_id,
-        )
-        candidate_summary = await repo.get_document_answer_candidate_summary(
-            project_id=project_id,
-            document_id=document_id,
-        )
-        report = build_knowledge_processing_report(
-            document_id=document_id,
-            document=document,
-            batches=batches,
-            candidate_summary=candidate_summary,
-        )
-        report_payload = _json_dict(report.to_dict())
-        processing_reports[document_id] = report_payload
-
-        metrics = _json_dict(report_payload.get("metrics"))
-        partial_surface_count[document_id] = (
-            _json_int(metrics.get("retrieval_surface_entry_count"))
-            or _json_int(metrics.get("published_answer_count"))
-            or _json_int(metrics.get("draft_answer_count"))
-            or _json_int(metrics.get("answer_candidate_count"))
-        )
-        source_unit_summary[document_id] = _overview_source_unit_summary(
-            document,
-            metrics,
-        )
-        groq_route_summary[document_id] = _overview_groq_route_summary(metrics)
-        economy_mode_summary[document_id] = _overview_economy_summary(metrics)
-
-    return {
-        "documents": documents,
-        "processing_reports": processing_reports,
-        "reports": processing_reports,
-        "partial_surface_count": partial_surface_count,
-        "source_unit_summary": source_unit_summary,
-        "groq_route_summary": groq_route_summary,
-        "economy_mode_summary": economy_mode_summary,
-    }
-
-
-@router.post("/preview")
-async def preview_knowledge(
-    project_id: str,
-    request: KnowledgePreviewRequestModel,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """
-    Returns the best knowledge-base matches for a customer question without
-    calling LLM generation.
-    """
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.preview_query(
-        project_id,
-        KnowledgePreviewRequestDto(
-            question=request.question,
-            limit=request.limit,
-            retrieval_mode=request.retrieval_mode,
-        ),
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-    )
-    return result.to_dict()
-
-
-@router.get("/usage")
-async def knowledge_usage(
-    project_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.usage(
-        project_id,
-        authorization,
-        model_usage_repo_factory=make_model_usage_repo,
-    )
-    return result.to_dict()
-
-
-@router.get("/{document_id}/fragments")
-async def knowledge_answer_drafts(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    limit: int = Query(20, ge=1, le=1000),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns saved answer drafts extracted from a knowledge document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.answer_drafts(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-        limit=limit,
-    )
-    return result.to_dict()
-
-
-@router.get("/{document_id}/source-units")
-async def knowledge_source_units(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    limit: int = Query(1000, ge=1, le=1000),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns source units/source chunks used as evidence for a document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.source_units(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-        limit=limit,
-    )
-    return result.to_dict()
-
-
-@router.get("/{document_id}/import-quality")
-async def knowledge_import_quality_report(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns a user-facing import quality report for a knowledge document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.import_quality_report(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-    )
-    return result.to_dict()
-
-
-@router.get("/{document_id}/progress")
-async def knowledge_processing_progress(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns a user-facing progress report for knowledge document processing."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.processing_report(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-    )
-    return result.to_dict()
-
-
-@router.get("/{document_id}/price-facts")
-async def knowledge_price_facts(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns extracted commercial price facts for review, including non-runtime facts."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.price_facts(
-        project_id,
-        document_id,
-        authorization,
-        commercial_price_repo_factory=make_commercial_price_repo,
-        logger=logger,
-    )
-    return result.to_dict()
-
-
-@router.get("/commercial-truth-review")
-async def project_commercial_truth_review(
-    project_id: str,
-    authorization: str | None = Header(default=None),
-    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns project-wide commercial truth conflicts and surface preview."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.project_commercial_truth_review(
-        project_id,
-        authorization,
-        commercial_price_repo_factory=make_commercial_price_repo,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-        policy=policy,
-    )
-    return result.to_dict()
-
-
-@router.get("/{document_id}/commercial-truth-review")
-async def knowledge_commercial_truth_review(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns commercial truth conflicts and surface preview for a price document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.commercial_truth_review(
-        project_id,
-        document_id,
-        authorization,
-        commercial_price_repo_factory=make_commercial_price_repo,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-        policy=policy,
-    )
-    return result.to_dict()
-
-
-@router.post("/{document_id}/price-facts/publish")
-async def publish_knowledge_price_facts(
-    project_id: str,
-    document_id: str,
-    payload: KnowledgePriceFactsActionRequestModel,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Publishes reviewed commercial price facts for runtime use."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.publish_price_facts(
-        project_id,
-        document_id,
-        payload.fact_ids,
-        authorization,
-        commercial_price_repo_factory=make_commercial_price_repo,
-        logger=logger,
-    )
-    return result.to_dict()
-
-
-@router.post("/{document_id}/price-facts/reject")
-async def reject_knowledge_price_facts(
-    project_id: str,
-    document_id: str,
-    payload: KnowledgePriceFactsActionRequestModel,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Rejects reviewed commercial price facts without publishing them."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    result = await service.reject_price_facts(
-        project_id,
-        document_id,
-        payload.fact_ids,
-        payload.reason,
-        authorization,
-        commercial_price_repo_factory=make_commercial_price_repo,
-        logger=logger,
-    )
-    return result.to_dict()
-
-
-@router.post("/{document_id}/retighten")
-async def retighten_knowledge_document(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Queues answer resolution tightening for an already processed document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    return await service.retighten_document_answer_resolution(
-        project_id,
-        document_id,
-        authorization,
-        queue_repo=queue_repo,
-        retighten_task_type=TASK_RETIGHTEN_KNOWLEDGE_DOCUMENT,
-        logger=logger,
-    )
-
-
-@router.post("/{document_id}/publish-ready")
-async def publish_knowledge_ready_answers(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Queues publishing of already extracted answer drafts for a document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    return await service.publish_document_ready_answers(
-        project_id,
-        document_id,
-        authorization,
-        queue_repo=queue_repo,
-        publish_ready_task_type=TASK_PUBLISH_KNOWLEDGE_READY_ANSWERS,
-        logger=logger,
-    )
-
-
-@router.post("/{document_id}/retry-failed-batches")
-async def retry_knowledge_failed_batches(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Queues retry for failed durable compiler batches of a document."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    return await service.retry_document_failed_batches(
-        project_id,
-        document_id,
-        authorization,
-        queue_repo=queue_repo,
-        retry_failed_batches_task_type=TASK_RETRY_KNOWLEDGE_FAILED_BATCHES,
-        logger=logger,
-    )
-
-
-@router.post("/{document_id}/resume-processing")
-async def resume_knowledge_processing(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Queues explicit resume for a cancelled recoverable FAQ processing run."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    return await service.resume_document_processing(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        queue_repo=queue_repo,
-        knowledge_upload_task_type=TASK_PROCESS_KNOWLEDGE_UPLOAD,
-        expected_faq_surface_prompt_version=GRAPH_PROMPT_VERSION,
-        logger=logger,
-    )
-
-
-@router.post("/{document_id}/cancel")
-async def cancel_knowledge_processing(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Stops queued/running knowledge document processing cooperatively."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    await service.cancel_document_processing(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-    )
-    return {"status": "cancelled", "document_id": document_id}
-
-
-@router.delete("/{document_id}")
-async def delete_knowledge_document(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Deletes one knowledge document and all artifacts owned by it."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
-    await service.delete_document(
-        project_id,
-        document_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-    )
-    return {"status": "deleted", "document_id": document_id}
-
 
 @router.post("")
 async def upload_knowledge(
@@ -961,55 +243,562 @@ async def upload_knowledge(
     queue_repo=Depends(get_queue_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """
-    Загружает текстовый, Markdown, JSON файл или PDF, разбивает на чанки,
-    генерирует эмбеддинги и сохраняет в базу знаний проекта.
+    """Uploads a document through the Workbench-first knowledge upload path."""
 
-    preprocessing_mode:
-    - faq: FAQ Retrieval Surface Compilation
-    - price_list: price/menu/catalog normalization
-    """
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
-    )
+    _validate_workbench_upload_file_name(file.filename)
+
     try:
         file_content = await _read_upload_bytes(file)
+    except HTTPException:
+        raise
     except Exception as exc:
-        if isinstance(exc, HTTPException):
-            raise
         logger.error(f"Failed to read uploaded file: {exc}")
         raise HTTPException(status_code=400, detail="Could not read file") from exc
 
-    result = await service.upload(
-        project_id,
-        file.filename,
-        file_content,
-        authorization,
-        chunker_factory=make_chunker,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
-        queue_repo=queue_repo,
-        knowledge_upload_task_type=TASK_PROCESS_KNOWLEDGE_UPLOAD,
-        upload_request=KnowledgeUploadRequestDto(
-            preprocessing_mode=preprocessing_mode,
-        ),
-        preprocessor_factory=(
-            lambda: make_knowledge_preprocessor(preprocessing_mode=preprocessing_mode)
-        ),
+    from src.domain.project_plane.knowledge_preprocessing import (
+        MODE_FAQ,
+        KnowledgePreprocessingValidationError,
+        normalize_preprocessing_mode,
     )
-    return result.to_dict()
 
+    try:
+        mode = normalize_preprocessing_mode(preprocessing_mode)
+    except KnowledgePreprocessingValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Only FAQ Workbench uploads are supported on this endpoint. "
+                "Legacy non-FAQ preprocessing modes are disabled until they have "
+                "a first-class Workbench implementation."
+            ),
+        ) from exc
+
+    if mode != MODE_FAQ:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Only FAQ Workbench uploads are supported on this endpoint. "
+                "Legacy non-FAQ preprocessing modes are disabled until they have "
+                "a first-class Workbench implementation."
+            ),
+        )
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_upload import (
+        upload_faq_workbench_knowledge_file,
+    )
+
+    from src.domain.project_plane.knowledge_workbench import DomainInvariantError
+
+    try:
+        result = await upload_faq_workbench_knowledge_file(
+            pool=pool,
+            queue_repo=queue_repo,
+            project_id=project_id,
+            file_name=file.filename,
+            file_content=file_content,
+            logger=logger,
+        )
+    except DomainInvariantError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if hasattr(result, "to_dict"):
+        return result.to_dict()
+    return _jsonable(result)
+
+@router.get("/{document_id}/progress")
+async def knowledge_processing_progress(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns Workbench processing progress for one document."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_progress import (
+        WorkbenchProgressNotFoundError,
+        fetch_workbench_progress,
+    )
+
+    try:
+        return await fetch_workbench_progress(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchProgressNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+
+@router.get("/processing-overview")
+async def knowledge_processing_overview(
+    project_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns project-level FAQ Workbench processing overview."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_processing_overview import (
+        fetch_workbench_processing_overview,
+    )
+
+    return await fetch_workbench_processing_overview(
+        pool=pool,
+        project_id=project_id,
+    )
+
+@router.post("/preview")
+async def preview_knowledge():
+    _legacy_endpoint_gone(
+        capability="retrieval preview",
+        target="WorkbenchRetrievalPreviewService or RuntimeRetrievalPreviewService",
+    )
+
+@router.get("/usage")
+@router.get("/usage")
+async def knowledge_usage(
+    project_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.dto.model_usage_dto import ModelUsageSummaryDto
+    from src.infrastructure.db.repositories.model_usage_repository import (
+        ModelUsageRepository,
+    )
+
+    repository = ModelUsageRepository(pool)
+    monthly_token_budget = int(
+        getattr(
+            settings,
+            "MODEL_USAGE_MONTHLY_TOKEN_BUDGET",
+            getattr(settings, "model_usage_monthly_token_budget", 0),
+        )
+        or 0
+    )
+
+    try:
+        summary = await repository.get_project_usage_summary(
+            project_id=project_id,
+            monthly_token_budget=monthly_token_budget,
+        )
+    except TypeError:
+        summary = await repository.get_project_usage_summary(project_id=project_id)
+
+    if hasattr(summary, "to_dict"):
+        return summary.to_dict()
+
+    return ModelUsageSummaryDto.from_view(summary).to_dict()
+
+@router.get("/{document_id}/source-units")
+async def knowledge_source_units(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns Workbench evidence trace/source units for one document."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_evidence_trace import (
+        WorkbenchEvidenceTraceNotFoundError,
+        fetch_workbench_evidence_trace,
+    )
+
+    try:
+        return await fetch_workbench_evidence_trace(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchEvidenceTraceNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+
+@router.get("/{document_id}/import-quality")
+async def knowledge_import_quality_report(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns Workbench import quality report for one document."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_import_quality import (
+        WorkbenchImportQualityNotFoundError,
+        fetch_workbench_import_quality_report,
+    )
+
+    try:
+        return await fetch_workbench_import_quality_report(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchImportQualityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+
+@router.get("/{document_id}/price-facts")
+@router.get("/{document_id}/price-facts")
+async def knowledge_price_facts(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.commercial_price_review import (
+        make_commercial_price_review_service,
+    )
+
+    service = make_commercial_price_review_service(pool)
+    return await service.price_facts(document_id=document_id)
+
+@router.get("/commercial-truth-review")
+@router.get("/commercial-truth-review")
+async def project_commercial_truth_review(
+    project_id: str,
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.commercial_price_review import (
+        make_commercial_price_review_service,
+    )
+
+    service = make_commercial_price_review_service(pool)
+    return await service.project_commercial_truth_review(
+        project_id=project_id,
+        policy=policy,
+    )
+
+@router.get("/{document_id}/commercial-truth-review")
+@router.get("/{document_id}/commercial-truth-review")
+async def knowledge_commercial_truth_review(
+    project_id: str,
+    document_id: str,
+    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.commercial_price_review import (
+        make_commercial_price_review_service,
+    )
+
+    service = make_commercial_price_review_service(pool)
+    return await service.commercial_truth_review(
+        document_id=document_id,
+        policy=policy,
+    )
+
+@router.post("/{document_id}/price-facts/publish")
+@router.post("/{document_id}/price-facts/publish")
+async def publish_knowledge_price_facts(
+    project_id: str,
+    document_id: str,
+    fact_ids: list[str] | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.commercial_price_review import (
+        make_commercial_price_review_service,
+    )
+
+    service = make_commercial_price_review_service(pool)
+    try:
+        return await service.publish_price_facts(
+            document_id=document_id,
+            fact_ids=tuple(fact_ids or ()),
+            reviewed_by="http_api",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@router.post("/{document_id}/price-facts/reject")
+@router.post("/{document_id}/price-facts/reject")
+async def reject_knowledge_price_facts(
+    project_id: str,
+    document_id: str,
+    fact_ids: list[str] | None = Query(default=None),
+    reason: str = "",
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.commercial_price_review import (
+        make_commercial_price_review_service,
+    )
+
+    service = make_commercial_price_review_service(pool)
+    try:
+        return await service.reject_price_facts(
+            document_id=document_id,
+            fact_ids=tuple(fact_ids or ()),
+            reviewed_by="http_api",
+            reason=reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@router.post("/{document_id}/retighten")
+async def retighten_knowledge_document(document_id: str):
+    _legacy_endpoint_gone(
+        capability=f"answer tightening for {document_id}",
+        target="Workbench surface curation/refinement command",
+    )
+
+@router.post("/{document_id}/publish-ready")
+async def publish_knowledge_ready_answers(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Publishes Workbench-approved surfaces into the runtime retrieval surface."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_publish_ready import (
+        WorkbenchPublishReadyNotFoundError,
+        WorkbenchPublishReadyRejectedError,
+        publish_workbench_ready_surfaces,
+    )
+
+    try:
+        return await publish_workbench_ready_surfaces(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchPublishReadyNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+    except WorkbenchPublishReadyRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@router.post("/{document_id}/retry-failed-batches")
+async def retry_knowledge_failed_batches(document_id: str):
+    _legacy_endpoint_gone(
+        capability=f"retry failed compiler batches for {document_id}",
+        target="Workbench failed node/section retry command",
+    )
+
+@router.post("/{document_id}/resume-processing")
+async def resume_knowledge_processing(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    queue_repo=Depends(get_queue_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Queues explicit user resume through the Workbench process document path."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_resume import (
+        WorkbenchManualResumeNotFoundError,
+        WorkbenchManualResumeRejectedError,
+        resume_workbench_document,
+    )
+
+    try:
+        return await resume_workbench_document(
+            pool=pool,
+            queue_repo=queue_repo,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchManualResumeNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+    except WorkbenchManualResumeRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@router.post("/{document_id}/cancel")
+async def cancel_knowledge_processing(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Cancels active Workbench processing and disables automatic recovery."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_cancel import (
+        WorkbenchCancelProcessingNotFoundError,
+        WorkbenchCancelProcessingRejectedError,
+        cancel_workbench_processing,
+    )
+
+    try:
+        return await cancel_workbench_processing(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchCancelProcessingNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+    except WorkbenchCancelProcessingRejectedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+@router.delete("/{document_id}")
+async def delete_knowledge_document(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Deletes a Workbench document and invalidates document-scoped processing artifacts."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    from src.interfaces.composition.faq_workbench_delete import (
+        WorkbenchDocumentDeleteNotFoundError,
+        WorkbenchDocumentDeleteRejectedError,
+        delete_workbench_document,
+    )
+
+    try:
+        return await delete_workbench_document(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchDocumentDeleteNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
+    except WorkbenchDocumentDeleteRejectedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
 
 @router.delete("")
 async def clear_knowledge(
@@ -1019,25 +808,26 @@ async def clear_knowledge(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Deletes all knowledge documents and chunks for a project."""
-    service = KnowledgeService(
-        project_repo,
-        user_repo,
-        pool,
-        settings.JWT_SECRET_KEY,
-        jwt_decoder,
-        service_config=KnowledgeServiceConfig(
-            model_usage_monthly_token_budget=int(
-                settings.MODEL_USAGE_MONTHLY_TOKEN_BUDGET
-            ),
-            voyage_free_monthly_tokens=int(settings.VOYAGE_FREE_MONTHLY_TOKENS),
-            model_usage_counter_enabled=bool(settings.MODEL_USAGE_COUNTER_ENABLED),
-        ),
+    """Clears all Workbench knowledge for a project."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
     )
-    await service.clear_project_knowledge(
-        project_id,
-        authorization,
-        knowledge_repo_factory=make_knowledge_repo,
-        logger=logger,
+    from src.interfaces.composition.faq_workbench_clear import (
+        WorkbenchProjectClearRejectedError,
+        clear_workbench_project,
     )
-    return {"status": "cleared"}
+
+    try:
+        return await clear_workbench_project(
+            pool=pool,
+            project_id=project_id,
+        )
+    except WorkbenchProjectClearRejectedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc

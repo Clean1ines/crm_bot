@@ -63,7 +63,7 @@ const faqStageProgressPercent = (metrics: MetricsRecord | null): number | null =
   const candidateCount = metricNumber(metrics, 'candidate_count');
   const candidateIndex = metricNumber(metrics, 'candidate_index');
 
-  if (stage === 'faq_retrieval_surface_compilation_completed') return 100;
+  if (stage === 'surface_materialization_completed') return 100;
   if (stage === 'source_units' || stage === 'faq_surface_graph_parallel_bootstrap') return 5;
   if (stage === 'global_reconciliation') return 90;
   if (stage === 'global_relation_judge') return 95;

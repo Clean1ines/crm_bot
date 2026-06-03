@@ -1,0 +1,5 @@
+-- D4C6-real-16f
+-- Intentionally no-op.
+--
+-- The canonical Workbench checkpoint model is defined in the parallel section
+-- batch queue migration and the fact-registry application queue migration.

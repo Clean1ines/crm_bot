@@ -13,13 +13,28 @@ from src.interfaces.http.dependencies import (
     get_project_member_repo,
     get_project_token_repo,
 )
-from src.interfaces.telegram.platform_bot import process_admin_update
-from src.interfaces.telegram.client_bot import process_client_update
-from src.interfaces.telegram.manager_bot import process_manager_update
 from src.application.services.webhook_dispatcher import WebhookDispatcher
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def _get_process_admin_update():
+    from src.interfaces.telegram.platform_bot import process_admin_update
+
+    return process_admin_update
+
+
+def _get_process_client_update():
+    from src.interfaces.telegram.client_bot import process_client_update
+
+    return process_client_update
+
+
+def _get_process_manager_update():
+    from src.interfaces.telegram.manager_bot import process_manager_update
+
+    return process_manager_update
 
 
 def _get_dispatcher() -> WebhookDispatcher:
@@ -34,7 +49,7 @@ async def platform_webhook(request: Request, pool=Depends(get_pool)):
         update,
         secret_token,
         pool=pool,
-        process_admin_update=process_admin_update,
+        process_admin_update=_get_process_admin_update(),
         logger=logger,
     )
 
@@ -54,7 +69,7 @@ async def client_webhook(
         secret_token,
         orchestrator=orchestrator,
         project_tokens=project_tokens,
-        process_client_update=process_client_update,
+        process_client_update=_get_process_client_update(),
         logger=logger,
     )
 
@@ -75,7 +90,7 @@ async def project_manager_webhook(
         orchestrator=orchestrator,
         project_tokens=project_tokens,
         project_members=project_members,
-        process_manager_update=process_manager_update,
+        process_manager_update=_get_process_manager_update(),
         logger=logger,
     )
     return result.to_dict() if hasattr(result, "to_dict") else result
@@ -110,7 +125,7 @@ async def telegram_webhook(
             secret_token,
             orchestrator=orchestrator,
             project_tokens=project_tokens,
-            process_client_update=process_client_update,
+            process_client_update=_get_process_client_update(),
             logger=logger,
         )
         return result.to_dict() if hasattr(result, "to_dict") else result
@@ -155,7 +170,7 @@ async def manager_webhook(
         orchestrator=orchestrator,
         project_tokens=project_tokens,
         project_members=project_members,
-        process_manager_update=process_manager_update,
+        process_manager_update=_get_process_manager_update(),
         logger=logger,
         skip_secret_validation=True,
     )

@@ -20,10 +20,14 @@ from src.application.rag_eval.runner import RagEvalRunner, RagEvalTechnicalAnswe
 from src.application.rag_eval.service import RagEvalService
 from src.application.rag_eval.ports import RagEvalRetrieverPort
 from src.application.rag_eval.schemas import RagEvalRun, RagQualityReport, new_eval_id
-from src.infrastructure.db.repositories.knowledge_repository import KnowledgeRepository
+from src.infrastructure.db.workbench_runtime_retrieval_repository import (
+    WorkbenchRuntimeRetrievalRepository,
+)
 from src.infrastructure.db.repositories.rag_eval_repository import RagEvalRepository
 from src.infrastructure.llm.query_expander import GroqQueryExpander
-from src.application.ports.knowledge import KnowledgeRuntimeRetrievalPort
+from src.application.ports.knowledge.runtime_search import (
+    KnowledgeRuntimeRetrievalPort,
+)
 from src.infrastructure.llm.rag_service import RAGService
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.llm.groq_keyring import has_configured_groq_api_key
@@ -628,9 +632,9 @@ async def _run_full_document_rag_eval(
     )
     retrieval_metadata = rag_eval_retrieval_metadata(retrieval_policy)
 
-    knowledge_repo = KnowledgeRepository(db_pool)
+    runtime_retrieval = WorkbenchRuntimeRetrievalRepository(db_pool)
     retriever = _build_rag_eval_retriever(
-        knowledge_repo=cast(KnowledgeRuntimeRetrievalPort, knowledge_repo),
+        knowledge_repo=cast(KnowledgeRuntimeRetrievalPort, runtime_retrieval),
         retrieval_mode=retrieval_policy.mode,
     )
 

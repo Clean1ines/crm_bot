@@ -17,7 +17,7 @@ const importQualityStatusClassName = (status: string): string => {
 };
 
 const importQualityActionLabel = (action: string): string => {
-  if (action === 'continue_to_knowledge_compilation') return t('knowledge.importQuality.action.continue');
+  if (action === 'continue_to_workbench_processing') return t('knowledge.importQuality.action.continue');
   if (action === 'review_source_units') return t('knowledge.importQuality.action.reviewSourceUnits');
   if (action === 'wait_for_processing') return t('knowledge.importQuality.action.waitForProcessing');
   if (action === 'replace_or_review_document') return t('knowledge.importQuality.action.replaceOrReview');

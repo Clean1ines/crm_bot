@@ -38,12 +38,8 @@ def test_domain_layer_has_no_asyncpg_driver_dependency() -> None:
     assert offenders == []
 
 
-def test_knowledge_ingestion_service_has_no_db_driver_fk_exception_reference() -> None:
-    source = Path("src/application/services/knowledge_ingestion_service.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert "ForeignKeyViolationError" not in source
-    assert "asyncpg." not in source
-    assert "import asyncpg" not in source
-    assert "from asyncpg" not in source
+def test_knowledge_ingestion_service_is_deleted_with_old_compiler_layer() -> None:
+    assert not Path("src/application/services/knowledge_ingestion_service.py").exists()
+    assert not Path(
+        "src/application/services/knowledge_ingestion_contracts.py"
+    ).exists()

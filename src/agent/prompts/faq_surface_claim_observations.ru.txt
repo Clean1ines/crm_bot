@@ -1,0 +1,97 @@
+NODE: faq_claim_observations
+Ты получаешь один фрагмент документа.
+
+Задача: извлечь claims — самостоятельные единицы знания, которые пользователь может захотеть получить из документа.
+
+Claim — это единица знания, подтверждённая текстом. Claim может быть атомарным или составным.
+
+Claim может описывать:
+
+* определение;
+* свойство;
+* возможность;
+* ограничение;
+* правило;
+* условие;
+* процесс;
+* список;
+* сравнение;
+* критерий;
+* набор примеров;
+* ценность;
+* исключение.
+
+Факт не обязан быть микрофактом.
+Если список, процесс, набор условий или набор примеров вместе отвечают на один смысловой запрос, оставь их одним composite claim.
+Дроби только тогда, когда часть блока является самостоятельным знанием, которое полезно искать отдельно.
+
+Для каждого claim верни:
+
+* краткую canonical формулировку;
+* тип claim;
+* granularity;
+* RDF-like triples;
+* evidence_block;
+* possible_questions;
+* scope;
+* exclusion_scope;
+* связи с другими claims внутри этого же результата.
+
+Controlled claim_kind:
+definition | property | capability | limitation | rule | condition | process | list | comparison | criterion | example_set | value | exception | other
+
+Controlled predicates:
+is_a | is_not | has_property | has_capability | has_limitation | requires | supports | uses | produces | includes | has_item | has_step | has_condition | has_result | has_value | has_example | differs_from | excludes | causes | enables | prevents | depends_on | applies_when
+
+Controlled local relation:
+part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for
+
+Relation meanings:
+same_meaning — claims express the same knowledge.
+part_of — source claim is a component of target claim.
+has_part — source claim contains target claim as a component.
+narrows — source claim is a more specific case.
+broadens — source claim is more general.
+refines — source claim makes wording, boundary, condition, or scope more precise without adding a large new content block.
+extends — source claim adds new substantial content.
+overlaps — claims share topic but assert different aspects.
+contradicts — claims are incompatible.
+supports — source claim explains or justifies target claim.
+sets_boundary_for — source claim defines what target claim does not cover.
+
+RDF-like triple:
+subject → predicate → object
+
+Use only predicates from the controlled predicate list.
+
+JSON output:
+{
+"claims": [
+{
+"local_ref": "c1",
+"claim": "",
+"claim_kind": "definition | property | capability | limitation | rule | condition | process | list | comparison | criterion | example_set | value | exception | other",
+"granularity": "atomic | composite",
+"triples": [
+{
+"subject": "",
+"predicate": "is_a | is_not | has_property | has_capability | has_limitation | requires | supports | uses | produces | includes | has_item | has_step | has_condition | has_result | has_value | has_example | differs_from | excludes | causes | enables | prevents | depends_on | applies_when",
+"object": "",
+"qualifiers": []
+}
+],
+"evidence_block": "",
+"possible_questions": [],
+"scope": "",
+"exclusion_scope": "",
+"local_relations": [
+{
+"target_ref": "c2",
+"relation": "part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for",
+"reason": ""
+}
+],
+"confidence": 0.0
+}
+]
+}

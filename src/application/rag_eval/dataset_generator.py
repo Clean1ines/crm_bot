@@ -11,7 +11,7 @@ from src.application.rag_eval.ports import (
     RagEvalDatasetMetricsCallback,
     RagEvalJsonLlmPort,
 )
-from src.domain.project_plane.knowledge_retrieval_surface import (
+from src.domain.project_plane.knowledge_entry_kind import (
     RUNTIME_ENTRY_KIND_VALUES,
 )
 from src.application.rag_eval.schemas import (

@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DTO_FILE = ROOT / "src/application/dto/knowledge_dto.py"
-SERVICE_FILE = ROOT / "src/application/services/knowledge_service.py"
+SERVICE_FILE = ROOT / "src/application/services/commercial_price_review_service.py"
 HTTP_FILE = ROOT / "src/interfaces/http/knowledge.py"
 
 
