@@ -30,6 +30,7 @@ class PublishFactRegistryRuntimeCommand:
 @dataclass(frozen=True, slots=True)
 class PublishFactRegistryRuntimeResult:
     published_entry_count: int
+    published_retrieval_surface_entry_count: int = 0
 
 
 class FaqWorkbenchRuntimePublicationService:
@@ -62,18 +63,23 @@ class FaqWorkbenchRuntimePublicationService:
             fact_registry_payload=command.fact_registry_payload,
         )
 
+        retrieval_surface_count = 0
         if self._retrieval_surface_publication_service is not None and isinstance(
             command.fact_registry_payload, dict
         ):
-            await self._retrieval_surface_publication_service.publish_workbench_fact_retrieval_surface(
+            retrieval_surface_result = await self._retrieval_surface_publication_service.publish_workbench_fact_retrieval_surface(
                 PublishWorkbenchFactRetrievalSurfaceCommand(
                     project_id=command.project_id,
                     document_id=command.document_id,
                     fact_registry_payload=JsonObject(command.fact_registry_payload),
                 )
             )
+            retrieval_surface_count = retrieval_surface_result.published_entry_count
 
-        return PublishFactRegistryRuntimeResult(published_entry_count=count)
+        return PublishFactRegistryRuntimeResult(
+            published_entry_count=count,
+            published_retrieval_surface_entry_count=retrieval_surface_count,
+        )
 
 
 __all__ = [

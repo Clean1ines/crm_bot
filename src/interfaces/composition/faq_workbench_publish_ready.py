@@ -6,7 +6,6 @@ import asyncpg
 
 from src.application.services.faq_workbench_retrieval_surface_publication_service import (
     FaqWorkbenchRetrievalSurfacePublicationService,
-    PublishWorkbenchFactRetrievalSurfaceCommand,
 )
 from src.application.services.faq_workbench_runtime_publication_service import (
     FaqWorkbenchRuntimePublicationService,
@@ -80,20 +79,6 @@ async def publish_workbench_ready_surfaces(
                 )
             )
 
-            retrieval_surface_publication = (
-                FaqWorkbenchRetrievalSurfacePublicationService(
-                    repository=WorkbenchRetrievalSurfaceRepository(connection),
-                    embedding_service=WorkbenchRetrievalSurfaceEmbeddingAdapter(),
-                )
-            )
-            retrieval_surface_result = await retrieval_surface_publication.publish_workbench_fact_retrieval_surface(
-                PublishWorkbenchFactRetrievalSurfaceCommand(
-                    project_id=result.project_id,
-                    document_id=result.document_id,
-                    fact_registry_payload=fact_registry_payload,
-                )
-            )
-
             return {
                 "project_id": result.project_id,
                 "document_id": result.document_id,
@@ -101,7 +86,7 @@ async def publish_workbench_ready_surfaces(
                 "published": result.published,
                 "published_runtime_entry_count": runtime_result.published_entry_count,
                 "published_retrieval_surface_entry_count": (
-                    retrieval_surface_result.published_entry_count
+                    runtime_result.published_retrieval_surface_entry_count
                 ),
             }
 
