@@ -72,13 +72,14 @@ class FaqWorkbenchClaimObservationsGenerator(
             )
 
         parsed_json = _workbench_json_value(result.parsed_json)
-        claim_observations = self.parse_claim_observations_payload(parsed_json)
+        normalized_payload = self._normalize_claim_observations_payload(parsed_json)
+        claim_observations = self.parse_claim_observations_payload(normalized_payload)
         return FaqWorkbenchClaimObservationsGenerationResult(
             claim_observations=claim_observations,
             invocation=result,
-            raw_payload=parsed_json,
-            warnings=self._warnings_from_payload(parsed_json),
-            metrics=self._metrics_from_payload(parsed_json),
+            raw_payload=normalized_payload,
+            warnings=self._warnings_from_payload(normalized_payload),
+            metrics=self._metrics_from_payload(normalized_payload),
         )
 
     def build_prompt(
@@ -113,6 +114,24 @@ class FaqWorkbenchClaimObservationsGenerator(
                 "Return only the strict JSON object described in the prompt.",
             )
         )
+
+    def _normalize_claim_observations_payload(self, payload: JsonValue) -> JsonValue:
+        if not isinstance(payload, dict):
+            return payload
+
+        has_canonical = "claim_observations" in payload
+        has_alias = "claims" in payload
+
+        if not has_alias:
+            return payload
+        if has_canonical:
+            raise DomainInvariantError(
+                "claim observations payload must not contain both claim_observations and claims"
+            )
+
+        normalized = dict(payload)
+        normalized["claim_observations"] = normalized.pop("claims")
+        return cast(JsonValue, normalized)
 
     def parse_claim_observations_payload(
         self,
