@@ -6,6 +6,7 @@ from enum import StrEnum
 class KnowledgeEntryKind(StrEnum):
     ANSWER = "answer"
     FAQ_ANSWER = "faq_answer"
+    FAQ_WORKBENCH_FACT = "faq_workbench_fact"
     CONTACT_INFO = "contact_info"
     WORKING_HOURS = "working_hours"
     CATALOG_ANSWER = "catalog_answer"
@@ -30,6 +31,7 @@ RUNTIME_ENTRY_KIND_VALUES: frozenset[str] = frozenset(
         KnowledgeEntryKind.CUSTOM.value,
         KnowledgeEntryKind.DELIVERY_POLICY.value,
         KnowledgeEntryKind.FAQ_ANSWER.value,
+        KnowledgeEntryKind.FAQ_WORKBENCH_FACT.value,
         KnowledgeEntryKind.POLICY_CLAUSE.value,
         KnowledgeEntryKind.PRICE_ANSWER.value,
         KnowledgeEntryKind.PRICING_POLICY.value,

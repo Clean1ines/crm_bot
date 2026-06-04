@@ -4,6 +4,10 @@ from typing import Callable, Protocol, cast
 
 import asyncpg
 
+from src.application.services.faq_workbench_retrieval_surface_publication_service import (
+    FaqWorkbenchRetrievalSurfacePublicationService,
+    PublishWorkbenchFactRetrievalSurfaceCommand,
+)
 from src.application.services.faq_workbench_runtime_publication_service import (
     FaqWorkbenchRuntimePublicationService,
     PublishFactRegistryRuntimeCommand,
@@ -17,8 +21,14 @@ from src.domain.project_plane.knowledge_workbench.shared import JsonValue
 from src.infrastructure.db.knowledge_workbench_repository import (
     KnowledgeWorkbenchRepository,
 )
+from src.infrastructure.db.workbench_retrieval_surface_repository import (
+    WorkbenchRetrievalSurfaceRepository,
+)
 from src.infrastructure.db.workbench_runtime_retrieval_repository import (
     WorkbenchRuntimeRetrievalRepository,
+)
+from src.infrastructure.llm.workbench_retrieval_surface_embedding_adapter import (
+    WorkbenchRetrievalSurfaceEmbeddingAdapter,
 )
 
 
@@ -50,8 +60,15 @@ async def publish_workbench_ready_surfaces(
                 snapshot_id=result.published_snapshot_id,
             )
 
+            retrieval_surface_publication = (
+                FaqWorkbenchRetrievalSurfacePublicationService(
+                    repository=WorkbenchRetrievalSurfaceRepository(connection),
+                    embedding_service=WorkbenchRetrievalSurfaceEmbeddingAdapter(),
+                )
+            )
             runtime_publication = FaqWorkbenchRuntimePublicationService(
-                WorkbenchRuntimeRetrievalRepository(cast(asyncpg.Pool, pool))
+                WorkbenchRuntimeRetrievalRepository(cast(asyncpg.Pool, pool)),
+                retrieval_surface_publication,
             )
             runtime_result = (
                 await runtime_publication.publish_fact_registry_runtime_entries(
@@ -63,12 +80,29 @@ async def publish_workbench_ready_surfaces(
                 )
             )
 
+            retrieval_surface_publication = (
+                FaqWorkbenchRetrievalSurfacePublicationService(
+                    repository=WorkbenchRetrievalSurfaceRepository(connection),
+                    embedding_service=WorkbenchRetrievalSurfaceEmbeddingAdapter(),
+                )
+            )
+            retrieval_surface_result = await retrieval_surface_publication.publish_workbench_fact_retrieval_surface(
+                PublishWorkbenchFactRetrievalSurfaceCommand(
+                    project_id=result.project_id,
+                    document_id=result.document_id,
+                    fact_registry_payload=fact_registry_payload,
+                )
+            )
+
             return {
                 "project_id": result.project_id,
                 "document_id": result.document_id,
                 "published_snapshot_id": result.published_snapshot_id,
                 "published": result.published,
                 "published_runtime_entry_count": runtime_result.published_entry_count,
+                "published_retrieval_surface_entry_count": (
+                    retrieval_surface_result.published_entry_count
+                ),
             }
 
 
