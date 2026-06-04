@@ -31,6 +31,12 @@ class WorkbenchProjectClearRepositoryPort(Protocol):
         cleared_at: datetime,
     ) -> int: ...
 
+    async def cleanup_project_final_retrieval_projections(
+        self,
+        *,
+        project_id: str,
+    ) -> int: ...
+
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchProjectClearCommand:
@@ -105,6 +111,10 @@ class WorkbenchProjectClearService:
             processing_run_status=transition.processing_run_status_after,
             cleared_at=transition.cleared_at,
         )
+        if transition.runtime_publications_should_be_removed:
+            await self._repository.cleanup_project_final_retrieval_projections(
+                project_id=transition.project_id,
+            )
         return WorkbenchProjectClearResult.from_transition(
             transition,
             affected_documents=affected_documents,

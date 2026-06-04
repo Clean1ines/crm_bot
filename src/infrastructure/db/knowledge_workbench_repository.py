@@ -154,6 +154,130 @@ class KnowledgeWorkbenchRepository(
     def __init__(self, connection: WorkbenchDbConnection) -> None:
         self._connection = connection
 
+    async def cleanup_document_final_retrieval_projections(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            workbench_runtime_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_runtime_retrieval_entries
+                    WHERE project_id = $1::uuid
+                      AND fact_id IN (
+                          SELECT fact.fact_id
+                          FROM knowledge_workbench_canonical_facts AS fact
+                          WHERE fact.project_id = $1::uuid
+                            AND fact.document_id = $2
+                      )
+                    """,
+                    project_id,
+                    document_id,
+                )
+            )
+
+            local_claim_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_local_claim_retrieval_entries
+                    WHERE project_id = $1::uuid
+                      AND document_id = $2
+                    """,
+                    project_id,
+                    document_id,
+                )
+            )
+
+            production_surface_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_retrieval_surface
+                    WHERE project_id = $1::uuid
+                      AND entry_kind = 'faq_workbench_fact'
+                      AND metadata ->> 'workbench_document_id' = $2
+                    """,
+                    project_id,
+                    document_id,
+                )
+            )
+
+            production_entry_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_entries
+                    WHERE project_id = $1::uuid
+                      AND entry_kind = 'faq_workbench_fact'
+                      AND metadata ->> 'workbench_document_id' = $2
+                    """,
+                    project_id,
+                    document_id,
+                )
+            )
+
+        return (
+            workbench_runtime_count
+            + local_claim_count
+            + production_surface_count
+            + production_entry_count
+        )
+
+    async def cleanup_project_final_retrieval_projections(
+        self,
+        *,
+        project_id: str,
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            workbench_runtime_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_runtime_retrieval_entries
+                    WHERE project_id = $1::uuid
+                    """,
+                    project_id,
+                )
+            )
+
+            local_claim_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_local_claim_retrieval_entries
+                    WHERE project_id = $1::uuid
+                    """,
+                    project_id,
+                )
+            )
+
+            production_surface_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_retrieval_surface
+                    WHERE project_id = $1::uuid
+                      AND entry_kind = 'faq_workbench_fact'
+                    """,
+                    project_id,
+                )
+            )
+
+            production_entry_count = self._row_count_from_execute_result(
+                await self._connection.execute(
+                    """
+                    DELETE FROM knowledge_entries
+                    WHERE project_id = $1::uuid
+                      AND entry_kind = 'faq_workbench_fact'
+                    """,
+                    project_id,
+                )
+            )
+
+        return (
+            workbench_runtime_count
+            + local_claim_count
+            + production_surface_count
+            + production_entry_count
+        )
+
     async def has_indexed_local_claim_retrieval_entries_for_node_run(
         self,
         *,

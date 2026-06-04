@@ -54,6 +54,13 @@ class WorkbenchDocumentDeleteRepositoryPort(Protocol):
         deleted_at: datetime,
     ) -> None: ...
 
+    async def cleanup_document_final_retrieval_projections(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+    ) -> int: ...
+
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchDocumentDeleteCommand:
@@ -164,6 +171,11 @@ class WorkbenchDocumentDeleteService:
             processing_run_status=transition.processing_run_status_after,
             deleted_at=transition.deleted_at,
         )
+        if transition.runtime_publication_should_be_removed:
+            await self._repository.cleanup_document_final_retrieval_projections(
+                project_id=transition.project_id,
+                document_id=transition.document_id,
+            )
         return WorkbenchDocumentDeleteResult.from_transition(transition)
 
 
