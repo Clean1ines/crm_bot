@@ -57,6 +57,11 @@ class KnowledgeWorkbenchFreshUploadRepositoryPort(Protocol):
 
     async def create_registry_snapshot(self, snapshot: RegistrySnapshot) -> None: ...
 
+    async def create_parallel_section_batch_plan(
+        self,
+        plan: ParallelSectionBatchPlan,
+    ) -> None: ...
+
     async def create_registry_application_queue_items(
         self,
         items: tuple[RegistryApplicationQueueItem, ...],

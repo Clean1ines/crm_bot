@@ -30,9 +30,11 @@ from src.domain.project_plane.knowledge_workbench import (
     ProcessingTrigger,
     FactRegistry,
     FactRegistryStatus,
+    ParallelSectionBatchPlan,
     RegistrySnapshot,
     ResumePolicy,
     SourceType,
+    plan_parallel_section_batch,
 )
 
 
@@ -68,6 +70,7 @@ class FaqWorkbenchFreshUploadResult:
     initialize_node_run: ProcessingNodeRun
     initialize_artifact: ProcessingNodeArtifact
     initial_snapshot: RegistrySnapshot
+    parallel_section_batch_plan: ParallelSectionBatchPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +226,7 @@ class FaqWorkbenchFreshUploadService:
         initialize_node_run_id = self._id_factory.new_id("node-run")
         initialize_artifact_id = self._id_factory.new_id("artifact")
         snapshot_id = self._id_factory.new_id("registry-snapshot")
+        batch_plan_id = self._id_factory.new_id("section-batch-plan")
 
         document = KnowledgeDocument(
             document_id=document_id,
@@ -349,6 +353,14 @@ class FaqWorkbenchFreshUploadService:
             created_at=now,
         )
 
+        parallel_section_batch_plan = plan_parallel_section_batch(
+            batch_plan_id=batch_plan_id,
+            sections=sections,
+            latest_registry_snapshot=initial_snapshot,
+            max_lanes=3,
+            queue_item_id_prefix=f"{batch_plan_id}-item",
+        )
+
         await self._repository.create_document(document)
         await self._repository.create_document_sections(sections)
         await self._repository.create_processing_run(processing_run)
@@ -356,6 +368,9 @@ class FaqWorkbenchFreshUploadService:
         await self._repository.create_processing_node_run(initialize_node_run)
         await self._repository.create_processing_node_artifact(initialize_artifact)
         await self._repository.create_registry_snapshot(initial_snapshot)
+        await self._repository.create_parallel_section_batch_plan(
+            parallel_section_batch_plan
+        )
 
         return FaqWorkbenchFreshUploadResult(
             document=document,
@@ -365,6 +380,7 @@ class FaqWorkbenchFreshUploadService:
             initialize_node_run=initialize_node_run,
             initialize_artifact=initialize_artifact,
             initial_snapshot=initial_snapshot,
+            parallel_section_batch_plan=parallel_section_batch_plan,
         )
 
     def _content_hash(self, raw_text: str) -> str:

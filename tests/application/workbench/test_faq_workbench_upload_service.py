@@ -9,6 +9,7 @@ from src.application.workbench.upload_service import (
     FaqWorkbenchUploadCommand,
     FaqWorkbenchUploadService,
 )
+from src.domain.project_plane.knowledge_workbench import SectionBatchQueueItemStatus
 from tests.application.workbench.helpers import (
     InMemoryWorkbenchQueue,
     InMemoryWorkbenchRepository,
@@ -41,6 +42,45 @@ async def test_workbench_upload_creates_lineage_and_enqueues_process_document() 
     assert repository.documents == [result.upload.document]
     assert result.upload.document.file_size_bytes == len(
         b"# Product\nProduct text.\n\n## Curation\nCuration text."
+    )
+
+    assert repository.sections == list(result.upload.sections)
+    assert len(repository.sections) == 2
+
+    assert repository.registry_snapshots == [result.upload.initial_snapshot]
+
+    assert repository.parallel_section_batch_plans == [
+        result.upload.parallel_section_batch_plan
+    ]
+    assert len(repository.section_batch_queue_items) == len(result.upload.sections)
+    assert result.upload.parallel_section_batch_plan.queue_items == tuple(
+        repository.section_batch_queue_items
+    )
+    assert result.upload.parallel_section_batch_plan.max_lanes == 3
+    assert result.upload.parallel_section_batch_plan.observed_registry_snapshot_id == (
+        result.upload.initial_snapshot.snapshot_id
+    )
+    assert (
+        result.upload.parallel_section_batch_plan.observed_registry_snapshot_sequence
+        == (result.upload.initial_snapshot.sequence_number)
+    )
+
+    queue_item_ids = {
+        item.queue_item_id for item in repository.section_batch_queue_items
+    }
+    assert len(queue_item_ids) == len(result.upload.sections)
+    assert all(
+        item.status is SectionBatchQueueItemStatus.READY
+        for item in repository.section_batch_queue_items
+    )
+    assert all(
+        item.observed_registry_snapshot_id == result.upload.initial_snapshot.snapshot_id
+        for item in repository.section_batch_queue_items
+    )
+    assert all(
+        item.observed_registry_snapshot_sequence
+        == result.upload.initial_snapshot.sequence_number
+        for item in repository.section_batch_queue_items
     )
 
     assert len(queue.payloads) == 1
