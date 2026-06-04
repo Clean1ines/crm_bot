@@ -21,8 +21,8 @@ from src.infrastructure.queue.handlers.rag_eval import handle_run_full_rag_eval
 from src.infrastructure.queue.handlers.workbench_document import (
     handle_process_workbench_document,
 )
-from src.infrastructure.queue.handlers.workbench_parallel_processing import (
-    handle_workbench_parallel_processing_job_from_connection,
+from src.infrastructure.queue.handlers.workbench_parallel_processing_terminal import (
+    handle_workbench_parallel_processing_job_terminal,
 )
 from src.infrastructure.queue.job_exceptions import PermanentJobError
 from src.infrastructure.queue.job_types import (
@@ -82,7 +82,7 @@ class JobDispatcher:
             return
 
         if task_type == TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING:
-            await handle_workbench_parallel_processing_job_from_connection(
+            await handle_workbench_parallel_processing_job_terminal(
                 payload=_job_payload(job),
                 connection=self.db_pool,
             )
