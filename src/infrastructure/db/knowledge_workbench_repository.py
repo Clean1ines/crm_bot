@@ -2271,25 +2271,27 @@ class KnowledgeWorkbenchRepository(
                 snapshot.snapshot_id,
                 snapshot.processing_run_id
             FROM knowledge_workbench_registry_snapshots AS snapshot
+            JOIN knowledge_workbench_processing_node_artifacts AS marker
+              ON marker.project_id = snapshot.project_id
+             AND marker.document_id = snapshot.document_id
+             AND marker.processing_run_id = snapshot.processing_run_id
+             AND marker.section_id IS NULL
+             AND marker.artifact_type = 'deterministic_result'
+             AND marker.metadata ->> 'contract' = 'fact_registry_canonicalization_barrier'
+             AND marker.metadata ->> 'status' = 'completed'
+             AND marker.metadata ->> 'final_snapshot_id' = snapshot.snapshot_id
+             AND (marker.metadata ->> 'expected_unit_count')::int
+               = (marker.metadata ->> 'completed_unit_count')::int
+            JOIN knowledge_workbench_processing_runs AS run
+              ON run.project_id = snapshot.project_id
+             AND run.document_id = snapshot.document_id
+             AND run.processing_run_id = snapshot.processing_run_id
             WHERE snapshot.project_id = $1::uuid
               AND snapshot.document_id = $2
               AND snapshot.processing_run_id IS NOT NULL
-              AND EXISTS (
-                  SELECT 1
-                  FROM knowledge_workbench_processing_node_runs AS node
-                  JOIN knowledge_workbench_processing_node_artifacts AS artifact
-                    ON artifact.node_run_id = node.node_run_id
-                   AND artifact.processing_run_id = node.processing_run_id
-                   AND artifact.project_id = node.project_id
-                   AND artifact.document_id = node.document_id
-                  WHERE node.project_id = snapshot.project_id
-                    AND node.document_id = snapshot.document_id
-                    AND node.processing_run_id = snapshot.processing_run_id
-                    AND node.node_name = 'faq_surface_final_reconciliation'
-                    AND node.status = 'completed'
-                    AND artifact.artifact_type = 'parsed_llm_output'
-                    AND artifact.metadata ->> 'snapshot_id' = snapshot.snapshot_id
-              )
+              AND snapshot.entries_payload ->> 'contract' = 'fact_registry'
+              AND snapshot.entry_count > 0
+              AND run.status = 'completed'
             ORDER BY snapshot.sequence_number DESC, snapshot.created_at DESC
             LIMIT 1
             """,
