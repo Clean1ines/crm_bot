@@ -6,7 +6,68 @@ PAGE = Path("frontend/src/pages/knowledge/KnowledgePage.tsx")
 API = Path("frontend/src/shared/api/modules/knowledge.ts")
 
 
-def test_workbench_card_uses_backend_card_view_actions_for_lifecycle() -> None:
+def test_document_card_is_current_workbench_card_without_legacy_dependencies() -> None:
+    source = CARD.read_text()
+
+    for forbidden in (
+        "ImportQualitySummary",
+        "PriceFactsSummary",
+        "CommercialTruthReviewSummary",
+        "KnowledgeImportQualityReport",
+        "KnowledgePriceFactsResponse",
+        "KnowledgeCommercialTruthReviewResponse",
+        "KnowledgeProcessingReport",
+        "processingNode",
+        "retightenReportNode",
+        "actionsNode",
+        "statusNode",
+        "retighten",
+        "retry_failed_batches",
+        "Legacy",
+        "старый прогресс",
+        "Диагностика импорта",
+        "unknown",
+    ):
+        assert forbidden not in source
+
+
+def test_knowledge_page_calls_document_card_with_current_workbench_contract_only() -> (
+    None
+):
+    source = PAGE.read_text()
+    start = source.index("<KnowledgeDocumentCard")
+    end = source.index("                />", start)
+    call = source[start:end]
+
+    for required in (
+        "doc={doc}",
+        "isDeletePending={",
+        "onRequestDelete={",
+        "onStopProcessing={",
+        "onOpenCuration={",
+        "onCardAction={",
+        "formatSize={formatSize}",
+        "knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}",
+    ):
+        assert required in call
+
+    for forbidden in (
+        "processingReport=",
+        "importQualityReport=",
+        "priceFactsResponse=",
+        "commercialTruthReviewResponse=",
+        "processingNode=",
+        "retightenReportNode=",
+        "statusNode=",
+        "actionsNode=",
+        "hasDrafts=",
+        "hasSourceUnits=",
+        "unknown",
+    ):
+        assert forbidden not in call
+
+
+def test_document_card_uses_backend_card_view_actions_for_lifecycle() -> None:
     source = CARD.read_text()
 
     assert "cardView.actions" in source
@@ -19,25 +80,24 @@ def test_workbench_card_uses_backend_card_view_actions_for_lifecycle() -> None:
     assert "action.action_id === 'delete_document'" in source
 
 
-def test_workbench_card_keeps_user_visible_live_metrics() -> None:
+def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
     source = CARD.read_text()
 
-    assert "active_elapsed_seconds" in source
-    assert "wall_elapsed_seconds" in source
-    assert "total_tokens" in source
-    assert "llm_call_count" in source
-    assert "sectionProgressPercent" in source
-    assert "runtime_entry_count" in source
-    assert "registry.entry_count" in source
-
-
-def test_workbench_card_details_are_current_process_not_old_legacy_title() -> None:
-    source = CARD.read_text()
-
-    assert "Подробности обработки" in source
-    assert "Открыть trace и курацию" in source
-    assert "Legacy-диагностика импорта" in source
-    assert "Диагностика импорта и старый прогресс" not in source
+    for marker in (
+        "rounded-2xl bg-[var(--surface-elevated)] p-4",
+        "Что происходит с документом",
+        "active_elapsed_seconds",
+        "wall_elapsed_seconds",
+        "total_tokens",
+        "llm_call_count",
+        "sectionProgressPercent",
+        "runtime_entry_count",
+        "registry.entry_count",
+        "Промежуточные данные очищены",
+        "Подробности обработки",
+        "Открыть trace и курацию",
+    ):
+        assert marker in source
 
 
 def test_frontend_action_mapping_uses_current_workbench_action_ids() -> None:

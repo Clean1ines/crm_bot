@@ -1,18 +1,8 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, FileText, Trash2, Zap } from 'lucide-react';
 
-import { ImportQualitySummary } from './ImportQualitySummary';
-import { PriceFactsSummary } from './PriceFactsSummary';
-import { CommercialTruthReviewSummary } from './CommercialTruthReviewSummary';
-
 import { t } from '@shared/i18n';
 import {
-  type KnowledgeCommercialTruthReviewPolicy,
-  type KnowledgeCommercialTruthReviewResponse,
-  type KnowledgeImportQualityReport,
-  type KnowledgePriceFact,
-  type KnowledgePriceFactsResponse,
-  type KnowledgeProcessingReport,
   type WorkbenchDocumentCardActionView,
   type WorkbenchDocumentCardUserMessage,
   type WorkbenchDocumentCardView,
@@ -22,14 +12,19 @@ type DocCardDocument = {
   id: string;
   file_name: string;
   file_size: number;
-  chunk_count: number;
-  structured_entries?: number;
-  structured_chunk_count?: number;
   preprocessing_mode?: string | null;
-  created_at: string;
-  status: string;
-  error?: string | null;
   card_view?: WorkbenchDocumentCardView | null;
+};
+
+type KnowledgeDocumentCardProps = {
+  doc: DocCardDocument;
+  isDeletePending: boolean;
+  onRequestDelete: () => void;
+  onCardAction: (actionId: string) => void;
+  onOpenCuration: () => void;
+  onStopProcessing: () => void;
+  formatSize: (bytes: number) => string;
+  knowledgeProcessingModeLabel: (value: string) => string;
 };
 
 const formatNumber = (value: number): string =>
@@ -49,7 +44,7 @@ const formatDuration = (seconds: number): string => {
   return `${minutes}:${restSeconds.toString().padStart(2, '0')}`;
 };
 
-const translateDynamic = t as unknown as (key: string) => string;
+const translateDynamic = t as (key: string) => string;
 
 const cardText = (i18nKey: string | null | undefined, fallback: string): string => {
   if (!i18nKey) return fallback;
@@ -117,118 +112,75 @@ const visibleSecondaryActions = (
       ),
   );
 
-export const KnowledgeDocumentCard: React.FC<{
-  doc: DocCardDocument;
-  statusBadge: { className: string; label: string };
-  isDeletePending: boolean;
-  processingReport: KnowledgeProcessingReport | undefined;
-  importQualityReport: KnowledgeImportQualityReport | undefined;
-  priceFactsResponse: KnowledgePriceFactsResponse | undefined;
-  commercialTruthReviewResponse: KnowledgeCommercialTruthReviewResponse | undefined;
-  isPriceFactsLoading: boolean;
-  isCommercialTruthReviewLoading: boolean;
-  mutatingPriceFactId: string | null;
-  importQualityLoading: boolean;
-  commercialTruthReviewPolicy: KnowledgeCommercialTruthReviewPolicy;
-  onPolicyChange: (policy: KnowledgeCommercialTruthReviewPolicy) => void;
-  onPublishFact: (fact: KnowledgePriceFact) => void;
-  onRejectFact: (fact: KnowledgePriceFact) => void;
-  onRequestDelete: () => void;
-  onCardAction?: (actionId: string) => void;
-  actionsNode: React.ReactNode;
-  processingNode: React.ReactNode;
-  retightenReportNode: React.ReactNode;
-  statusNode: React.ReactNode;
-  hasDrafts: boolean;
-  draftCount?: number;
-  hasSourceUnits: boolean;
-  isDocumentProcessing: boolean;
-  onOpenDrafts: () => void;
-  onOpenSourceUnits: () => void;
-  onOpenCuration: () => void;
-  onStopProcessing: () => void;
-  formatSize: (bytes: number) => string;
-  knowledgeProcessingModeLabel: (value: string) => string;
-}> = ({
+export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   doc,
-  statusBadge,
   isDeletePending,
-  importQualityReport,
-  importQualityLoading,
-  priceFactsResponse,
-  isPriceFactsLoading,
-  onPublishFact,
-  onRejectFact,
   onRequestDelete,
   onCardAction,
-  mutatingPriceFactId,
-  commercialTruthReviewResponse,
-  isCommercialTruthReviewLoading,
-  commercialTruthReviewPolicy,
-  onPolicyChange,
-  actionsNode,
-  processingNode,
-  retightenReportNode,
-  statusNode,
-  hasDrafts,
-  draftCount,
-  hasSourceUnits,
-  isDocumentProcessing,
-  onOpenDrafts,
-  onOpenSourceUnits,
   onOpenCuration,
   onStopProcessing,
   formatSize,
   knowledgeProcessingModeLabel,
 }) => {
-  const cardView = doc.card_view ?? null;
-  const cardPrimaryActions = cardView ? primaryActions(cardView) : [];
-  const cardSecondaryActions = cardView ? visibleSecondaryActions(cardView) : [];
-  const deleteAction = cardView?.actions.find(
+  const cardView = doc.card_view;
+
+  if (!cardView) {
+    return null;
+  }
+
+  const cardPrimaryActions = primaryActions(cardView);
+  const cardSecondaryActions = visibleSecondaryActions(cardView);
+  const deleteAction = cardView.actions.find(
     (action) => action.action_id === 'delete_document',
   );
 
-  const sectionProgressPercent = cardView && cardView.sections.total > 0
-    ? Math.round(
-        ((cardView.sections.processed + cardView.sections.failed) /
-          cardView.sections.total) *
-          100,
-      )
-    : 0;
+  const sectionProgressPercent =
+    cardView.sections.total > 0
+      ? Math.round(
+          ((cardView.sections.processed + cardView.sections.failed) /
+            cardView.sections.total) *
+            100,
+        )
+      : 0;
 
-  const sectionProgressText = cardView
-    ? `${formatNumber(cardView.sections.processed)} из ${formatNumber(
-        cardView.sections.total,
-      )} секций обработано${
-        cardView.sections.failed > 0
-          ? ` · ${formatNumber(cardView.sections.failed)} с ошибкой`
-          : ''
-      }`
-    : '';
+  const sectionProgressText = `${formatNumber(
+    cardView.sections.processed,
+  )} из ${formatNumber(cardView.sections.total)} секций обработано${
+    cardView.sections.failed > 0
+      ? ` · ${formatNumber(cardView.sections.failed)} с ошибкой`
+      : ''
+  }`;
 
-  const elapsedText = cardView
-    ? `активно ${formatDuration(cardView.timer.active_elapsed_seconds)} · всего ${formatDuration(
-        cardView.timer.wall_elapsed_seconds,
-      )}`
-    : '';
+  const elapsedText = `активно ${formatDuration(
+    cardView.timer.active_elapsed_seconds,
+  )} · всего ${formatDuration(cardView.timer.wall_elapsed_seconds)}`;
 
-  const llmUsageText = cardView
-    ? `${formatNumber(cardView.usage.total_tokens)} токенов · ${formatNumber(
-        cardView.usage.llm_call_count,
-      )} LLM-выз.`
-    : '';
+  const llmUsageText = `${formatNumber(
+    cardView.usage.total_tokens,
+  )} токенов · ${formatNumber(cardView.usage.llm_call_count)} LLM-выз.`;
 
   const handleCardAction = (action: WorkbenchDocumentCardActionView): void => {
     if (!action.enabled) return;
-    if (onCardAction) {
-      onCardAction(action.action_id);
+
+    if (action.action_id === 'cancel_processing') {
+      onStopProcessing();
       return;
     }
 
-    if (action.action_id === 'cancel_processing') onStopProcessing();
-    if (action.action_id === 'open_curation') onOpenCuration();
-    if (action.action_id === 'open_published_surfaces') onOpenCuration();
-    if (action.action_id === 'delete_document') onRequestDelete();
+    if (
+      action.action_id === 'open_curation' ||
+      action.action_id === 'open_published_surfaces'
+    ) {
+      onOpenCuration();
+      return;
+    }
+
+    if (action.action_id === 'delete_document') {
+      onRequestDelete();
+      return;
+    }
+
+    onCardAction(action.action_id);
   };
 
   return (
@@ -242,62 +194,8 @@ export const KnowledgeDocumentCard: React.FC<{
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {cardView ? (
-            <>
-              {cardPrimaryActions.length > 0 ? (
-                cardPrimaryActions.map((action) => (
-                  <button
-                    key={action.action_id}
-                    type="button"
-                    disabled={!action.enabled}
-                    title={action.default_confirmation || action.default_label}
-                    onClick={() => handleCardAction(action)}
-                    className={actionClassName(action)}
-                  >
-                    {cardText(action.i18n_key, action.default_label)}
-                  </button>
-                ))
-              ) : (
-                <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
-                  {cardText(
-                    cardView.status_i18n_key,
-                    cardView.default_status_label,
-                  )}
-                </span>
-              )}
-            </>
-          ) : isDocumentProcessing ? (
-            <button
-              type="button"
-              onClick={onStopProcessing}
-              className="rounded-full bg-[var(--accent-danger-bg)] px-2.5 py-1 text-xs font-medium text-[var(--accent-danger-text)] transition-colors hover:opacity-80"
-            >
-              {t('knowledge.documentCard.primaryAction.stop')}
-            </button>
-          ) : hasDrafts ? (
-            <button
-              type="button"
-              onClick={onOpenDrafts}
-              className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
-            >
-              {t('knowledge.documentCard.primaryAction.openDrafts')}
-            </button>
-          ) : hasSourceUnits ? (
-            <button
-              type="button"
-              onClick={onOpenSourceUnits}
-              className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
-            >
-              {t('knowledge.documentCard.primaryAction.openSources')}
-            </button>
-          ) : (
-            <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
-              {t('knowledge.documentCard.primaryAction.details')}
-            </span>
-          )}
-
-          {cardView ? (
-            cardSecondaryActions.slice(0, 3).map((action) => (
+          {cardPrimaryActions.length > 0 ? (
+            cardPrimaryActions.map((action) => (
               <button
                 key={action.action_id}
                 type="button"
@@ -310,17 +208,23 @@ export const KnowledgeDocumentCard: React.FC<{
               </button>
             ))
           ) : (
-            <button
-              type="button"
-              onClick={onOpenCuration}
-              className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
-            >
-              {cardText(
-                'knowledge.workbench.card.actions.open_curation',
-                'Открыть курацию',
-              )}
-            </button>
+            <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
+              {cardText(cardView.status_i18n_key, cardView.default_status_label)}
+            </span>
           )}
+
+          {cardSecondaryActions.slice(0, 3).map((action) => (
+            <button
+              key={action.action_id}
+              type="button"
+              disabled={!action.enabled}
+              title={action.default_confirmation || action.default_label}
+              onClick={() => handleCardAction(action)}
+              className={actionClassName(action)}
+            >
+              {cardText(action.i18n_key, action.default_label)}
+            </button>
+          ))}
 
           <button
             type="button"
@@ -349,285 +253,193 @@ export const KnowledgeDocumentCard: React.FC<{
               {knowledgeProcessingModeLabel(doc.preprocessing_mode || 'faq')}
             </p>
           </div>
-          <span
-            className={
-              cardView
-                ? 'rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]'
-                : statusBadge.className
-            }
-          >
-            {cardView
-              ? cardText(cardView.status_i18n_key, cardView.default_status_label)
-              : statusBadge.label}
+          <span className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]">
+            {cardText(cardView.status_i18n_key, cardView.default_status_label)}
           </span>
         </div>
 
-        {cardView && (
-          <div className="mt-2 rounded-xl bg-[var(--surface-secondary)] px-3 py-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-            <div className="font-medium text-[var(--text-primary)]">
-              Что происходит с документом
+        <div className="mt-2 rounded-xl bg-[var(--surface-secondary)] px-3 py-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+          <div className="font-medium text-[var(--text-primary)]">
+            Что происходит с документом
+          </div>
+          <p className="mt-1">
+            {cardText(
+              cardView.status_description_i18n_key,
+              cardView.default_status_description,
+            )}
+          </p>
+        </div>
+      </div>
+
+      <div className="mb-4 space-y-3">
+        <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+            <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
+              <Clock3 className="h-3.5 w-3.5" />
+              {cardText(cardView.timer.i18n_key, cardView.timer.default_label)}
             </div>
-            <p className="mt-1">
-              {cardText(
-                cardView.status_description_i18n_key,
-                cardView.default_status_description,
-              )}
-            </p>
+            <div className="text-[var(--text-muted)]">
+              {elapsedText}
+              {cardView.timer.mode === 'running' ? ' · live' : ''}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+            <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
+              <Zap className="h-3.5 w-3.5" />
+              ИИ
+            </div>
+            <div className="text-[var(--text-muted)]">{llmUsageText}</div>
+          </div>
+
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+            <div className="mb-1 font-medium text-[var(--text-primary)]">
+              Прогресс
+            </div>
+            <div className="text-[var(--text-muted)]">{sectionProgressText}</div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--control-bg)]">
+              <div
+                className="h-full rounded-full bg-[var(--accent-primary)]"
+                style={{ width: `${sectionProgressPercent}%` }}
+              />
+            </div>
+            <div className="mt-1 text-[var(--text-muted)]">
+              {sectionProgressPercent}%
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+            <div className="mb-1 font-medium text-[var(--text-primary)]">
+              Runtime
+            </div>
+            <div className="text-[var(--text-muted)]">
+              {formatNumber(cardView.runtime.runtime_entry_count)} записей
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+            Факты: {formatNumber(cardView.registry.entry_count)}
+            {cardView.registry.retained ? ' · registry сохранён' : ''}
+          </span>
+          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+            Runtime: {formatNumber(cardView.runtime.runtime_entry_count)} записей
+          </span>
+          {cardView.registry.final_snapshot_id && (
+            <span
+              className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]"
+              title={cardView.registry.final_snapshot_id}
+            >
+              Snapshot: {cardView.registry.final_snapshot_id}
+            </span>
+          )}
+          {cardView.transient_purged && (
+            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-300">
+              Промежуточные данные очищены
+            </span>
+          )}
+          {cardView.recovery.mode === 'scheduled_auto_resume' && (
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300">
+              {cardText(cardView.recovery.i18n_key, cardView.recovery.default_message)}
+            </span>
+          )}
+        </div>
+
+        {cardView.messages.length > 0 && (
+          <div className="space-y-2">
+            {cardView.messages.map((message) => (
+              <div
+                key={`${message.code}-${message.default_message}`}
+                className={`flex gap-2 rounded-xl border px-3 py-2 text-xs ${messageClassName(
+                  message.severity,
+                )}`}
+              >
+                {messageIcon(message)}
+                <span>{cardText(message.i18n_key, message.default_message)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {cardView.error && (
+          <div className="rounded-xl border border-[var(--accent-danger)]/30 bg-[var(--accent-danger-bg)] px-3 py-2 text-xs text-[var(--accent-danger-text)]">
+            {cardText(
+              cardView.error.user_message.i18n_key,
+              cardView.error.user_message.default_message,
+            )}
           </div>
         )}
       </div>
 
-      {cardView && (
-        <div className="mb-4 space-y-3">
-          <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
-                <Clock3 className="h-3.5 w-3.5" />
-                {cardText(cardView.timer.i18n_key, cardView.timer.default_label)}
-              </div>
-              <div className="text-[var(--text-muted)]">
-                {elapsedText}
-                {cardView.timer.mode === 'running' ? ' · live' : ''}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
-                <Zap className="h-3.5 w-3.5" />
-                ИИ
-              </div>
-              <div className="text-[var(--text-muted)]">
-                {llmUsageText}
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 font-medium text-[var(--text-primary)]">
-                Прогресс
-              </div>
-              <div className="text-[var(--text-muted)]">
-                {sectionProgressText}
-              </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--control-bg)]">
-                <div
-                  className="h-full rounded-full bg-[var(--accent-primary)]"
-                  style={{ width: `${sectionProgressPercent}%` }}
-                />
-              </div>
-              <div className="mt-1 text-[var(--text-muted)]">
-                {sectionProgressPercent}%
-              </div>
-            </div>
-
-            <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 font-medium text-[var(--text-primary)]">
-                Runtime
-              </div>
-              <div className="text-[var(--text-muted)]">
-                {formatNumber(cardView.runtime.runtime_entry_count)} записей
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Факты: {formatNumber(cardView.registry.entry_count)}
-              {cardView.registry.retained ? ' · registry сохранён' : ''}
-            </span>
-            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Runtime: {formatNumber(cardView.runtime.runtime_entry_count)} записей
-            </span>
-            {cardView.registry.final_snapshot_id && (
-              <span
-                className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]"
-                title={cardView.registry.final_snapshot_id}
-              >
-                Snapshot: {cardView.registry.final_snapshot_id}
-              </span>
-            )}
-            {cardView.transient_purged && (
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-700 dark:text-emerald-300">
-                Промежуточные данные очищены
-              </span>
-            )}
-            {cardView.recovery.mode === 'scheduled_auto_resume' && (
-              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-700 dark:text-amber-300">
-                {cardText(
-                  cardView.recovery.i18n_key,
-                  cardView.recovery.default_message,
-                )}
-              </span>
-            )}
-          </div>
-
-          {cardView.messages.length > 0 && (
-            <div className="space-y-2">
-              {cardView.messages.map((message) => (
-                <div
-                  key={`${message.code}-${message.default_message}`}
-                  className={`flex gap-2 rounded-xl border px-3 py-2 text-xs ${messageClassName(
-                    message.severity,
-                  )}`}
-                >
-                  {messageIcon(message)}
-                  <span>{cardText(message.i18n_key, message.default_message)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {cardView.error && (
-            <div className="rounded-xl border border-[var(--accent-danger)]/30 bg-[var(--accent-danger-bg)] px-3 py-2 text-xs text-[var(--accent-danger-text)]">
-              {cardText(
-                cardView.error.user_message.i18n_key,
-                cardView.error.user_message.default_message,
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {!cardView && (
-        <div className="mb-3 flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-            {t('knowledge.documentCard.counters.chunks')}: {doc.chunk_count}
-          </span>
-          {typeof doc.structured_entries === 'number' && doc.structured_entries > 0 && (
-            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              {t('knowledge.documentCard.counters.runtimeEntries')}:{' '}
-              {doc.structured_entries}
-            </span>
-          )}
-          {typeof draftCount === 'number' && draftCount > 0 && (
-            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              {t('knowledge.documentCard.counters.drafts')}: {draftCount}
-            </span>
-          )}
-        </div>
-      )}
-
-      {!cardView && statusNode}
-
       <div className="mt-4 space-y-3">
-        {!cardView && actionsNode}
+        <details className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
+          <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
+            Подробности обработки
+          </summary>
 
-        {doc.preprocessing_mode === 'faq' ? (
-          <>
-
-            <details className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
-              <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
-                {cardView ? 'Подробности обработки' : 'Legacy-диагностика импорта'}
-              </summary>
-              {cardView ? (
-                <div className="mt-3 space-y-3">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                      <div className="font-medium text-[var(--text-primary)]">
-                        Секции
-                      </div>
-                      <div className="mt-1">
-                        Обработано {formatNumber(cardView.sections.processed)} из{' '}
-                        {formatNumber(cardView.sections.total)}
-                        {cardView.sections.failed > 0
-                          ? ` · ошибок: ${formatNumber(cardView.sections.failed)}`
-                          : ''}
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                      <div className="font-medium text-[var(--text-primary)]">
-                        Расход ИИ
-                      </div>
-                      <div className="mt-1">
-                        {formatNumber(cardView.usage.total_tokens)} токенов ·{' '}
-                        {formatNumber(cardView.usage.llm_call_count)} LLM-выз.
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                      <div className="font-medium text-[var(--text-primary)]">
-                        Итоговые факты
-                      </div>
-                      <div className="mt-1">
-                        {formatNumber(cardView.registry.entry_count)} фактов ·{' '}
-                        {formatNumber(cardView.runtime.runtime_entry_count)} runtime-записей
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                      <div className="font-medium text-[var(--text-primary)]">
-                        Время
-                      </div>
-                      <div className="mt-1">{elapsedText}</div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={onOpenCuration}
-                      className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
-                    >
-                      Открыть trace и курацию
-                    </button>
-                    {cardView.registry.final_snapshot_id && (
-                      <span
-                        className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[var(--text-muted)]"
-                        title={cardView.registry.final_snapshot_id}
-                      >
-                        Snapshot сохранён
-                      </span>
-                    )}
-                  </div>
+          <div className="mt-3 space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                <div className="font-medium text-[var(--text-primary)]">
+                  Секции
                 </div>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  <ImportQualitySummary
-                    report={importQualityReport}
-                    isLoading={importQualityLoading}
-                  />
-                  {processingNode}
-                  {retightenReportNode}
-                  <PriceFactsSummary
-                    response={priceFactsResponse}
-                    isLoading={isPriceFactsLoading}
-                    onPublishFact={onPublishFact}
-                    onRejectFact={onRejectFact}
-                    mutatingFactId={mutatingPriceFactId}
-                  />
-                  <CommercialTruthReviewSummary
-                    response={commercialTruthReviewResponse}
-                    isLoading={isCommercialTruthReviewLoading}
-                    policy={commercialTruthReviewPolicy}
-                    onPolicyChange={onPolicyChange}
-                  />
+                <div className="mt-1">
+                  Обработано {formatNumber(cardView.sections.processed)} из{' '}
+                  {formatNumber(cardView.sections.total)}
+                  {cardView.sections.failed > 0
+                    ? ` · ошибок: ${formatNumber(cardView.sections.failed)}`
+                    : ''}
                 </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                <div className="font-medium text-[var(--text-primary)]">
+                  Расход ИИ
+                </div>
+                <div className="mt-1">
+                  {formatNumber(cardView.usage.total_tokens)} токенов ·{' '}
+                  {formatNumber(cardView.usage.llm_call_count)} LLM-выз.
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                <div className="font-medium text-[var(--text-primary)]">
+                  Итоговые факты
+                </div>
+                <div className="mt-1">
+                  {formatNumber(cardView.registry.entry_count)} фактов ·{' '}
+                  {formatNumber(cardView.runtime.runtime_entry_count)} runtime-записей
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                <div className="font-medium text-[var(--text-primary)]">
+                  Время
+                </div>
+                <div className="mt-1">{elapsedText}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onOpenCuration}
+                className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+              >
+                Открыть trace и курацию
+              </button>
+              {cardView.registry.final_snapshot_id && (
+                <span
+                  className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[var(--text-muted)]"
+                  title={cardView.registry.final_snapshot_id}
+                >
+                  Snapshot сохранён
+                </span>
               )}
-            </details>
-          </>
-        ) : (
-          <>
-            <ImportQualitySummary
-              report={importQualityReport}
-              isLoading={importQualityLoading}
-            />
-            <PriceFactsSummary
-              response={priceFactsResponse}
-              isLoading={isPriceFactsLoading}
-              onPublishFact={onPublishFact}
-              onRejectFact={onRejectFact}
-              mutatingFactId={mutatingPriceFactId}
-            />
-            <CommercialTruthReviewSummary
-              response={commercialTruthReviewResponse}
-              isLoading={isCommercialTruthReviewLoading}
-              policy={commercialTruthReviewPolicy}
-              onPolicyChange={onPolicyChange}
-            />
-            {processingNode}
-            {retightenReportNode}
-          </>
-        )}
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   );
