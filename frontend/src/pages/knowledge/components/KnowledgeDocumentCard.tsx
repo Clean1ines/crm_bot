@@ -516,29 +516,93 @@ export const KnowledgeDocumentCard: React.FC<{
 
             <details className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
               <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
-                Диагностика импорта и старый прогресс
+                {cardView ? 'Подробности обработки' : 'Legacy-диагностика импорта'}
               </summary>
-              <div className="mt-3 space-y-3">
-                <ImportQualitySummary
-                  report={importQualityReport}
-                  isLoading={importQualityLoading}
-                />
-                {processingNode}
-                {retightenReportNode}
-                <PriceFactsSummary
-                  response={priceFactsResponse}
-                  isLoading={isPriceFactsLoading}
-                  onPublishFact={onPublishFact}
-                  onRejectFact={onRejectFact}
-                  mutatingFactId={mutatingPriceFactId}
-                />
-                <CommercialTruthReviewSummary
-                  response={commercialTruthReviewResponse}
-                  isLoading={isCommercialTruthReviewLoading}
-                  policy={commercialTruthReviewPolicy}
-                  onPolicyChange={onPolicyChange}
-                />
-              </div>
+              {cardView ? (
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                      <div className="font-medium text-[var(--text-primary)]">
+                        Секции
+                      </div>
+                      <div className="mt-1">
+                        Обработано {formatNumber(cardView.sections.processed)} из{' '}
+                        {formatNumber(cardView.sections.total)}
+                        {cardView.sections.failed > 0
+                          ? ` · ошибок: ${formatNumber(cardView.sections.failed)}`
+                          : ''}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                      <div className="font-medium text-[var(--text-primary)]">
+                        Расход ИИ
+                      </div>
+                      <div className="mt-1">
+                        {formatNumber(cardView.usage.total_tokens)} токенов ·{' '}
+                        {formatNumber(cardView.usage.llm_call_count)} LLM-выз.
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                      <div className="font-medium text-[var(--text-primary)]">
+                        Итоговые факты
+                      </div>
+                      <div className="mt-1">
+                        {formatNumber(cardView.registry.entry_count)} фактов ·{' '}
+                        {formatNumber(cardView.runtime.runtime_entry_count)} runtime-записей
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                      <div className="font-medium text-[var(--text-primary)]">
+                        Время
+                      </div>
+                      <div className="mt-1">{elapsedText}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={onOpenCuration}
+                      className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+                    >
+                      Открыть trace и курацию
+                    </button>
+                    {cardView.registry.final_snapshot_id && (
+                      <span
+                        className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[var(--text-muted)]"
+                        title={cardView.registry.final_snapshot_id}
+                      >
+                        Snapshot сохранён
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <ImportQualitySummary
+                    report={importQualityReport}
+                    isLoading={importQualityLoading}
+                  />
+                  {processingNode}
+                  {retightenReportNode}
+                  <PriceFactsSummary
+                    response={priceFactsResponse}
+                    isLoading={isPriceFactsLoading}
+                    onPublishFact={onPublishFact}
+                    onRejectFact={onRejectFact}
+                    mutatingFactId={mutatingPriceFactId}
+                  />
+                  <CommercialTruthReviewSummary
+                    response={commercialTruthReviewResponse}
+                    isLoading={isCommercialTruthReviewLoading}
+                    policy={commercialTruthReviewPolicy}
+                    onPolicyChange={onPolicyChange}
+                  />
+                </div>
+              )}
             </details>
           </>
         ) : (
