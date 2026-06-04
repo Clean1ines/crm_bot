@@ -34,6 +34,7 @@ from src.application.services.faq_workbench_parallel_processing_coordinator_serv
     FaqWorkbenchParallelProcessingCoordinatorService,
     RunParallelWorkbenchProcessingCommand,
 )
+from src.domain.project_plane.llm_routing import LlmJsonInvocationResult
 from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
     FactRegistry,
@@ -253,9 +254,7 @@ class DefaultClaimObservationsRunner:
                 registry_snapshot=registry_snapshot_payload,
             )
         except Exception as exc:
-            invocation = (
-                getattr(exc, "args", (None,))[0] if getattr(exc, "args", ()) else None
-            )
+            invocation = _llm_json_invocation_from_exception(exc)
             if invocation is not None:
                 await self.persistence_service.persist_claim_observations_generation_error(
                     ProcessClaimObservationsGenerationErrorCommand(
@@ -315,6 +314,15 @@ class DefaultClaimObservationsRunner:
             claim_observations_node_run_id=persisted.node_run.node_run_id,
             claim_input_refs=persisted.claim_observation_ids,
         )
+
+
+def _llm_json_invocation_from_exception(
+    exc: BaseException,
+) -> LlmJsonInvocationResult | None:
+    for arg in getattr(exc, "args", ()):
+        if isinstance(arg, LlmJsonInvocationResult):
+            return arg
+    return None
 
 
 def make_workbench_claim_observations_generator(
