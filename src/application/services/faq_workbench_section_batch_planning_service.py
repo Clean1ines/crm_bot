@@ -1,12 +1,17 @@
+"""Retired WorkbenchSectionWorkItem planning service.
+
+This module is kept as historical/diagnostic code only. Production Workbench
+section scheduling uses section_batch_queue.py with ParallelSectionBatchPlan
+and SectionBatchQueueItem persisted through create_parallel_section_batch_plan.
+Do not wire this service into runtime composition.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from src.application.ports.knowledge_workbench import (
-    KnowledgeWorkbenchSectionBatchPlanningRepositoryPort,
-)
 from src.domain.project_plane.knowledge_workbench import (
     DocumentSection,
     DomainInvariantError,
@@ -34,6 +39,30 @@ class IdFactory(Protocol):
 
 class TimeProvider(Protocol):
     def now(self) -> datetime: ...
+
+
+class RetiredWorkbenchSectionBatchPlanningRepositoryPort(Protocol):
+    async def create_processing_node_run(self, node_run: ProcessingNodeRun) -> None: ...
+
+    async def create_processing_node_artifact(
+        self,
+        artifact: ProcessingNodeArtifact,
+    ) -> None: ...
+
+    async def create_section_batch_plan(
+        self,
+        plan: WorkbenchSectionBatchPlan,
+    ) -> None: ...
+
+    async def create_section_work_items(
+        self,
+        items: tuple[WorkbenchSectionWorkItem, ...],
+    ) -> None: ...
+
+    async def update_section_work_items(
+        self,
+        items: tuple[WorkbenchSectionWorkItem, ...],
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +97,7 @@ class ProcessParallelSectionBatchResult:
 class FaqWorkbenchSectionBatchPlanningService:
     def __init__(
         self,
-        repository: KnowledgeWorkbenchSectionBatchPlanningRepositoryPort,
+        repository: RetiredWorkbenchSectionBatchPlanningRepositoryPort,
         *,
         id_factory: IdFactory,
         time_provider: TimeProvider | None = None,

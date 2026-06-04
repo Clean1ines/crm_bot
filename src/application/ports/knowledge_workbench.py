@@ -23,8 +23,6 @@ from src.domain.project_plane.knowledge_workbench import (
     ResumePolicy,
     RegistryUpdateProposal,
     RegistryApplicationQueueItem,
-    WorkbenchSectionBatchPlan,
-    WorkbenchSectionWorkItem,
 )
 
 
@@ -356,52 +354,6 @@ class KnowledgeWorkbenchRegistryApplicationRepositoryPort(Protocol):
         document_id: str,
         processing_run_id: str,
     ) -> None: ...
-
-
-class KnowledgeWorkbenchSectionBatchPlanningRepositoryPort(Protocol):
-    async def create_processing_node_run(self, node_run: ProcessingNodeRun) -> None: ...
-
-    async def create_processing_node_artifact(
-        self,
-        artifact: ProcessingNodeArtifact,
-    ) -> None: ...
-
-    async def list_claim_observation_parsed_artifacts(
-        self,
-        *,
-        project_id: str,
-        document_id: str,
-        processing_run_id: str,
-    ) -> tuple[ProcessingNodeArtifact, ...]: ...
-
-    async def create_section_batch_plan(
-        self,
-        plan: WorkbenchSectionBatchPlan,
-    ) -> None: ...
-
-    async def create_section_work_items(
-        self,
-        items: tuple[WorkbenchSectionWorkItem, ...],
-    ) -> None: ...
-
-    async def update_section_work_items(
-        self,
-        items: tuple[WorkbenchSectionWorkItem, ...],
-    ) -> None: ...
-
-    async def get_latest_section_batch_plan(
-        self,
-        *,
-        project_id: str,
-        document_id: str,
-        processing_run_id: str,
-    ) -> WorkbenchSectionBatchPlan | None: ...
-
-    async def list_section_work_items(
-        self,
-        *,
-        batch_plan_id: str,
-    ) -> tuple[WorkbenchSectionWorkItem, ...]: ...
 
 
 class KnowledgeWorkbenchRuntimePublicationRepositoryPort(Protocol):
