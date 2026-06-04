@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from decimal import Decimal
 import json
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Protocol, cast
 
+from src.application.services.faq_workbench_local_claim_retrieval_service import (
+    LoadIndexedLocalClaimRetrievalSurfaceCommand,
+    LoadIndexedLocalClaimRetrievalSurfaceResult,
+)
 from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
     LocalClaimRetrievalSurfaceEntry,
 )
@@ -44,6 +49,13 @@ from src.domain.project_plane.knowledge_workbench import (
     ParallelProcessingIntegrityCounts,
     RegistryUpdateApplication,
 )
+from src.domain.project_plane.knowledge_workbench.local_claim_retrieval import (
+    LocalClaimSimilarityEdge,
+    LocalClaimSimilaritySignal,
+)
+from src.domain.project_plane.knowledge_workbench.local_claim_search import (
+    LocalClaimSearchDocument,
+)
 
 
 def _publish_ready_optional_text(value: object) -> str | None:
@@ -70,6 +82,14 @@ def _publish_ready_text_tuple(value: object) -> tuple[str, ...]:
     if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
         return tuple(str(item) for item in value if str(item).strip())
     return (str(value),)
+
+
+def _required_float_from_db_value(value: object, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be numeric, got bool")
+    if isinstance(value, (int, float, str, Decimal)):
+        return float(value)
+    raise ValueError(f"{field_name} must be numeric")
 
 
 def _text_tuple_from_object(value: object) -> tuple[str, ...]:
@@ -276,6 +296,114 @@ class KnowledgeWorkbenchRepository(
             + local_claim_count
             + production_surface_count
             + production_entry_count
+        )
+
+    async def load_indexed_local_claim_retrieval_surface(
+        self,
+        command: LoadIndexedLocalClaimRetrievalSurfaceCommand,
+    ) -> LoadIndexedLocalClaimRetrievalSurfaceResult:
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                search_document_id,
+                project_id,
+                document_id,
+                section_id,
+                node_run_id,
+                local_ref,
+                claim,
+                claim_kind,
+                granularity,
+                triples_payload,
+                possible_questions_payload,
+                scope,
+                exclusion_scope,
+                evidence_block,
+                relation_texts_payload,
+                search_text
+            FROM knowledge_workbench_local_claim_retrieval_entries
+            WHERE project_id = $1::uuid
+              AND document_id = $2
+              AND processing_run_id = $3
+              AND status = 'indexed'
+            ORDER BY section_id ASC, node_run_id ASC, local_ref ASC
+            """,
+            command.project_id,
+            command.document_id,
+            command.processing_run_id,
+        )
+        search_documents = tuple(
+            self._local_claim_search_document_from_retrieval_row(row) for row in rows
+        )
+        if not search_documents:
+            return LoadIndexedLocalClaimRetrievalSurfaceResult(
+                search_documents=(),
+                vector_similarity_edges=(),
+            )
+
+        edge_rows = await self._connection.fetch(
+            """
+            WITH entries AS (
+                SELECT
+                    search_document_id,
+                    embedding
+                FROM knowledge_workbench_local_claim_retrieval_entries
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND processing_run_id = $3
+                  AND status = 'indexed'
+            ),
+            candidate_edges AS (
+                SELECT
+                    LEAST(left_entry.search_document_id, right_entry.search_document_id)
+                        AS source_search_document_id,
+                    GREATEST(left_entry.search_document_id, right_entry.search_document_id)
+                        AS target_search_document_id,
+                    GREATEST(
+                        0.0,
+                        LEAST(
+                            1.0,
+                            1.0 - ((left_entry.embedding <=> right_entry.embedding) / 2.0)
+                        )
+                    ) AS score
+                FROM entries AS left_entry
+                JOIN LATERAL (
+                    SELECT
+                        right_entry.search_document_id,
+                        right_entry.embedding
+                    FROM entries AS right_entry
+                    WHERE right_entry.search_document_id <> left_entry.search_document_id
+                    ORDER BY left_entry.embedding <=> right_entry.embedding
+                    LIMIT $4
+                ) AS right_entry ON TRUE
+            )
+            SELECT DISTINCT ON (
+                source_search_document_id,
+                target_search_document_id
+            )
+                source_search_document_id,
+                target_search_document_id,
+                score
+            FROM candidate_edges
+            WHERE score >= $5
+            ORDER BY
+                source_search_document_id,
+                target_search_document_id,
+                score DESC
+            """,
+            command.project_id,
+            command.document_id,
+            command.processing_run_id,
+            command.max_candidates_per_claim,
+            command.min_vector_similarity_score,
+        )
+        vector_edges = tuple(
+            self._local_claim_vector_similarity_edge_from_row(row) for row in edge_rows
+        )
+
+        return LoadIndexedLocalClaimRetrievalSurfaceResult(
+            search_documents=search_documents,
+            vector_similarity_edges=vector_edges,
         )
 
     async def has_indexed_local_claim_retrieval_entries_for_node_run(
@@ -1362,6 +1490,48 @@ class KnowledgeWorkbenchRepository(
             attempt_count=self._int_from_db(row["attempt_count"]),
             created_at=self._datetime_from_db(row["created_at"]),
             updated_at=self._datetime_from_db(row["updated_at"]),
+        )
+
+    def _local_claim_search_document_from_retrieval_row(
+        self,
+        row: Mapping[str, object],
+    ) -> LocalClaimSearchDocument:
+        return LocalClaimSearchDocument(
+            search_document_id=str(row["search_document_id"]),
+            project_id=str(row["project_id"]),
+            document_id=str(row["document_id"]),
+            section_id=str(row["section_id"]),
+            node_run_id=str(row["node_run_id"]),
+            local_ref=str(row["local_ref"]),
+            claim=str(row["claim"]),
+            claim_kind=str(row["claim_kind"]),
+            granularity=str(row["granularity"]),
+            triple_texts=_text_tuple_from_object(row["triples_payload"]),
+            possible_questions=_text_tuple_from_object(
+                row["possible_questions_payload"]
+            ),
+            scope=str(row["scope"]),
+            exclusion_scope=str(row["exclusion_scope"]),
+            evidence_block=str(row["evidence_block"]),
+            relation_texts=_text_tuple_from_object(row["relation_texts_payload"]),
+            search_text=str(row["search_text"]),
+        )
+
+    def _local_claim_vector_similarity_edge_from_row(
+        self,
+        row: Mapping[str, object],
+    ) -> LocalClaimSimilarityEdge:
+        score = _required_float_from_db_value(row["score"], "score")
+        return LocalClaimSimilarityEdge(
+            source_search_document_id=str(row["source_search_document_id"]),
+            target_search_document_id=str(row["target_search_document_id"]),
+            score=score,
+            signals=(
+                LocalClaimSimilaritySignal(
+                    signal_type="embedding_similarity",
+                    score=score,
+                ),
+            ),
         )
 
     def _pg_vector_text(self, values: tuple[float, ...]) -> str:

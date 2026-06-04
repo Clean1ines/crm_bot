@@ -106,12 +106,25 @@ def test_local_claim_retrieval_has_embedding_surface_before_prompt_c() -> None:
     drain_policy_source = DRAIN_POLICY.read_text()
     migration_source = LOCAL_CLAIM_MIGRATION.read_text()
 
+    assert "retrieval_surface_reader" in retrieval_source
+    assert "LoadIndexedLocalClaimRetrievalSurfaceCommand" in retrieval_source
+    assert "load_indexed_local_claim_retrieval_surface" in retrieval_source
     assert "retrieval_surface_indexing_service" in retrieval_source
+
     assert "embedding_similarity" in indexing_source
     assert "embed_batch" in embedding_adapter_source
+
     assert "knowledge_workbench_local_claim_retrieval_entries" in repository_source
     assert "replace_local_claim_retrieval_entries" in repository_source
+    assert "load_indexed_local_claim_retrieval_surface" in repository_source
+    assert "left_entry.embedding <=> right_entry.embedding" in repository_source
+
     assert "FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService" in composition_source
+    assert (
+        "retrieval_surface_reader=cast(LocalClaimRetrievalSurfaceReaderPort, repository)"
+        in composition_source
+    )
+
     assert "local_claim_retrieval_indexed_artifacts_total" in drain_policy_source
     assert "knowledge_workbench_local_claim_retrieval_entries" in migration_source
     assert "embedding vector(384)" in migration_source

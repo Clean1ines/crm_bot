@@ -15,6 +15,7 @@ from src.application.services.faq_workbench_local_claim_graph_loader_service imp
 )
 from src.application.services.faq_workbench_local_claim_retrieval_service import (
     FaqWorkbenchLocalClaimRetrievalService,
+    LocalClaimRetrievalSurfaceReaderPort,
 )
 from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
     FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService,
@@ -243,6 +244,7 @@ def make_workbench_canonicalization_barrier_service_from_repository(
     local_claim_retrieval_service = FaqWorkbenchLocalClaimRetrievalService(
         graph_loader=graph_loader,
         retrieval_surface_indexing_service=local_claim_retrieval_surface_indexing_service,
+        retrieval_surface_reader=cast(LocalClaimRetrievalSurfaceReaderPort, repository),
     )
     llm_json_invocation = (
         dependencies.llm_json_invocation

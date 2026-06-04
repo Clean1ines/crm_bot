@@ -30,6 +30,54 @@ class LocalClaimRetrievalSurfaceIndexingPort(Protocol):
     ) -> object: ...
 
 
+class LocalClaimRetrievalSurfaceReaderPort(Protocol):
+    async def load_indexed_local_claim_retrieval_surface(
+        self,
+        command: LoadIndexedLocalClaimRetrievalSurfaceCommand,
+    ) -> LoadIndexedLocalClaimRetrievalSurfaceResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LoadIndexedLocalClaimRetrievalSurfaceCommand:
+    project_id: str
+    document_id: str
+    processing_run_id: str
+    min_vector_similarity_score: float = 0.72
+    max_candidates_per_claim: int = 20
+
+    def __post_init__(self) -> None:
+        if not self.project_id:
+            raise DomainInvariantError(
+                "indexed local claim retrieval requires project_id"
+            )
+        if not self.document_id:
+            raise DomainInvariantError(
+                "indexed local claim retrieval requires document_id"
+            )
+        if not self.processing_run_id:
+            raise DomainInvariantError(
+                "indexed local claim retrieval requires processing_run_id"
+            )
+        if self.min_vector_similarity_score < 0 or self.min_vector_similarity_score > 1:
+            raise DomainInvariantError(
+                "indexed local claim retrieval min_vector_similarity_score must be in [0, 1]"
+            )
+        if self.max_candidates_per_claim < 1:
+            raise DomainInvariantError(
+                "indexed local claim retrieval max_candidates_per_claim must be positive"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class LoadIndexedLocalClaimRetrievalSurfaceResult:
+    search_documents: tuple[LocalClaimSearchDocument, ...]
+    vector_similarity_edges: tuple[LocalClaimSimilarityEdge, ...]
+
+    @property
+    def indexed_claim_count(self) -> int:
+        return len(self.search_documents)
+
+
 @dataclass(frozen=True, slots=True)
 class BuildDocumentLocalClaimRetrievalCommand:
     project_id: str
@@ -88,25 +136,31 @@ class FaqWorkbenchLocalClaimRetrievalService:
     retrieval_surface_indexing_service: (
         LocalClaimRetrievalSurfaceIndexingPort | None
     ) = None
+    retrieval_surface_reader: LocalClaimRetrievalSurfaceReaderPort | None = None
 
     async def build_document_local_claim_retrieval(
         self,
         command: BuildDocumentLocalClaimRetrievalCommand,
     ) -> DocumentLocalClaimRetrievalResult:
-        graph_result = await self.graph_loader.load_document_local_claim_graphs(
-            LoadDocumentLocalClaimGraphsCommand(
-                project_id=command.project_id,
-                document_id=command.document_id,
-                processing_run_id=command.processing_run_id,
+        persisted_surface = await self._load_persisted_retrieval_surface(command)
+        if persisted_surface is not None and persisted_surface.search_documents:
+            search_documents = persisted_surface.search_documents
+            vector_edges = persisted_surface.vector_similarity_edges
+        else:
+            graph_result = await self.graph_loader.load_document_local_claim_graphs(
+                LoadDocumentLocalClaimGraphsCommand(
+                    project_id=command.project_id,
+                    document_id=command.document_id,
+                    processing_run_id=command.processing_run_id,
+                )
             )
-        )
 
-        graphs = tuple(item.graph for item in graph_result.graphs)
-        search_documents = local_claim_search_documents_from_graphs(graphs)
-        vector_edges = await self._index_and_get_vector_edges(
-            command=command,
-            search_documents=search_documents,
-        )
+            graphs = tuple(item.graph for item in graph_result.graphs)
+            search_documents = local_claim_search_documents_from_graphs(graphs)
+            vector_edges = await self._index_and_get_vector_edges(
+                command=command,
+                search_documents=search_documents,
+            )
         deterministic_edges = build_local_claim_hybrid_similarity_edges(
             search_documents,
             min_score=command.min_similarity_score,
@@ -130,6 +184,20 @@ class FaqWorkbenchLocalClaimRetrievalService:
             similarity_edges=similarity_edges,
             candidate_groups=candidate_groups,
             canonicalization_units=canonicalization_units,
+        )
+
+    async def _load_persisted_retrieval_surface(
+        self,
+        command: BuildDocumentLocalClaimRetrievalCommand,
+    ) -> LoadIndexedLocalClaimRetrievalSurfaceResult | None:
+        if self.retrieval_surface_reader is None:
+            return None
+        return await self.retrieval_surface_reader.load_indexed_local_claim_retrieval_surface(
+            LoadIndexedLocalClaimRetrievalSurfaceCommand(
+                project_id=command.project_id,
+                document_id=command.document_id,
+                processing_run_id=command.processing_run_id,
+            )
         )
 
     async def _index_and_get_vector_edges(
@@ -205,5 +273,8 @@ __all__ = [
     "BuildDocumentLocalClaimRetrievalCommand",
     "DocumentLocalClaimRetrievalResult",
     "FaqWorkbenchLocalClaimRetrievalService",
+    "LoadIndexedLocalClaimRetrievalSurfaceCommand",
+    "LoadIndexedLocalClaimRetrievalSurfaceResult",
+    "LocalClaimRetrievalSurfaceReaderPort",
     "LocalClaimRetrievalSurfaceIndexingPort",
 ]
