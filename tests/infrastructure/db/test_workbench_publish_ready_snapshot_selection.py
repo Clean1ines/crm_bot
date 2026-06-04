@@ -55,7 +55,9 @@ class CapturingConnection:
 
 
 @pytest.mark.asyncio
-async def test_publish_ready_selects_snapshot_from_canonicalization_barrier_marker() -> None:
+async def test_publish_ready_selects_snapshot_from_canonicalization_barrier_marker() -> (
+    None
+):
     connection = CapturingConnection(
         first_row=None,
         second_row=FakeRow(
@@ -79,18 +81,24 @@ async def test_publish_ready_selects_snapshot_from_canonicalization_barrier_mark
     selection_query = connection.fetchrow_queries[1]
     assert "fact_registry_canonicalization_barrier" in selection_query
     assert "final_snapshot_id" in selection_query
-    assert "snapshot.entries_payload ->> 'contract' = 'fact_registry'" in selection_query
+    assert (
+        "snapshot.entries_payload ->> 'contract' = 'fact_registry'" in selection_query
+    )
     assert "snapshot.entry_count > 0" in selection_query
     assert "run.status = 'completed'" in selection_query
 
     assert "faq_surface_final_reconciliation" not in selection_query
     assert "faq_surface_registry_merge" not in selection_query
 
-    assert any("set is_final_published = true" in query for query in connection.execute_queries)
+    assert any(
+        "set is_final_published = true" in query for query in connection.execute_queries
+    )
 
 
 @pytest.mark.asyncio
-async def test_publish_ready_returns_existing_published_snapshot_without_reselecting() -> None:
+async def test_publish_ready_returns_existing_published_snapshot_without_reselecting() -> (
+    None
+):
     connection = CapturingConnection(
         first_row=FakeRow({"snapshot_id": "already-published"}),
         second_row=None,

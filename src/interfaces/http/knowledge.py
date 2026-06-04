@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from dataclasses import asdict, is_dataclass
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     Form,
@@ -660,6 +661,271 @@ async def retighten_knowledge_document(document_id: str):
         capability=f"answer tightening for {document_id}",
         target="Workbench surface curation/refinement command",
     )
+
+
+def _optional_payload_text(payload: dict[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+@router.post("/{document_id}/surfaces/{surface_id}/approve")
+async def approve_knowledge_surface(
+    project_id: str,
+    document_id: str,
+    surface_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.workbench_commands.surface_curation import (
+        SurfaceCurationRejectedError,
+    )
+    from src.interfaces.composition.faq_workbench_surface_curation import (
+        make_surface_curation_service,
+    )
+
+    try:
+        service = await make_surface_curation_service(pool)
+        return (
+            await service.approve_surface(
+                project_id=project_id,
+                document_id=document_id,
+                surface_id=surface_id,
+            )
+        ).to_dict()
+    except SurfaceCurationRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/surfaces/{surface_id}/reject")
+async def reject_knowledge_surface(
+    project_id: str,
+    document_id: str,
+    surface_id: str,
+    payload: dict[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.workbench_commands.surface_curation import (
+        SurfaceCurationRejectedError,
+    )
+    from src.interfaces.composition.faq_workbench_surface_curation import (
+        make_surface_curation_service,
+    )
+
+    try:
+        service = await make_surface_curation_service(pool)
+        return (
+            await service.reject_surface(
+                project_id=project_id,
+                document_id=document_id,
+                surface_id=surface_id,
+                reason=str(payload.get("reason") or ""),
+            )
+        ).to_dict()
+    except SurfaceCurationRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.patch("/{document_id}/surfaces/{surface_id}")
+async def edit_knowledge_surface(
+    project_id: str,
+    document_id: str,
+    surface_id: str,
+    payload: dict[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.workbench_commands.surface_curation import (
+        SurfaceCurationRejectedError,
+    )
+    from src.interfaces.composition.faq_workbench_surface_curation import (
+        make_surface_curation_service,
+    )
+
+    raw_questions = payload.get("question_variants")
+    question_variants = (
+        tuple(str(item).strip() for item in raw_questions if str(item).strip())
+        if isinstance(raw_questions, list)
+        else None
+    )
+
+    try:
+        service = await make_surface_curation_service(pool)
+        return (
+            await service.edit_surface(
+                project_id=project_id,
+                document_id=document_id,
+                surface_id=surface_id,
+                title=_optional_payload_text(payload, "title"),
+                answer=_optional_payload_text(payload, "answer"),
+                short_answer=_optional_payload_text(payload, "short_answer"),
+                question_variants=question_variants,
+                retrieval_scope=_optional_payload_text(payload, "retrieval_scope"),
+                exclusion_scope=_optional_payload_text(payload, "exclusion_scope"),
+            )
+        ).to_dict()
+    except SurfaceCurationRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/facts/{target_fact_id}/merge")
+async def merge_knowledge_facts(
+    project_id: str,
+    document_id: str,
+    target_fact_id: str,
+    payload: dict[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.workbench_commands.surface_curation import (
+        SurfaceCurationRejectedError,
+    )
+    from src.interfaces.composition.faq_workbench_surface_curation import (
+        make_surface_curation_service,
+    )
+
+    raw_sources = payload.get("source_fact_ids")
+    source_fact_ids = (
+        tuple(str(item).strip() for item in raw_sources if str(item).strip())
+        if isinstance(raw_sources, list)
+        else ()
+    )
+
+    try:
+        service = await make_surface_curation_service(pool)
+        return (
+            await service.merge_facts(
+                project_id=project_id,
+                document_id=document_id,
+                target_fact_id=target_fact_id,
+                source_fact_ids=source_fact_ids,
+                reason=str(payload.get("reason") or ""),
+            )
+        ).to_dict()
+    except SurfaceCurationRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.delete("/{document_id}/facts/{fact_id}")
+async def delete_knowledge_fact(
+    project_id: str,
+    document_id: str,
+    fact_id: str,
+    payload: dict[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.workbench_commands.surface_curation import (
+        SurfaceCurationRejectedError,
+    )
+    from src.interfaces.composition.faq_workbench_surface_curation import (
+        make_surface_curation_service,
+    )
+
+    try:
+        service = await make_surface_curation_service(pool)
+        return (
+            await service.delete_fact(
+                project_id=project_id,
+                document_id=document_id,
+                fact_id=fact_id,
+                reason=str(payload.get("reason") or ""),
+            )
+        ).to_dict()
+    except SurfaceCurationRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{document_id}/surfaces/publish-selected")
+async def publish_selected_workbench_surfaces(
+    project_id: str,
+    document_id: str,
+    payload: dict[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.application.workbench_commands.surface_curation import (
+        SurfaceCurationRejectedError,
+    )
+    from src.interfaces.composition.faq_workbench_surface_curation import (
+        make_surface_curation_service,
+    )
+
+    raw_surface_ids = payload.get("surface_ids")
+    surface_ids = (
+        tuple(str(item).strip() for item in raw_surface_ids if str(item).strip())
+        if isinstance(raw_surface_ids, list)
+        else ()
+    )
+
+    try:
+        service = await make_surface_curation_service(pool)
+        return (
+            await service.publish_selected_surfaces(
+                project_id=project_id,
+                document_id=document_id,
+                surface_ids=surface_ids,
+            )
+        ).to_dict()
+    except SurfaceCurationRejectedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{document_id}/publish-ready")

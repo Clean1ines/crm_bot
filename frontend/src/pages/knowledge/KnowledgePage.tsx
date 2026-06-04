@@ -160,7 +160,6 @@ const STOPPED_BY_USER_ISSUE_NEEDLE =
 
 const PROCESSING_REPORT_PRIMARY_ACTION_IDS = new Set([
   "resume_processing",
-  "retry_failed_batches",
   "publish_ready",
 ]);
 
@@ -289,12 +288,6 @@ const isDocumentProcessing = (doc: Document): boolean => {
       doc.preprocessing_status === "processing")
   );
 };
-
-const isDocumentRetightenable = (doc: Document): boolean =>
-  doc.status === "processed" &&
-  !isDocumentProcessing(doc) &&
-  !isDocumentFailed(doc) &&
-  !isDocumentCancelled(doc);
 
 const knowledgeProcessingModeLabel = (
   mode: string | null | undefined,
@@ -1491,54 +1484,6 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
-  const retightenMutation = useMutation({
-    mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
-      await knowledgeApi.retighten(projectId, documentId);
-    },
-    onSuccess: async () => {
-      toast.success(t("knowledge.feedback.retightenQueued"));
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-documents", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-usage", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-processing-reports", projectId],
-      });
-    },
-    onError: (err: unknown) => {
-      toast.error(
-        getErrorMessage(err, t("knowledge.feedback.retightenFailed")),
-      );
-    },
-  });
-
-  const retryFailedBatchesMutation = useMutation({
-    mutationFn: async (documentId: string) => {
-      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
-      await knowledgeApi.retryFailedBatches(projectId, documentId);
-    },
-    onSuccess: async () => {
-      toast.success(t("knowledge.feedback.retryFailedBatchesQueued"));
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-documents", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-usage", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-processing-reports", projectId],
-      });
-    },
-    onError: (err: unknown) => {
-      toast.error(
-        getErrorMessage(err, t("knowledge.feedback.retryFailedBatchesFailed")),
-      );
-    },
-  });
-
   const publishReadyMutation = useMutation({
     mutationFn: async (documentId: string) => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
@@ -2020,9 +1965,6 @@ export const KnowledgePage: React.FC = () => {
           >
             {filteredDocuments.map((doc) => {
               const statusBadge = getStatusBadge(doc);
-              const isRetighteningThisDoc =
-                retightenMutation.isPending &&
-                retightenMutation.variables === doc.id;
               const processingReport = processingReports[doc.id];
               const importQualityReport = importQualityReports[doc.id];
               const priceFactsResponse = priceFacts[doc.id];
@@ -2055,7 +1997,6 @@ export const KnowledgePage: React.FC = () => {
                   key={doc.id}
                   doc={doc}
                   statusBadge={statusBadge}
-                  isRetighteningThisDoc={isRetighteningThisDoc}
                   isDeletePending={
                     deleteDocumentMutation.isPending &&
                     deleteDocumentMutation.variables === doc.id
@@ -2082,12 +2023,8 @@ export const KnowledgePage: React.FC = () => {
                   actionsNode={
                     <div className="flex flex-wrap items-center gap-2">
                       <DocumentActionsBlock
-                        showRetighten={isDocumentRetightenable(doc)}
                         showStop={false}
-                        isRetighteningThisDoc={isRetighteningThisDoc}
-                        retightenPending={retightenMutation.isPending}
                         cancelPending={cancelProcessingMutation.isPending}
-                        onRetighten={() => retightenMutation.mutate(doc.id)}
                         onStop={() => cancelProcessingMutation.mutate(doc.id)}
                       />
 
@@ -2095,8 +2032,6 @@ export const KnowledgePage: React.FC = () => {
                         <div className="flex flex-wrap gap-1.5">
                           {primaryProcessingReportActions.map((action) => {
                             const isResume = action.id === "resume_processing";
-                            const isRetry =
-                              action.id === "retry_failed_batches";
                             const isPublishReady =
                               action.id === "publish_ready";
                             const isPending =
@@ -2104,28 +2039,19 @@ export const KnowledgePage: React.FC = () => {
                                 resumeProcessingMutation.isPending &&
                                 resumeProcessingMutation.variables ===
                                   doc.id) ||
-                              (isRetry &&
-                                retryFailedBatchesMutation.isPending &&
-                                retryFailedBatchesMutation.variables ===
-                                  doc.id) ||
                               (isPublishReady &&
                                 publishReadyMutation.isPending &&
                                 publishReadyMutation.variables === doc.id);
                             const isMutationPending =
                               (isResume &&
                                 resumeProcessingMutation.isPending) ||
-                              (isRetry &&
-                                retryFailedBatchesMutation.isPending) ||
                               (isPublishReady &&
                                 publishReadyMutation.isPending);
                             const onClick = isResume
                               ? () => resumeProcessingMutation.mutate(doc.id)
-                              : isRetry
-                                ? () =>
-                                    retryFailedBatchesMutation.mutate(doc.id)
-                                : isPublishReady
-                                  ? () => publishReadyMutation.mutate(doc.id)
-                                  : undefined;
+                              : isPublishReady
+                                ? () => publishReadyMutation.mutate(doc.id)
+                                : undefined;
 
                             if (!onClick) return null;
 
@@ -2189,15 +2115,10 @@ export const KnowledgePage: React.FC = () => {
                         doc.id,
                       )}
                       onOpenSourceUnits={() => openSourceUnitsModal(doc.id)}
-                      onRetryFailedBatches={() =>
-                        retryFailedBatchesMutation.mutate(doc.id)
-                      }
                       onPublishReady={() => publishReadyMutation.mutate(doc.id)}
                       onResumeProcessing={() =>
                         resumeProcessingMutation.mutate(doc.id)
                       }
-                      retryPending={retryFailedBatchesMutation.isPending}
-                      retryTarget={retryFailedBatchesMutation.variables}
                       publishReadyPending={publishReadyMutation.isPending}
                       publishReadyTarget={publishReadyMutation.variables}
                       resumePending={resumeProcessingMutation.isPending}

@@ -45,8 +45,10 @@ def test_knowledge_page_uses_processing_report_actions_for_primary_lifecycle_act
     assert 'enabledProcessingReportAction(processingReport, "cancel")' in page
     assert "enabledPrimaryProcessingReportActions(processingReport)" in page
     assert 'action.id === "resume_processing"' in page
-    assert 'action.id === "retry_failed_batches"' in page
     assert 'action.id === "publish_ready"' in page
+    assert 'action.id === "retry_failed_batches"' not in page
+    assert "retryFailedBatchesMutation" not in page
+    assert "knowledgeApi.retryFailedBatches" not in page
     assert "isDocumentProcessing={canCancelProcessing}" in page
     assert "showStop={isDocumentProcessing(doc)}" not in page
 

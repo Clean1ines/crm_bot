@@ -124,7 +124,6 @@ const hasWorkbenchCard = (doc: DocCardDocument): doc is DocCardDocument & {
 export const KnowledgeDocumentCard: React.FC<{
   doc: DocCardDocument;
   statusBadge: { className: string; label: string };
-  isRetighteningThisDoc: boolean;
   isDeletePending: boolean;
   processingReport: KnowledgeProcessingReport | undefined;
   importQualityReport: KnowledgeImportQualityReport | undefined;

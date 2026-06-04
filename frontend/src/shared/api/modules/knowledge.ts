@@ -515,6 +515,24 @@ export interface WorkbenchEvidenceTraceCanonicalFact {
   updated_at?: string | null;
 }
 
+export interface WorkbenchEvidenceTraceSurface {
+  surface_id: string;
+  fact_id?: string | null;
+  title: string;
+  claim: string;
+  question_variants: unknown[];
+  answer: string;
+  short_answer: string;
+  evidence_quotes: unknown[];
+  source_refs: unknown[];
+  source_section_ids: unknown[];
+  claim_kind: string;
+  status: string;
+  curation_state: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface WorkbenchEvidenceTraceSourceUnit {
   unit_id: string;
   source_unit_id: string;
@@ -530,6 +548,7 @@ export interface WorkbenchEvidenceTraceSourceUnit {
   raw_text_excerpt: string;
   findings: WorkbenchEvidenceTraceFinding[];
   canonical_facts: WorkbenchEvidenceTraceCanonicalFact[];
+  surfaces: WorkbenchEvidenceTraceSurface[];
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -540,9 +559,45 @@ export interface WorkbenchEvidenceTraceResponse {
   items: WorkbenchEvidenceTraceSourceUnit[];
   findings: WorkbenchEvidenceTraceFinding[];
   canonical_facts: WorkbenchEvidenceTraceCanonicalFact[];
+  surfaces: WorkbenchEvidenceTraceSurface[];
   coverage: Record<string, number>;
   gaps: Record<string, unknown>;
 }
+
+export type SurfaceEditRequest = {
+  title?: string;
+  answer?: string;
+  short_answer?: string;
+  question_variants?: string[];
+  retrieval_scope?: string;
+  exclusion_scope?: string;
+};
+
+export type SurfaceRejectRequest = {
+  reason?: string;
+};
+
+export type SurfaceMergeFactsRequest = {
+  source_fact_ids: string[];
+  reason?: string;
+};
+
+export type SurfaceDeleteFactRequest = {
+  reason?: string;
+};
+
+export type SurfacePublishSelectedRequest = {
+  surface_ids: string[];
+};
+
+export type SurfaceCurationMutationResponse = {
+  project_id: string;
+  document_id: string;
+  action: string;
+  affected_count: number;
+  item?: Record<string, unknown> | null;
+  items?: Array<Record<string, unknown>>;
+};
 
 
 export const knowledgeApi = {
@@ -574,18 +629,8 @@ export const knowledgeApi = {
       method: 'POST',
     }),
 
-  retighten: (projectId: string, documentId: string) =>
-    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retighten`, {
-      method: 'POST',
-    }),
-
   publishReady: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
-      method: 'POST',
-    }),
-
-  retryFailedBatches: (projectId: string, documentId: string) =>
-    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
       method: 'POST',
     }),
 
@@ -594,6 +639,83 @@ export const knowledgeApi = {
       `/api/projects/${projectId}/knowledge/${documentId}/evidence-trace`,
       {
         method: 'GET',
+      },
+    ),
+
+  approveSurface: (projectId: string, documentId: string, surfaceId: string) =>
+    authedJsonRequest<SurfaceCurationMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/${surfaceId}/approve`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  rejectSurface: (
+    projectId: string,
+    documentId: string,
+    surfaceId: string,
+    payload: SurfaceRejectRequest,
+  ) =>
+    authedJsonRequest<SurfaceCurationMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/${surfaceId}/reject`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  editSurface: (
+    projectId: string,
+    documentId: string,
+    surfaceId: string,
+    payload: SurfaceEditRequest,
+  ) =>
+    authedJsonRequest<SurfaceCurationMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/${surfaceId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  mergeFacts: (
+    projectId: string,
+    documentId: string,
+    targetFactId: string,
+    payload: SurfaceMergeFactsRequest,
+  ) =>
+    authedJsonRequest<SurfaceCurationMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/facts/${targetFactId}/merge`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  deleteFact: (
+    projectId: string,
+    documentId: string,
+    factId: string,
+    payload: SurfaceDeleteFactRequest,
+  ) =>
+    authedJsonRequest<SurfaceCurationMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/facts/${factId}`,
+      {
+        method: 'DELETE',
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  publishSelectedSurfaces: (
+    projectId: string,
+    documentId: string,
+    payload: SurfacePublishSelectedRequest,
+  ) =>
+    authedJsonRequest<SurfaceCurationMutationResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/publish-selected`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
       },
     ),
 
