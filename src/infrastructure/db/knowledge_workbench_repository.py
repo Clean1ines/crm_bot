@@ -2599,6 +2599,185 @@ class KnowledgeWorkbenchRepository(
 
         return snapshot_id
 
+    async def persist_document_processing_summary_before_purge(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> None:
+        await self._connection.execute(
+            """
+            WITH run_summary AS (
+                SELECT
+                    run.processing_run_id,
+                    run.active_elapsed_seconds,
+                    run.wall_elapsed_seconds,
+                    run.total_prompt_tokens,
+                    run.total_completion_tokens,
+                    run.total_tokens,
+                    run.total_llm_calls,
+                    run.started_at,
+                    run.completed_at,
+                    run.created_at
+                FROM knowledge_workbench_processing_runs AS run
+                WHERE run.project_id = $1::uuid
+                  AND run.document_id = $2
+                  AND run.processing_run_id = $3
+            ),
+            node_summary AS (
+                SELECT
+                    COUNT(*)::int AS node_run_count,
+                    COALESCE(SUM(duration_ms), 0)::int AS total_node_duration_ms,
+                    COALESCE(SUM(prompt_tokens), 0)::int AS node_prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0)::int AS node_completion_tokens,
+                    COALESCE(SUM(total_tokens), 0)::int AS node_total_tokens
+                FROM knowledge_workbench_processing_node_runs
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND processing_run_id = $3
+            ),
+            section_summary AS (
+                SELECT COUNT(*)::int AS document_section_count
+                FROM knowledge_workbench_document_sections
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND status <> 'deleted'
+            ),
+            artifact_summary AS (
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE artifact.artifact_type = 'parsed_llm_output'
+                          AND node.node_name = 'faq_claim_observations'
+                    )::int AS prompt_a_artifact_count,
+                    COUNT(*) FILTER (
+                        WHERE artifact.artifact_type = 'parsed_llm_output'
+                          AND node.node_name = 'faq_surface_registry_merge'
+                    )::int AS prompt_c_artifact_count
+                FROM knowledge_workbench_processing_node_artifacts AS artifact
+                JOIN knowledge_workbench_processing_node_runs AS node
+                  ON node.node_run_id = artifact.node_run_id
+                 AND node.processing_run_id = artifact.processing_run_id
+                 AND node.project_id = artifact.project_id
+                 AND node.document_id = artifact.document_id
+                WHERE artifact.project_id = $1::uuid
+                  AND artifact.document_id = $2
+                  AND artifact.processing_run_id = $3
+            ),
+            final_snapshot AS (
+                SELECT
+                    snapshot.snapshot_id,
+                    snapshot.entry_count,
+                    snapshot.relation_count,
+                    snapshot.claim_observation_count,
+                    snapshot.update_count,
+                    snapshot.created_at AS final_snapshot_created_at
+                FROM knowledge_workbench_registry_snapshots AS snapshot
+                WHERE snapshot.project_id = $1::uuid
+                  AND snapshot.document_id = $2
+                  AND snapshot.processing_run_id = $3
+                  AND snapshot.is_final_published IS TRUE
+                ORDER BY snapshot.created_at DESC, snapshot.sequence_number DESC
+                LIMIT 1
+            ),
+            materialized_summary AS (
+                SELECT
+                    (
+                        SELECT COUNT(*)::int
+                        FROM knowledge_workbench_canonical_facts AS fact
+                        WHERE fact.project_id = $1::uuid
+                          AND fact.document_id = $2
+                          AND fact.status = 'active'
+                    ) AS canonical_fact_count,
+                    (
+                        SELECT COUNT(*)::int
+                        FROM knowledge_workbench_fact_relations AS relation
+                        WHERE relation.project_id = $1::uuid
+                          AND relation.document_id = $2
+                    ) AS fact_relation_count,
+                    (
+                        SELECT COUNT(*)::int
+                        FROM knowledge_workbench_surfaces AS surface
+                        WHERE surface.project_id = $1::uuid
+                          AND surface.document_id = $2
+                          AND surface.status = 'published'
+                    ) AS published_surface_count
+            ),
+            runtime_summary AS (
+                SELECT COUNT(*)::int AS published_runtime_fact_count
+                FROM knowledge_retrieval_surface
+                WHERE project_id = $1::uuid
+                  AND entry_kind = 'faq_workbench_fact'
+                  AND status = 'published'
+                  AND visibility = 'runtime'
+                  AND metadata ->> 'workbench_document_id' = $2
+            )
+            UPDATE knowledge_workbench_documents AS document
+            SET processing_summary = jsonb_strip_nulls(
+                    jsonb_build_object(
+                        'contract', 'workbench_document_processing_summary_v1',
+                        'processing_run_id', $3,
+                        'active_elapsed_seconds', run_summary.active_elapsed_seconds,
+                        'wall_elapsed_seconds', run_summary.wall_elapsed_seconds,
+                        'total_prompt_tokens', run_summary.total_prompt_tokens,
+                        'total_completion_tokens', run_summary.total_completion_tokens,
+                        'total_tokens', run_summary.total_tokens,
+                        'total_llm_calls', run_summary.total_llm_calls,
+                        'started_at', run_summary.started_at,
+                        'completed_at', run_summary.completed_at,
+                        'run_created_at', run_summary.created_at,
+                        'node_run_count', node_summary.node_run_count,
+                        'total_node_duration_ms', node_summary.total_node_duration_ms,
+                        'node_prompt_tokens', node_summary.node_prompt_tokens,
+                        'node_completion_tokens', node_summary.node_completion_tokens,
+                        'node_total_tokens', node_summary.node_total_tokens,
+                        'document_section_count', section_summary.document_section_count,
+                        'prompt_a_artifact_count', artifact_summary.prompt_a_artifact_count,
+                        'prompt_c_artifact_count', artifact_summary.prompt_c_artifact_count,
+                        'final_snapshot_id', final_snapshot.snapshot_id,
+                        'final_snapshot_created_at', final_snapshot.final_snapshot_created_at,
+                        'canonical_fact_count', COALESCE(
+                            materialized_summary.canonical_fact_count,
+                            final_snapshot.entry_count,
+                            0
+                        ),
+                        'fact_relation_count', COALESCE(
+                            materialized_summary.fact_relation_count,
+                            final_snapshot.relation_count,
+                            0
+                        ),
+                        'claim_observation_count', COALESCE(
+                            final_snapshot.claim_observation_count,
+                            0
+                        ),
+                        'registry_update_count', COALESCE(final_snapshot.update_count, 0),
+                        'published_surface_count', COALESCE(
+                            materialized_summary.published_surface_count,
+                            0
+                        ),
+                        'published_runtime_fact_count', COALESCE(
+                            runtime_summary.published_runtime_fact_count,
+                            0
+                        ),
+                        'published_at', now()
+                    )
+                ),
+                updated_at = now()
+            FROM run_summary,
+                 node_summary,
+                 section_summary,
+                 artifact_summary,
+                 final_snapshot,
+                 materialized_summary,
+                 runtime_summary
+            WHERE document.project_id = $1::uuid
+              AND document.document_id = $2
+            """,
+            project_id,
+            document_id,
+            processing_run_id,
+        )
+
     async def purge_transient_processing_workspace_after_publication(
         self,
         *,
@@ -2606,7 +2785,7 @@ class KnowledgeWorkbenchRepository(
         document_id: str,
         processing_run_id: str,
     ) -> None:
-        """Delete transient processing workspace after successful publication.
+        """Persist durable summary and delete transient workspace after publication.
 
         Durable state after publication:
         - the Workbench document row;
@@ -2626,6 +2805,12 @@ class KnowledgeWorkbenchRepository(
         """
 
         async with _optional_workbench_transaction(self._connection):
+            await self.persist_document_processing_summary_before_purge(
+                project_id=project_id,
+                document_id=document_id,
+                processing_run_id=processing_run_id,
+            )
+
             await self._connection.execute(
                 """
                 DELETE FROM execution_queue

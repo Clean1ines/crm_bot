@@ -75,7 +75,13 @@ async def test_publication_purge_removes_transient_retrieval_projections_but_not
 
     assert "delete from knowledge_retrieval_surface" not in joined_sql
     assert "delete from knowledge_entries" not in joined_sql
-    assert "entry_kind = 'faq_workbench_fact'" not in joined_sql
+
+    destructive_sql = "\n".join(
+        query
+        for query, _args in connection.execute_calls
+        if query.startswith("delete from ")
+    )
+    assert "entry_kind = 'faq_workbench_fact'" not in destructive_sql
 
     local_claim_delete = next(
         query
