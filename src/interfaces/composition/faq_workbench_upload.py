@@ -122,7 +122,7 @@ async def upload_faq_workbench_knowledge_file(
     upload_service = FaqWorkbenchUploadService(
         _workbench_repository(cast(asyncpg.Pool, pool)),
         WorkbenchParallelQueueAdapter(
-            connection=cast(WorkbenchParallelQueueConnection, queue_repo),
+            connection=cast(WorkbenchParallelQueueConnection, pool),
         ),
         id_factory=UuidIdFactory(),
     )
