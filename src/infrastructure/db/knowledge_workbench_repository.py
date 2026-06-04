@@ -47,6 +47,7 @@ from src.domain.project_plane.knowledge_workbench import (
     RegistryApplicationQueueItemStatus,
     ParallelDrainWorkCounts,
     ParallelProcessingIntegrityCounts,
+    FactRegistry,
     RegistryUpdateApplication,
 )
 from src.domain.project_plane.knowledge_workbench.local_claim_retrieval import (
@@ -1548,6 +1549,38 @@ class KnowledgeWorkbenchRepository(
             return None
         text = str(value).strip()
         return text or None
+
+    async def create_fact_registry(self, registry: FactRegistry) -> None:
+        await self._connection.execute(
+            """
+            INSERT INTO knowledge_workbench_fact_registries (
+                registry_id,
+                project_id,
+                document_id,
+                processing_run_id,
+                status,
+                version,
+                retention_state,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (registry_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                version = EXCLUDED.version,
+                retention_state = EXCLUDED.retention_state,
+                updated_at = EXCLUDED.updated_at
+            """,
+            registry.registry_id,
+            registry.project_id,
+            registry.document_id,
+            registry.processing_run_id,
+            registry.status.value,
+            registry.version,
+            "active_processing",
+            registry.created_at,
+            registry.updated_at,
+        )
 
     async def create_document(self, document: KnowledgeDocument) -> None:
         await self._connection.execute(
