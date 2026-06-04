@@ -55,7 +55,7 @@ def test_registry_snapshot_is_declared_as_separate_graph_node() -> None:
 def test_registry_snapshot_artifact_type_exists_in_runtime_domain() -> None:
     node_domain = _read(NODE_DOMAIN)
 
-    assert "REGISTRY_SNAPSHOT = \"registry_snapshot\"" in node_domain
+    assert 'REGISTRY_SNAPSHOT = "registry_snapshot"' in node_domain
 
 
 def test_registry_snapshot_has_dedicated_persisted_runtime_boundary() -> None:

@@ -4,7 +4,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, cast
 
 from src.application.ports.llm_json_invocation import LlmJsonInvocationPort
 from src.domain.project_plane.llm_routing import (
@@ -93,7 +93,7 @@ class GroqLlmJsonInvocationAdapter(LlmJsonInvocationPort):
         config: GroqLlmJsonInvocationConfig | None = None,
     ) -> GroqLlmJsonInvocationAdapter:
         return cls(
-            client=RotatingAsyncGroq(),
+            client=cast(GroqJsonClientLike, RotatingAsyncGroq()),
             config=config or GroqLlmJsonInvocationConfig(),
         )
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.abc
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -191,7 +192,9 @@ def test_parallel_queue_handler_factory_delegates_to_composition(monkeypatch) ->
         captured["coordinator_dependencies"] = dependencies
         return object()
 
-    monkeypatch.setattr(handler, "KnowledgeWorkbenchRepository", FakeKnowledgeWorkbenchRepository)
+    monkeypatch.setattr(
+        handler, "KnowledgeWorkbenchRepository", FakeKnowledgeWorkbenchRepository
+    )
     monkeypatch.setattr(
         handler,
         "make_workbench_canonicalization_barrier_service_from_repository",
@@ -226,19 +229,26 @@ def test_parallel_queue_handler_factory_delegates_to_composition(monkeypatch) ->
 
     assert barrier_dependencies.claim_observations_runner is claim_runner
     assert barrier_dependencies.llm_json_invocation is llm
-    assert barrier_dependencies.registry_application_service is registry_application_service
+    assert (
+        barrier_dependencies.registry_application_service
+        is registry_application_service
+    )
     assert barrier_dependencies.canonicalization_barrier_service is None
 
     assert coordinator_dependencies.claim_observations_runner is claim_runner
     assert coordinator_dependencies.llm_json_invocation is llm
-    assert coordinator_dependencies.registry_application_service is registry_application_service
+    assert (
+        coordinator_dependencies.registry_application_service
+        is registry_application_service
+    )
     assert coordinator_dependencies.canonicalization_barrier_service is not None
 
 
-
-
 def test_parallel_queue_handler_no_longer_hand_builds_coordinator_services() -> None:
-    source = handler.__loader__.get_source(handler.__name__)  # type: ignore[union-attr]
+    loader = handler.__loader__
+    assert isinstance(loader, importlib.abc.InspectLoader)
+    source = loader.get_source(handler.__name__)
+    assert source is not None
 
     assert "make_workbench_parallel_processing_coordinator_from_repository" in source
     assert "make_workbench_canonicalization_barrier_service_from_repository" in source
@@ -248,6 +258,8 @@ def test_parallel_queue_handler_no_longer_hand_builds_coordinator_services() -> 
     assert "FaqWorkbenchRegistryApplicationWorkItemProcessorService" not in source
     assert "_instantiate_with_available_kwargs" not in source
     assert "inspect.signature" not in source
+
+
 class FakeGenerator:
     pass
 
@@ -256,7 +268,9 @@ class FakePersistenceService:
     pass
 
 
-def test_parallel_queue_handler_builds_default_claim_observations_generator_with_groq_best_path(monkeypatch) -> None:
+def test_parallel_queue_handler_builds_default_claim_observations_generator_with_groq_best_path(
+    monkeypatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeGroqLlmJsonInvocationAdapter:
@@ -300,10 +314,14 @@ def test_parallel_queue_handler_builds_default_claim_observations_generator_with
     )
 
 
-def test_parallel_queue_handler_builds_default_claim_observations_runner(monkeypatch) -> None:
+def test_parallel_queue_handler_builds_default_claim_observations_runner(
+    monkeypatch,
+) -> None:
     captured: dict[str, object] = {}
 
-    def fake_make_generator(*, llm_json_invocation: object | None = None, prompt_path: Path):
+    def fake_make_generator(
+        *, llm_json_invocation: object | None = None, prompt_path: Path
+    ):
         captured["llm_json_invocation"] = llm_json_invocation
         captured["prompt_path"] = prompt_path
         return FakeGenerator()
@@ -345,14 +363,18 @@ def test_parallel_queue_handler_builds_default_claim_observations_runner(monkeyp
     assert runner.__class__.__name__ == "DefaultClaimObservationsRunner"
     assert runner.repository is repository
     assert runner.generator.__class__ is FakeGenerator
-    assert runner.persistence_service.__class__ is FakeFaqWorkbenchClaimObservationsService
+    assert (
+        runner.persistence_service.__class__ is FakeFaqWorkbenchClaimObservationsService
+    )
     assert captured["llm_json_invocation"] is llm
     assert captured["prompt_path"] == Path("custom_prompt.txt")
     assert captured["repository"] is repository
     assert captured["id_factory"] is id_factory
 
 
-def test_parallel_queue_handler_dependencies_build_default_runner_when_not_injected(monkeypatch) -> None:
+def test_parallel_queue_handler_dependencies_build_default_runner_when_not_injected(
+    monkeypatch,
+) -> None:
     captured: dict[str, object] = {}
 
     def fake_make_runner(**kwargs):
@@ -363,7 +385,9 @@ def test_parallel_queue_handler_dependencies_build_default_runner_when_not_injec
         captured["barrier_dependencies"] = dependencies
         return object()
 
-    monkeypatch.setattr(handler, "make_workbench_claim_observations_runner", fake_make_runner)
+    monkeypatch.setattr(
+        handler, "make_workbench_claim_observations_runner", fake_make_runner
+    )
     monkeypatch.setattr(
         handler,
         "make_workbench_canonicalization_barrier_service_from_repository",
@@ -382,7 +406,9 @@ def test_parallel_queue_handler_dependencies_build_default_runner_when_not_injec
         claim_observations_prompt_path=Path("prompt-a.txt"),
     )
 
-    assert dependencies.claim_observations_runner.__class__ is FakeClaimObservationsRunner
+    assert (
+        dependencies.claim_observations_runner.__class__ is FakeClaimObservationsRunner
+    )
     assert dependencies.canonicalization_barrier_service is not None
     assert captured["runner_kwargs"]["repository"] is repository
     assert captured["runner_kwargs"]["id_factory"] is id_factory
@@ -393,14 +419,22 @@ def test_parallel_queue_handler_dependencies_build_default_runner_when_not_injec
     )
 
 
-def test_parallel_queue_handler_no_longer_requires_manual_claim_observations_runner() -> None:
-    source = handler.__loader__.get_source(handler.__name__)  # type: ignore[union-attr]
+def test_parallel_queue_handler_no_longer_requires_manual_claim_observations_runner() -> (
+    None
+):
+    loader = handler.__loader__
+    assert isinstance(loader, importlib.abc.InspectLoader)
+    source = loader.get_source(handler.__name__)
+    assert source is not None
 
     assert "make_workbench_claim_observations_runner" in source
     assert "make_workbench_claim_observations_generator" in source
     assert "GroqLlmJsonInvocationAdapter.create_default()" in source
     assert "faq_surface_claim_observations.ru.txt" in source
-    assert "parallel queue handler requires " + "claim_observations_runner" not in source
+    assert (
+        "parallel queue handler requires " + "claim_observations_runner" not in source
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class FakeParallelCycle:
@@ -424,7 +458,9 @@ def test_parallel_handler_terminal_guard_accepts_terminal_success() -> None:
     )
 
 
-def test_parallel_handler_terminal_guard_retries_when_max_cycles_exhausted_with_work_left() -> None:
+def test_parallel_handler_terminal_guard_retries_when_max_cycles_exhausted_with_work_left() -> (
+    None
+):
     with pytest.raises(TransientJobError, match="max_cycles"):
         handler._ensure_parallel_processing_terminal_result(
             FakeParallelResult(
@@ -450,7 +486,9 @@ def test_parallel_handler_terminal_guard_retries_when_max_cycles_exhausted_with_
         "keep_draining",
     ],
 )
-def test_parallel_handler_terminal_guard_retries_transient_blocked_terminal_cycles(outcome: str) -> None:
+def test_parallel_handler_terminal_guard_retries_transient_blocked_terminal_cycles(
+    outcome: str,
+) -> None:
     with pytest.raises(TransientJobError, match=outcome):
         handler._ensure_parallel_processing_terminal_result(
             FakeParallelResult(
@@ -464,7 +502,9 @@ def test_parallel_handler_terminal_guard_retries_transient_blocked_terminal_cycl
         )
 
 
-def test_parallel_handler_terminal_guard_fails_failed_terminal_cycles_permanently() -> None:
+def test_parallel_handler_terminal_guard_fails_failed_terminal_cycles_permanently() -> (
+    None
+):
     with pytest.raises(PermanentJobError, match="failed terminal"):
         handler._ensure_parallel_processing_terminal_result(
             FakeParallelResult(
@@ -479,7 +519,9 @@ def test_parallel_handler_terminal_guard_fails_failed_terminal_cycles_permanentl
 
 
 @pytest.mark.asyncio
-async def test_parallel_handler_raises_retry_instead_of_returning_non_terminal_result() -> None:
+async def test_parallel_handler_raises_retry_instead_of_returning_non_terminal_result() -> (
+    None
+):
     class NonTerminalCoordinator:
         async def run_parallel_processing(self, command):
             return FakeParallelResult(

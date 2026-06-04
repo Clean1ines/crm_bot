@@ -26,7 +26,9 @@ def test_worker_loop_keeps_transient_and_permanent_paths_explicit() -> None:
     source = _read(WORKER)
 
     assert "except PermanentJobError as exc:" in source
-    assert "await queue_repo.complete_job(job_id, success=False, error=str(exc))" in source
+    assert (
+        "await queue_repo.complete_job(job_id, success=False, error=str(exc))" in source
+    )
     assert "except TransientJobError as exc:" in source
     assert "await queue_repo.fail_job(" in source
     assert "build_retry_decision(" in source

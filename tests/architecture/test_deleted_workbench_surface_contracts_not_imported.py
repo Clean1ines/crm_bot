@@ -24,7 +24,9 @@ FORBIDDEN = (
 # A separate node/retention cutover should decide whether to delete/rename it.
 
 
-def test_deleted_workbench_surface_contracts_are_not_imported_by_production_code() -> None:
+def test_deleted_workbench_surface_contracts_are_not_imported_by_production_code() -> (
+    None
+):
     chunks: list[str] = []
     for root in CHECKED_ROOTS:
         if not root.exists():

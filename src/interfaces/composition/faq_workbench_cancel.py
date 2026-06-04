@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, cast
+from typing import Callable, Protocol, cast
 
 import asyncpg
 
@@ -26,7 +26,7 @@ async def cancel_workbench_processing(
     document_id: str,
 ) -> dict[str, object]:
     async with cast(asyncpg.Pool, pool).acquire() as connection:
-        repository = KnowledgeWorkbenchRepository(connection)
+        repository = _workbench_repository(connection)
         service = WorkbenchCancelProcessingService(repository)
         result = await service.cancel_processing(
             WorkbenchCancelProcessingCommand(
@@ -42,3 +42,11 @@ __all__ = [
     "WorkbenchCancelProcessingRejectedError",
     "cancel_workbench_processing",
 ]
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)

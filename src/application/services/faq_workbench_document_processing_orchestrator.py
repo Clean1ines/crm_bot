@@ -22,7 +22,9 @@ class FaqWorkbenchDocumentProcessingOrchestrator:
     claim observations -> fact registry builder -> registry application.
     """
 
-    async def process_existing_document(self, *args: object, **kwargs: object) -> FaqWorkbenchDocumentProcessingResult:
+    async def process_existing_document(
+        self, *args: object, **kwargs: object
+    ) -> FaqWorkbenchDocumentProcessingResult:
         raise RetiredSequentialWorkbenchOrchestratorError(
             "Sequential FAQ Workbench orchestrator is retired; use parallel Workbench processing."
         )

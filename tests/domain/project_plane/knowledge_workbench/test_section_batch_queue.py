@@ -160,7 +160,10 @@ def test_section_batch_item_lifecycle_records_worker_and_registry_queue_link() -
         queue_item=leased,
         claim_observations_node_run_id="node-run-claim-observations-1",
     )
-    assert claim_observations_persisted.status is SectionBatchQueueItemStatus.CLAIM_OBSERVATIONS_PERSISTED
+    assert (
+        claim_observations_persisted.status
+        is SectionBatchQueueItemStatus.CLAIM_OBSERVATIONS_PERSISTED
+    )
     assert claim_observations_persisted.claim_observations_node_run_id == (
         "node-run-claim-observations-1"
     )

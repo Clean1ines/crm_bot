@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 
+from src.application.ports.knowledge_workbench import (
+    KnowledgeWorkbenchRegistryApplicationRepositoryPort,
+)
 from src.application.services.faq_workbench_registry_application_service import (
     ApplyFactRegistrySnapshotCommand,
     FaqWorkbenchRegistryApplicationService,
@@ -172,7 +175,10 @@ class FaqWorkbenchRegistryApplicationWorkItemProcessorService:
         self._registry_application_service = (
             registry_application_service
             or FaqWorkbenchRegistryApplicationService(
-                repository,
+                cast(
+                    KnowledgeWorkbenchRegistryApplicationRepositoryPort,
+                    repository,
+                ),
                 id_factory=id_factory,
                 time_provider=self._time_provider,
             )
@@ -303,13 +309,11 @@ class FaqWorkbenchRegistryApplicationWorkItemProcessorService:
         applied_item: RegistryApplicationQueueItem,
         updated_at: datetime,
     ) -> None:
-        linked_section_item = (
-            await self._repository.get_section_batch_queue_item_by_registry_application_queue_item_id(
-                project_id=applied_item.project_id,
-                document_id=applied_item.document_id,
-                processing_run_id=applied_item.processing_run_id,
-                registry_application_queue_item_id=applied_item.queue_item_id,
-            )
+        linked_section_item = await self._repository.get_section_batch_queue_item_by_registry_application_queue_item_id(
+            project_id=applied_item.project_id,
+            document_id=applied_item.document_id,
+            processing_run_id=applied_item.processing_run_id,
+            registry_application_queue_item_id=applied_item.queue_item_id,
         )
         if linked_section_item is None:
             return
@@ -355,12 +359,14 @@ class FaqWorkbenchRegistryApplicationWorkItemProcessorService:
         self,
         queue_item: RegistryApplicationQueueItem,
     ) -> ProcessingNodeArtifact:
-        artifact = await self._repository.get_processing_node_artifact_by_node_run_id_and_type(
-            project_id=queue_item.project_id,
-            document_id=queue_item.document_id,
-            processing_run_id=queue_item.processing_run_id,
-            node_run_id=queue_item.source_node_run_id,
-            artifact_type=ProcessingNodeArtifactType.PARSED_LLM_OUTPUT,
+        artifact = (
+            await self._repository.get_processing_node_artifact_by_node_run_id_and_type(
+                project_id=queue_item.project_id,
+                document_id=queue_item.document_id,
+                processing_run_id=queue_item.processing_run_id,
+                node_run_id=queue_item.source_node_run_id,
+                artifact_type=ProcessingNodeArtifactType.PARSED_LLM_OUTPUT,
+            )
         )
         if artifact is None:
             raise DomainInvariantError(
@@ -374,7 +380,9 @@ class FaqWorkbenchRegistryApplicationWorkItemProcessorService:
     ) -> tuple[dict[str, JsonValue], dict[str, JsonValue]]:
         payload = artifact.payload_json
         if not isinstance(payload, dict):
-            raise DomainInvariantError("fact registry artifact payload must be an object")
+            raise DomainInvariantError(
+                "fact registry artifact payload must be an object"
+            )
 
         fact_registry = payload.get("fact_registry")
         if not isinstance(fact_registry, dict):

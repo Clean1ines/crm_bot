@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 
 from .local_claim_search import LocalClaimSearchDocument
-from .shared import DomainInvariantError, JsonValue
+from .shared import DomainInvariantError
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +17,9 @@ class LocalClaimSimilaritySignal:
         if not self.signal_type.strip():
             raise DomainInvariantError("local claim similarity signal type is required")
         if self.score < 0 or self.score > 1:
-            raise DomainInvariantError("local claim similarity signal score must be in [0, 1]")
+            raise DomainInvariantError(
+                "local claim similarity signal score must be in [0, 1]"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,9 +35,13 @@ class LocalClaimSimilarityEdge:
         if not self.target_search_document_id.strip():
             raise DomainInvariantError("local claim similarity edge target is required")
         if self.source_search_document_id == self.target_search_document_id:
-            raise DomainInvariantError("local claim similarity edge cannot target itself")
+            raise DomainInvariantError(
+                "local claim similarity edge cannot target itself"
+            )
         if self.score < 0 or self.score > 1:
-            raise DomainInvariantError("local claim similarity edge score must be in [0, 1]")
+            raise DomainInvariantError(
+                "local claim similarity edge score must be in [0, 1]"
+            )
         if not self.signals:
             raise DomainInvariantError("local claim similarity edge requires signals")
 
@@ -53,11 +59,17 @@ class LocalClaimCandidateGroup:
         if not self.search_document_ids:
             raise DomainInvariantError("local claim candidate group requires members")
         if len(set(self.search_document_ids)) != len(self.search_document_ids):
-            raise DomainInvariantError("local claim candidate group has duplicate members")
+            raise DomainInvariantError(
+                "local claim candidate group has duplicate members"
+            )
         if self.edge_count < 0:
-            raise DomainInvariantError("local claim candidate group edge_count must be non-negative")
+            raise DomainInvariantError(
+                "local claim candidate group edge_count must be non-negative"
+            )
         if self.max_score < 0 or self.max_score > 1:
-            raise DomainInvariantError("local claim candidate group max_score must be in [0, 1]")
+            raise DomainInvariantError(
+                "local claim candidate group max_score must be in [0, 1]"
+            )
 
 
 def build_local_claim_similarity_edges(
@@ -88,7 +100,16 @@ def build_local_claim_similarity_edges(
                 )
             )
 
-    return tuple(sorted(edges, key=lambda item: (-item.score, item.source_search_document_id, item.target_search_document_id)))
+    return tuple(
+        sorted(
+            edges,
+            key=lambda item: (
+                -item.score,
+                item.source_search_document_id,
+                item.target_search_document_id,
+            ),
+        )
+    )
 
 
 def build_local_claim_candidate_groups(
@@ -98,7 +119,9 @@ def build_local_claim_candidate_groups(
     document_ids = tuple(document.search_document_id for document in documents)
     document_id_set = set(document_ids)
 
-    adjacency: dict[str, set[str]] = {document_id: set() for document_id in document_ids}
+    adjacency: dict[str, set[str]] = {
+        document_id: set() for document_id in document_ids
+    }
     edge_scores_by_pair: dict[frozenset[str], float] = {}
 
     for edge in edges:
@@ -112,7 +135,9 @@ def build_local_claim_candidate_groups(
             )
         adjacency[edge.source_search_document_id].add(edge.target_search_document_id)
         adjacency[edge.target_search_document_id].add(edge.source_search_document_id)
-        edge_scores_by_pair[frozenset((edge.source_search_document_id, edge.target_search_document_id))] = edge.score
+        edge_scores_by_pair[
+            frozenset((edge.source_search_document_id, edge.target_search_document_id))
+        ] = edge.score
 
     groups: list[LocalClaimCandidateGroup] = []
     visited: set[str] = set()
@@ -134,7 +159,9 @@ def build_local_claim_candidate_groups(
                 visited.add(neighbor)
                 stack.append(neighbor)
 
-        ordered_component = tuple(document_id for document_id in document_ids if document_id in set(component))
+        ordered_component = tuple(
+            document_id for document_id in document_ids if document_id in set(component)
+        )
         component_pairs = {
             pair: score
             for pair, score in edge_scores_by_pair.items()
@@ -415,13 +442,6 @@ def _parse_triple_text(triple_text: str) -> tuple[str, str, str]:
     return subject.strip(), predicate.strip(), object_.strip()
 
 
-__all__ = [
-    "LocalClaimCandidateGroup",
-    "LocalClaimSimilarityEdge",
-    "LocalClaimSimilaritySignal",
-    "build_local_claim_candidate_groups",
-    "build_local_claim_similarity_edges",
-]
 @dataclass(frozen=True, slots=True)
 class LocalClaimHybridSearchHit:
     source_search_document_id: str
@@ -454,19 +474,33 @@ class LocalClaimHybridSearchTrace:
 
     def __post_init__(self) -> None:
         if self.document_count < 0:
-            raise DomainInvariantError("hybrid search trace document_count must be non-negative")
+            raise DomainInvariantError(
+                "hybrid search trace document_count must be non-negative"
+            )
         if self.token_posting_count < 0:
-            raise DomainInvariantError("hybrid search trace token_posting_count must be non-negative")
+            raise DomainInvariantError(
+                "hybrid search trace token_posting_count must be non-negative"
+            )
         if self.ngram_posting_count < 0:
-            raise DomainInvariantError("hybrid search trace ngram_posting_count must be non-negative")
+            raise DomainInvariantError(
+                "hybrid search trace ngram_posting_count must be non-negative"
+            )
         if self.candidate_pair_count < 0:
-            raise DomainInvariantError("hybrid search trace candidate_pair_count must be non-negative")
+            raise DomainInvariantError(
+                "hybrid search trace candidate_pair_count must be non-negative"
+            )
         if self.emitted_edge_count < 0:
-            raise DomainInvariantError("hybrid search trace emitted_edge_count must be non-negative")
+            raise DomainInvariantError(
+                "hybrid search trace emitted_edge_count must be non-negative"
+            )
         if self.min_score < 0 or self.min_score > 1:
-            raise DomainInvariantError("hybrid search trace min_score must be in [0, 1]")
+            raise DomainInvariantError(
+                "hybrid search trace min_score must be in [0, 1]"
+            )
         if self.candidate_limit_per_document <= 0:
-            raise DomainInvariantError("hybrid search trace candidate_limit_per_document must be positive")
+            raise DomainInvariantError(
+                "hybrid search trace candidate_limit_per_document must be positive"
+            )
 
 
 def build_local_claim_hybrid_similarity_edges(
@@ -490,9 +524,13 @@ def build_local_claim_hybrid_similarity_edges_with_trace(
     candidate_limit_per_document: int = 80,
 ) -> tuple[tuple[LocalClaimSimilarityEdge, ...], LocalClaimHybridSearchTrace]:
     if min_score < 0 or min_score > 1:
-        raise DomainInvariantError("local claim hybrid retrieval min_score must be in [0, 1]")
+        raise DomainInvariantError(
+            "local claim hybrid retrieval min_score must be in [0, 1]"
+        )
     if candidate_limit_per_document <= 0:
-        raise DomainInvariantError("local claim hybrid retrieval candidate_limit_per_document must be positive")
+        raise DomainInvariantError(
+            "local claim hybrid retrieval candidate_limit_per_document must be positive"
+        )
 
     ordered_documents = tuple(documents)
     if len(ordered_documents) < 2:
@@ -569,9 +607,13 @@ def search_local_claim_hybrid_candidates(
     candidate_limit: int = 80,
 ) -> tuple[LocalClaimHybridSearchHit, ...]:
     if min_score < 0 or min_score > 1:
-        raise DomainInvariantError("local claim hybrid search min_score must be in [0, 1]")
+        raise DomainInvariantError(
+            "local claim hybrid search min_score must be in [0, 1]"
+        )
     if candidate_limit <= 0:
-        raise DomainInvariantError("local claim hybrid search candidate_limit must be positive")
+        raise DomainInvariantError(
+            "local claim hybrid search candidate_limit must be positive"
+        )
 
     candidate_ids = index.candidate_ids_for(document)
     hits: list[LocalClaimHybridSearchHit] = []
@@ -610,20 +652,25 @@ class _HybridLocalClaimIndex:
     def __init__(self, documents: tuple[LocalClaimSearchDocument, ...]) -> None:
         self.documents = documents
         self.documents_by_id = {
-            document.search_document_id: document
-            for document in documents
+            document.search_document_id: document for document in documents
         }
         if len(self.documents_by_id) != len(documents):
-            raise DomainInvariantError("hybrid local claim search documents must be unique")
+            raise DomainInvariantError(
+                "hybrid local claim search documents must be unique"
+            )
 
         self.token_postings: dict[str, set[str]] = {}
         self.ngram_postings: dict[str, set[str]] = {}
 
         for document in documents:
             for token in _hybrid_tokens(document.search_text):
-                self.token_postings.setdefault(token, set()).add(document.search_document_id)
+                self.token_postings.setdefault(token, set()).add(
+                    document.search_document_id
+                )
             for ngram in _char_ngrams(document.search_text):
-                self.ngram_postings.setdefault(ngram, set()).add(document.search_document_id)
+                self.ngram_postings.setdefault(ngram, set()).add(
+                    document.search_document_id
+                )
 
     def candidate_ids_for(self, document: LocalClaimSearchDocument) -> tuple[str, ...]:
         candidate_ids: set[str] = set()
@@ -640,7 +687,10 @@ class _HybridLocalClaimIndex:
             sorted(
                 candidate_ids,
                 key=lambda candidate_id: (
-                    0 if self.documents_by_id[candidate_id].document_id == document.document_id else 1,
+                    0
+                    if self.documents_by_id[candidate_id].document_id
+                    == document.document_id
+                    else 1,
                     str(self.documents_by_id[candidate_id].section_id),
                     candidate_id,
                 ),
@@ -818,7 +868,9 @@ def _append_controlled_predicate_signal(
     )
 
 
-def _char_ngram_overlap(left_text: str, right_text: str) -> tuple[float, tuple[str, ...]]:
+def _char_ngram_overlap(
+    left_text: str, right_text: str
+) -> tuple[float, tuple[str, ...]]:
     return _jaccard_like_overlap(_char_ngrams(left_text), _char_ngrams(right_text))
 
 
@@ -828,17 +880,12 @@ def _char_ngrams(text: str, *, size: int = 4) -> set[str]:
     if len(compact) < size:
         return {compact} if compact else set()
     return {
-        compact[index : index + size]
-        for index in range(0, len(compact) - size + 1)
+        compact[index : index + size] for index in range(0, len(compact) - size + 1)
     }
 
 
 def _hybrid_tokens(text: str) -> set[str]:
-    return {
-        token
-        for token in _tokens(text)
-        if token not in _HYBRID_STOP_WORDS
-    }
+    return {token for token in _tokens(text) if token not in _HYBRID_STOP_WORDS}
 
 
 _HYBRID_STOP_WORDS = frozenset(
@@ -865,21 +912,15 @@ _HYBRID_STOP_WORDS = frozenset(
     }
 )
 
-
-try:
-    __all__ = tuple(__all__) + (
-        "LocalClaimHybridSearchHit",
-        "LocalClaimHybridSearchTrace",
-        "build_local_claim_hybrid_similarity_edges",
-        "build_local_claim_hybrid_similarity_edges_with_trace",
-        "search_local_claim_hybrid_candidates",
-    )
-except NameError:
-    __all__ = (
-        "LocalClaimHybridSearchHit",
-        "LocalClaimHybridSearchTrace",
-        "build_local_claim_hybrid_similarity_edges",
-        "build_local_claim_hybrid_similarity_edges_with_trace",
-        "search_local_claim_hybrid_candidates",
-    )
-
+__all__ = (
+    "LocalClaimHybridSearchHit",
+    "LocalClaimHybridSearchTrace",
+    "build_local_claim_hybrid_similarity_edges",
+    "build_local_claim_hybrid_similarity_edges_with_trace",
+    "search_local_claim_hybrid_candidates",
+    "LocalClaimCandidateGroup",
+    "LocalClaimSimilarityEdge",
+    "LocalClaimSimilaritySignal",
+    "build_local_claim_candidate_groups",
+    "build_local_claim_similarity_edges",
+)

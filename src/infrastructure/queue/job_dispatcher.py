@@ -52,11 +52,11 @@ class JobDispatcher:
             await handle_notify_manager(
                 job,
                 thread_read_repo=self.thread_read_repo,
-                db_pool=self.db_pool,
                 project_repo=self.project_repo,
                 telegram_sender=self.telegram_sender,
                 redis_getter=self.redis_getter,
                 worker_id=worker_id,
+                db_pool=self.db_pool,
             )
             return
 
@@ -78,7 +78,6 @@ class JobDispatcher:
         if task_type == TASK_PROCESS_WORKBENCH_DOCUMENT:
             await handle_process_workbench_document(
                 job,
-                db_pool=self.db_pool,
             )
             return
 

@@ -181,7 +181,10 @@ class ParallelWorkbenchProcessingCycle:
     @property
     def made_progress(self) -> bool:
         return (
-            any(_outcome_made_progress(outcome) for outcome in self.section_worker_outcomes)
+            any(
+                _outcome_made_progress(outcome)
+                for outcome in self.section_worker_outcomes
+            )
             or any(
                 _outcome_made_progress(outcome)
                 for outcome in self.canonicalization_barrier_outcomes
@@ -205,7 +208,8 @@ class ParallelWorkbenchProcessingCycle:
         return sum(
             1
             for outcome in self.canonicalization_barrier_outcomes
-            if outcome not in {
+            if outcome
+            not in {
                 "no_work",
                 "skip_terminal",
                 "blocked_by_sections",
@@ -253,9 +257,11 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
         *,
         section_processor: SectionWorkItemProcessorPort,
         registry_processor: RegistryApplicationWorkItemProcessorPort,
-        canonicalization_barrier_processor: CanonicalizationBarrierProcessorPort | None = None,
+        canonicalization_barrier_processor: CanonicalizationBarrierProcessorPort
+        | None = None,
         drain_counts_provider: ParallelDrainCountsProviderPort | None = None,
-        lifecycle_completion_port: ParallelProcessingLifecycleCompletionPort | None = None,
+        lifecycle_completion_port: ParallelProcessingLifecycleCompletionPort
+        | None = None,
     ) -> None:
         self._section_processor = section_processor
         self._registry_processor = registry_processor
@@ -380,7 +386,11 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
         section_outcomes: tuple[str, ...],
     ) -> str:
         if self._drain_counts_provider is None:
-            return "can_finalize" if _section_wave_is_drained(section_outcomes) else "blocked_by_sections"
+            return (
+                "can_finalize"
+                if _section_wave_is_drained(section_outcomes)
+                else "blocked_by_sections"
+            )
 
         counts = await self._drain_counts_provider.get_parallel_processing_drain_counts(
             project_id=command.project_id,

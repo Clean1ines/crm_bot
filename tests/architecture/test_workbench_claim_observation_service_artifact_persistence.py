@@ -2,7 +2,10 @@ from pathlib import Path
 
 SERVICE = Path("src/application/services/faq_workbench_claim_observations_service.py")
 
-def test_claim_observations_service_persists_claim_observations_as_node_artifacts_not_old_rows() -> None:
+
+def test_claim_observations_service_persists_claim_observations_as_node_artifacts_not_old_rows() -> (
+    None
+):
     source = SERVICE.read_text(encoding="utf-8")
     assert "claim_observations: tuple[ClaimObservation" in source
     assert "claim_observation_ids" in source

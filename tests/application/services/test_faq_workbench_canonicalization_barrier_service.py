@@ -247,7 +247,9 @@ def _unit(local_ref: str) -> LocalClaimCanonicalizationUnit:
     )
 
 
-def _retrieval_result(*units: LocalClaimCanonicalizationUnit) -> DocumentLocalClaimRetrievalResult:
+def _retrieval_result(
+    *units: LocalClaimCanonicalizationUnit,
+) -> DocumentLocalClaimRetrievalResult:
     return DocumentLocalClaimRetrievalResult(
         search_documents=(),
         similarity_edges=(),
@@ -286,8 +288,8 @@ def _service(
 
 @pytest.mark.asyncio
 async def test_canonicalization_barrier_returns_no_work_when_no_units() -> None:
-    service, repository, retrieval, generator, merge_service, application_service = _service(
-        retrieval_result=_retrieval_result()
+    service, repository, retrieval, generator, merge_service, application_service = (
+        _service(retrieval_result=_retrieval_result())
     )
 
     result = await service.process_document_canonicalization_barrier(
@@ -313,9 +315,11 @@ async def test_canonicalization_barrier_returns_no_work_when_no_units() -> None:
 
 
 @pytest.mark.asyncio
-async def test_canonicalization_barrier_runs_prompt_c_persists_and_applies_snapshot_per_unit() -> None:
-    service, _repository, _retrieval, generator, merge_service, application_service = _service(
-        retrieval_result=_retrieval_result(_unit("c1"), _unit("c2"))
+async def test_canonicalization_barrier_runs_prompt_c_persists_and_applies_snapshot_per_unit() -> (
+    None
+):
+    service, _repository, _retrieval, generator, merge_service, application_service = (
+        _service(retrieval_result=_retrieval_result(_unit("c1"), _unit("c2")))
     )
 
     result = await service.process_document_canonicalization_barrier(
@@ -340,12 +344,18 @@ async def test_canonicalization_barrier_runs_prompt_c_persists_and_applies_snaps
     ]
     assert generator.commands[0].canonicalization_unit.unit_id == "unit-c1"
     assert generator.commands[1].canonicalization_unit.unit_id == "unit-c2"
-    assert generator.commands[0].registry_snapshot_payload["fact_registry"][
-        "canonical_facts"
-    ] == []
-    assert generator.commands[1].registry_snapshot_payload["fact_registry"][
-        "canonical_facts"
-    ][0]["fact_id"] == "fact-1"
+    assert (
+        generator.commands[0].registry_snapshot_payload["fact_registry"][
+            "canonical_facts"
+        ]
+        == []
+    )
+    assert (
+        generator.commands[1].registry_snapshot_payload["fact_registry"][
+            "canonical_facts"
+        ][0]["fact_id"]
+        == "fact-1"
+    )
 
     assert [command.node_run_id for command in merge_service.commands] == [
         "node-run-1",
@@ -388,11 +398,17 @@ def test_canonicalization_barrier_command_validates_required_fields() -> None:
             worker_id="worker-1",
             min_similarity_score=2.0,
         )
+
+
 @pytest.mark.asyncio
-async def test_canonicalization_barrier_is_document_level_idempotent_when_completion_marker_exists() -> None:
-    service, repository, retrieval, generator, merge_service, application_service = _service(
-        retrieval_result=_retrieval_result(_unit("c1")),
-        canonicalization_completed=True,
+async def test_canonicalization_barrier_is_document_level_idempotent_when_completion_marker_exists() -> (
+    None
+):
+    service, repository, retrieval, generator, merge_service, application_service = (
+        _service(
+            retrieval_result=_retrieval_result(_unit("c1")),
+            canonicalization_completed=True,
+        )
     )
 
     result = await service.process_document_canonicalization_barrier(

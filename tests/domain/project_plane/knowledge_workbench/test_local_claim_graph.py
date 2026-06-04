@@ -34,7 +34,9 @@ def _payload() -> dict[str, object]:
     }
 
 
-def test_local_claim_graph_from_claim_observations_payload_maps_extraction_material() -> None:
+def test_local_claim_graph_from_claim_observations_payload_maps_extraction_material() -> (
+    None
+):
     graph = local_claim_graph_from_claim_observations_payload(
         _payload(),
         project_id="project-1",
@@ -54,8 +56,11 @@ def test_local_claim_graph_from_claim_observations_payload_maps_extraction_mater
 
 def test_local_claim_graph_rejects_later_stage_fields_in_prompt_a_payload() -> None:
     payload = _payload()
-    claim = payload["claim_observations"][0]  # type: ignore[index]
-    claim["suggested_" + "registry_action"] = "create_new_claim"  # type: ignore[index]
+    claims = payload["claim_observations"]
+    assert isinstance(claims, list)
+    claim = claims[0]
+    assert isinstance(claim, dict)
+    claim["suggested_" + "registry_action"] = "create_new_claim"
 
     with pytest.raises(DomainInvariantError, match="later-stage fields forbidden"):
         local_claim_graph_from_claim_observations_payload(
@@ -80,8 +85,11 @@ def test_local_claim_graph_requires_non_empty_claim_observations() -> None:
 
 def test_local_claim_graph_requires_triples() -> None:
     payload = _payload()
-    claim = payload["claim_observations"][0]  # type: ignore[index]
-    claim["triples"] = []  # type: ignore[index]
+    claims = payload["claim_observations"]
+    assert isinstance(claims, list)
+    claim = claims[0]
+    assert isinstance(claim, dict)
+    claim["triples"] = []
 
     with pytest.raises(DomainInvariantError, match="non-empty triples"):
         local_claim_graph_from_claim_observations_payload(

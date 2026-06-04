@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Protocol, cast
+from typing import Callable, Protocol, cast
 
 import asyncpg
 
 from src.application.workbench_commands.delete_document import (
     WorkbenchDocumentDeleteCommand,
     WorkbenchDocumentDeleteNotFoundError,
+    WorkbenchDocumentDeleteRepositoryPort,
     WorkbenchDocumentDeleteRejectedError,
     WorkbenchDocumentDeleteService,
 )
@@ -26,8 +27,10 @@ async def delete_workbench_document(
     document_id: str,
 ) -> dict[str, object]:
     async with cast(asyncpg.Pool, pool).acquire() as connection:
-        repository = KnowledgeWorkbenchRepository(connection)
-        service = WorkbenchDocumentDeleteService(repository)
+        repository = _workbench_repository(connection)
+        service = WorkbenchDocumentDeleteService(
+            cast(WorkbenchDocumentDeleteRepositoryPort, repository)
+        )
         result = await service.delete_document(
             WorkbenchDocumentDeleteCommand(
                 project_id=project_id,
@@ -42,3 +45,11 @@ __all__ = [
     "WorkbenchDocumentDeleteRejectedError",
     "delete_workbench_document",
 ]
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)

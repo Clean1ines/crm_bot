@@ -74,9 +74,7 @@ def test_publish_ready_command_requires_document_id() -> None:
 
 
 def test_publish_ready_command_does_not_use_surface_session_contract() -> None:
-    source = (
-        "src/application/workbench_commands/publish_ready.py"
-    )
+    source = "src/application/workbench_commands/publish_ready.py"
     text = __import__("pathlib").Path(source).read_text(encoding="utf-8")
 
     assert "publish_latest_reconciled_fact_registry_snapshot" in text

@@ -514,13 +514,13 @@ def _nullable_text(value: object) -> str | None:
 def _int(value: object) -> int:
     if value is None:
         return 0
-    return int(value)
+    return int(str(value))
 
 
 def _nullable_float(value: object) -> float | None:
     if value is None:
         return None
-    return float(value)
+    return float(str(value))
 
 
 def _iso(value: object) -> str | None:

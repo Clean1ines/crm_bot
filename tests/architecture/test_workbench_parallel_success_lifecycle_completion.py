@@ -29,7 +29,9 @@ def test_parallel_success_lifecycle_completion_is_declared_in_repository_port() 
     assert "async def mark_parallel_processing_completed" in source
 
 
-def test_parallel_success_lifecycle_completion_updates_document_and_processing_run() -> None:
+def test_parallel_success_lifecycle_completion_updates_document_and_processing_run() -> (
+    None
+):
     source = _read(REPOSITORY)
 
     assert "async def mark_parallel_processing_completed" in source
@@ -41,7 +43,9 @@ def test_parallel_success_lifecycle_completion_updates_document_and_processing_r
     assert "completed_at = COALESCE(completed_at, now())" in source
 
 
-def test_parallel_success_lifecycle_completion_is_not_triggered_on_blocking_outcomes() -> None:
+def test_parallel_success_lifecycle_completion_is_not_triggered_on_blocking_outcomes() -> (
+    None
+):
     source = _read(COORDINATOR)
     terminal_function = source.split("def _cycle_is_terminal_success", 1)[1].split(
         "def _section_wave_is_drained",

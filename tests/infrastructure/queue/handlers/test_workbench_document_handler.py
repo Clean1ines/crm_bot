@@ -32,8 +32,12 @@ def test_legacy_workbench_document_payload_requires_ids() -> None:
 
 
 @pytest.mark.asyncio
-async def test_process_workbench_document_handler_rejects_legacy_sequential_task() -> None:
-    with pytest.raises(PermanentJobError, match="legacy process_workbench_document task is retired"):
+async def test_process_workbench_document_handler_rejects_legacy_sequential_task() -> (
+    None
+):
+    with pytest.raises(
+        PermanentJobError, match="legacy process_workbench_document task is retired"
+    ):
         await handle_process_workbench_document(
             FakeJob(
                 payload={
@@ -47,13 +51,18 @@ async def test_process_workbench_document_handler_rejects_legacy_sequential_task
 
 
 @pytest.mark.asyncio
-async def test_process_workbench_document_exhausted_hook_is_noop_for_retired_task() -> None:
-    assert await mark_process_workbench_document_exhausted(
-        FakeJob(
-            payload={
-                "project_id": "project-1",
-                "document_id": "document-1",
-                "processing_run_id": "processing-run-1",
-            }
+async def test_process_workbench_document_exhausted_hook_is_noop_for_retired_task() -> (
+    None
+):
+    assert (
+        await mark_process_workbench_document_exhausted(
+            FakeJob(
+                payload={
+                    "project_id": "project-1",
+                    "document_id": "document-1",
+                    "processing_run_id": "processing-run-1",
+                }
+            )
         )
-    ) is None
+        is None
+    )

@@ -88,7 +88,6 @@ class FakeDrainCountsProvider:
         return ParallelDrainWorkCounts()
 
 
-
 @dataclass(slots=True)
 class FakeLifecycleCompletionPort:
     calls: list[dict[str, str]] = field(default_factory=list)
@@ -110,7 +109,9 @@ class FakeLifecycleCompletionPort:
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_runs_canonicalization_barrier_after_section_wave_is_drained() -> None:
+async def test_parallel_processing_runs_canonicalization_barrier_after_section_wave_is_drained() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work", "no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -153,7 +154,9 @@ async def test_parallel_processing_runs_canonicalization_barrier_after_section_w
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_blocks_canonicalization_barrier_while_section_wave_makes_progress() -> None:
+async def test_parallel_processing_blocks_canonicalization_barrier_while_section_wave_makes_progress() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["claim_observations_persisted"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -176,9 +179,7 @@ async def test_parallel_processing_blocks_canonicalization_barrier_while_section
         )
     )
 
-    assert result.cycles[0].section_worker_outcomes == (
-        "claim_observations_persisted",
-    )
+    assert result.cycles[0].section_worker_outcomes == ("claim_observations_persisted",)
     assert result.cycles[0].canonicalization_barrier_outcomes == (
         "blocked_by_sections",
     )
@@ -187,7 +188,9 @@ async def test_parallel_processing_blocks_canonicalization_barrier_while_section
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_keeps_backward_compatible_empty_barrier_when_not_wired_yet() -> None:
+async def test_parallel_processing_keeps_backward_compatible_empty_barrier_when_not_wired_yet() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     registry_processor = FakeRegistryProcessor(outcomes=["no_work"])
 
@@ -212,7 +215,9 @@ async def test_parallel_processing_keeps_backward_compatible_empty_barrier_when_
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_treats_canonicalization_no_work_as_no_progress() -> None:
+async def test_parallel_processing_treats_canonicalization_no_work_as_no_progress() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["no_work"]
@@ -281,8 +286,12 @@ def test_parallel_canonicalization_barrier_command_validates_required_fields() -
             worker_id="worker",
             lease_seconds=0,
         )
+
+
 @pytest.mark.asyncio
-async def test_parallel_processing_uses_durable_drain_counts_before_canonicalization_barrier() -> None:
+async def test_parallel_processing_uses_durable_drain_counts_before_canonicalization_barrier() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work", "no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -319,7 +328,9 @@ async def test_parallel_processing_uses_durable_drain_counts_before_canonicaliza
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_blocks_canonicalization_when_durable_section_work_remains() -> None:
+async def test_parallel_processing_blocks_canonicalization_when_durable_section_work_remains() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -352,7 +363,9 @@ async def test_parallel_processing_blocks_canonicalization_when_durable_section_
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_blocks_canonicalization_when_durable_leases_remain() -> None:
+async def test_parallel_processing_blocks_canonicalization_when_durable_leases_remain() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -384,7 +397,9 @@ async def test_parallel_processing_blocks_canonicalization_when_durable_leases_r
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_blocks_canonicalization_when_durable_failures_remain() -> None:
+async def test_parallel_processing_blocks_canonicalization_when_durable_failures_remain() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -414,8 +429,11 @@ async def test_parallel_processing_blocks_canonicalization_when_durable_failures
     assert result.cycles[0].canonicalization_barrier_outcomes == ("failed",)
     assert not canonicalization_processor.commands
 
+
 @pytest.mark.asyncio
-async def test_parallel_processing_marks_lifecycle_completed_after_terminal_success_cycle() -> None:
+async def test_parallel_processing_marks_lifecycle_completed_after_terminal_success_cycle() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["already_canonicalized"]
@@ -453,7 +471,9 @@ async def test_parallel_processing_marks_lifecycle_completed_after_terminal_succ
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_does_not_mark_lifecycle_completed_when_barrier_is_blocked() -> None:
+async def test_parallel_processing_does_not_mark_lifecycle_completed_when_barrier_is_blocked() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["canonicalized"]
@@ -488,7 +508,9 @@ async def test_parallel_processing_does_not_mark_lifecycle_completed_when_barrie
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_does_not_mark_lifecycle_completed_on_wait_for_snapshot() -> None:
+async def test_parallel_processing_does_not_mark_lifecycle_completed_on_wait_for_snapshot() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["already_canonicalized"]
@@ -517,8 +539,11 @@ async def test_parallel_processing_does_not_mark_lifecycle_completed_on_wait_for
 
     assert lifecycle_completion.calls == []
 
+
 @pytest.mark.asyncio
-async def test_parallel_processing_treats_already_canonicalized_as_no_progress_for_completion() -> None:
+async def test_parallel_processing_treats_already_canonicalized_as_no_progress_for_completion() -> (
+    None
+):
     section_processor = FakeSectionProcessor(outcomes=["no_work"])
     canonicalization_processor = FakeCanonicalizationBarrierProcessor(
         outcomes=["already_canonicalized"]
@@ -555,13 +580,21 @@ async def test_parallel_processing_treats_already_canonicalized_as_no_progress_f
         }
     ]
 
-def test_parallel_processing_outcome_made_progress_treats_already_canonicalized_as_no_progress() -> None:
-    from src.application.services import faq_workbench_parallel_processing_coordinator_service as module
+
+def test_parallel_processing_outcome_made_progress_treats_already_canonicalized_as_no_progress() -> (
+    None
+):
+    from src.application.services import (
+        faq_workbench_parallel_processing_coordinator_service as module,
+    )
 
     assert module._outcome_made_progress("already_canonicalized") is False
     assert module._outcome_made_progress("canonicalized") is True
 
-def test_parallel_processing_run_loop_calls_success_lifecycle_before_terminal_break() -> None:
+
+def test_parallel_processing_run_loop_calls_success_lifecycle_before_terminal_break() -> (
+    None
+):
     from pathlib import Path
 
     source = Path(
@@ -574,7 +607,10 @@ def test_parallel_processing_run_loop_calls_success_lifecycle_before_terminal_br
 
     assert "if not cycle.made_progress:" in run_loop
     assert "await self._mark_success_lifecycle_if_terminal(" in run_loop
-    assert run_loop.index("await self._mark_success_lifecycle_if_terminal(") < run_loop.index("break")
+    assert run_loop.index(
+        "await self._mark_success_lifecycle_if_terminal("
+    ) < run_loop.index("break")
+
 
 def test_parallel_processing_terminal_success_accepts_already_canonicalized() -> None:
     from src.application.services.faq_workbench_parallel_processing_coordinator_service import (

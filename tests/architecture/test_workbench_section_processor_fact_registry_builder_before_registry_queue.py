@@ -5,7 +5,9 @@ SECTION_WORKER = Path(
 )
 
 
-def test_section_processor_no_longer_builds_fact_registry_before_registry_queue() -> None:
+def test_section_processor_no_longer_builds_fact_registry_before_registry_queue() -> (
+    None
+):
     source = SECTION_WORKER.read_text(encoding="utf-8")
 
     assert "process_leased_claim_observations" in source

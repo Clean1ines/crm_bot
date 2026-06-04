@@ -26,9 +26,13 @@ def fact_target_refs(
     if fact_id:
         refs.append(WorkbenchTargetRef(WorkbenchTargetRefKind.FACT_ID, fact_id))
     if claim_local_ref:
-        refs.append(WorkbenchTargetRef(WorkbenchTargetRefKind.CLAIM_LOCAL_REF, claim_local_ref))
+        refs.append(
+            WorkbenchTargetRef(WorkbenchTargetRefKind.CLAIM_LOCAL_REF, claim_local_ref)
+        )
     if claim:
-        refs.append(WorkbenchTargetRef(WorkbenchTargetRefKind.CLAIM_TEXT, claim.strip()))
+        refs.append(
+            WorkbenchTargetRef(WorkbenchTargetRefKind.CLAIM_TEXT, claim.strip())
+        )
     return tuple(refs)
 
 

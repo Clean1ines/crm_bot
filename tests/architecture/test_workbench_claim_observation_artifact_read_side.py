@@ -25,16 +25,23 @@ def test_claim_observation_artifact_read_side_is_explicit_document_run_api() -> 
 def test_claim_observation_artifact_read_side_orders_by_section_index() -> None:
     repository_source = REPOSITORY.read_text(encoding="utf-8")
 
-    assert "LEFT JOIN knowledge_workbench_document_sections AS section" in repository_source
+    assert (
+        "LEFT JOIN knowledge_workbench_document_sections AS section"
+        in repository_source
+    )
     assert "ORDER BY" in repository_source
     assert "section.section_index" in repository_source
     assert "artifact.created_at" in repository_source
 
 
-def test_claim_observation_artifact_read_side_uses_artifact_payload_not_old_rows() -> None:
+def test_claim_observation_artifact_read_side_uses_artifact_payload_not_old_rows() -> (
+    None
+):
     repository_source = REPOSITORY.read_text(encoding="utf-8")
 
-    method_start = repository_source.index("async def list_claim_observation_parsed_artifacts")
+    method_start = repository_source.index(
+        "async def list_claim_observation_parsed_artifacts"
+    )
     method_end = repository_source.find("\n    async def ", method_start + 1)
     if method_end == -1:
         method_end = len(repository_source)

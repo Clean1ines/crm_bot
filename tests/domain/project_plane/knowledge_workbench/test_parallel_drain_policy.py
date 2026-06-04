@@ -76,6 +76,7 @@ def test_parallel_drain_counts_reject_negative_values() -> None:
     with pytest.raises(DomainInvariantError, match="non-negative"):
         ParallelDrainWorkCounts(section_ready=-1)
 
+
 def test_registry_application_queued_section_blocks_finalization() -> None:
     counts = ParallelDrainWorkCounts(section_registry_application_queued=1)
 
@@ -91,7 +92,9 @@ def test_registry_application_queued_section_blocks_finalization() -> None:
         ensure_parallel_processing_can_finalize(counts)
 
 
-def test_registry_application_applied_section_is_terminal_and_allows_finalization() -> None:
+def test_registry_application_applied_section_is_terminal_and_allows_finalization() -> (
+    None
+):
     counts = ParallelDrainWorkCounts(
         section_registry_application_applied=1,
         registry_applied=1,
@@ -107,4 +110,3 @@ def test_registry_application_applied_section_is_terminal_and_allows_finalizatio
     assert readiness.may_finalize is True
 
     ensure_parallel_processing_can_finalize(counts)
-

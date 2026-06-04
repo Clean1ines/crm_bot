@@ -33,9 +33,7 @@ def _valid_payload(local_ref: str = "c1") -> dict[str, object]:
                     }
                 ],
                 "evidence_block": "Бот автоматически отвечает клиентам в Telegram.",
-                "possible_questions": [
-                    "Может ли бот отвечать клиентам в Telegram?"
-                ],
+                "possible_questions": ["Может ли бот отвечать клиентам в Telegram?"],
                 "scope": "автоматические ответы в Telegram",
                 "exclusion_scope": "",
                 "local_relations": [],
@@ -87,7 +85,9 @@ class FakeRepository:
 
 
 @pytest.mark.asyncio
-async def test_load_document_local_claim_graphs_returns_empty_result_for_no_artifacts() -> None:
+async def test_load_document_local_claim_graphs_returns_empty_result_for_no_artifacts() -> (
+    None
+):
     repository = FakeRepository(artifacts=(), calls=[])
     service = FaqWorkbenchLocalClaimGraphLoaderService(repository=repository)
 
@@ -151,7 +151,9 @@ async def test_load_document_local_claim_graphs_converts_artifacts_to_graphs() -
 
 
 @pytest.mark.asyncio
-async def test_load_document_local_claim_graphs_rejects_artifact_without_section_id() -> None:
+async def test_load_document_local_claim_graphs_rejects_artifact_without_section_id() -> (
+    None
+):
     repository = FakeRepository(
         artifacts=(_artifact(section_id=None),),
         calls=[],
@@ -169,7 +171,9 @@ async def test_load_document_local_claim_graphs_rejects_artifact_without_section
 
 
 @pytest.mark.asyncio
-async def test_load_document_local_claim_graphs_propagates_invalid_payload_error() -> None:
+async def test_load_document_local_claim_graphs_propagates_invalid_payload_error() -> (
+    None
+):
     repository = FakeRepository(
         artifacts=(
             _artifact(

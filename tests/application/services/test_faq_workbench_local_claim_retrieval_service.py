@@ -102,7 +102,9 @@ def _service(repository: FakeRepository) -> FaqWorkbenchLocalClaimRetrievalServi
 
 
 @pytest.mark.asyncio
-async def test_build_document_local_claim_retrieval_returns_empty_package_for_no_artifacts() -> None:
+async def test_build_document_local_claim_retrieval_returns_empty_package_for_no_artifacts() -> (
+    None
+):
     repository = FakeRepository(artifacts=(), calls=[])
     service = _service(repository)
 
@@ -127,7 +129,9 @@ async def test_build_document_local_claim_retrieval_returns_empty_package_for_no
 
 
 @pytest.mark.asyncio
-async def test_build_document_local_claim_retrieval_builds_search_docs_edges_and_groups() -> None:
+async def test_build_document_local_claim_retrieval_builds_search_docs_edges_and_groups() -> (
+    None
+):
     repository = FakeRepository(
         artifacts=(
             _artifact(
@@ -230,7 +234,9 @@ async def test_build_document_local_claim_retrieval_builds_search_docs_edges_and
 
 
 @pytest.mark.asyncio
-async def test_build_document_local_claim_retrieval_respects_min_similarity_score() -> None:
+async def test_build_document_local_claim_retrieval_respects_min_similarity_score() -> (
+    None
+):
     repository = FakeRepository(
         artifacts=(
             _artifact(

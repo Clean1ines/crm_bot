@@ -1,10 +1,14 @@
 from pathlib import Path
 
 
-SERVICE = Path("src/application/services/faq_workbench_section_work_item_processor_service.py")
+SERVICE = Path(
+    "src/application/services/faq_workbench_section_work_item_processor_service.py"
+)
 
 
-def test_section_processor_no_longer_runs_prompt_c_from_claim_observation_artifacts() -> None:
+def test_section_processor_no_longer_runs_prompt_c_from_claim_observation_artifacts() -> (
+    None
+):
     source = SERVICE.read_text(encoding="utf-8")
 
     assert "process_claim_observations_persisted_section_work_item" in source

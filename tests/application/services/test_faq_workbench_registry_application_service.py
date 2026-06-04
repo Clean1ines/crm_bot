@@ -130,7 +130,9 @@ def _summary() -> dict:
 
 
 @pytest.mark.asyncio
-async def test_apply_fact_registry_snapshot_persists_snapshot_without_old_entries_or_applications() -> None:
+async def test_apply_fact_registry_snapshot_persists_snapshot_without_old_entries_or_applications() -> (
+    None
+):
     repository = InMemoryRegistryApplicationRepository()
     service = FaqWorkbenchRegistryApplicationService(
         repository,
@@ -162,7 +164,9 @@ async def test_apply_fact_registry_snapshot_persists_snapshot_without_old_entrie
     assert result.snapshot.sequence_number == 2
 
     assert result.snapshot.entries_payload["contract"] == "fact_registry"
-    assert result.snapshot.entries_payload["previous_snapshot_id"] == "registry-snapshot-0"
+    assert (
+        result.snapshot.entries_payload["previous_snapshot_id"] == "registry-snapshot-0"
+    )
     assert result.snapshot.entries_payload["fact_registry"] == _fact_registry()
     assert result.snapshot.entries_payload["registry_update_summary"] == _summary()
 
@@ -318,7 +322,9 @@ async def test_apply_fact_registry_snapshot_validates_summary_counts() -> None:
         )
 
 
-def test_registry_application_service_repository_does_not_need_old_entry_or_application_methods() -> None:
+def test_registry_application_service_repository_does_not_need_old_entry_or_application_methods() -> (
+    None
+):
     repository = InMemoryRegistryApplicationRepository()
 
     assert not hasattr(repository, "upsert_fact_registry_entries")

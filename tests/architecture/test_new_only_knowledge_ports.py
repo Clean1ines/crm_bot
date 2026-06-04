@@ -3,46 +3,34 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_new_only_knowledge_ports_do_not_expose_old_chunk_contract() -> None:
-    files = (
-        Path("src/application/ports/knowledge_document_parser_port.py"),
-        Path("src/domain/project_plane/knowledge_document_structure.py"),
+def test_old_document_parser_port_is_deleted() -> None:
+    assert not Path("src/application/ports/knowledge_document_parser_port.py").exists()
+
+
+def test_current_workbench_port_file_is_the_current_knowledge_boundary() -> None:
+    source = Path("src/application/ports/knowledge_workbench.py").read_text(
+        encoding="utf-8"
     )
 
-    forbidden_markers = (
-        "JsonObject",
-        "json_value_from_unknown",
-        "entry_kind",
-        "plain_enriched",
-        "list[str |",
-        "to_legacy",
-        "from_legacy",
-        "from_mapping",
-        "chunk_from_mapping",
-        "chunk_from_text",
-        "add_knowledge_batch",
-        "add_structured_knowledge_batch",
+    assert "Protocol" in source
+    assert "DocumentSection" in source
+    assert "RegistrySnapshot" in source
+    assert "ProcessingRun" in source
+
+
+def test_knowledge_ports_do_not_reference_old_parser_domain() -> None:
+    offenders: list[str] = []
+    forbidden = (
+        "ParsedKnowledgeDocument",
+        "KnowledgeDocumentParserPort",
+        "knowledge_document_structure",
+        "knowledge_chunks",
     )
 
-    for file_path in files:
-        source = file_path.read_text(encoding="utf-8")
-        for marker in forbidden_markers:
-            assert marker not in source, f"{file_path} contains forbidden {marker!r}"
+    for path in Path("src/application/ports").rglob("*.py"):
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for marker in forbidden:
+            if marker in source:
+                offenders.append(f"{path}: {marker}")
 
-
-def test_new_only_ports_depend_on_domain_not_infrastructure_or_interfaces() -> None:
-    files = (Path("src/application/ports/knowledge_document_parser_port.py"),)
-
-    forbidden_imports = (
-        "src.infrastructure",
-        "src.interfaces",
-        "asyncpg",
-        "fastapi",
-        "httpx",
-        "groq",
-    )
-
-    for file_path in files:
-        source = file_path.read_text(encoding="utf-8")
-        for marker in forbidden_imports:
-            assert marker not in source, f"{file_path} contains forbidden {marker!r}"
+    assert offenders == []

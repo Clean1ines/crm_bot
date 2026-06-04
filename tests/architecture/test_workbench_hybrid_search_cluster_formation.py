@@ -2,10 +2,14 @@ from pathlib import Path
 
 
 DOMAIN = Path("src/domain/project_plane/knowledge_workbench/local_claim_retrieval.py")
-SERVICE = Path("src/application/services/faq_workbench_local_claim_retrieval_service.py")
+SERVICE = Path(
+    "src/application/services/faq_workbench_local_claim_retrieval_service.py"
+)
 
 
-def test_local_claim_retrieval_domain_contains_hybrid_search_cluster_formation_layer() -> None:
+def test_local_claim_retrieval_domain_contains_hybrid_search_cluster_formation_layer() -> (
+    None
+):
     source = DOMAIN.read_text(encoding="utf-8")
 
     required = (

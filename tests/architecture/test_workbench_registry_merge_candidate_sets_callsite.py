@@ -3,11 +3,17 @@ from pathlib import Path
 SECTION_WORKER = Path(
     "src/application/services/faq_workbench_section_work_item_processor_service.py"
 )
-REGISTRY_MERGE_PORT = Path("src/application/ports/faq_workbench_registry_merge_generator.py")
-GRAPH_ALIGNMENT = Path("src/domain/project_plane/knowledge_workbench/graph_alignment.py")
+REGISTRY_MERGE_PORT = Path(
+    "src/application/ports/faq_workbench_registry_merge_generator.py"
+)
+GRAPH_ALIGNMENT = Path(
+    "src/domain/project_plane/knowledge_workbench/graph_alignment.py"
+)
 
 
-def test_section_worker_no_longer_builds_graph_alignment_candidates_for_prompt_c() -> None:
+def test_section_worker_no_longer_builds_graph_alignment_candidates_for_prompt_c() -> (
+    None
+):
     source = SECTION_WORKER.read_text(encoding="utf-8")
 
     forbidden_markers = (
@@ -21,7 +27,9 @@ def test_section_worker_no_longer_builds_graph_alignment_candidates_for_prompt_c
         assert marker not in source
 
 
-def test_graph_alignment_candidates_remain_only_in_graph_alignment_domain_not_prompt_c_port() -> None:
+def test_graph_alignment_candidates_remain_only_in_graph_alignment_domain_not_prompt_c_port() -> (
+    None
+):
     graph_alignment = GRAPH_ALIGNMENT.read_text(encoding="utf-8")
     registry_merge_port = REGISTRY_MERGE_PORT.read_text(encoding="utf-8")
 

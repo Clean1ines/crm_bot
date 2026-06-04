@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import importlib.abc
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -56,21 +57,30 @@ class FakePool:
         return FakePoolConnectionManager(self.connection)
 
 
-def _dependencies(**overrides: object) -> composition.FaqWorkbenchParallelProcessingDependencies:
+def _dependencies(
+    **overrides: object,
+) -> composition.FaqWorkbenchParallelProcessingDependencies:
     values = {
         "id_factory": FakeIdFactory(),
         "claim_observations_runner": FakeClaimObservationsRunner(),
         "canonicalization_barrier_service": FakeCanonicalizationBarrierService(),
         "registry_application_service": FakeRegistryApplicationService(),
         "llm_json_invocation": FakeLlmJsonInvocation(),
-        "registry_merge_prompt_path": Path("src/agent/prompts/faq_surface_registry_merge.ru.txt"),
+        "registry_merge_prompt_path": Path(
+            "src/agent/prompts/faq_surface_registry_merge.ru.txt"
+        ),
     }
     values.update(overrides)
     return composition.FaqWorkbenchParallelProcessingDependencies(**values)
 
 
-def test_parallel_processing_composition_imports_current_boundary_without_legacy_runner() -> None:
-    source = composition.__loader__.get_source(composition.__name__)  # type: ignore[union-attr]
+def test_parallel_processing_composition_imports_current_boundary_without_legacy_runner() -> (
+    None
+):
+    loader = composition.__loader__
+    assert isinstance(loader, importlib.abc.InspectLoader)
+    source = loader.get_source(composition.__name__)
+    assert source is not None
 
     assert "FaqWorkbenchParallelSectionProcessorAdapter" in source
     assert "FaqWorkbenchParallelRegistryApplicationProcessorAdapter" in source
@@ -83,10 +93,14 @@ def test_parallel_processing_composition_imports_current_boundary_without_legacy
     assert "match_context" not in source
 
 
-def test_parallel_processing_composition_builds_coordinator_with_section_registry_and_barrier_adapters() -> None:
-    coordinator = composition.make_workbench_parallel_processing_coordinator_from_repository(
-        repository=FakeRepository(),
-        dependencies=_dependencies(),
+def test_parallel_processing_composition_builds_coordinator_with_section_registry_and_barrier_adapters() -> (
+    None
+):
+    coordinator = (
+        composition.make_workbench_parallel_processing_coordinator_from_repository(
+            repository=FakeRepository(),
+            dependencies=_dependencies(),
+        )
     )
 
     assert coordinator._section_processor.__class__.__name__ == (
@@ -106,13 +120,19 @@ def test_parallel_processing_composition_builds_coordinator_with_section_registr
     assert section_adapter.processor.id_factory.__class__ is FakeIdFactory
 
     barrier_adapter = coordinator._canonicalization_barrier_processor
-    assert barrier_adapter.barrier_service.__class__ is FakeCanonicalizationBarrierService
+    assert (
+        barrier_adapter.barrier_service.__class__ is FakeCanonicalizationBarrierService
+    )
 
 
-def test_parallel_processing_composition_allows_unwired_barrier_only_explicitly() -> None:
-    coordinator = composition.make_workbench_parallel_processing_coordinator_from_repository(
-        repository=FakeRepository(),
-        dependencies=_dependencies(canonicalization_barrier_service=None),
+def test_parallel_processing_composition_allows_unwired_barrier_only_explicitly() -> (
+    None
+):
+    coordinator = (
+        composition.make_workbench_parallel_processing_coordinator_from_repository(
+            repository=FakeRepository(),
+            dependencies=_dependencies(canonicalization_barrier_service=None),
+        )
     )
 
     assert coordinator._canonicalization_barrier_processor is None
@@ -127,7 +147,9 @@ def test_parallel_processing_composition_requires_claim_observations_runner() ->
 
 
 @pytest.mark.asyncio
-async def test_parallel_processing_pool_factory_uses_connection_and_builds_coordinator(monkeypatch) -> None:
+async def test_parallel_processing_pool_factory_uses_connection_and_builds_coordinator(
+    monkeypatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeKnowledgeWorkbenchRepository:
@@ -151,7 +173,9 @@ async def test_parallel_processing_pool_factory_uses_connection_and_builds_coord
     assert coordinator._canonicalization_barrier_processor is not None
 
 
-def test_section_processor_builder_keeps_prompt_c_out_of_section_worker_composition() -> None:
+def test_section_processor_builder_keeps_prompt_c_out_of_section_worker_composition() -> (
+    None
+):
     section_processor = composition.make_workbench_section_processor_from_repository(
         repository=FakeRepository(),
         dependencies=_dependencies(),
@@ -164,10 +188,14 @@ def test_section_processor_builder_keeps_prompt_c_out_of_section_worker_composit
     assert not hasattr(section_processor, "registry_merge_service")
 
 
-def test_full_canonicalization_barrier_factory_builds_prompt_c_dependency_graph() -> None:
-    barrier = composition.make_workbench_canonicalization_barrier_service_from_repository(
-        repository=FakeRepository(),
-        dependencies=_dependencies(canonicalization_barrier_service=None),
+def test_full_canonicalization_barrier_factory_builds_prompt_c_dependency_graph() -> (
+    None
+):
+    barrier = (
+        composition.make_workbench_canonicalization_barrier_service_from_repository(
+            repository=FakeRepository(),
+            dependencies=_dependencies(canonicalization_barrier_service=None),
+        )
     )
 
     assert barrier.__class__.__name__ == "FaqWorkbenchCanonicalizationBarrierService"
@@ -180,7 +208,10 @@ def test_full_canonicalization_barrier_factory_builds_prompt_c_dependency_graph(
     assert barrier._registry_merge_generator.__class__.__name__ == (
         "FaqWorkbenchRegistryMergeGenerator"
     )
-    assert barrier._registry_merge_generator.llm_invocation.__class__ is FakeLlmJsonInvocation
+    assert (
+        barrier._registry_merge_generator.llm_invocation.__class__
+        is FakeLlmJsonInvocation
+    )
     assert barrier._registry_merge_generator.config.prompt_path == Path(
         "src/agent/prompts/faq_surface_registry_merge.ru.txt"
     )
@@ -192,8 +223,13 @@ def test_full_canonicalization_barrier_factory_builds_prompt_c_dependency_graph(
     )
 
 
-def test_full_canonicalization_barrier_factory_does_not_leak_prompt_c_into_section_worker() -> None:
-    source = composition.__loader__.get_source(composition.__name__)  # type: ignore[union-attr]
+def test_full_canonicalization_barrier_factory_does_not_leak_prompt_c_into_section_worker() -> (
+    None
+):
+    loader = composition.__loader__
+    assert isinstance(loader, importlib.abc.InspectLoader)
+    source = loader.get_source(composition.__name__)
+    assert source is not None
     section_factory_source = source.split(
         "def make_workbench_section_processor_from_repository",
         1,

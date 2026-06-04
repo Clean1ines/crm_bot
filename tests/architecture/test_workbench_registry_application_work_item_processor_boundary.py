@@ -6,7 +6,9 @@ SERVICE = Path(
 )
 
 
-def test_registry_application_work_item_processor_consumes_fact_registry_artifact() -> None:
+def test_registry_application_work_item_processor_consumes_fact_registry_artifact() -> (
+    None
+):
     source = SERVICE.read_text(encoding="utf-8")
 
     assert "FaqWorkbenchRegistryApplicationWorkItemProcessorService" in source

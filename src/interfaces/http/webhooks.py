@@ -5,6 +5,9 @@ Telegram webhook gateway.
 from fastapi import APIRouter, Request, HTTPException, Depends
 
 from src.application.errors import ApplicationError
+from src.application.orchestration.conversation_orchestrator import (
+    ConversationOrchestrator,
+)
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.config.settings import settings
 from src.interfaces.http.dependencies import (
@@ -19,21 +22,62 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-def _get_process_admin_update():
-    from src.interfaces.telegram.platform_bot import process_admin_update
+async def process_admin_update(
+    update: dict[str, object],
+    pool: object,
+) -> object:
+    from src.interfaces.telegram.platform_bot import (
+        process_admin_update as telegram_process_admin_update,
+    )
 
+    return await telegram_process_admin_update(update, pool)
+
+
+async def process_client_update(
+    update: dict[str, object],
+    project_id: str,
+    orchestrator: ConversationOrchestrator,
+    bot_token: str,
+) -> object:
+    from src.interfaces.telegram.client_bot import (
+        process_client_update as telegram_process_client_update,
+    )
+
+    return await telegram_process_client_update(
+        update,
+        project_id,
+        orchestrator,
+        bot_token,
+    )
+
+
+async def process_manager_update(
+    update: dict[str, object],
+    project_id: str,
+    orchestrator: ConversationOrchestrator,
+    bot_token: str,
+) -> object:
+    from src.interfaces.telegram.manager_bot import (
+        process_manager_update as telegram_process_manager_update,
+    )
+
+    return await telegram_process_manager_update(
+        update,
+        project_id,
+        orchestrator,
+        bot_token,
+    )
+
+
+def _get_process_admin_update():
     return process_admin_update
 
 
 def _get_process_client_update():
-    from src.interfaces.telegram.client_bot import process_client_update
-
     return process_client_update
 
 
 def _get_process_manager_update():
-    from src.interfaces.telegram.manager_bot import process_manager_update
-
     return process_manager_update
 
 

@@ -49,8 +49,6 @@ class SourceType(StrEnum):
     IMPORTED_PAGE = "imported_page"
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class TimeRange:
     started_at: datetime | None = None

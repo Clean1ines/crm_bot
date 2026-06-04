@@ -1,12 +1,18 @@
 from pathlib import Path
 
 
-SERVICE = Path("src/application/services/faq_workbench_section_work_item_processor_service.py")
+SERVICE = Path(
+    "src/application/services/faq_workbench_section_work_item_processor_service.py"
+)
 
 
-def test_claim_observations_persisted_recovery_is_extraction_queue_transition_not_prompt_c_builder() -> None:
+def test_claim_observations_persisted_recovery_is_extraction_queue_transition_not_prompt_c_builder() -> (
+    None
+):
     source = SERVICE.read_text(encoding="utf-8")
-    start = source.index("async def process_claim_observations_persisted_section_work_item")
+    start = source.index(
+        "async def process_claim_observations_persisted_section_work_item"
+    )
     end = source.index("async def process_one_section_work_item", start)
     body = source[start:end]
 

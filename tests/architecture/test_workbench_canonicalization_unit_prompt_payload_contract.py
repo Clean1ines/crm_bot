@@ -11,7 +11,9 @@ from src.domain.project_plane.knowledge_workbench.local_claim_search import (
 )
 
 
-def test_canonicalization_unit_prompt_payload_keeps_full_source_identity_and_evidence() -> None:
+def test_canonicalization_unit_prompt_payload_keeps_full_source_identity_and_evidence() -> (
+    None
+):
     docs = (
         LocalClaimSearchDocument(
             search_document_id="section-1:node-run-1:c1",

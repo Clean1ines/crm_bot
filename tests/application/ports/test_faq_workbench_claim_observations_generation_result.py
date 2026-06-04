@@ -6,7 +6,9 @@ from src.application.ports import faq_workbench_claim_observations_generator as 
 PORT = Path("src/application/ports/faq_workbench_claim_observations_generator.py")
 
 
-def test_claim_observations_contract_is_extraction_only_source_unit_to_local_graph() -> None:
+def test_claim_observations_contract_is_extraction_only_source_unit_to_local_graph() -> (
+    None
+):
     source = PORT.read_text(encoding="utf-8")
 
     assert port.FaqWorkbenchClaimObservationsGenerationResult is not None

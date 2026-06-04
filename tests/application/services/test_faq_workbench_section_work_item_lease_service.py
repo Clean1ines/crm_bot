@@ -202,6 +202,7 @@ def test_claim_command_rejects_blank_worker_id() -> None:
             worker_id="",
         )
 
+
 def test_claim_command_rejects_non_positive_lease_seconds() -> None:
     with pytest.raises(DomainInvariantError, match="lease_seconds"):
         ClaimSectionWorkItemCommand(
@@ -244,4 +245,3 @@ async def test_claim_next_ready_section_work_item_does_not_reclaim_registry_appl
     assert repository.items == [queued_item]
     assert len(repository.restore_calls) == 1
     assert len(repository.lease_calls) == 1
-

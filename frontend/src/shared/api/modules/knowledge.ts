@@ -463,6 +463,88 @@ export type KnowledgeDocumentDeleteResponse = {
   document_id: string;
 };
 
+
+export interface WorkbenchEvidenceTraceDocument {
+  project_id: string;
+  document_id: string;
+  file_name: string;
+  source_type?: string;
+  file_size_bytes?: number;
+  status?: string;
+  current_processing_run_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  deleted_at?: string | null;
+}
+
+export interface WorkbenchEvidenceTraceFinding {
+  claim_observation_id: string;
+  section_id: string;
+  action: string;
+  status: string;
+  target_fact_id?: string | null;
+  claim_local_ref?: string | null;
+  title?: string | null;
+  claim?: string | null;
+  claim_kind?: string;
+  answer?: string | null;
+  short_answer?: string | null;
+  claim_delta?: string | null;
+  variants: unknown[];
+  evidence_quotes: unknown[];
+  source_refs: unknown[];
+  source_chunk_indexes: unknown[];
+  confidence?: number | null;
+  reason?: string | null;
+  created_at?: string | null;
+}
+
+export interface WorkbenchEvidenceTraceCanonicalFact {
+  fact_id: string;
+  fact_key: string;
+  claim: string;
+  question_variants: unknown[];
+  claim_kind: string;
+  answer: string;
+  short_answer: string;
+  evidence_quotes: unknown[];
+  source_refs: unknown[];
+  source_section_ids: unknown[];
+  source_chunk_indexes: unknown[];
+  status: string;
+  updated_at?: string | null;
+}
+
+export interface WorkbenchEvidenceTraceSourceUnit {
+  unit_id: string;
+  source_unit_id: string;
+  section_id: string;
+  section_key: string;
+  section_index: number;
+  title: string;
+  status: string;
+  source_refs: unknown[];
+  source_chunk_indexes: unknown[];
+  metadata: Record<string, unknown>;
+  text_excerpt: string;
+  raw_text_excerpt: string;
+  findings: WorkbenchEvidenceTraceFinding[];
+  canonical_facts: WorkbenchEvidenceTraceCanonicalFact[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface WorkbenchEvidenceTraceResponse {
+  document: WorkbenchEvidenceTraceDocument;
+  source_units: WorkbenchEvidenceTraceSourceUnit[];
+  items: WorkbenchEvidenceTraceSourceUnit[];
+  findings: WorkbenchEvidenceTraceFinding[];
+  canonical_facts: WorkbenchEvidenceTraceCanonicalFact[];
+  coverage: Record<string, number>;
+  gaps: Record<string, unknown>;
+}
+
+
 export const knowledgeApi = {
   list: (projectId: string) =>
     authedJsonRequest<{ documents?: Array<Record<string, unknown>>; items?: Array<Record<string, unknown>> }>(`/api/projects/${projectId}/knowledge`, {
@@ -506,6 +588,14 @@ export const knowledgeApi = {
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/retry-failed-batches`, {
       method: 'POST',
     }),
+
+  evidenceTrace: (projectId: string, documentId: string) =>
+    authedJsonRequest<WorkbenchEvidenceTraceResponse>(
+      `/api/projects/${projectId}/knowledge/${documentId}/evidence-trace`,
+      {
+        method: 'GET',
+      },
+    ),
 
   progress: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeProcessingReport>(

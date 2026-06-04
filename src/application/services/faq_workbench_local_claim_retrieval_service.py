@@ -28,13 +28,9 @@ class BuildDocumentLocalClaimRetrievalCommand:
 
     def __post_init__(self) -> None:
         if not self.project_id:
-            raise DomainInvariantError(
-                "local claim retrieval requires project_id"
-            )
+            raise DomainInvariantError("local claim retrieval requires project_id")
         if not self.document_id:
-            raise DomainInvariantError(
-                "local claim retrieval requires document_id"
-            )
+            raise DomainInvariantError("local claim retrieval requires document_id")
         if not self.processing_run_id:
             raise DomainInvariantError(
                 "local claim retrieval requires processing_run_id"
@@ -71,9 +67,7 @@ class DocumentLocalClaimRetrievalResult:
     @property
     def singleton_group_count(self) -> int:
         return sum(
-            1
-            for group in self.candidate_groups
-            if len(group.search_document_ids) == 1
+            1 for group in self.candidate_groups if len(group.search_document_ids) == 1
         )
 
 

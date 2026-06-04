@@ -23,7 +23,9 @@ class FakeConnection:
 
 
 @pytest.mark.asyncio
-async def test_get_parallel_processing_drain_counts_maps_section_and_registry_queue_states() -> None:
+async def test_get_parallel_processing_drain_counts_maps_section_and_registry_queue_states() -> (
+    None
+):
     connection = FakeConnection(
         fetchrow_results=[
             {
@@ -75,12 +77,17 @@ async def test_get_parallel_processing_drain_counts_maps_section_and_registry_qu
     normalized_section_query = " ".join(section_query.lower().split())
     normalized_registry_query = " ".join(registry_query.lower().split())
 
-    assert "from knowledge_workbench_section_batch_queue_items" in normalized_section_query
+    assert (
+        "from knowledge_workbench_section_batch_queue_items" in normalized_section_query
+    )
     assert "registry_application_queued" in normalized_section_query
     assert "registry_application_applied" in normalized_section_query
     assert "skipped" in normalized_section_query
 
-    assert "from knowledge_workbench_fact_registry_application_queue" in normalized_registry_query
+    assert (
+        "from knowledge_workbench_fact_registry_application_queue"
+        in normalized_registry_query
+    )
     assert "ready" in normalized_registry_query
     assert "waiting_for_fresh_registry" in normalized_registry_query
     assert "applied" in normalized_registry_query

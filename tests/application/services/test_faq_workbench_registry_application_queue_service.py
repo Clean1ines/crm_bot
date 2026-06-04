@@ -9,7 +9,9 @@ from src.application.services.faq_workbench_registry_application_queue_service i
 )
 
 
-def test_retired_registry_application_queue_service_command_is_importable_marker() -> None:
+def test_retired_registry_application_queue_service_command_is_importable_marker() -> (
+    None
+):
     command = RetiredRegistryApplicationQueueServiceCommand()
 
     assert command.reason == "registry application queue service is retired"
@@ -30,7 +32,9 @@ async def test_retired_registry_application_queue_service_fails_explicitly() -> 
 
 
 @pytest.mark.asyncio
-async def test_retired_registry_application_queue_service_unknown_methods_fail_explicitly() -> None:
+async def test_retired_registry_application_queue_service_unknown_methods_fail_explicitly() -> (
+    None
+):
     service = FaqWorkbenchRegistryApplicationQueueService()
 
     with pytest.raises(

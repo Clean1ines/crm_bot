@@ -31,7 +31,9 @@ class FakeCanonicalizationBarrierService:
 
 
 @pytest.mark.asyncio
-async def test_canonicalization_barrier_adapter_maps_parallel_command_to_document_barrier_command() -> None:
+async def test_canonicalization_barrier_adapter_maps_parallel_command_to_document_barrier_command() -> (
+    None
+):
     barrier_service = FakeCanonicalizationBarrierService(result="canonicalized")
     adapter = FaqWorkbenchCanonicalizationBarrierProcessorAdapter(
         barrier_service=barrier_service,
@@ -59,7 +61,9 @@ async def test_canonicalization_barrier_adapter_maps_parallel_command_to_documen
     ]
 
 
-def test_parallel_processing_adapters_export_canonicalization_barrier_adapter_without_legacy_section_merge() -> None:
+def test_parallel_processing_adapters_export_canonicalization_barrier_adapter_without_legacy_section_merge() -> (
+    None
+):
     import src.application.services.faq_workbench_parallel_processing_adapters as module
 
     assert hasattr(module, "FaqWorkbenchCanonicalizationBarrierProcessorAdapter")

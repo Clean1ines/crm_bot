@@ -126,14 +126,11 @@ class ClaimObservationRecord:
         require_project_id(self.project_id)
         require_document_id(self.document_id)
         if not self.section_id:
-            raise DomainInvariantError("ClaimObservationRecord must reference section_id")
-        if (
-            self.action is not ClaimObservationAction.ADDS_EVIDENCE
-            and not self.claim
-        ):
             raise DomainInvariantError(
-                "claim observation must have claim"
+                "ClaimObservationRecord must reference section_id"
             )
+        if self.action is not ClaimObservationAction.ADDS_EVIDENCE and not self.claim:
+            raise DomainInvariantError("claim observation must have claim")
         if self.confidence < 0 or self.confidence > 1:
             raise DomainInvariantError("confidence must be between 0 and 1")
 
@@ -219,9 +216,7 @@ class CanonicalFact:
         require_document_id(self.document_id)
         require_processing_run_id(self.processing_run_id)
         if self.status is CanonicalFactStatus.ACTIVE and not self.claim:
-            raise DomainInvariantError(
-                "active canonical fact must have claim"
-            )
+            raise DomainInvariantError("active canonical fact must have claim")
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,9 +330,7 @@ def apply_registry_update(
         raise DomainInvariantError("application target does not match canonical fact")
     return replace(
         entry,
-        claim=claim
-        if claim is not None
-        else entry.claim,
+        claim=claim if claim is not None else entry.claim,
         answer=answer if answer is not None else entry.answer,
         short_answer=short_answer if short_answer is not None else entry.short_answer,
         question_variants=entry.question_variants + added_variants,

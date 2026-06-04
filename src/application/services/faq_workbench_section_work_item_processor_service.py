@@ -113,7 +113,10 @@ class FaqWorkbenchSectionWorkItemProcessorService:
         *,
         queue_item: SectionBatchQueueItem,
     ) -> ProcessClaimObservationsPersistedSectionWorkItemResult:
-        if queue_item.status is not SectionBatchQueueItemStatus.CLAIM_OBSERVATIONS_PERSISTED:
+        if (
+            queue_item.status
+            is not SectionBatchQueueItemStatus.CLAIM_OBSERVATIONS_PERSISTED
+        ):
             raise DomainInvariantError(
                 "claim observations persisted recovery requires CLAIM_OBSERVATIONS_PERSISTED item"
             )
@@ -164,12 +167,14 @@ class FaqWorkbenchSectionWorkItemProcessorService:
             )
         )
 
-        claim_observations_persisted_item = mark_section_batch_item_claim_observations_persisted(
-            queue_item=queue_item,
-            claim_observations_node_run_id=(
-                claim_observations_result.claim_observations_node_run_id
-            ),
-            updated_at=self.time_provider.now(),
+        claim_observations_persisted_item = (
+            mark_section_batch_item_claim_observations_persisted(
+                queue_item=queue_item,
+                claim_observations_node_run_id=(
+                    claim_observations_result.claim_observations_node_run_id
+                ),
+                updated_at=self.time_provider.now(),
+            )
         )
         await self.repository.update_section_batch_queue_item(
             claim_observations_persisted_item

@@ -25,9 +25,18 @@ def test_knowledge_upload_http_boundary_is_workbench_only() -> None:
 def test_non_faq_upload_modes_fail_closed_until_workbench_analog_exists() -> None:
     source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
 
-    assert "mode != MODE_FAQ" in source
-    assert "status_code=422" in source
-    assert "first-class Workbench implementation" in source
+    assert "require_faq_workbench_mode" in source
+    assert "status_code=400" in source
+    assert "Only FAQ Workbench uploads are supported by this endpoint" in source
+
+    forbidden = (
+        "mode != MODE_FAQ",
+        "normalize_preprocessing_mode",
+        "src.domain.project_plane.knowledge_preprocessing",
+        "status_code=422",
+    )
+    for marker in forbidden:
+        assert marker not in source
 
 
 def test_knowledge_http_module_imports_without_legacy_upload_path() -> None:

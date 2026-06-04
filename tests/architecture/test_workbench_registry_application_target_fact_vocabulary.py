@@ -5,22 +5,22 @@ CHECKED = (
     Path("src/domain/project_plane/knowledge_workbench/registry.py"),
     Path("src/infrastructure/db/knowledge_workbench_repository.py"),
     Path("src/application/services/faq_workbench_registry_application_service.py"),
-    Path("src/application/services/faq_workbench_registry_application_work_item_processor_service.py"),
+    Path(
+        "src/application/services/faq_workbench_registry_application_work_item_processor_service.py"
+    ),
 )
 
 ACTIVE_MIGRATIONS = tuple(Path("migrations").glob("*.sql"))
 
-FORBIDDEN = (
-    "target_registry_entry_id",
-)
+FORBIDDEN = ("target_registry_entry_id",)
 
-REQUIRED = (
-    "target_fact_id",
-)
+REQUIRED = ("target_fact_id",)
 
 
 def _read(paths: tuple[Path, ...]) -> str:
-    return "\n".join(path.read_text(encoding="utf-8") for path in paths if path.exists())
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in paths if path.exists()
+    )
 
 
 def test_registry_application_code_uses_target_fact_id() -> None:

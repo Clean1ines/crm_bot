@@ -53,7 +53,9 @@ class InMemoryRegistryApplicationWorkerRepository:
     fact_registry_artifact: ProcessingNodeArtifact | None
     linked_section_item: SectionBatchQueueItem | None = None
     restored_stale_count: int = 0
-    updated_queue_items: list[RegistryApplicationQueueItem] = field(default_factory=list)
+    updated_queue_items: list[RegistryApplicationQueueItem] = field(
+        default_factory=list
+    )
     updated_section_items: list[SectionBatchQueueItem] = field(default_factory=list)
     snapshots: list[RegistrySnapshot] = field(default_factory=list)
 
@@ -181,7 +183,11 @@ def _snapshot(
         sequence_number=sequence_number,
         entries_payload={
             "contract": "fact_registry",
-            "fact_registry": {"version": 1, "canonical_facts": [], "fact_relations": []},
+            "fact_registry": {
+                "version": 1,
+                "canonical_facts": [],
+                "fact_relations": [],
+            },
         },
         relations_payload={"contract": "fact_registry_relations", "fact_relations": []},
         entry_count=0,
@@ -318,7 +324,9 @@ def _command() -> ProcessRegistryApplicationWorkItemCommand:
 
 
 @pytest.mark.asyncio
-async def test_single_writer_applies_fact_registry_artifact_and_marks_queue_item_applied() -> None:
+async def test_single_writer_applies_fact_registry_artifact_and_marks_queue_item_applied() -> (
+    None
+):
     repository = InMemoryRegistryApplicationWorkerRepository(
         queue_item=_queue_item(),
         latest_snapshot=_snapshot(),
@@ -336,12 +344,17 @@ async def test_single_writer_applies_fact_registry_artifact_and_marks_queue_item
     assert result.applied_snapshot is not None
     assert result.applied_snapshot.sequence_number == 2
     assert result.applied_snapshot.entries_payload["fact_registry"] == _fact_registry()
-    assert result.applied_snapshot.entries_payload["registry_update_summary"] == _summary()
+    assert (
+        result.applied_snapshot.entries_payload["registry_update_summary"] == _summary()
+    )
 
     assert len(repository.snapshots) == 1
     assert repository.snapshots[0] is result.applied_snapshot
 
-    assert repository.updated_queue_items[-1].status is RegistryApplicationQueueItemStatus.APPLIED
+    assert (
+        repository.updated_queue_items[-1].status
+        is RegistryApplicationQueueItemStatus.APPLIED
+    )
     assert (
         repository.updated_queue_items[-1].applied_registry_snapshot_id
         == result.applied_snapshot.snapshot_id
@@ -355,7 +368,9 @@ async def test_single_writer_applies_fact_registry_artifact_and_marks_queue_item
 
 
 @pytest.mark.asyncio
-async def test_single_writer_marks_stale_queue_item_for_rebase_without_mutating_registry() -> None:
+async def test_single_writer_marks_stale_queue_item_for_rebase_without_mutating_registry() -> (
+    None
+):
     repository = InMemoryRegistryApplicationWorkerRepository(
         queue_item=_queue_item(
             observed_snapshot_id="registry-snapshot-1",
@@ -373,7 +388,10 @@ async def test_single_writer_marks_stale_queue_item_for_rebase_without_mutating_
     assert result.outcome is RegistryApplicationWorkItemOutcome.REBASE_REQUIRED
     assert result.applied_snapshot is None
     assert repository.snapshots == []
-    assert repository.updated_queue_items[-1].status is RegistryApplicationQueueItemStatus.WAITING_FOR_FRESH_REGISTRY
+    assert (
+        repository.updated_queue_items[-1].status
+        is RegistryApplicationQueueItemStatus.WAITING_FOR_FRESH_REGISTRY
+    )
 
 
 @pytest.mark.asyncio
@@ -404,7 +422,9 @@ async def test_single_writer_requires_fact_registry_artifact() -> None:
     )
 
     with pytest.raises(DomainInvariantError, match="fact_registry parsed artifact"):
-        await _service(repository).process_next_registry_application_work_item(_command())
+        await _service(repository).process_next_registry_application_work_item(
+            _command()
+        )
 
 
 @pytest.mark.asyncio
@@ -417,7 +437,9 @@ async def test_single_writer_requires_fact_registry_payload_shape() -> None:
     )
 
     with pytest.raises(DomainInvariantError, match="requires fact_registry"):
-        await _service(repository).process_next_registry_application_work_item(_command())
+        await _service(repository).process_next_registry_application_work_item(
+            _command()
+        )
 
 
 def test_registry_application_work_item_command_requires_worker_id() -> None:
@@ -441,7 +463,9 @@ def test_registry_application_work_item_command_requires_positive_lease() -> Non
         )
 
 
-def test_registry_application_worker_no_longer_needs_old_entry_or_finding_loaders() -> None:
+def test_registry_application_worker_no_longer_needs_old_entry_or_finding_loaders() -> (
+    None
+):
     repository = InMemoryRegistryApplicationWorkerRepository(
         queue_item=_queue_item(),
         latest_snapshot=_snapshot(),

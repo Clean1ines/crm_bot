@@ -19,14 +19,12 @@ FORBIDDEN_SECTION_WORKER_TOKENS = (
     "registry_merge_service",
     "generate_registry_updates",
     "persist_registry_merge_output",
-
     # Candidate sets for Prompt C must be produced by the document-level
     # retrieval/clustering stage, not by the section worker.
     "CandidateFactSet",
     "_candidate_fact_sets_for_claim_observations",
     "_candidate_facts_for_claim_observation",
     "candidate_fact_sets",
-
     # Registry application queue must receive canonicalized cluster outputs,
     # not raw per-section Prompt C outputs.
     "RegistryApplicationQueueItem",
@@ -61,7 +59,10 @@ def test_section_worker_does_not_load_claim_observations_for_prompt_c() -> None:
 
     assert "_load_claim_observations_for_node_run" not in source
     assert "claim_inputs=claim_observations" not in source
-    assert "registry_snapshot_payload=latest_registry_snapshot.entries_payload" not in source
+    assert (
+        "registry_snapshot_payload=latest_registry_snapshot.entries_payload"
+        not in source
+    )
 
 
 def test_section_worker_result_contract_is_extraction_only() -> None:

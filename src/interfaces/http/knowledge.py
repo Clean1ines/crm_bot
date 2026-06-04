@@ -7,6 +7,7 @@ FAQ uploads are delegated lazily to the Workbench upload composition.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from dataclasses import asdict, is_dataclass
 from fastapi import (
     APIRouter,
@@ -35,6 +36,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 
+
 async def _maybe_await(value: object) -> object:
     import inspect
 
@@ -42,9 +44,11 @@ async def _maybe_await(value: object) -> object:
         return await value
     return value
 
+
 _ALLOWED_WORKBENCH_UPLOAD_EXTENSIONS = frozenset(
     {".txt", ".md", ".markdown", ".pdf", ".json"}
 )
+
 
 def _validate_workbench_upload_file_name(file_name: str | None) -> None:
     normalized = (file_name or "").strip()
@@ -61,6 +65,7 @@ def _validate_workbench_upload_file_name(file_name: str | None) -> None:
             detail=f"Unsupported file type: {normalized}",
         )
 
+
 async def _project_exists_for_workbench(project_repo: object, project_id: str) -> bool:
     project_exists = getattr(project_repo, "project_exists", None)
     if project_exists is not None:
@@ -72,6 +77,7 @@ async def _project_exists_for_workbench(project_repo: object, project_id: str) -
 
     return True
 
+
 async def _user_is_platform_admin_for_workbench(
     user_repo: UserRepository,
     user_id: str,
@@ -80,6 +86,7 @@ async def _user_is_platform_admin_for_workbench(
     if is_platform_admin is None:
         return False
     return bool(await _maybe_await(is_platform_admin(user_id)))
+
 
 async def _user_has_workbench_project_role(
     project_repo: object,
@@ -110,6 +117,7 @@ async def _user_has_workbench_project_role(
             )
         )
 
+
 async def _read_upload_bytes(file: UploadFile) -> bytearray:
     buffer = bytearray()
     max_bytes = settings.KNOWLEDGE_UPLOAD_MAX_BYTES
@@ -124,6 +132,7 @@ async def _read_upload_bytes(file: UploadFile) -> bytearray:
         if len(buffer) > max_bytes:
             raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
 
+
 def _jsonable(value: object) -> object:
     if is_dataclass(value) and not isinstance(value, type):
         return {key: _jsonable(item) for key, item in asdict(value).items()}
@@ -135,6 +144,7 @@ def _jsonable(value: object) -> object:
     if isinstance(enum_value, str):
         return enum_value
     return value
+
 
 async def _require_project_access(
     *,
@@ -195,6 +205,7 @@ async def _require_project_access(
 
     raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+
 def _legacy_endpoint_gone(*, capability: str, target: str) -> None:
     raise HTTPException(
         status_code=410,
@@ -209,6 +220,7 @@ def _legacy_endpoint_gone(*, capability: str, target: str) -> None:
             ),
         },
     )
+
 
 @router.get("")
 async def list_knowledge_documents(
@@ -228,9 +240,7 @@ async def list_knowledge_documents(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_documents import (
-        fetch_workbench_documents,
-    )
+
 
 @router.post("")
 async def upload_knowledge(
@@ -255,33 +265,21 @@ async def upload_knowledge(
         logger.error(f"Failed to read uploaded file: {exc}")
         raise HTTPException(status_code=400, detail="Could not read file") from exc
 
-    from src.domain.project_plane.knowledge_preprocessing import (
-        MODE_FAQ,
-        KnowledgePreprocessingValidationError,
-        normalize_preprocessing_mode,
+    from src.domain.project_plane.knowledge_processing_modes import (
+        KnowledgeProcessingModeValidationError,
+        require_faq_workbench_mode,
     )
 
     try:
-        mode = normalize_preprocessing_mode(preprocessing_mode)
-    except KnowledgePreprocessingValidationError as exc:
+        require_faq_workbench_mode(preprocessing_mode)
+    except KnowledgeProcessingModeValidationError as exc:
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail=(
-                "Only FAQ Workbench uploads are supported on this endpoint. "
-                "Legacy non-FAQ preprocessing modes are disabled until they have "
-                "a first-class Workbench implementation."
+                "Unsupported preprocessing_mode. "
+                "Only FAQ Workbench uploads are supported by this endpoint."
             ),
         ) from exc
-
-    if mode != MODE_FAQ:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Only FAQ Workbench uploads are supported on this endpoint. "
-                "Legacy non-FAQ preprocessing modes are disabled until they have "
-                "a first-class Workbench implementation."
-            ),
-        )
 
     await _require_project_access(
         project_id=project_id,
@@ -311,6 +309,7 @@ async def upload_knowledge(
     if hasattr(result, "to_dict"):
         return result.to_dict()
     return _jsonable(result)
+
 
 @router.get("/{document_id}/progress")
 async def knowledge_processing_progress(
@@ -346,6 +345,7 @@ async def knowledge_processing_progress(
             detail="Knowledge document not found",
         ) from exc
 
+
 @router.get("/processing-overview")
 async def knowledge_processing_overview(
     project_id: str,
@@ -371,12 +371,14 @@ async def knowledge_processing_overview(
         project_id=project_id,
     )
 
+
 @router.post("/preview")
 async def preview_knowledge():
     _legacy_endpoint_gone(
         capability="retrieval preview",
         target="WorkbenchRetrievalPreviewService or RuntimeRetrievalPreviewService",
     )
+
 
 @router.get("/usage")
 @router.get("/usage")
@@ -400,7 +402,7 @@ async def knowledge_usage(
     )
 
     repository = ModelUsageRepository(pool)
-    monthly_token_budget = int(
+    monthly_budget_tokens = int(
         getattr(
             settings,
             "MODEL_USAGE_MONTHLY_TOKEN_BUDGET",
@@ -409,18 +411,33 @@ async def knowledge_usage(
         or 0
     )
 
-    try:
-        summary = await repository.get_project_usage_summary(
-            project_id=project_id,
-            monthly_token_budget=monthly_token_budget,
+    now_utc = datetime.now(timezone.utc)
+    today_start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start_utc = today_start_utc.replace(day=1)
+    if month_start_utc.month == 12:
+        month_end_utc = month_start_utc.replace(
+            year=month_start_utc.year + 1,
+            month=1,
         )
-    except TypeError:
-        summary = await repository.get_project_usage_summary(project_id=project_id)
+    else:
+        month_end_utc = month_start_utc.replace(month=month_start_utc.month + 1)
+
+    summary = await repository.get_project_usage_summary(
+        project_id=project_id,
+        month_start_utc=month_start_utc,
+        month_end_utc=month_end_utc,
+        today_start_utc=today_start_utc,
+        monthly_budget_tokens=monthly_budget_tokens,
+    )
 
     if hasattr(summary, "to_dict"):
         return summary.to_dict()
 
-    return ModelUsageSummaryDto.from_view(summary).to_dict()
+    return ModelUsageSummaryDto.from_view(
+        summary,
+        counter_enabled=True,
+    ).to_dict()
+
 
 @router.get("/{document_id}/source-units")
 async def knowledge_source_units(
@@ -456,6 +473,7 @@ async def knowledge_source_units(
             detail="Knowledge document not found",
         ) from exc
 
+
 @router.get("/{document_id}/import-quality")
 async def knowledge_import_quality_report(
     project_id: str,
@@ -490,6 +508,7 @@ async def knowledge_import_quality_report(
             detail="Knowledge document not found",
         ) from exc
 
+
 @router.get("/{document_id}/price-facts")
 @router.get("/{document_id}/price-facts")
 async def knowledge_price_facts(
@@ -512,6 +531,7 @@ async def knowledge_price_facts(
 
     service = make_commercial_price_review_service(pool)
     return await service.price_facts(document_id=document_id)
+
 
 @router.get("/commercial-truth-review")
 @router.get("/commercial-truth-review")
@@ -539,6 +559,7 @@ async def project_commercial_truth_review(
         policy=policy,
     )
 
+
 @router.get("/{document_id}/commercial-truth-review")
 @router.get("/{document_id}/commercial-truth-review")
 async def knowledge_commercial_truth_review(
@@ -565,6 +586,7 @@ async def knowledge_commercial_truth_review(
         document_id=document_id,
         policy=policy,
     )
+
 
 @router.post("/{document_id}/price-facts/publish")
 @router.post("/{document_id}/price-facts/publish")
@@ -596,6 +618,7 @@ async def publish_knowledge_price_facts(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
 
 @router.post("/{document_id}/price-facts/reject")
 @router.post("/{document_id}/price-facts/reject")
@@ -630,12 +653,14 @@ async def reject_knowledge_price_facts(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+
 @router.post("/{document_id}/retighten")
 async def retighten_knowledge_document(document_id: str):
     _legacy_endpoint_gone(
         capability=f"answer tightening for {document_id}",
         target="Workbench surface curation/refinement command",
     )
+
 
 @router.post("/{document_id}/publish-ready")
 async def publish_knowledge_ready_answers(
@@ -655,8 +680,7 @@ async def publish_knowledge_ready_answers(
         user_repo=user_repo,
     )
     from src.interfaces.composition.faq_workbench_publish_ready import (
-        WorkbenchPublishReadyNotFoundError,
-        WorkbenchPublishReadyRejectedError,
+        PublishReadyRejectedError,
         publish_workbench_ready_surfaces,
     )
 
@@ -666,13 +690,14 @@ async def publish_knowledge_ready_answers(
             project_id=project_id,
             document_id=document_id,
         )
-    except WorkbenchPublishReadyNotFoundError as exc:
+    except LookupError as exc:
         raise HTTPException(
             status_code=404,
             detail="Knowledge document not found",
         ) from exc
-    except WorkbenchPublishReadyRejectedError as exc:
+    except PublishReadyRejectedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 @router.post("/{document_id}/retry-failed-batches")
 async def retry_knowledge_failed_batches(document_id: str):
@@ -680,6 +705,7 @@ async def retry_knowledge_failed_batches(document_id: str):
         capability=f"retry failed compiler batches for {document_id}",
         target="Workbench failed node/section retry command",
     )
+
 
 @router.post("/{document_id}/resume-processing")
 async def resume_knowledge_processing(
@@ -719,6 +745,7 @@ async def resume_knowledge_processing(
         ) from exc
     except WorkbenchManualResumeRejectedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
 
 @router.post("/{document_id}/cancel")
 async def cancel_knowledge_processing(
@@ -760,6 +787,7 @@ async def cancel_knowledge_processing(
             detail=str(exc),
         ) from exc
 
+
 @router.delete("/{document_id}")
 async def delete_knowledge_document(
     project_id: str,
@@ -799,6 +827,7 @@ async def delete_knowledge_document(
             status_code=409,
             detail=str(exc),
         ) from exc
+
 
 @router.delete("")
 async def clear_knowledge(

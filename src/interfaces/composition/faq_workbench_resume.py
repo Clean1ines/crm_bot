@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, cast
+from typing import Callable, Protocol, cast
 
 import asyncpg
 
@@ -14,6 +14,7 @@ from src.infrastructure.db.knowledge_workbench_repository import (
     KnowledgeWorkbenchRepository,
 )
 from src.infrastructure.queue.workbench_queue import WorkbenchQueueAdapter
+from src.domain.project_plane.knowledge_workbench.shared import JsonValue
 
 
 class WorkbenchManualResumeDbPool(Protocol):
@@ -24,7 +25,7 @@ class WorkbenchManualResumeQueueRepository(Protocol):
     async def enqueue(
         self,
         task_type: str,
-        payload: dict[str, object] | None = None,
+        payload: dict[str, JsonValue] | None = None,
         max_attempts: int = 3,
     ) -> str: ...
 
@@ -37,7 +38,7 @@ async def resume_workbench_document(
     document_id: str,
 ) -> dict[str, object]:
     async with cast(asyncpg.Pool, pool).acquire() as connection:
-        repository = KnowledgeWorkbenchRepository(connection)
+        repository = _workbench_repository(connection)
         queue = WorkbenchQueueAdapter(queue_repository=queue_repo)
         service = WorkbenchManualResumeService(repository, queue)
         result = await service.resume_document(
@@ -54,3 +55,11 @@ __all__ = [
     "WorkbenchManualResumeRejectedError",
     "resume_workbench_document",
 ]
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)

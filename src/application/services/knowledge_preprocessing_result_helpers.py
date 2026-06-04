@@ -11,12 +11,13 @@ from src.domain.project_plane.json_types import (
     JsonObject,
     JsonValue,
 )
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingEntry,
-    KnowledgePreprocessingMode,
-    KnowledgePreprocessingResult,
-    KnowledgePreprocessingValidationError,
+from src.domain.project_plane.knowledge_processing_modes import (
+    KnowledgeProcessingMode,
+    KnowledgeProcessingModeValidationError,
 )
+
+KnowledgePreprocessingEntry = JsonObject
+KnowledgePreprocessingMode = KnowledgeProcessingMode
 
 
 def _clean_optional_text(value: object) -> str:
@@ -43,7 +44,7 @@ def build_preprocessing_failure_status_message(exc: Exception) -> str:
         return (
             "Обработка остановлена: прогресс до последнего завершённого шага сохранён"
         )
-    if isinstance(exc, KnowledgePreprocessingValidationError):
+    if isinstance(exc, KnowledgeProcessingModeValidationError):
         return "Ошибка предобработки: LLM вернула данные в неподдерживаемом формате"
     if isinstance(exc, ValidationError):
         return "Ошибка предобработки: результаты не прошли проверку перед публикацией"
@@ -66,17 +67,27 @@ def json_metric_int(metrics: Mapping[str, JsonValue], key: str) -> int:
 def build_preprocessing_result_from_entries(
     *,
     mode: KnowledgePreprocessingMode,
-    template: KnowledgePreprocessingResult,
+    template: object,
     entries: Sequence[KnowledgePreprocessingEntry],
     metrics: JsonObject,
-) -> KnowledgePreprocessingResult:
-    return KnowledgePreprocessingResult(
-        mode=mode,
-        prompt_version=template.prompt_version,
-        model=template.model,
-        entries=tuple(entries),
-        metrics=metrics,
+) -> JsonObject:
+    prompt_version = (
+        template.get("prompt_version")
+        if isinstance(template, dict)
+        else getattr(template, "prompt_version", None)
     )
+    model = (
+        template.get("model")
+        if isinstance(template, dict)
+        else getattr(template, "model", None)
+    )
+    return {
+        "mode": mode,
+        "prompt_version": prompt_version,
+        "model": model,
+        "entries": list(entries),
+        "metrics": metrics,
+    }
 
 
 __all__ = [

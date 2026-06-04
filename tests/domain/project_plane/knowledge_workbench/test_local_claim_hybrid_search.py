@@ -53,7 +53,9 @@ def _doc(
     )
 
 
-def test_hybrid_search_forms_clusters_from_lexical_questions_triples_and_ngrams() -> None:
+def test_hybrid_search_forms_clusters_from_lexical_questions_triples_and_ngrams() -> (
+    None
+):
     refund_a = _doc(
         "claim-a",
         "Клиент может вернуть товар в течение 14 дней после покупки.",
@@ -65,7 +67,10 @@ def test_hybrid_search_forms_clusters_from_lexical_questions_triples_and_ngrams(
     refund_b = _doc(
         "claim-b",
         "Покупатель оформляет возврат товара не позднее четырнадцати дней.",
-        triple_texts=("покупатель can_return товар", "возврат has_window четырнадцать дней"),
+        triple_texts=(
+            "покупатель can_return товар",
+            "возврат has_window четырнадцать дней",
+        ),
         questions=("можно ли вернуть товар", "сколько дней на возврат"),
         scope="сроки возврата товара",
         evidence="Покупатель может оформить возврат в течение четырнадцати дней.",
@@ -73,7 +78,10 @@ def test_hybrid_search_forms_clusters_from_lexical_questions_triples_and_ngrams(
     delivery = _doc(
         "claim-c",
         "Доставка выполняется курьером после подтверждения заказа.",
-        triple_texts=("курьер delivers заказ", "заказ requires_confirmation подтверждение"),
+        triple_texts=(
+            "курьер delivers заказ",
+            "заказ requires_confirmation подтверждение",
+        ),
         questions=("как работает доставка", "когда приезжает курьер"),
         scope="доставка заказа",
         evidence="Курьер доставляет подтвержденный заказ.",

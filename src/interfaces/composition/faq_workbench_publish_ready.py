@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, cast
+from typing import Callable, Protocol, cast
 
 import asyncpg
 
@@ -13,6 +13,7 @@ from src.application.workbench_commands.publish_ready import (
     PublishReadyCommand,
     PublishReadyRejectedError,
 )
+from src.domain.project_plane.knowledge_workbench.shared import JsonValue
 from src.infrastructure.db.knowledge_workbench_repository import (
     KnowledgeWorkbenchRepository,
 )
@@ -33,7 +34,7 @@ async def publish_workbench_ready_surfaces(
 ) -> dict[str, object]:
     async with cast(asyncpg.Pool, pool).acquire() as connection:
         async with connection.transaction():
-            repository = KnowledgeWorkbenchRepository(connection)
+            repository = _workbench_repository(connection)
             service = FaqWorkbenchPublishReadyService(repository)
             result = await service.publish_ready(
                 PublishReadyCommand(
@@ -52,11 +53,13 @@ async def publish_workbench_ready_surfaces(
             runtime_publication = FaqWorkbenchRuntimePublicationService(
                 WorkbenchRuntimeRetrievalRepository(cast(asyncpg.Pool, pool))
             )
-            runtime_result = await runtime_publication.publish_fact_registry_runtime_entries(
-                PublishFactRegistryRuntimeCommand(
-                    project_id=result.project_id,
-                    document_id=result.document_id,
-                    fact_registry_payload=fact_registry_payload,
+            runtime_result = (
+                await runtime_publication.publish_fact_registry_runtime_entries(
+                    PublishFactRegistryRuntimeCommand(
+                        project_id=result.project_id,
+                        document_id=result.document_id,
+                        fact_registry_payload=cast(JsonValue, fact_registry_payload),
+                    )
                 )
             )
 
@@ -105,15 +108,22 @@ async def _load_published_fact_registry_payload(
     if isinstance(fact_registry, dict):
         return dict(fact_registry)
 
-    if (
-        isinstance(entries_payload.get("canonical_facts"), list)
-        and isinstance(entries_payload.get("fact_relations"), list)
+    if isinstance(entries_payload.get("canonical_facts"), list) and isinstance(
+        entries_payload.get("fact_relations"), list
     ):
         return dict(entries_payload)
 
     raise PublishReadyRejectedError(
         "published snapshot does not contain fact_registry payload"
     )
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)
 
 
 __all__ = [

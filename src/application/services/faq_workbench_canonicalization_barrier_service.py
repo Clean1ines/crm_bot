@@ -77,21 +77,15 @@ class ProcessDocumentCanonicalizationBarrierCommand:
 
     def __post_init__(self) -> None:
         if not self.project_id:
-            raise DomainInvariantError(
-                "canonicalization barrier requires project_id"
-            )
+            raise DomainInvariantError("canonicalization barrier requires project_id")
         if not self.document_id:
-            raise DomainInvariantError(
-                "canonicalization barrier requires document_id"
-            )
+            raise DomainInvariantError("canonicalization barrier requires document_id")
         if not self.processing_run_id:
             raise DomainInvariantError(
                 "canonicalization barrier requires processing_run_id"
             )
         if not self.worker_id:
-            raise DomainInvariantError(
-                "canonicalization barrier requires worker_id"
-            )
+            raise DomainInvariantError("canonicalization barrier requires worker_id")
         if self.lease_seconds < 1:
             raise DomainInvariantError(
                 "canonicalization barrier lease_seconds must be positive"
@@ -148,10 +142,12 @@ class FaqWorkbenchCanonicalizationBarrierService:
         self,
         command: ProcessDocumentCanonicalizationBarrierCommand,
     ) -> ProcessDocumentCanonicalizationBarrierResult:
-        already_completed = await self._repository.has_completed_fact_registry_canonicalization(
-            project_id=command.project_id,
-            document_id=command.document_id,
-            processing_run_id=command.processing_run_id,
+        already_completed = (
+            await self._repository.has_completed_fact_registry_canonicalization(
+                project_id=command.project_id,
+                document_id=command.document_id,
+                processing_run_id=command.processing_run_id,
+            )
         )
         if already_completed:
             latest_snapshot = await self._repository.get_latest_registry_snapshot(
@@ -169,7 +165,9 @@ class FaqWorkbenchCanonicalizationBarrierService:
                     latest_snapshot.snapshot_id if latest_snapshot is not None else None
                 ),
                 latest_snapshot_sequence_number=(
-                    latest_snapshot.sequence_number if latest_snapshot is not None else 0
+                    latest_snapshot.sequence_number
+                    if latest_snapshot is not None
+                    else 0
                 ),
             )
 
@@ -208,7 +206,9 @@ class FaqWorkbenchCanonicalizationBarrierService:
                     latest_snapshot.snapshot_id if latest_snapshot is not None else None
                 ),
                 latest_snapshot_sequence_number=(
-                    latest_snapshot.sequence_number if latest_snapshot is not None else 0
+                    latest_snapshot.sequence_number
+                    if latest_snapshot is not None
+                    else 0
                 ),
             )
 
@@ -228,31 +228,35 @@ class FaqWorkbenchCanonicalizationBarrierService:
 
         for index, unit in enumerate(retrieval_result.canonicalization_units, start=1):
             node_run_id = self._id_factory.new_id("node-run")
-            generation_result = await self._registry_merge_generator.generate_registry_updates(
-                FaqWorkbenchRegistryMergeGenerationCommand(
-                    node_run_id=node_run_id,
-                    canonicalization_unit=unit,
-                    registry=registry,
-                    canonical_facts=canonical_facts,
-                    registry_snapshot_payload=current_registry_snapshot_payload,
-                    relevant_registry_state={
-                        "contract": "relevant_fact_registry_state",
-                        "worker_id": command.worker_id,
-                        "unit_index": index,
-                        "unit_count": retrieval_result.unit_count,
-                        "latest_snapshot_id": previous_snapshot_id,
-                        "latest_fact_registry": current_fact_registry_payload,
-                    },
+            generation_result = (
+                await self._registry_merge_generator.generate_registry_updates(
+                    FaqWorkbenchRegistryMergeGenerationCommand(
+                        node_run_id=node_run_id,
+                        canonicalization_unit=unit,
+                        registry=registry,
+                        canonical_facts=canonical_facts,
+                        registry_snapshot_payload=current_registry_snapshot_payload,
+                        relevant_registry_state={
+                            "contract": "relevant_fact_registry_state",
+                            "worker_id": command.worker_id,
+                            "unit_index": index,
+                            "unit_count": retrieval_result.unit_count,
+                            "latest_snapshot_id": previous_snapshot_id,
+                            "latest_fact_registry": current_fact_registry_payload,
+                        },
+                    )
                 )
             )
             prompt_c_success_count += 1
 
-            persisted = await self._registry_merge_service.persist_registry_merge_output(
-                PersistRegistryMergeNodeOutputCommand(
-                    node_run_id=node_run_id,
-                    canonicalization_unit=unit,
-                    registry=registry,
-                    generation_result=generation_result,
+            persisted = (
+                await self._registry_merge_service.persist_registry_merge_output(
+                    PersistRegistryMergeNodeOutputCommand(
+                        node_run_id=node_run_id,
+                        canonicalization_unit=unit,
+                        registry=registry,
+                        generation_result=generation_result,
+                    )
                 )
             )
 
@@ -272,11 +276,15 @@ class FaqWorkbenchCanonicalizationBarrierService:
             previous_snapshot_id = applied.snapshot.snapshot_id
             previous_snapshot_sequence_number = applied.snapshot.sequence_number
             current_fact_registry_payload = applied.fact_registry
+            applied_entries_payload = applied.snapshot.entries_payload
+            applied_previous_snapshot_id = (
+                applied_entries_payload.get("previous_snapshot_id")
+                if isinstance(applied_entries_payload, dict)
+                else None
+            )
             current_registry_snapshot_payload = {
                 "contract": "fact_registry",
-                "previous_snapshot_id": applied.snapshot.entries_payload.get(
-                    "previous_snapshot_id"
-                ),
+                "previous_snapshot_id": applied_previous_snapshot_id,
                 "fact_registry": applied.fact_registry,
                 "registry_update_summary": applied.registry_update_summary,
             }
@@ -316,7 +324,9 @@ class FaqWorkbenchCanonicalizationBarrierService:
         if isinstance(entries_payload, dict):
             return dict(entries_payload)
 
-        raise DomainInvariantError("latest registry snapshot entries_payload must be object")
+        raise DomainInvariantError(
+            "latest registry snapshot entries_payload must be object"
+        )
 
     def _fact_registry_from_snapshot_payload(
         self,
@@ -325,9 +335,8 @@ class FaqWorkbenchCanonicalizationBarrierService:
         fact_registry = payload.get("fact_registry")
         if isinstance(fact_registry, dict):
             return fact_registry
-        if (
-            isinstance(payload.get("canonical_facts"), list)
-            and isinstance(payload.get("fact_relations"), list)
+        if isinstance(payload.get("canonical_facts"), list) and isinstance(
+            payload.get("fact_relations"), list
         ):
             return payload
         return {

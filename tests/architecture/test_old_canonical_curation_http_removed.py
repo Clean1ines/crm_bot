@@ -3,44 +3,89 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def test_old_canonical_curation_http_route_is_removed() -> None:
-    assert not Path("src/interfaces/http/knowledge_curation.py").exists()
+OLD_SURFACE_CURATION_SERVICE = Path(
+    "src/application/services/faq_workbench_surface_curation_service.py"
+)
+OLD_SURFACE_MATERIALIZATION_SERVICE = Path(
+    "src/application/services/faq_workbench_surface_materialization_service.py"
+)
+OLD_SURFACE_SUMMARY = Path(
+    "frontend/src/pages/knowledge/components/SurfaceCompilationSummary.tsx"
+)
+OLD_SURFACE_CONTRACT = Path(
+    "frontend/src/pages/knowledge/components/surfacePipelineContract.ts"
+)
+OLD_SURFACE_API = Path("frontend/src/shared/api/modules/knowledgeSurface.ts")
 
-    app_source = Path("src/interfaces/http/app.py").read_text(encoding="utf-8")
-    init_source = Path("src/interfaces/http/__init__.py").read_text(encoding="utf-8")
+CURRENT_CURATION_MODAL = Path(
+    "frontend/src/pages/knowledge/components/KnowledgeDocumentCurationModal.tsx"
+)
+CURRENT_EVIDENCE_TRACE_COMPOSITION = Path(
+    "src/interfaces/composition/faq_workbench_evidence_trace.py"
+)
+CURRENT_PUBLISH_READY_COMPOSITION = Path(
+    "src/interfaces/composition/faq_workbench_publish_ready.py"
+)
 
-    assert "from src.interfaces.http.knowledge_curation import" not in app_source
-    assert "knowledge_curation_router" not in app_source
-    assert "app.include_router(knowledge_curation_router)" not in app_source
-    assert "knowledge_curation" not in init_source
 
-
-def test_fastapi_app_does_not_mount_old_canonical_curation_routes() -> None:
-    from src.interfaces.http.app import app
-
-    mounted_paths = {getattr(route, "path", "") for route in app.routes}
-
-    assert not any(
-        "/knowledge/" in path and "/curation" in path for path in mounted_paths
+def test_old_surface_backend_and_frontend_chain_is_deleted() -> None:
+    deleted = (
+        OLD_SURFACE_CURATION_SERVICE,
+        OLD_SURFACE_MATERIALIZATION_SERVICE,
+        OLD_SURFACE_SUMMARY,
+        OLD_SURFACE_CONTRACT,
+        OLD_SURFACE_API,
     )
 
-
-def test_workbench_curation_and_publication_are_the_supported_path() -> None:
-    surface_curation_source = Path(
-        "src/application/services/faq_workbench_surface_curation_service.py"
-    ).read_text(encoding="utf-8")
-    runtime_publication_source = Path(
-        "src/application/services/faq_workbench_runtime_publication_service.py"
-    ).read_text(encoding="utf-8")
-
-    assert "FaqWorkbenchSurfaceCurationService" in surface_curation_source
-    assert "CurationChangeOperation" in surface_curation_source
-    assert "FaqWorkbenchRuntimePublicationService" in runtime_publication_source
+    for path in deleted:
+        assert not path.exists(), f"{path} should stay deleted"
 
 
-def test_old_canonical_curation_tests_are_removed() -> None:
-    assert not Path("tests/test_knowledge_curation_domain.py").exists()
-    assert not Path("tests/test_knowledge_curation_service.py").exists()
-    assert not Path(
-        "tests/architecture/test_kcd_stage_h_knowledge_edit_actions_guard.py"
-    ).exists()
+def test_workbench_trace_and_publish_are_the_supported_paths() -> None:
+    assert CURRENT_CURATION_MODAL.exists()
+    assert CURRENT_EVIDENCE_TRACE_COMPOSITION.exists()
+    assert CURRENT_PUBLISH_READY_COMPOSITION.exists()
+
+    modal = CURRENT_CURATION_MODAL.read_text(encoding="utf-8")
+    assert "evidenceTrace" in modal
+    assert "knowledgeSurfaceApi" not in modal
+    assert "RetrievalSurface" not in modal
+
+
+def test_old_surface_chain_is_not_imported_by_current_knowledge_ui_or_backend() -> None:
+    offenders: list[str] = []
+    forbidden = (
+        "faq_workbench_surface_curation_service",
+        "faq_workbench_surface_materialization_service",
+        "knowledgeSurfaceApi",
+        "SurfaceCompilationSummary",
+        "surfacePipelineContract",
+        "@shared/api/modules/knowledgeSurface",
+    )
+
+    roots = (
+        Path("src/application"),
+        Path("src/interfaces"),
+        Path("frontend/src/pages/knowledge"),
+        Path("frontend/src/shared/api/modules"),
+    )
+
+    this_file = Path(__file__).resolve()
+    for root in roots:
+        if not root.exists():
+            continue
+        for candidate in root.rglob("*"):
+            if not candidate.is_file() or candidate.suffix not in {
+                ".py",
+                ".ts",
+                ".tsx",
+            }:
+                continue
+            if candidate.resolve() == this_file:
+                continue
+            source = candidate.read_text(encoding="utf-8", errors="ignore")
+            for marker in forbidden:
+                if marker in source:
+                    offenders.append(f"{candidate}: {marker}")
+
+    assert offenders == []

@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Callable, Protocol, TypeVar, cast
 
 import asyncpg
 
@@ -52,6 +52,17 @@ from src.infrastructure.db.knowledge_workbench_repository import (
 )
 
 
+_T = TypeVar("_T")
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    repository_factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return repository_factory(connection)
+
+
 class WorkbenchParallelProcessingDbPool(Protocol):
     async def acquire(self): ...
 
@@ -86,7 +97,7 @@ async def make_workbench_parallel_processing_coordinator(
     dependencies: FaqWorkbenchParallelProcessingDependencies,
 ) -> FaqWorkbenchParallelProcessingCoordinatorService:
     async with cast(asyncpg.Pool, pool).acquire() as connection:
-        repository = KnowledgeWorkbenchRepository(connection)
+        repository = _workbench_repository(connection)
         return make_workbench_parallel_processing_coordinator_from_repository(
             repository=repository,
             dependencies=dependencies,
@@ -109,11 +120,13 @@ def make_workbench_parallel_processing_coordinator_from_repository(
 
     canonicalization_processor = None
     if dependencies.canonicalization_barrier_service is not None:
-        canonicalization_processor = FaqWorkbenchCanonicalizationBarrierProcessorAdapter(
+        canonicalization_processor = _instantiate_with_available_kwargs(
+            FaqWorkbenchCanonicalizationBarrierProcessorAdapter,
             barrier_service=dependencies.canonicalization_barrier_service,
         )
 
-    return FaqWorkbenchParallelProcessingCoordinatorService(
+    return _instantiate_with_available_kwargs(
+        FaqWorkbenchParallelProcessingCoordinatorService,
         section_processor=FaqWorkbenchParallelSectionProcessorAdapter(
             lease_service=_instantiate_with_available_kwargs(
                 FaqWorkbenchSectionWorkItemLeaseService,
@@ -146,7 +159,7 @@ async def make_workbench_section_work_item_processor(
     dependencies: FaqWorkbenchParallelProcessingDependencies,
 ) -> FaqWorkbenchSectionWorkItemProcessorService:
     async with cast(asyncpg.Pool, pool).acquire() as connection:
-        repository = KnowledgeWorkbenchRepository(connection)
+        repository = _workbench_repository(connection)
         return make_workbench_section_processor_from_repository(
             repository=repository,
             dependencies=dependencies,
@@ -172,7 +185,6 @@ def make_workbench_section_processor_from_repository(
     )
 
 
-
 def make_workbench_canonicalization_barrier_service_from_repository(
     *,
     repository: object,
@@ -186,7 +198,10 @@ def make_workbench_canonicalization_barrier_service_from_repository(
     The section worker still receives only claim_observations_runner.
     """
 
-    graph_loader = FaqWorkbenchLocalClaimGraphLoaderService(repository=repository)
+    graph_loader = _instantiate_with_available_kwargs(
+        FaqWorkbenchLocalClaimGraphLoaderService,
+        repository=repository,
+    )
     local_claim_retrieval_service = FaqWorkbenchLocalClaimRetrievalService(
         graph_loader=graph_loader,
     )
@@ -195,7 +210,8 @@ def make_workbench_canonicalization_barrier_service_from_repository(
         if dependencies.llm_json_invocation is not None
         else GroqLlmJsonInvocationAdapter.create_default()
     )
-    registry_merge_generator = FaqWorkbenchRegistryMergeGenerator(
+    registry_merge_generator = _instantiate_with_available_kwargs(
+        FaqWorkbenchRegistryMergeGenerator,
         llm_invocation=llm_json_invocation,
         config=FaqWorkbenchRegistryMergeGeneratorConfig(
             prompt_path=dependencies.registry_merge_prompt_path,
@@ -219,7 +235,8 @@ def make_workbench_canonicalization_barrier_service_from_repository(
         )
     )
 
-    return FaqWorkbenchCanonicalizationBarrierService(
+    return _instantiate_with_available_kwargs(
+        FaqWorkbenchCanonicalizationBarrierService,
         repository=repository,
         local_claim_retrieval_service=local_claim_retrieval_service,
         registry_merge_generator=registry_merge_generator,
@@ -227,6 +244,7 @@ def make_workbench_canonicalization_barrier_service_from_repository(
         registry_application_service=registry_application_service,
         id_factory=dependencies.id_factory,
     )
+
 
 def make_workbench_registry_application_processor_from_repository(
     *,
@@ -242,8 +260,11 @@ def make_workbench_registry_application_processor_from_repository(
     )
 
 
-def _instantiate_with_available_kwargs(cls: object, **available: object) -> object:
-    signature = inspect.signature(cls)  # type: ignore[arg-type]
+def _instantiate_with_available_kwargs(
+    cls: Callable[..., _T],
+    **available: object,
+) -> _T:
+    signature = inspect.signature(cls)
     kwargs: dict[str, object] = {}
 
     for name, parameter in signature.parameters.items():
@@ -258,7 +279,7 @@ def _instantiate_with_available_kwargs(cls: object, **available: object) -> obje
             f"cannot build {getattr(cls, '__name__', cls)!s}: missing dependency {name}"
         )
 
-    return cls(**kwargs)  # type: ignore[misc]
+    return cls(**kwargs)
 
 
 __all__ = [

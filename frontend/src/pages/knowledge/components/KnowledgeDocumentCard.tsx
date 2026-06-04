@@ -4,7 +4,6 @@ import { AlertTriangle, CheckCircle2, Clock3, FileText, Trash2, Zap } from 'luci
 import { ImportQualitySummary } from './ImportQualitySummary';
 import { PriceFactsSummary } from './PriceFactsSummary';
 import { CommercialTruthReviewSummary } from './CommercialTruthReviewSummary';
-import { SurfaceCompilationSummary } from './SurfaceCompilationSummary';
 
 import { t } from '@shared/i18n';
 import {
@@ -194,6 +193,36 @@ export const KnowledgeDocumentCard: React.FC<{
     (action) => action.action_id === 'delete_document',
   );
 
+  const sectionProgressPercent = cardView && cardView.sections.total > 0
+    ? Math.round(
+        ((cardView.sections.processed + cardView.sections.failed) /
+          cardView.sections.total) *
+          100,
+      )
+    : 0;
+
+  const sectionProgressText = cardView
+    ? `${formatNumber(cardView.sections.processed)} из ${formatNumber(
+        cardView.sections.total,
+      )} секций обработано${
+        cardView.sections.failed > 0
+          ? ` · ${formatNumber(cardView.sections.failed)} с ошибкой`
+          : ''
+      }`
+    : '';
+
+  const elapsedText = cardView
+    ? `активно ${formatDuration(cardView.timer.active_elapsed_seconds)} · всего ${formatDuration(
+        cardView.timer.wall_elapsed_seconds,
+      )}`
+    : '';
+
+  const llmUsageText = cardView
+    ? `${formatNumber(cardView.usage.total_tokens)} токенов · ${formatNumber(
+        cardView.usage.llm_call_count,
+      )} LLM-выз.`
+    : '';
+
   const handleCardAction = (action: WorkbenchDocumentCardActionView): void => {
     if (!action.enabled) return;
     if (onCardAction) {
@@ -339,12 +368,17 @@ export const KnowledgeDocumentCard: React.FC<{
         </div>
 
         {cardView && (
-          <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-            {cardText(
-              cardView.status_description_i18n_key,
-              cardView.default_status_description,
-            )}
-          </p>
+          <div className="mt-2 rounded-xl bg-[var(--surface-secondary)] px-3 py-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+            <div className="font-medium text-[var(--text-primary)]">
+              Что происходит с документом
+            </div>
+            <p className="mt-1">
+              {cardText(
+                cardView.status_description_i18n_key,
+                cardView.default_status_description,
+              )}
+            </p>
+          </div>
         )}
       </div>
 
@@ -357,7 +391,7 @@ export const KnowledgeDocumentCard: React.FC<{
                 {cardText(cardView.timer.i18n_key, cardView.timer.default_label)}
               </div>
               <div className="text-[var(--text-muted)]">
-                {formatDuration(cardView.timer.active_elapsed_seconds)}
+                {elapsedText}
                 {cardView.timer.mode === 'running' ? ' · live' : ''}
               </div>
             </div>
@@ -368,18 +402,25 @@ export const KnowledgeDocumentCard: React.FC<{
                 ИИ
               </div>
               <div className="text-[var(--text-muted)]">
-                {formatNumber(cardView.usage.total_tokens)} токенов ·{' '}
-                {formatNumber(cardView.usage.llm_call_count)} выз.
+                {llmUsageText}
               </div>
             </div>
 
             <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
               <div className="mb-1 font-medium text-[var(--text-primary)]">
-                Секции
+                Прогресс
               </div>
               <div className="text-[var(--text-muted)]">
-                {formatNumber(cardView.sections.processed)} /{' '}
-                {formatNumber(cardView.sections.total)}
+                {sectionProgressText}
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--control-bg)]">
+                <div
+                  className="h-full rounded-full bg-[var(--accent-primary)]"
+                  style={{ width: `${sectionProgressPercent}%` }}
+                />
+              </div>
+              <div className="mt-1 text-[var(--text-muted)]">
+                {sectionProgressPercent}%
               </div>
             </div>
 
@@ -477,11 +518,6 @@ export const KnowledgeDocumentCard: React.FC<{
 
         {doc.preprocessing_mode === 'faq' ? (
           <>
-            <SurfaceCompilationSummary
-              documentId={doc.id}
-              enabled={!cardView || !cardView.transient_purged}
-              isDocumentProcessing={cardView?.lifecycle_state === 'processing' || isDocumentProcessing}
-            />
 
             <details className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
               <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">

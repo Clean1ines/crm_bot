@@ -51,7 +51,9 @@ def _row() -> Mapping[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_get_section_batch_queue_item_by_registry_application_queue_item_id_filters_and_maps_row() -> None:
+async def test_get_section_batch_queue_item_by_registry_application_queue_item_id_filters_and_maps_row() -> (
+    None
+):
     connection = FakeConnection(row=_row())
     repository = KnowledgeWorkbenchRepository(connection)
 
@@ -86,7 +88,9 @@ async def test_get_section_batch_queue_item_by_registry_application_queue_item_i
 
 
 @pytest.mark.asyncio
-async def test_get_section_batch_queue_item_by_registry_application_queue_item_id_returns_none_when_missing() -> None:
+async def test_get_section_batch_queue_item_by_registry_application_queue_item_id_returns_none_when_missing() -> (
+    None
+):
     connection = FakeConnection(row=None)
     repository = KnowledgeWorkbenchRepository(connection)
 

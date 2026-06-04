@@ -1,7 +1,9 @@
 from pathlib import Path
 
 
-SERVICE = Path("src/application/services/faq_workbench_registry_application_queue_service.py")
+SERVICE = Path(
+    "src/application/services/faq_workbench_registry_application_queue_service.py"
+)
 WORKER = Path(
     "src/application/services/faq_workbench_registry_application_work_item_processor_service.py"
 )

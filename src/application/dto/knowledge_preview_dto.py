@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
@@ -75,9 +75,9 @@ class KnowledgePreviewResultDto:
             document_status=result.document_status,
             entry_kind=result.entry_kind,
             source_excerpt=result.source_excerpt,
-            questions=tuple(result.questions or ()),
-            synonyms=tuple(result.synonyms or ()),
-            tags=tuple(result.tags or ()),
+            questions=_string_tuple(result.questions),
+            synonyms=_string_tuple(result.synonyms),
+            tags=_string_tuple(result.tags),
             trace=result.trace,
         )
 
@@ -104,7 +104,7 @@ class KnowledgePreviewResultDto:
         if self.source_excerpt is not None:
             payload["source_excerpt"] = self.source_excerpt
         if self.trace is not None:
-            payload["trace"] = dict(self.trace)
+            payload["trace"] = _trace_to_dict(self.trace)
         return payload
 
 
@@ -214,3 +214,19 @@ def _metadata_int_list(metadata: Mapping[str, object], key: str) -> tuple[int, .
         return tuple(result)
     single = _metadata_int(metadata, key)
     return (single,) if single is not None else ()
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return (cleaned,) if cleaned else ()
+    if isinstance(value, list | tuple | set):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    cleaned = str(value).strip()
+    return (cleaned,) if cleaned else ()
+
+
+def _trace_to_dict(trace: KnowledgeSearchTraceView) -> dict[str, object]:
+    return asdict(trace)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from src.application.workbench.dto import WorkbenchProcessDocumentJobPayloadDto
@@ -48,7 +48,9 @@ class InMemoryWorkbenchRepository:
     processing_runs: list[KnowledgeProcessingRun] = field(default_factory=list)
     fact_registries: list[FactRegistry] = field(default_factory=list)
     processing_node_runs: list[ProcessingNodeRun] = field(default_factory=list)
-    processing_node_artifacts: list[ProcessingNodeArtifact] = field(default_factory=list)
+    processing_node_artifacts: list[ProcessingNodeArtifact] = field(
+        default_factory=list
+    )
     registry_snapshots: list[RegistrySnapshot] = field(default_factory=list)
     section_batch_plans: list[WorkbenchSectionBatchPlan] = field(default_factory=list)
     section_work_items: list[WorkbenchSectionWorkItem] = field(default_factory=list)
@@ -159,8 +161,7 @@ class InMemoryWorkbenchRepository:
             if item.project_id == project_id
             and item.document_id == document_id
             and (
-                processing_run_id is None
-                or item.processing_run_id == processing_run_id
+                processing_run_id is None or item.processing_run_id == processing_run_id
             )
         )
 
@@ -199,19 +200,13 @@ class InMemoryWorkbenchRepository:
         queued = sum(1 for item in items if item.status.value == "queued")
         leased = sum(1 for item in items if item.status.value == "leased")
         claim_observations_persisted = sum(
-            1
-            for item in items
-            if item.status.value == "claim_observations_persisted"
+            1 for item in items if item.status.value == "claim_observations_persisted"
         )
         registry_application_queued = sum(
-            1
-            for item in items
-            if item.status.value == "registry_application_queued"
+            1 for item in items if item.status.value == "registry_application_queued"
         )
         registry_application_applied = sum(
-            1
-            for item in items
-            if item.status.value == "registry_application_applied"
+            1 for item in items if item.status.value == "registry_application_applied"
         )
         failed = sum(1 for item in items if item.status.value == "failed")
         cancelled = sum(1 for item in items if item.status.value == "cancelled")

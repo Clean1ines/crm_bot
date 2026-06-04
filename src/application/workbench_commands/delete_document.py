@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, cast
 
 from src.domain.project_plane.knowledge_workbench.deletion import (
+    WorkbenchDeleteDocument,
+    WorkbenchDeleteProcessingRun,
     WorkbenchDocumentDeleteTransition,
     decide_workbench_document_delete_transition,
 )
@@ -144,8 +146,11 @@ class WorkbenchDocumentDeleteService:
 
         try:
             transition = decide_workbench_document_delete_transition(
-                document=document,
-                current_processing_run=current_processing_run,
+                document=cast(WorkbenchDeleteDocument, document),
+                current_processing_run=cast(
+                    WorkbenchDeleteProcessingRun | None,
+                    current_processing_run,
+                ),
                 deleted_at=datetime.now(timezone.utc),
             )
         except DomainInvariantError as exc:

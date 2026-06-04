@@ -40,7 +40,9 @@ def test_orchestrator_module_does_not_export_old_sequential_commands() -> None:
     import src.application.services.faq_workbench_document_processing_orchestrator as module
 
     assert not hasattr(module, "Process" + "Markdown" + "Document" + "Command")
-    assert not hasattr(module, "Process" + "Existing" + "Document" + "Sections" + "Command")
+    assert not hasattr(
+        module, "Process" + "Existing" + "Document" + "Sections" + "Command"
+    )
     assert not hasattr(module, "Claim" + "Observations" + "Input")
     assert not hasattr(module, "Workbench" + "Processing" + "Cancelled" + "Error")
 

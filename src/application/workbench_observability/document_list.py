@@ -111,7 +111,7 @@ def _nullable_text(value: object) -> str | None:
 def _int(value: object) -> int:
     if value is None:
         return 0
-    return int(value)
+    return int(str(value))
 
 
 def _bool(value: object) -> bool:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Protocol
 
 from src.application.ports.faq_workbench_registry_merge_generator import (
     FaqWorkbenchRegistryMergeGenerationCommand,
@@ -83,12 +84,13 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
         if result.parsed_json is None:
             raise DomainInvariantError("Prompt C returned empty JSON")
 
+        parsed_json = _workbench_json_value(result.parsed_json)
         fact_registry, registry_update_summary = self.parse_fact_registry_payload(
-            result.parsed_json
+            parsed_json
         )
 
-        warnings = self._warnings_from_payload(result.parsed_json)
-        metrics = self._metrics_from_payload(result.parsed_json)
+        warnings = self._warnings_from_payload(parsed_json)
+        metrics = self._metrics_from_payload(parsed_json)
         parsed_payload: JsonValue = {
             "fact_registry": fact_registry,
             "registry_update_summary": registry_update_summary,
@@ -100,7 +102,7 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
             "prompt_version": command.prompt_version,
             "canonicalization_unit_id": command.canonicalization_unit.unit_id,
             "raw_text": result.raw_text,
-            "parsed_json": result.parsed_json,
+            "parsed_json": parsed_json,
         }
 
         return FaqWorkbenchRegistryMergeGenerationResult(
@@ -123,8 +125,7 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
             "registry_snapshot_payload": command.registry_snapshot_payload,
             "relevant_registry_state": command.relevant_registry_state,
             "canonical_facts": [
-                self._json_safe(fact)
-                for fact in command.canonical_facts
+                self._json_safe(fact) for fact in command.canonical_facts
             ],
         }
 
@@ -163,7 +164,9 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
 
         fact_registry = payload.get("fact_registry")
         if not isinstance(fact_registry, dict):
-            raise DomainInvariantError("Prompt C payload must contain fact_registry object")
+            raise DomainInvariantError(
+                "Prompt C payload must contain fact_registry object"
+            )
 
         registry_update_summary = payload.get("registry_update_summary")
         if not isinstance(registry_update_summary, dict):
@@ -175,14 +178,16 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
         self._validate_registry_update_summary(registry_update_summary)
 
         return (
-            cast(dict[str, JsonValue], fact_registry),
-            cast(dict[str, JsonValue], registry_update_summary),
+            fact_registry,
+            registry_update_summary,
         )
 
     def _validate_fact_registry(self, fact_registry: dict[str, JsonValue]) -> None:
         version = fact_registry.get("version")
         if not isinstance(version, int) or version < 1:
-            raise DomainInvariantError("fact_registry.version must be a positive integer")
+            raise DomainInvariantError(
+                "fact_registry.version must be a positive integer"
+            )
 
         canonical_facts = fact_registry.get("canonical_facts")
         if not isinstance(canonical_facts, list):
@@ -196,7 +201,9 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
         for index, raw_fact in enumerate(canonical_facts):
             if not isinstance(raw_fact, dict):
                 raise DomainInvariantError(f"canonical fact #{index} must be an object")
-            fact_id = self._required_str(raw_fact, "fact_id", f"canonical fact #{index}")
+            fact_id = self._required_str(
+                raw_fact, "fact_id", f"canonical fact #{index}"
+            )
             if fact_id in fact_ids:
                 raise DomainInvariantError(f"duplicate canonical fact id: {fact_id}")
             fact_ids.add(fact_id)
@@ -207,8 +214,12 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
             self._required_str(raw_fact, "status", f"canonical fact #{index}")
             self._required_list(raw_fact, "triples", f"canonical fact #{index}")
             self._required_list(raw_fact, "mentions", f"canonical fact #{index}")
-            self._required_list(raw_fact, "question_variants", f"canonical fact #{index}")
-            self._required_list(raw_fact, "derived_fact_notes", f"canonical fact #{index}")
+            self._required_list(
+                raw_fact, "question_variants", f"canonical fact #{index}"
+            )
+            self._required_list(
+                raw_fact, "derived_fact_notes", f"canonical fact #{index}"
+            )
 
         for index, raw_relation in enumerate(fact_relations):
             if not isinstance(raw_relation, dict):
@@ -260,7 +271,9 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
         raw_warnings = payload.get("warnings", ())
         if not isinstance(raw_warnings, list):
             return ()
-        return tuple(item for item in raw_warnings if isinstance(item, str) and item.strip())
+        return tuple(
+            item for item in raw_warnings if isinstance(item, str) and item.strip()
+        )
 
     def _metrics_from_payload(self, payload: JsonValue) -> dict[str, JsonValue]:
         if not isinstance(payload, dict):
@@ -268,7 +281,7 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
         raw_metrics = payload.get("metrics", {})
         if not isinstance(raw_metrics, dict):
             return {}
-        return cast(dict[str, JsonValue], raw_metrics)
+        return raw_metrics
 
     def _json_safe(self, value: object) -> JsonValue:
         if isinstance(value, str | int | float | bool) or value is None:
@@ -310,6 +323,16 @@ class FaqWorkbenchRegistryMergeGenerator(FaqWorkbenchRegistryMergeGeneratorPort)
 
     def _load_prompt_template(self) -> str:
         return self.config.prompt_path.read_text(encoding="utf-8")
+
+
+def _workbench_json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _workbench_json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_workbench_json_value(item) for item in value]
+    raise DomainInvariantError("LLM JSON payload contains non-JSON value")
 
 
 __all__ = [

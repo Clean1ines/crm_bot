@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
 
 import pytest
 
@@ -16,7 +15,7 @@ class FakeQueueRepository:
     jobs: list[QueueJobView]
     claimed: list[str] = field(default_factory=list)
     completed: list[tuple[str, bool, str | None]] = field(default_factory=list)
-    failed: list[dict[str, Any]] = field(default_factory=list)
+    failed: list[dict[str, object]] = field(default_factory=list)
     stale_recoveries: int = 0
 
     async def claim_job(self, worker_id: str) -> QueueJobView | None:
@@ -61,10 +60,10 @@ class FakeQueueRepository:
 @dataclass(slots=True)
 class FakeDispatcher:
     outcomes: list[object]
-    calls: list[dict[str, Any]] = field(default_factory=list)
+    calls: list[dict[str, object]] = field(default_factory=list)
     db_pool: object = object()
 
-    async def dispatch(self, job: dict[str, Any], *, worker_id: str) -> None:
+    async def dispatch(self, job: dict[str, object], *, worker_id: str) -> None:
         self.calls.append({"job": job, "worker_id": worker_id})
         if self.outcomes:
             outcome = self.outcomes.pop(0)
@@ -98,8 +97,8 @@ async def test_worker_loop_completes_job_successfully_after_dispatch_returns() -
 
     await asyncio.gather(
         run_worker_loop(
-            queue_repo=queue_repo,  # type: ignore[arg-type]
-            dispatcher=dispatcher,  # type: ignore[arg-type]
+            queue_repo=queue_repo,
+            dispatcher=dispatcher,
             shutdown_event=shutdown_event,
             worker_id="worker-1",
             idle_sleep_seconds=0.001,
@@ -121,8 +120,8 @@ async def test_worker_loop_marks_permanent_job_error_as_failed_without_retry() -
 
     await asyncio.gather(
         run_worker_loop(
-            queue_repo=queue_repo,  # type: ignore[arg-type]
-            dispatcher=dispatcher,  # type: ignore[arg-type]
+            queue_repo=queue_repo,
+            dispatcher=dispatcher,
             shutdown_event=shutdown_event,
             worker_id="worker-1",
             idle_sleep_seconds=0.001,
@@ -145,8 +144,8 @@ async def test_worker_loop_retries_transient_job_error() -> None:
 
     await asyncio.gather(
         run_worker_loop(
-            queue_repo=queue_repo,  # type: ignore[arg-type]
-            dispatcher=dispatcher,  # type: ignore[arg-type]
+            queue_repo=queue_repo,
+            dispatcher=dispatcher,
             shutdown_event=shutdown_event,
             worker_id="worker-1",
             idle_sleep_seconds=0.001,
@@ -178,8 +177,8 @@ async def test_worker_loop_continues_after_one_successful_job_until_shutdown() -
 
     await asyncio.gather(
         run_worker_loop(
-            queue_repo=queue_repo,  # type: ignore[arg-type]
-            dispatcher=dispatcher,  # type: ignore[arg-type]
+            queue_repo=queue_repo,
+            dispatcher=dispatcher,
             shutdown_event=shutdown_event,
             worker_id="worker-1",
             idle_sleep_seconds=0.001,

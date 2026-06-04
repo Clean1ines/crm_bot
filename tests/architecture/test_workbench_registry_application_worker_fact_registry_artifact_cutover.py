@@ -6,7 +6,9 @@ SERVICE = Path(
 )
 
 
-def test_registry_application_worker_consumes_fact_registry_artifact_not_old_findings() -> None:
+def test_registry_application_worker_consumes_fact_registry_artifact_not_old_findings() -> (
+    None
+):
     source = SERVICE.read_text(encoding="utf-8")
 
     assert "get_processing_node_artifact_by_node_run_id_and_type" in source

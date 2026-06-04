@@ -110,3 +110,32 @@ def test_knowledge_repository_no_longer_contains_old_edit_action_methods() -> No
 
     for marker in forbidden:
         assert marker not in source, f"knowledge_repository.py still contains {marker}"
+
+
+def test_knowledge_repository_does_not_import_deleted_artifact_cleanup_domain() -> None:
+    source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+
+    forbidden = (
+        "src.domain.project_plane.knowledge_artifact_cleanup",
+        "from src.infrastructure.db.repositories.knowledge_artifact_cleanup import",
+        "KnowledgeArtifactCleanupPlan",
+        "KnowledgeArtifactCleanupResult",
+        "build_document_delete_cleanup_plan",
+        "build_document_reset_cleanup_plan",
+        "build_project_clear_cleanup_plan",
+        "run_cleanup_document_artifacts",
+        "run_cleanup_project_artifacts",
+    )
+    for marker in forbidden:
+        assert marker not in source
+
+
+def test_knowledge_repository_cleanup_surface_is_explicitly_retired() -> None:
+    source = Path(
+        "src/infrastructure/db/repositories/knowledge_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "Legacy KnowledgeRepository artifact cleanup API is retired" in source
+    assert "Use Workbench delete/clear command handlers instead" in source

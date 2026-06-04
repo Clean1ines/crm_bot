@@ -15,7 +15,9 @@ REQUIRED_SQL_TOKENS = (
 )
 
 
-def test_workbench_observability_uses_fact_registry_schema_not_question_registry_tables() -> None:
+def test_workbench_observability_uses_fact_registry_schema_not_question_registry_tables() -> (
+    None
+):
     source = REPOSITORY.read_text(encoding="utf-8")
 
     for token in FORBIDDEN_SQL_TOKENS:

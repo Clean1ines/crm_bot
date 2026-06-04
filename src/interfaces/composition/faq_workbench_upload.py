@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import cast
+from typing import Callable, cast
 from uuid import uuid4
 
 import asyncpg
@@ -13,9 +13,6 @@ from src.application.workbench.upload_service import (
     FaqWorkbenchUploadCommand,
     FaqWorkbenchUploadService,
 )
-MODE_FAQ = "faq"
-PREPROCESSING_STATUS_PROCESSING = "processing"
-
 from src.domain.project_plane.knowledge_workbench import SourceType
 from src.infrastructure.db.knowledge_workbench_repository import (
     KnowledgeWorkbenchRepository,
@@ -23,7 +20,12 @@ from src.infrastructure.db.knowledge_workbench_repository import (
 from src.infrastructure.llm.chunker import ChunkerService
 from src.infrastructure.queue.workbench_parallel_queue import (
     WorkbenchParallelQueueAdapter,
+    WorkbenchParallelQueueConnection,
 )
+
+
+MODE_FAQ = "faq"
+PREPROCESSING_STATUS_PROCESSING = "processing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +46,14 @@ class FaqWorkbenchKnowledgeUploadResult:
             "preprocessing_status": self.preprocessing_status,
             "structured_entries": self.structured_entries,
         }
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)
 
 
 class UuidIdFactory:
@@ -110,8 +120,10 @@ async def upload_faq_workbench_knowledge_file(
         )
 
     upload_service = FaqWorkbenchUploadService(
-        KnowledgeWorkbenchRepository(cast(asyncpg.Pool, pool)),
-        WorkbenchParallelQueueAdapter(connection=queue_repo),
+        _workbench_repository(cast(asyncpg.Pool, pool)),
+        WorkbenchParallelQueueAdapter(
+            connection=cast(WorkbenchParallelQueueConnection, queue_repo),
+        ),
         id_factory=UuidIdFactory(),
     )
     result = await upload_service.upload_markdown(

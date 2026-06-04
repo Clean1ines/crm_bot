@@ -16,10 +16,6 @@ from src.domain.project_plane.knowledge_import_quality import (
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchTraceView,
 )
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingMode,
-    normalize_preprocessing_mode,
-)
 from src.domain.project_plane.production_retrieval import ProductionRetrievalMode
 
 KNOWLEDGE_PREVIEW_RETRIEVAL_MODE_RUNTIME_EQUIVALENT = "runtime_equivalent"
@@ -126,9 +122,6 @@ class KnowledgeUploadJobPayloadDto:
             payload["resume_run_id"] = self.resume_run_id
         return payload
 
-    def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
-        return normalize_preprocessing_mode(self.preprocessing_mode)
-
     @classmethod
     def from_mapping(
         cls, payload: Mapping[str, object]
@@ -180,16 +173,13 @@ class KnowledgeUploadJobPayloadDto:
 class KnowledgeUploadRequestDto:
     preprocessing_mode: str = "faq"
 
-    def normalized_preprocessing_mode(self) -> KnowledgePreprocessingMode:
-        return normalize_preprocessing_mode(self.preprocessing_mode)
-
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeSearchTraceDto:
     matched_fields: tuple[str, ...]
     lexical_score: float
     vector_score: float
-    exact_claim_match: bool
+    exact_question_match: bool
     title_match: bool
     length_penalty: float
     final_score: float
@@ -203,7 +193,7 @@ class KnowledgeSearchTraceDto:
             matched_fields=trace.matched_fields,
             lexical_score=trace.lexical_score,
             vector_score=trace.vector_score,
-            exact_claim_match=trace.exact_claim_match,
+            exact_question_match=trace.exact_question_match,
             title_match=trace.title_match,
             length_penalty=trace.length_penalty,
             final_score=trace.final_score,
@@ -217,7 +207,7 @@ class KnowledgeSearchTraceDto:
             "matched_fields": list(self.matched_fields),
             "lexical_score": self.lexical_score,
             "vector_score": self.vector_score,
-            "exact_claim_match": self.exact_claim_match,
+            "exact_question_match": self.exact_question_match,
             "title_match": self.title_match,
             "length_penalty": self.length_penalty,
             "final_score": self.final_score,

@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.application.workbench.dto import WorkbenchProcessDocumentJobPayloadDto
 from src.domain.project_plane.knowledge_workbench import DomainInvariantError
 from src.infrastructure.queue.handlers.workbench_parallel_processing import (
     PARALLEL_WORKBENCH_PROCESSING_TASK_TYPE,
@@ -78,13 +79,13 @@ class WorkbenchParallelQueueAdapter:
 
     async def enqueue_process_workbench_document(
         self,
-        command: object,
-    ) -> EnqueueWorkbenchParallelProcessingResult:
-        return await self.enqueue_process_workbench_parallel_processing(
+        payload: WorkbenchProcessDocumentJobPayloadDto,
+    ) -> None:
+        await self.enqueue_process_workbench_parallel_processing(
             EnqueueWorkbenchParallelProcessingCommand(
-                project_id=str(getattr(command, "project_id")),
-                document_id=str(getattr(command, "document_id")),
-                processing_run_id=str(getattr(command, "processing_run_id")),
+                project_id=payload.project_id,
+                document_id=payload.document_id,
+                processing_run_id=payload.processing_run_id,
                 section_worker_count=3,
             )
         )

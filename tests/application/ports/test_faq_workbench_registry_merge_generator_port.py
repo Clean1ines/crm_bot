@@ -88,7 +88,9 @@ def test_registry_merge_result_is_actual_fact_registry_artifact_contract() -> No
     )
 
 
-def test_registry_merge_error_wraps_llm_invocation_result_not_freeform_message_context() -> None:
+def test_registry_merge_error_wraps_llm_invocation_result_not_freeform_message_context() -> (
+    None
+):
     signature = inspect.signature(FaqWorkbenchRegistryMergeGenerationError)
 
     assert tuple(signature.parameters) == ("result",)
@@ -102,7 +104,9 @@ def test_registry_merge_error_wraps_llm_invocation_result_not_freeform_message_c
         1,
     )[0]
 
-    assert "def __init__(self, result: LlmJsonInvocationResult) -> None:" in error_source
+    assert (
+        "def __init__(self, result: LlmJsonInvocationResult) -> None:" in error_source
+    )
     assert "self.result = result" in error_source
     assert "self.status = result.status" in error_source
     assert "self.error_kind = error_kind" in error_source

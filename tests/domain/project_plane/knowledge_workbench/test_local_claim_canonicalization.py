@@ -85,12 +85,8 @@ def test_canonicalization_units_preserve_candidate_group_members_and_edges() -> 
     assert first_unit.edge_count == 1
     assert first_unit.max_similarity_score > 0
     assert tuple(member.local_ref for member in first_unit.members) == ("c1", "c2")
-    assert first_unit.edges[0].source_search_document_id == (
-        "section-1:node-run-1:c1"
-    )
-    assert first_unit.edges[0].target_search_document_id == (
-        "section-2:node-run-2:c2"
-    )
+    assert first_unit.edges[0].source_search_document_id == ("section-1:node-run-1:c1")
+    assert first_unit.edges[0].target_search_document_id == ("section-2:node-run-2:c2")
     assert first_unit.edges[0].signal_summaries
 
     second_unit = units[1]
@@ -99,7 +95,9 @@ def test_canonicalization_units_preserve_candidate_group_members_and_edges() -> 
     assert second_unit.members[0].local_ref == "c3"
 
 
-def test_canonicalization_unit_prompt_payload_is_prompt_c_ready_without_registry_merge_vocabulary() -> None:
+def test_canonicalization_unit_prompt_payload_is_prompt_c_ready_without_registry_merge_vocabulary() -> (
+    None
+):
     first = _doc(
         search_document_id="section-1:node-run-1:c1",
         claim="Бот автоматически отвечает клиентам в Telegram.",
@@ -139,9 +137,7 @@ def test_canonicalization_unit_prompt_payload_is_prompt_c_ready_without_registry
     assert first_member["triples"] == [
         "бот has_capability автоматически отвечать клиентам telegram"
     ]
-    assert first_member["possible_questions"] == [
-        "Может ли бот отвечать клиентам?"
-    ]
+    assert first_member["possible_questions"] == ["Может ли бот отвечать клиентам?"]
     assert first_member["scope"] == "автоматические ответы telegram"
     assert first_member["exclusion_scope"] == "не ручные ответы менеджера"
 

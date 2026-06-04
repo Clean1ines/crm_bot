@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Mapping, Sequence
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, cast
 
 from src.application.ports.knowledge_workbench import (
     KnowledgeWorkbenchFreshUploadRepositoryPort,
@@ -14,6 +14,12 @@ from src.application.ports.knowledge_workbench import (
     KnowledgeWorkbenchClaimObservationsRepositoryPort,
 )
 from src.domain.project_plane.knowledge_workbench import (
+    ProcessingNodeArtifactType,
+    ProcessingNodeName,
+    WorkbenchSectionBatchPlan,
+    WorkbenchSectionBatchPlanStatus,
+    WorkbenchSectionWorkItem,
+    WorkbenchSectionWorkItemStatus,
     ProcessingExhaustionTransition,
     DocumentSection,
     DocumentSectionStatus,
@@ -37,7 +43,9 @@ from src.domain.project_plane.knowledge_workbench import (
     RegistryApplicationQueueItem,
     RegistryApplicationQueueItemStatus,
     ParallelDrainWorkCounts,
+    RegistryUpdateApplication,
 )
+
 
 def _publish_ready_optional_text(value: object) -> str | None:
     if value is None:
@@ -45,9 +53,11 @@ def _publish_ready_optional_text(value: object) -> str | None:
     text = str(value).strip()
     return text or None
 
+
 def _publish_ready_text(value: object) -> str:
     text = _publish_ready_optional_text(value)
     return "" if text is None else text
+
 
 def _publish_ready_text_tuple(value: object) -> tuple[str, ...]:
     if value is None:
@@ -62,6 +72,7 @@ def _publish_ready_text_tuple(value: object) -> tuple[str, ...]:
         return tuple(str(item) for item in value if str(item).strip())
     return (str(value),)
 
+
 def _publish_ready_datetime(value: object) -> datetime | None:
     if value is None:
         return None
@@ -73,6 +84,18 @@ def _publish_ready_datetime(value: object) -> datetime | None:
     if text.endswith("Z"):
         text = f"{text[:-1]}+00:00"
     return datetime.fromisoformat(text)
+
+
+class WorkbenchAsyncTransaction(Protocol):
+    async def __aenter__(self) -> object: ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> object: ...
+
 
 class _NoopAsyncTransaction:
     async def __aenter__(self) -> None:
@@ -86,11 +109,13 @@ class _NoopAsyncTransaction:
     ) -> None:
         return None
 
-def _optional_workbench_transaction(connection: object) -> object:
+
+def _optional_workbench_transaction(connection: object) -> WorkbenchAsyncTransaction:
     transaction = getattr(connection, "transaction", None)
     if callable(transaction):
-        return transaction()
+        return cast(WorkbenchAsyncTransaction, transaction())
     return _NoopAsyncTransaction()
+
 
 class WorkbenchDbConnection(Protocol):
     def execute(self, query: str, *args: object) -> Awaitable[str]: ...
@@ -106,6 +131,7 @@ class WorkbenchDbConnection(Protocol):
         query: str,
         *args: object,
     ) -> Awaitable[Sequence[Mapping[str, object]]]: ...
+
 
 class KnowledgeWorkbenchRepository(
     KnowledgeWorkbenchFreshUploadRepositoryPort,
@@ -160,7 +186,7 @@ class KnowledgeWorkbenchRepository(
                 plan.observed_registry_snapshot_id,
                 plan.observed_registry_snapshot_sequence,
                 plan.max_lanes,
-                self._json(lanes_payload),
+                self._json(self._json_value_from_db(lanes_payload)),
                 len(plan.queue_items),
             )
 
@@ -500,42 +526,6 @@ class KnowledgeWorkbenchRepository(
             item.updated_at,
         )
 
-    def _section_batch_queue_item_from_row(
-        self,
-        row: Mapping[str, object],
-    ) -> SectionBatchQueueItem:
-        return SectionBatchQueueItem(
-            queue_item_id=str(row["queue_item_id"]),
-            batch_plan_id=str(row["batch_plan_id"]),
-            processing_run_id=str(row["processing_run_id"]),
-            project_id=str(row["project_id"]),
-            document_id=str(row["document_id"]),
-            section_id=str(row["section_id"]),
-            section_key=str(row["section_key"]),
-            section_index=int(row["section_index"]),
-            lane_id=str(row["lane_id"]),
-            lane_index=int(row["lane_index"]),
-            observed_registry_snapshot_id=str(row["observed_registry_snapshot_id"]),
-            observed_registry_snapshot_sequence=int(
-                row["observed_registry_snapshot_sequence"]
-            ),
-            status=SectionBatchQueueItemStatus(str(row["status"])),
-            claimed_by_worker_id=_publish_ready_optional_text(
-                row["claimed_by_worker_id"]
-            ),
-            lease_expires_at=_publish_ready_datetime(row["lease_expires_at"]),
-            claim_observations_node_run_id=_publish_ready_optional_text(
-                row["claim_observations_node_run_id"]
-            ),
-            registry_application_queue_item_id=_publish_ready_optional_text(
-                row["registry_application_queue_item_id"]
-            ),
-            error_kind=_publish_ready_optional_text(row["error_kind"]),
-            attempt_count=int(row["attempt_count"] or 0),
-            created_at=_publish_ready_datetime(row["created_at"]),
-            updated_at=_publish_ready_datetime(row["updated_at"]),
-        )
-
     async def get_document(
         self,
         *,
@@ -578,11 +568,9 @@ class KnowledgeWorkbenchRepository(
             project_id=str(row["project_id"]),
             file_name=str(row["file_name"]),
             source_type=SourceType(str(row["source_type"])),
-            content_hash=str(row["content_hash"])
-            if row["content_hash"] is not None
-            else None,
+            content_hash=_publish_ready_text(row["content_hash"]),
             upload_id=str(row["upload_id"]),
-            file_size_bytes=int(row["file_size_bytes"] or 0),
+            file_size_bytes=self._int_from_db(row["file_size_bytes"]),
             status=KnowledgeDocumentStatus(str(row["status"])),
             current_processing_run_id=str(row["current_processing_run_id"])
             if row["current_processing_run_id"] is not None
@@ -603,10 +591,10 @@ class KnowledgeWorkbenchRepository(
             last_error_message=str(row["last_error_message"])
             if row["last_error_message"] is not None
             else None,
-            last_error_at=row["last_error_at"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            deleted_at=row["deleted_at"],
+            last_error_at=self._datetime_from_db(row["last_error_at"]),
+            created_at=self._datetime_from_db(row["created_at"]),
+            updated_at=self._datetime_from_db(row["updated_at"]),
+            deleted_at=self._datetime_from_db(row["deleted_at"]),
         )
 
     async def get_document_section(
@@ -650,7 +638,7 @@ class KnowledgeWorkbenchRepository(
             section_id=str(row["section_id"]),
             document_id=str(row["document_id"]),
             project_id=str(row["project_id"]),
-            section_index=int(row["section_index"]),
+            section_index=self._int_from_db(row["section_index"]),
             section_key=str(row["section_key"]),
             heading_path=self._text_tuple_from_db(row["heading_path"]),
             title=str(row["title"]),
@@ -704,7 +692,7 @@ class KnowledgeWorkbenchRepository(
                     section_id=str(row["section_id"]),
                     document_id=str(row["document_id"]),
                     project_id=str(row["project_id"]),
-                    section_index=int(row["section_index"]),
+                    section_index=self._int_from_db(row["section_index"]),
                     section_key=str(row["section_key"]),
                     heading_path=self._text_tuple_from_db(row["heading_path"]),
                     title=str(row["title"]),
@@ -772,16 +760,16 @@ class KnowledgeWorkbenchRepository(
             trigger=ProcessingTrigger(str(row["trigger"])),
             status=ProcessingRunStatus(str(row["status"])),
             resume_policy=ResumePolicy(str(row["resume_policy"])),
-            started_at=row["started_at"],
-            stopped_at=row["stopped_at"],
-            completed_at=row["completed_at"],
-            deleted_at=row["deleted_at"],
-            active_elapsed_seconds=int(row["active_elapsed_seconds"] or 0),
-            wall_elapsed_seconds=int(row["wall_elapsed_seconds"] or 0),
-            total_prompt_tokens=int(row["total_prompt_tokens"] or 0),
-            total_completion_tokens=int(row["total_completion_tokens"] or 0),
-            total_tokens=int(row["total_tokens"] or 0),
-            total_llm_calls=int(row["total_llm_calls"] or 0),
+            started_at=self._datetime_from_db(row["started_at"]),
+            stopped_at=self._datetime_from_db(row["stopped_at"]),
+            completed_at=self._datetime_from_db(row["completed_at"]),
+            deleted_at=self._datetime_from_db(row["deleted_at"]),
+            active_elapsed_seconds=self._int_from_db(row["active_elapsed_seconds"]),
+            wall_elapsed_seconds=self._int_from_db(row["wall_elapsed_seconds"]),
+            total_prompt_tokens=self._int_from_db(row["total_prompt_tokens"]),
+            total_completion_tokens=self._int_from_db(row["total_completion_tokens"]),
+            total_tokens=self._int_from_db(row["total_tokens"]),
+            total_llm_calls=self._int_from_db(row["total_llm_calls"]),
             last_error_kind=str(row["last_error_kind"])
             if row["last_error_kind"] is not None
             else None,
@@ -841,14 +829,14 @@ class KnowledgeWorkbenchRepository(
             if row["after_section_id"] is not None
             else None,
             after_node_run_id=str(row["after_node_run_id"]),
-            sequence_number=int(row["sequence_number"]),
+            sequence_number=self._int_from_db(row["sequence_number"]),
             entries_payload=self._json_object_from_db(row["entries_payload"]),
             relations_payload=self._json_object_from_db(row["relations_payload"]),
-            entry_count=int(row["entry_count"]),
-            relation_count=int(row["relation_count"]),
-            claim_observation_count=int(row["claim_observation_count"]),
-            update_count=int(row["update_count"]),
-            created_at=row["created_at"],
+            entry_count=self._int_from_db(row["entry_count"]),
+            relation_count=self._int_from_db(row["relation_count"]),
+            claim_observation_count=self._int_from_db(row["claim_observation_count"]),
+            update_count=self._int_from_db(row["update_count"]),
+            created_at=self._datetime_from_db(row["created_at"]),
         )
 
     async def persist_processing_cancellation_transition(
@@ -1011,16 +999,16 @@ class KnowledgeWorkbenchRepository(
             document_id=str(row["document_id"]),
             section_id=str(row["section_id"]),
             section_key=str(row["section_key"]),
-            section_index=int(row["section_index"]),
+            section_index=self._int_from_db(row["section_index"]),
             lane_id=str(row["lane_id"]),
-            lane_index=int(row["lane_index"]),
+            lane_index=self._int_from_db(row["lane_index"]),
             observed_registry_snapshot_id=str(row["observed_registry_snapshot_id"]),
-            observed_registry_snapshot_sequence=int(
+            observed_registry_snapshot_sequence=self._int_from_db(
                 row["observed_registry_snapshot_sequence"]
             ),
             status=SectionBatchQueueItemStatus(str(row["status"])),
             claimed_by_worker_id=self._optional_text(row["claimed_by_worker_id"]),
-            lease_expires_at=row["lease_expires_at"],
+            lease_expires_at=self._datetime_from_db(row["lease_expires_at"]),
             claim_observations_node_run_id=self._optional_text(
                 row["claim_observations_node_run_id"]
             ),
@@ -1028,9 +1016,9 @@ class KnowledgeWorkbenchRepository(
                 row["registry_application_queue_item_id"]
             ),
             error_kind=self._optional_text(row["error_kind"]),
-            attempt_count=int(row["attempt_count"] or 0),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            attempt_count=self._int_from_db(row["attempt_count"]),
+            created_at=self._datetime_from_db(row["created_at"]),
+            updated_at=self._datetime_from_db(row["updated_at"]),
         )
 
     def _row_count_from_execute_result(self, result: object) -> int:
@@ -1141,10 +1129,9 @@ class KnowledgeWorkbenchRepository(
         processing_run_id: str,
         transition: ProcessingExhaustionTransition,
     ) -> None:
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    """
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
                     UPDATE knowledge_workbench_documents
                     SET status = $4,
                         last_error_kind = $5,
@@ -1155,17 +1142,17 @@ class KnowledgeWorkbenchRepository(
                       AND document_id = $2::uuid
                       AND current_processing_run_id = $3
                     """,
-                    project_id,
-                    document_id,
-                    processing_run_id,
-                    transition.document_status_after.value,
-                    transition.error_kind,
-                    transition.error_message_user,
-                )
+                project_id,
+                document_id,
+                processing_run_id,
+                transition.document_status_after.value,
+                transition.error_kind,
+                transition.error_message_user,
+            )
 
-                await conn.execute(
-                    """
-                    UPDATE knowledge_workbench_processing_runs
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_processing_runs
                     SET status = $4,
                         resume_policy = $5,
                         last_error = $6,
@@ -1176,15 +1163,15 @@ class KnowledgeWorkbenchRepository(
                       AND document_id = $2::uuid
                       AND processing_run_id = $3
                     """,
-                    project_id,
-                    document_id,
-                    processing_run_id,
-                    transition.processing_run_status_after.value,
-                    transition.resume_policy_after.value,
-                    transition.error_message_user,
-                    transition.error_kind,
-                    transition.error_message_internal,
-                )
+                project_id,
+                document_id,
+                processing_run_id,
+                transition.processing_run_status_after.value,
+                transition.resume_policy_after.value,
+                transition.error_message_user,
+                transition.error_kind,
+                transition.error_message_internal,
+            )
 
     async def create_processing_run(self, run: KnowledgeProcessingRun) -> None:
         await self._connection.execute(
@@ -1372,15 +1359,13 @@ class KnowledgeWorkbenchRepository(
             project_id=str(row["project_id"]),
             document_id=str(row["document_id"]),
             section_id=(
-                str(row["section_id"])
-                if row["section_id"] is not None
-                else None
+                str(row["section_id"]) if row["section_id"] is not None else None
             ),
             artifact_type=ProcessingNodeArtifactType(str(row["artifact_type"])),
-            payload_json=dict(row["payload_json"] or {}),
-            schema_version=int(row["schema_version"]),
-            created_at=row["created_at"],
-            metadata=dict(row["metadata"] or {}),
+            payload_json=self._json_object_from_db(row["payload_json"]),
+            schema_version=self._int_from_db(row["schema_version"]),
+            created_at=self._datetime_from_db(row["created_at"]),
+            metadata=self._json_object_from_db(row["metadata"]),
         )
 
     async def list_claim_observation_parsed_artifacts(
@@ -1438,15 +1423,13 @@ class KnowledgeWorkbenchRepository(
                 project_id=str(row["project_id"]),
                 document_id=str(row["document_id"]),
                 section_id=(
-                    str(row["section_id"])
-                    if row["section_id"] is not None
-                    else None
+                    str(row["section_id"]) if row["section_id"] is not None else None
                 ),
                 artifact_type=ProcessingNodeArtifactType(str(row["artifact_type"])),
-                payload_json=dict(row["payload_json"] or {}),
-                schema_version=int(row["schema_version"]),
-                metadata=dict(row["metadata"] or {}),
-                created_at=row["created_at"],
+                payload_json=self._json_object_from_db(row["payload_json"]),
+                schema_version=self._int_from_db(row["schema_version"]),
+                metadata=self._json_object_from_db(row["metadata"]),
+                created_at=self._datetime_from_db(row["created_at"]),
             )
             for row in rows
         )
@@ -1512,6 +1495,7 @@ class KnowledgeWorkbenchRepository(
         error_report_id: str,
         user_message: str,
         internal_error: str,
+        node_run_id: str | None = None,
     ) -> None:
         document_status_value = getattr(document_status, "value", str(document_status))
         processing_run_status_value = getattr(
@@ -1591,6 +1575,7 @@ class KnowledgeWorkbenchRepository(
             processing_run_status=processing_run_status,
             resume_policy=resume_policy,
             error_kind=error_kind,
+            error_report_id=node_run_id,
             user_message=user_message,
             internal_error=internal_error,
         )
@@ -1618,6 +1603,7 @@ class KnowledgeWorkbenchRepository(
             processing_run_status=processing_run_status,
             resume_policy=resume_policy,
             error_kind=error_kind,
+            error_report_id=node_run_id,
             user_message=user_message,
             internal_error=internal_error,
         )
@@ -1823,7 +1809,7 @@ class KnowledgeWorkbenchRepository(
             section_id=str(row["section_id"]),
             source_node_run_id=str(row["source_node_run_id"]),
             observed_registry_snapshot_id=str(row["observed_registry_snapshot_id"]),
-            observed_registry_snapshot_sequence=int(
+            observed_registry_snapshot_sequence=self._int_from_db(
                 row["observed_registry_snapshot_sequence"]
             ),
             claim_input_refs=self._text_tuple_from_db(row["claim_input_refs"]),
@@ -1833,7 +1819,7 @@ class KnowledgeWorkbenchRepository(
                 if row["claimed_by_worker_id"] is not None
                 else None
             ),
-            lease_expires_at=row["lease_expires_at"],
+            lease_expires_at=self._datetime_from_db(row["lease_expires_at"]),
             applied_registry_snapshot_id=(
                 str(row["applied_registry_snapshot_id"])
                 if row["applied_registry_snapshot_id"] is not None
@@ -1844,14 +1830,14 @@ class KnowledgeWorkbenchRepository(
                 if row["stale_at_registry_snapshot_id"] is not None
                 else None
             ),
-            attempt_count=int(row["attempt_count"] or 0),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            attempt_count=self._int_from_db(row["attempt_count"]),
+            created_at=self._datetime_from_db(row["created_at"]),
+            updated_at=self._datetime_from_db(row["updated_at"]),
         )
 
     async def create_registry_update_applications(
         self,
-        applications: tuple[...],
+        applications: tuple[RegistryUpdateApplication, ...],
     ) -> None:
         for application in applications:
             await self._connection.execute(
@@ -1923,7 +1909,7 @@ class KnowledgeWorkbenchRepository(
 
     async def create_section_work_items(
         self,
-        items: tuple[...],
+        items: tuple[WorkbenchSectionWorkItem, ...],
     ) -> None:
         for item in items:
             await self._connection.execute(
@@ -1989,7 +1975,7 @@ class KnowledgeWorkbenchRepository(
 
     async def update_section_work_items(
         self,
-        items: tuple[...],
+        items: tuple[WorkbenchSectionWorkItem, ...],
     ) -> None:
         for item in items:
             await self._connection.execute(
@@ -2067,18 +2053,20 @@ class KnowledgeWorkbenchRepository(
             project_id=str(row["project_id"]),
             document_id=str(row["document_id"]),
             base_snapshot_id=str(row["base_snapshot_id"]),
-            base_snapshot_sequence_number=int(row["base_snapshot_sequence_number"]),
-            max_concurrency=int(row["max_concurrency"]),
+            base_snapshot_sequence_number=self._int_from_db(
+                row["base_snapshot_sequence_number"]
+            ),
+            max_concurrency=self._int_from_db(row["max_concurrency"]),
             status=WorkbenchSectionBatchPlanStatus(str(row["status"])),
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            created_at=self._datetime_from_db(row["created_at"]),
+            updated_at=self._datetime_from_db(row["updated_at"]),
         )
 
     async def list_section_work_items(
         self,
         *,
         batch_plan_id: str,
-    ) -> tuple[...]:
+    ) -> tuple[WorkbenchSectionWorkItem, ...]:
         rows = await self._connection.fetch(
             """
             SELECT
@@ -2120,14 +2108,14 @@ class KnowledgeWorkbenchRepository(
                 project_id=str(row["project_id"]),
                 document_id=str(row["document_id"]),
                 section_id=str(row["section_id"]),
-                section_index=int(row["section_index"]),
+                section_index=self._int_from_db(row["section_index"]),
                 lane_id=str(row["lane_id"]),
                 status=WorkbenchSectionWorkItemStatus(str(row["status"])),
                 idempotency_key=str(row["idempotency_key"]),
                 based_on_snapshot_id=str(row["based_on_snapshot_id"])
                 if row["based_on_snapshot_id"] is not None
                 else None,
-                based_on_snapshot_sequence_number=int(
+                based_on_snapshot_sequence_number=self._int_from_db(
                     row["based_on_snapshot_sequence_number"]
                 )
                 if row["based_on_snapshot_sequence_number"] is not None
@@ -2155,13 +2143,13 @@ class KnowledgeWorkbenchRepository(
                 locked_by=str(row["locked_by"])
                 if row["locked_by"] is not None
                 else None,
-                locked_until=row["locked_until"],
-                retry_count=int(row["retry_count"] or 0),
+                locked_until=self._datetime_from_db(row["locked_until"]),
+                retry_count=self._int_from_db(row["retry_count"]),
                 dirty_reason=str(row["dirty_reason"])
                 if row["dirty_reason"] is not None
                 else None,
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
+                created_at=self._datetime_from_db(row["created_at"]),
+                updated_at=self._datetime_from_db(row["updated_at"]),
             )
             for row in rows
         )
@@ -2325,6 +2313,32 @@ class KnowledgeWorkbenchRepository(
                 document_id,
             )
 
+    def _int_from_db(self, value: object, *, default: int = 0) -> int:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        text = str(value).strip()
+        if not text:
+            return default
+        return int(text)
+
+    def _datetime_from_db(self, value: object) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        return datetime.fromisoformat(text)
+
     def _json_value_from_db(self, value: object) -> JsonValue:
         if isinstance(value, str):
             stripped = value.strip()
@@ -2380,8 +2394,6 @@ class KnowledgeWorkbenchRepository(
 
     def _time(self, value: datetime | None) -> datetime:
         return value if value is not None else datetime.now(timezone.utc)
-
-
 
     async def mark_parallel_processing_completed(
         self,
@@ -2531,12 +2543,10 @@ class KnowledgeWorkbenchRepository(
             processing_run_id,
         )
 
-        def count(row: object, key: str) -> int:
+        def count(row: Mapping[str, object] | None, key: str) -> int:
             if row is None:
                 return 0
-            if hasattr(row, "get"):
-                return int(row.get(key, 0) or 0)  # type: ignore[attr-defined]
-            return int(row[key] or 0)  # type: ignore[index]
+            return self._int_from_db(row.get(key, 0))
 
         return ParallelDrainWorkCounts(
             section_ready=count(section_row, "section_ready"),

@@ -56,7 +56,9 @@ class FakeRepository:
         self,
         item: SectionBatchQueueItem,
     ) -> None:
-        self.call_log.append(f"repo.update_section_batch_queue_item:{item.status.value}")
+        self.call_log.append(
+            f"repo.update_section_batch_queue_item:{item.status.value}"
+        )
         self.updated_items.append(item)
 
 
@@ -69,7 +71,9 @@ class FakeClaimObservationsRunner:
         self,
         command: ProcessLeasedClaimObservationsCommand,
     ) -> ProcessLeasedClaimObservationsResult:
-        self.call_log.append("claim_observations_runner.process_leased_claim_observations")
+        self.call_log.append(
+            "claim_observations_runner.process_leased_claim_observations"
+        )
         self.commands.append(command)
         return ProcessLeasedClaimObservationsResult(
             claim_observations_node_run_id="claim-observations-node-run-1",
@@ -153,7 +157,9 @@ def _persisted_item() -> SectionBatchQueueItem:
 
 
 @pytest.mark.asyncio
-async def test_section_worker_persists_claim_observations_and_stops_before_prompt_c() -> None:
+async def test_section_worker_persists_claim_observations_and_stops_before_prompt_c() -> (
+    None
+):
     runner = FakeClaimObservationsRunner()
     repository = FakeRepository(sections={"section-1": _section()})
     service = FaqWorkbenchSectionWorkItemProcessorService(
@@ -180,7 +186,10 @@ async def test_section_worker_persists_claim_observations_and_stops_before_promp
     assert result.claim_observations_persisted_item.claim_observations_node_run_id == (
         "claim-observations-node-run-1"
     )
-    assert result.claim_observations_persisted_item.registry_application_queue_item_id is None
+    assert (
+        result.claim_observations_persisted_item.registry_application_queue_item_id
+        is None
+    )
 
     assert repository.call_log == [
         "repo.get_document_section",
@@ -193,7 +202,9 @@ async def test_section_worker_persists_claim_observations_and_stops_before_promp
 
 
 @pytest.mark.asyncio
-async def test_claim_observations_persisted_recovery_is_idempotent_extraction_state() -> None:
+async def test_claim_observations_persisted_recovery_is_idempotent_extraction_state() -> (
+    None
+):
     repository = FakeRepository(sections={"section-1": _section()})
     service = FaqWorkbenchSectionWorkItemProcessorService(
         repository=repository,

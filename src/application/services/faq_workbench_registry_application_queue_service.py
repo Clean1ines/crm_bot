@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from src.domain.project_plane.knowledge_workbench import DomainInvariantError
 
@@ -34,36 +33,36 @@ class FaqWorkbenchRegistryApplicationQueueService:
     registry merge path.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         self._args = args
         self._kwargs = kwargs
 
     async def process_next_registry_application_queue_item(
         self,
-        *args: Any,
-        **kwargs: Any,
+        *args: object,
+        **kwargs: object,
     ) -> None:
         raise _retired_error()
 
     async def process_registry_application_queue_item(
         self,
-        *args: Any,
-        **kwargs: Any,
+        *args: object,
+        **kwargs: object,
     ) -> None:
         raise _retired_error()
 
     async def apply_registry_application_queue_item(
         self,
-        *args: Any,
-        **kwargs: Any,
+        *args: object,
+        **kwargs: object,
     ) -> None:
         raise _retired_error()
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         if name.startswith("_"):
             raise AttributeError(name)
 
-        async def _retired_method(*args: Any, **kwargs: Any) -> None:
+        async def _retired_method(*args: object, **kwargs: object) -> None:
             raise _retired_error()
 
         return _retired_method

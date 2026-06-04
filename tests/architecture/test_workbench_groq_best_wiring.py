@@ -37,7 +37,9 @@ def test_parallel_workbench_handler_uses_best_groq_json_factory_explicitly() -> 
     assert "FaqWorkbenchSectionFindingsRunner" not in source
 
 
-def test_retired_workbench_document_handler_does_not_own_groq_or_prompt_wiring() -> None:
+def test_retired_workbench_document_handler_does_not_own_groq_or_prompt_wiring() -> (
+    None
+):
     source = _read(RETIRED_DOCUMENT_HANDLER)
 
     assert "legacy process_workbench_document task is retired" in source
@@ -64,7 +66,9 @@ def test_groq_is_wired_only_at_infrastructure_composition_boundary() -> None:
     assert "GroqLlmJsonInvocationAdapter.create_default()" not in prompt_c_source
 
 
-def test_prompt_generators_depend_on_llm_json_invocation_port_not_groq_directly() -> None:
+def test_prompt_generators_depend_on_llm_json_invocation_port_not_groq_directly() -> (
+    None
+):
     prompt_a_source = _read(PROMPT_A_GENERATOR)
     prompt_c_source = _read(PROMPT_C_GENERATOR)
 

@@ -98,23 +98,18 @@ export interface paths {
         };
         /**
          * List Knowledge Documents
-         * @description Lists uploaded knowledge documents for a project.
+         * @description Lists FAQ Workbench documents for a project.
          */
         get: operations["list_knowledge_documents_api_projects__project_id__knowledge_get"];
         put?: never;
         /**
          * Upload Knowledge
-         * @description Загружает текстовый, Markdown, JSON файл или PDF, разбивает на чанки,
-         *     генерирует эмбеддинги и сохраняет в базу знаний проекта.
-         *
-         *     preprocessing_mode:
-         *     - faq: FAQ Retrieval Surface Compilation
-         *     - price_list: price/menu/catalog normalization
+         * @description Uploads a document through the Workbench-first knowledge upload path.
          */
         post: operations["upload_knowledge_api_projects__project_id__knowledge_post"];
         /**
          * Clear Knowledge
-         * @description Deletes all knowledge documents and chunks for a project.
+         * @description Clears all Workbench knowledge for a project.
          */
         delete: operations["clear_knowledge_api_projects__project_id__knowledge_delete"];
         options?: never;
@@ -122,102 +117,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{project_id}/knowledge/{document_id}/surface-compilation": {
+    "/api/projects/{project_id}/knowledge/{document_id}/progress": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Surface Compilation State */
-        get: operations["get_surface_compilation_state_api_projects__project_id__knowledge__document_id__surface_compilation_get"];
+        /**
+         * Knowledge Processing Progress
+         * @description Returns Workbench processing progress for one document.
+         */
+        get: operations["knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/surfaces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Document Surfaces */
-        get: operations["list_document_surfaces_api_projects__project_id__knowledge__document_id__surfaces_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/surface-relations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Document Surface Relations */
-        get: operations["list_document_surface_relations_api_projects__project_id__knowledge__document_id__surface_relations_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/surface-ownership": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Document Surface Ownership */
-        get: operations["list_document_surface_ownership_api_projects__project_id__knowledge__document_id__surface_ownership_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/surface-merge-decisions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Document Surface Merge Decisions */
-        get: operations["list_document_surface_merge_decisions_api_projects__project_id__knowledge__document_id__surface_merge_decisions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/surfaces/{surface_id}/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Publish Surface To Runtime Entry */
-        post: operations["publish_surface_to_runtime_entry_api_projects__project_id__knowledge__document_id__surfaces__surface_id__publish_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -233,7 +146,7 @@ export interface paths {
         };
         /**
          * Knowledge Processing Overview
-         * @description Returns one lightweight polling payload for processing knowledge documents.
+         * @description Returns project-level FAQ Workbench processing overview.
          */
         get: operations["knowledge_processing_overview_api_projects__project_id__knowledge_processing_overview_get"];
         put?: never;
@@ -253,11 +166,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Preview Knowledge
-         * @description Returns the best knowledge-base matches for a customer question without
-         *     calling LLM generation.
-         */
+        /** Preview Knowledge */
         post: operations["preview_knowledge_api_projects__project_id__knowledge_preview_post"];
         delete?: never;
         options?: never;
@@ -282,26 +191,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{project_id}/knowledge/{document_id}/fragments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Knowledge Answer Drafts
-         * @description Returns saved answer drafts extracted from a knowledge document.
-         */
-        get: operations["knowledge_answer_drafts_api_projects__project_id__knowledge__document_id__fragments_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{project_id}/knowledge/{document_id}/source-units": {
         parameters: {
             query?: never;
@@ -311,7 +200,7 @@ export interface paths {
         };
         /**
          * Knowledge Source Units
-         * @description Returns source units/source chunks used as evidence for a document.
+         * @description Returns Workbench evidence trace/source units for one document.
          */
         get: operations["knowledge_source_units_api_projects__project_id__knowledge__document_id__source_units_get"];
         put?: never;
@@ -331,29 +220,9 @@ export interface paths {
         };
         /**
          * Knowledge Import Quality Report
-         * @description Returns a user-facing import quality report for a knowledge document.
+         * @description Returns Workbench import quality report for one document.
          */
         get: operations["knowledge_import_quality_report_api_projects__project_id__knowledge__document_id__import_quality_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Knowledge Processing Progress
-         * @description Returns a user-facing progress report for knowledge document processing.
-         */
-        get: operations["knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -369,10 +238,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Knowledge Price Facts
-         * @description Returns extracted commercial price facts for review, including non-runtime facts.
-         */
+        /** Knowledge Price Facts */
         get: operations["knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_get"];
         put?: never;
         post?: never;
@@ -389,10 +255,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Project Commercial Truth Review
-         * @description Returns project-wide commercial truth conflicts and surface preview.
-         */
+        /** Project Commercial Truth Review */
         get: operations["project_commercial_truth_review_api_projects__project_id__knowledge_commercial_truth_review_get"];
         put?: never;
         post?: never;
@@ -409,10 +272,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Knowledge Commercial Truth Review
-         * @description Returns commercial truth conflicts and surface preview for a price document.
-         */
+        /** Knowledge Commercial Truth Review */
         get: operations["knowledge_commercial_truth_review_api_projects__project_id__knowledge__document_id__commercial_truth_review_get"];
         put?: never;
         post?: never;
@@ -431,10 +291,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Publish Knowledge Price Facts
-         * @description Publishes reviewed commercial price facts for runtime use.
-         */
+        /** Publish Knowledge Price Facts */
         post: operations["publish_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_publish_post"];
         delete?: never;
         options?: never;
@@ -451,10 +308,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Reject Knowledge Price Facts
-         * @description Rejects reviewed commercial price facts without publishing them.
-         */
+        /** Reject Knowledge Price Facts */
         post: operations["reject_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_reject_post"];
         delete?: never;
         options?: never;
@@ -471,10 +325,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Retighten Knowledge Document
-         * @description Queues answer resolution tightening for an already processed document.
-         */
+        /** Retighten Knowledge Document */
         post: operations["retighten_knowledge_document_api_projects__project_id__knowledge__document_id__retighten_post"];
         delete?: never;
         options?: never;
@@ -493,7 +344,7 @@ export interface paths {
         put?: never;
         /**
          * Publish Knowledge Ready Answers
-         * @description Queues publishing of already extracted answer drafts for a document.
+         * @description Publishes Workbench-approved surfaces into the runtime retrieval surface.
          */
         post: operations["publish_knowledge_ready_answers_api_projects__project_id__knowledge__document_id__publish_ready_post"];
         delete?: never;
@@ -511,10 +362,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Retry Knowledge Failed Batches
-         * @description Queues retry for failed durable compiler batches of a document.
-         */
+        /** Retry Knowledge Failed Batches */
         post: operations["retry_knowledge_failed_batches_api_projects__project_id__knowledge__document_id__retry_failed_batches_post"];
         delete?: never;
         options?: never;
@@ -533,7 +381,7 @@ export interface paths {
         put?: never;
         /**
          * Resume Knowledge Processing
-         * @description Queues explicit resume for a cancelled recoverable FAQ processing run.
+         * @description Queues explicit user resume through the Workbench process document path.
          */
         post: operations["resume_knowledge_processing_api_projects__project_id__knowledge__document_id__resume_processing_post"];
         delete?: never;
@@ -553,7 +401,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Knowledge Processing
-         * @description Stops queued/running knowledge document processing cooperatively.
+         * @description Cancels active Workbench processing and disables automatic recovery.
          */
         post: operations["cancel_knowledge_processing_api_projects__project_id__knowledge__document_id__cancel_post"];
         delete?: never;
@@ -562,41 +410,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Document Curation */
-        get: operations["get_document_curation_api_projects__project_id__knowledge__document_id__curation_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/entries/{entry_id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Set Entry Status */
-        post: operations["set_entry_status_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__status_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/entries/{entry_id}": {
+    "/api/projects/{project_id}/knowledge/{document_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -606,365 +420,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Patch Entry */
-        patch: operations["patch_entry_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__patch"];
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/entries/{entry_id}/embedding/rebuild": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Rebuild Entry Embedding */
-        post: operations["rebuild_entry_embedding_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__embedding_rebuild_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/merge/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Merge */
-        post: operations["preview_merge_api_projects__project_id__knowledge__document_id__curation_merge_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/merge/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply Merge */
-        post: operations["apply_merge_api_projects__project_id__knowledge__document_id__curation_merge_apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/actions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Actions */
-        get: operations["list_actions_api_projects__project_id__knowledge__document_id__curation_actions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/entries/{entry_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Versions */
-        get: operations["list_versions_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__versions_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/curation/entries/{entry_id}/versions/{version_id}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Restore Version */
-        post: operations["restore_version_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__versions__version_id__restore_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/runs/{run_id}/review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Rag Eval Run Review */
-        get: operations["get_rag_eval_run_review_api_rag_eval_runs__run_id__review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/documents/{document_id}/latest-review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Latest Rag Eval Review */
-        get: operations["get_latest_rag_eval_review_api_rag_eval_documents__document_id__latest_review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/questions/{question_id}/review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Review Rag Eval Question */
-        post: operations["review_rag_eval_question_api_rag_eval_questions__question_id__review_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/questions/{question_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /** Edit Rag Eval Question */
-        patch: operations["edit_rag_eval_question_api_rag_eval_questions__question_id__patch"];
-        trace?: never;
-    };
-    "/api/rag-eval/runs/{run_id}/apply-accepted": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply Accepted Rag Eval Questions */
-        post: operations["apply_accepted_rag_eval_questions_api_rag_eval_runs__run_id__apply_accepted_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/results/{result_id}/actions/execute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Execute Rag Eval Result Actions */
-        post: operations["execute_rag_eval_result_actions_api_rag_eval_results__result_id__actions_execute_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/documents/{document_id}/latest-report": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Latest Rag Eval Report */
-        get: operations["get_latest_rag_eval_report_api_rag_eval_documents__document_id__latest_report_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/documents/{document_id}/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Rag Eval Document Status */
-        get: operations["get_rag_eval_document_status_api_rag_eval_documents__document_id__status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/documents/{document_id}/run-full": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Enqueue Full Rag Eval For Document */
-        post: operations["enqueue_full_rag_eval_for_document_api_rag_eval_documents__document_id__run_full_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/documents/{document_id}/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Run Rag Eval For Document */
-        post: operations["run_rag_eval_for_document_api_rag_eval_documents__document_id__run_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/documents/{document_id}/jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Rag Eval Jobs For Document */
-        get: operations["list_rag_eval_jobs_for_document_api_rag_eval_documents__document_id__jobs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/jobs/{job_id}/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Rag Eval Job Progress */
-        get: operations["get_rag_eval_job_progress_api_rag_eval_jobs__job_id__progress_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/jobs/{job_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Rag Eval Job */
-        post: operations["cancel_rag_eval_job_api_rag_eval_jobs__job_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/jobs/{job_id}/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pause Rag Eval Job */
-        post: operations["pause_rag_eval_job_api_rag_eval_jobs__job_id__pause_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/rag-eval/jobs/{job_id}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resume Rag Eval Job */
-        post: operations["resume_rag_eval_job_api_rag_eval_jobs__job_id__resume_post"];
-        delete?: never;
+        /**
+         * Delete Knowledge Document
+         * @description Deletes a Workbench document and invalidates document-scoped processing artifacts.
+         */
+        delete: operations["delete_knowledge_document_api_projects__project_id__knowledge__document_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1906,16 +1366,6 @@ export interface components {
              */
             preprocessing_mode: string;
         };
-        /** Body_upload_knowledge_surface_aware_api_projects__project_id__knowledge_post */
-        Body_upload_knowledge_surface_aware_api_projects__project_id__knowledge_post: {
-            /** File */
-            file: string;
-            /**
-             * Preprocessing Mode
-             * @default faq
-             */
-            preprocessing_mode: string;
-        };
         /** BotConnectRequest */
         BotConnectRequest: {
             /** Token */
@@ -1987,233 +1437,6 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
-        };
-        /**
-         * KnowledgeCurationActionType
-         * @enum {string}
-         */
-        KnowledgeCurationActionType: "merge_entries" | "hide_entry" | "reject_entry" | "restore_entry" | "publish_entry" | "unpublish_entry" | "edit_entry_title" | "edit_entry_answer" | "edit_entry_enrichment" | "rebuild_embedding" | "rerun_eval";
-        /** KnowledgeCurationStatusRequest */
-        KnowledgeCurationStatusRequest: {
-            action: components["schemas"]["KnowledgeCurationActionType"];
-            target_status?: components["schemas"]["KnowledgeEntryStatus"] | null;
-            target_visibility?: components["schemas"]["KnowledgeEntryVisibility"] | null;
-            /** Expected Version */
-            expected_version?: number | null;
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
-            /**
-             * Rebuild Embedding
-             * @default false
-             */
-            rebuild_embedding: boolean;
-            /**
-             * Rerun Eval
-             * @default false
-             */
-            rerun_eval: boolean;
-            /** Idempotency Key */
-            idempotency_key: string;
-        };
-        /** KnowledgeEditActionExecutionSummary */
-        KnowledgeEditActionExecutionSummary: {
-            /** Ok */
-            ok: boolean;
-            /** Source Result Id */
-            source_result_id: string;
-            /** Project Id */
-            project_id: string;
-            /** Document Id */
-            document_id: string;
-            /** Total Actions */
-            total_actions: number;
-            /** Applied Actions */
-            applied_actions: number;
-            /** Rejected Actions */
-            rejected_actions: number;
-            /** Failed Actions */
-            failed_actions: number;
-            /** Skipped Actions */
-            skipped_actions: number;
-            /** Queued Rerun Job Ids */
-            queued_rerun_job_ids: string[];
-        };
-        /** KnowledgeEntryMergeExcludeRequest */
-        KnowledgeEntryMergeExcludeRequest: {
-            /** Question Values */
-            question_values?: string[];
-            /** Synonym Values */
-            synonym_values?: string[];
-            /** Tag Values */
-            tag_values?: string[];
-            /** Source Ref Keys */
-            source_ref_keys?: string[];
-            /** Metadata Keys */
-            metadata_keys?: string[];
-        };
-        /** KnowledgeEntryMergeIncludeRequest */
-        KnowledgeEntryMergeIncludeRequest: {
-            /**
-             * Answers
-             * @default true
-             */
-            answers: boolean;
-            /**
-             * Questions
-             * @default true
-             */
-            questions: boolean;
-            /**
-             * Paraphrases
-             * @default true
-             */
-            paraphrases: boolean;
-            /**
-             * Synonyms
-             * @default true
-             */
-            synonyms: boolean;
-            /**
-             * Typo Queries
-             * @default true
-             */
-            typo_queries: boolean;
-            /**
-             * Colloquial Queries
-             * @default true
-             */
-            colloquial_queries: boolean;
-            /**
-             * Tags
-             * @default true
-             */
-            tags: boolean;
-            /**
-             * Retrieval Guards
-             * @default false
-             */
-            retrieval_guards: boolean;
-            /**
-             * Source Refs
-             * @default true
-             */
-            source_refs: boolean;
-            /**
-             * Metadata
-             * @default true
-             */
-            metadata: boolean;
-        };
-        /** KnowledgeEntryMergeRequestModel */
-        KnowledgeEntryMergeRequestModel: {
-            /** Parent Entry Id */
-            parent_entry_id: string;
-            /** Absorbed Entry Ids */
-            absorbed_entry_ids: string[];
-            /** Parent Expected Version */
-            parent_expected_version?: number | null;
-            /** Absorbed Expected Versions */
-            absorbed_expected_versions?: {
-                [key: string]: number;
-            };
-            /**
-             * Merge Instruction
-             * @default
-             */
-            merge_instruction: string;
-            /** Final Title */
-            final_title?: string | null;
-            /** Final Answer */
-            final_answer?: string | null;
-            include?: components["schemas"]["KnowledgeEntryMergeIncludeRequest"];
-            exclude?: components["schemas"]["KnowledgeEntryMergeExcludeRequest"];
-            /**
-             * Absorbed Status
-             * @default merged
-             */
-            absorbed_status: string;
-            /**
-             * Rebuild Embedding
-             * @default true
-             */
-            rebuild_embedding: boolean;
-            /**
-             * Rerun Eval
-             * @default false
-             */
-            rerun_eval: boolean;
-            /** Idempotency Key */
-            idempotency_key: string;
-        };
-        /** KnowledgeEntryPatchRequest */
-        KnowledgeEntryPatchRequest: {
-            /** Title */
-            title?: string | null;
-            /** Answer */
-            answer?: string | null;
-            /** Enrichment */
-            enrichment?: {
-                [key: string]: unknown;
-            } | null;
-            /** Source Refs */
-            source_refs?: {
-                [key: string]: unknown;
-            }[] | null;
-            /** Expected Version */
-            expected_version?: number | null;
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
-            /**
-             * Rebuild Embedding
-             * @default false
-             */
-            rebuild_embedding: boolean;
-            /**
-             * Rerun Eval
-             * @default false
-             */
-            rerun_eval: boolean;
-            /**
-             * Idempotency Key
-             * @default
-             */
-            idempotency_key: string;
-        };
-        /**
-         * KnowledgeEntryStatus
-         * @enum {string}
-         */
-        KnowledgeEntryStatus: "draft" | "grounded" | "enriched" | "embedded" | "published" | "needs_review" | "hidden" | "archived" | "rejected" | "merged";
-        /**
-         * KnowledgeEntryVisibility
-         * @enum {string}
-         */
-        KnowledgeEntryVisibility: "runtime" | "owner_only" | "internal" | "hidden";
-        /** KnowledgePreviewRequestModel */
-        KnowledgePreviewRequestModel: {
-            /** Question */
-            question: string;
-            /**
-             * Limit
-             * @default 5
-             */
-            limit: number;
-        };
-        /** KnowledgePriceFactsActionRequestModel */
-        KnowledgePriceFactsActionRequestModel: {
-            /** Fact Ids */
-            fact_ids?: string[];
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
         };
         /** LinkEmailRequest */
         LinkEmailRequest: {
@@ -2497,48 +1720,10 @@ export interface components {
             /** Name */
             name?: string | null;
         };
-        /** RagEvalQuestionEditRequest */
-        RagEvalQuestionEditRequest: {
-            /** Question */
-            question: string;
-        };
-        /** RagEvalQuestionReviewRequest */
-        RagEvalQuestionReviewRequest: {
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "accepted" | "rejected";
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
-        };
-        /** RebuildEmbeddingRequest */
-        RebuildEmbeddingRequest: {
-            /**
-             * Reason
-             * @default Manual embedding rebuild
-             */
-            reason: string;
-            /** Expected Version */
-            expected_version?: number | null;
-            /** Idempotency Key */
-            idempotency_key: string;
-        };
         /** ReplyRequest */
         ReplyRequest: {
             /** Message */
             message: string;
-        };
-        /** RestoreVersionRequest */
-        RestoreVersionRequest: {
-            /**
-             * Reason
-             * @default
-             */
-            reason: string;
         };
         /** TelegramAuthData */
         TelegramAuthData: {
@@ -2863,7 +2048,7 @@ export interface operations {
             };
         };
     };
-    get_surface_compilation_state_api_projects__project_id__knowledge__document_id__surface_compilation_get: {
+    knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get: {
         parameters: {
             query?: never;
             header?: {
@@ -2872,177 +2057,6 @@ export interface operations {
             path: {
                 project_id: string;
                 document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_document_surfaces_api_projects__project_id__knowledge__document_id__surfaces_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_document_surface_relations_api_projects__project_id__knowledge__document_id__surface_relations_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_document_surface_ownership_api_projects__project_id__knowledge__document_id__surface_ownership_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_document_surface_merge_decisions_api_projects__project_id__knowledge__document_id__surface_merge_decisions_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    publish_surface_to_runtime_entry_api_projects__project_id__knowledge__document_id__surfaces__surface_id__publish_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-                surface_id: string;
             };
             cookie?: never;
         };
@@ -3070,9 +2084,7 @@ export interface operations {
     };
     knowledge_processing_overview_api_projects__project_id__knowledge_processing_overview_get: {
         parameters: {
-            query?: {
-                limit?: number;
-            };
+            query?: never;
             header?: {
                 authorization?: string | null;
             };
@@ -3106,19 +2118,11 @@ export interface operations {
     preview_knowledge_api_projects__project_id__knowledge_preview_post: {
         parameters: {
             query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgePreviewRequestModel"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3127,15 +2131,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3173,79 +2168,7 @@ export interface operations {
             };
         };
     };
-    knowledge_answer_drafts_api_projects__project_id__knowledge__document_id__fragments_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     knowledge_source_units_api_projects__project_id__knowledge__document_id__source_units_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    knowledge_import_quality_report_api_projects__project_id__knowledge__document_id__import_quality_get: {
         parameters: {
             query?: never;
             header?: {
@@ -3279,7 +2202,7 @@ export interface operations {
             };
         };
     };
-    knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get: {
+    knowledge_import_quality_report_api_projects__project_id__knowledge__document_id__import_quality_get: {
         parameters: {
             query?: never;
             header?: {
@@ -3420,7 +2343,9 @@ export interface operations {
     };
     publish_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_publish_post: {
         parameters: {
-            query?: never;
+            query?: {
+                fact_ids?: string[] | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -3430,11 +2355,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgePriceFactsActionRequestModel"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3458,7 +2379,10 @@ export interface operations {
     };
     reject_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_reject_post: {
         parameters: {
-            query?: never;
+            query?: {
+                fact_ids?: string[] | null;
+                reason?: string;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -3468,11 +2392,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgePriceFactsActionRequestModel"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3497,11 +2417,8 @@ export interface operations {
     retighten_knowledge_document_api_projects__project_id__knowledge__document_id__retighten_post: {
         parameters: {
             query?: never;
-            header?: {
-                authorization?: string | null;
-            };
+            header?: never;
             path: {
-                project_id: string;
                 document_id: string;
             };
             cookie?: never;
@@ -3565,11 +2482,8 @@ export interface operations {
     retry_knowledge_failed_batches_api_projects__project_id__knowledge__document_id__retry_failed_batches_post: {
         parameters: {
             query?: never;
-            header?: {
-                authorization?: string | null;
-            };
+            header?: never;
             path: {
-                project_id: string;
                 document_id: string;
             };
             cookie?: never;
@@ -3664,7 +2578,7 @@ export interface operations {
             };
         };
     };
-    get_document_curation_api_projects__project_id__knowledge__document_id__curation_get: {
+    delete_knowledge_document_api_projects__project_id__knowledge__document_id__delete: {
         parameters: {
             query?: never;
             header?: {
@@ -3685,850 +2599,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    set_entry_status_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__status_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-                entry_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgeCurationStatusRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    patch_entry_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-                entry_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgeEntryPatchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rebuild_entry_embedding_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__embedding_rebuild_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-                entry_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RebuildEmbeddingRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_merge_api_projects__project_id__knowledge__document_id__curation_merge_preview_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgeEntryMergeRequestModel"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_merge_api_projects__project_id__knowledge__document_id__curation_merge_apply_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["KnowledgeEntryMergeRequestModel"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_actions_api_projects__project_id__knowledge__document_id__curation_actions_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_versions_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__versions_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-                entry_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    restore_version_api_projects__project_id__knowledge__document_id__curation_entries__entry_id__versions__version_id__restore_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-                entry_id: string;
-                version_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RestoreVersionRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_rag_eval_run_review_api_rag_eval_runs__run_id__review_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_latest_rag_eval_review_api_rag_eval_documents__document_id__latest_review_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    review_rag_eval_question_api_rag_eval_questions__question_id__review_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                question_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RagEvalQuestionReviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    edit_rag_eval_question_api_rag_eval_questions__question_id__patch: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                question_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RagEvalQuestionEditRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    apply_accepted_rag_eval_questions_api_rag_eval_runs__run_id__apply_accepted_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    execute_rag_eval_result_actions_api_rag_eval_results__result_id__actions_execute_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                result_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["KnowledgeEditActionExecutionSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_latest_rag_eval_report_api_rag_eval_documents__document_id__latest_report_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_rag_eval_document_status_api_rag_eval_documents__document_id__status_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    enqueue_full_rag_eval_for_document_api_rag_eval_documents__document_id__run_full_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    run_rag_eval_for_document_api_rag_eval_documents__document_id__run_post: {
-        parameters: {
-            query?: {
-                /** @description RAG eval mode. retrieval_eval is deterministic retrieval coverage; answer_quality_eval additionally runs production answer generation and LLM judging. */
-                mode?: string;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_rag_eval_jobs_for_document_api_rag_eval_documents__document_id__jobs_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_rag_eval_job_progress_api_rag_eval_jobs__job_id__progress_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_rag_eval_job_api_rag_eval_jobs__job_id__cancel_post: {
-        parameters: {
-            query?: {
-                /** @description Optional cancellation reason. */
-                reason?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pause_rag_eval_job_api_rag_eval_jobs__job_id__pause_post: {
-        parameters: {
-            query?: {
-                /** @description Optional pause reason. */
-                reason?: string | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    resume_rag_eval_job_api_rag_eval_jobs__job_id__resume_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */

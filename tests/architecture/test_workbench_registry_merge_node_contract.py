@@ -83,7 +83,9 @@ def test_registry_merge_node_graph_contract_uses_canonicalization_unit_inputs() 
     assert _old_match_context_marker() not in block
 
 
-def test_registry_merge_node_graph_contract_outputs_fact_registry_snapshot_payload() -> None:
+def test_registry_merge_node_graph_contract_outputs_fact_registry_snapshot_payload() -> (
+    None
+):
     block = _registry_merge_graph_block()
 
     assert '"fact_registry"' in block
@@ -93,7 +95,9 @@ def test_registry_merge_node_graph_contract_outputs_fact_registry_snapshot_paylo
     assert _old_registry_updates_marker() not in block
 
 
-def test_registry_merge_node_graph_contract_uses_fact_registry_canonicalization_route() -> None:
+def test_registry_merge_node_graph_contract_uses_fact_registry_canonicalization_route() -> (
+    None
+):
     block = _registry_merge_graph_block()
 
     assert 'operation_name="faq_surface_registry_merge"' in block
@@ -101,7 +105,9 @@ def test_registry_merge_node_graph_contract_uses_fact_registry_canonicalization_
     assert 'route_purpose="workbench_registry_merge"' not in block
 
 
-def test_prompt_c_port_contract_uses_canonicalization_unit_not_old_section_merge_inputs() -> None:
+def test_prompt_c_port_contract_uses_canonicalization_unit_not_old_section_merge_inputs() -> (
+    None
+):
     source = _read(PORT)
 
     assert "FaqWorkbenchRegistryMergeGenerationCommand" in source
@@ -118,7 +124,9 @@ def test_prompt_c_port_contract_uses_canonicalization_unit_not_old_section_merge
     assert _old_match_context_marker() not in source
 
 
-def test_prompt_c_port_result_exposes_fact_registry_counts_not_old_advisory_rows() -> None:
+def test_prompt_c_port_result_exposes_fact_registry_counts_not_old_advisory_rows() -> (
+    None
+):
     source = _read(PORT)
 
     assert "fact_registry:" in source
@@ -133,7 +141,9 @@ def test_prompt_c_port_result_exposes_fact_registry_counts_not_old_advisory_rows
     assert '"' + _old_registry_updates_marker() + '"' not in source
 
 
-def test_prompt_c_generator_builds_payload_from_canonicalization_unit_and_registry_state() -> None:
+def test_prompt_c_generator_builds_payload_from_canonicalization_unit_and_registry_state() -> (
+    None
+):
     source = _read(GENERATOR)
 
     assert "command.canonicalization_unit.to_prompt_payload()" in source
@@ -195,7 +205,9 @@ def test_prompt_c_prompt_file_uses_cluster_canonicalization_language() -> None:
     assert _old_match_context_marker() not in source
 
 
-def test_registry_merge_persistence_service_is_document_level_canonicalization_node() -> None:
+def test_registry_merge_persistence_service_is_document_level_canonicalization_node() -> (
+    None
+):
     source = _read(SERVICE)
 
     assert "LocalClaimCanonicalizationUnit" in source
@@ -208,7 +220,9 @@ def test_registry_merge_persistence_service_is_document_level_canonicalization_n
     assert '"contract": "fact_registry_canonicalization"' in source
 
 
-def test_registry_merge_persistence_service_persists_llm_artifacts_without_applying_snapshot() -> None:
+def test_registry_merge_persistence_service_persists_llm_artifacts_without_applying_snapshot() -> (
+    None
+):
     source = _read(SERVICE)
 
     assert "create_processing_node_run" in source
@@ -223,38 +237,56 @@ def test_registry_merge_persistence_service_persists_llm_artifacts_without_apply
     assert "upsert_fact_registry_entries" not in source
 
 
-def test_registry_merge_error_lifecycle_persists_canonicalization_unit_context() -> None:
+def test_registry_merge_error_lifecycle_persists_canonicalization_unit_context() -> (
+    None
+):
     source = _read(SERVICE)
 
     assert "persist_registry_merge_generation_error" in source
     assert "persist_registry_merge_generation_error_lifecycle" in source
-    assert '"canonicalization_unit": command.canonicalization_unit.to_prompt_payload()' in source
+    assert (
+        '"canonicalization_unit": command.canonicalization_unit.to_prompt_payload()'
+        in source
+    )
     assert '"canonicalization_unit_id"' in source
     assert "ProcessingNodeStatus.FAILED" in source
     assert "ERROR_REPORT" in source
 
 
-def test_registry_update_proposal_migration_is_retired_after_fact_registry_cutover() -> None:
+def test_registry_update_proposal_migration_is_retired_after_fact_registry_cutover() -> (
+    None
+):
     source = _read(MIGRATION_072)
 
     assert "Intentionally no-op" in source
     assert "Prompt C produces fact_registry snapshots/artifacts directly" in source
-    assert "CREATE TABLE IF NOT EXISTS knowledge_workbench_registry_update_proposals" not in source
+    assert (
+        "CREATE TABLE IF NOT EXISTS knowledge_workbench_registry_update_proposals"
+        not in source
+    )
 
 
-def test_registry_merge_architecture_does_not_require_nonexistent_renamed_files() -> None:
+def test_registry_merge_architecture_does_not_require_nonexistent_renamed_files() -> (
+    None
+):
     assert PORT.exists()
     assert GENERATOR.exists()
     assert SERVICE.exists()
 
     assert not Path(
-        "src/application/ports/faq_workbench_" + "fact_registry_canonicalization" + "_generator.py"
+        "src/application/ports/faq_workbench_"
+        + "fact_registry_canonicalization"
+        + "_generator.py"
     ).exists()
     assert not Path(
-        "src/infrastructure/llm/faq_workbench_" + "fact_registry_canonicalization" + "_generator.py"
+        "src/infrastructure/llm/faq_workbench_"
+        + "fact_registry_canonicalization"
+        + "_generator.py"
     ).exists()
     assert not Path(
-        "src/application/services/faq_workbench_" + "fact_registry_canonicalization" + "_service.py"
+        "src/application/services/faq_workbench_"
+        + "fact_registry_canonicalization"
+        + "_service.py"
     ).exists()
 
 

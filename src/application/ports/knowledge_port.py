@@ -5,20 +5,24 @@ from typing import Protocol
 
 from src.application.ports.knowledge.curation import KnowledgeCurationPort
 from src.application.ports.knowledge.runtime_search import KnowledgeRuntimeRetrievalPort
-
-
 from src.domain.control_plane.project_views import ProjectSummaryView
-from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgeAnswerResolutionCase,
-    KnowledgeAnswerResolverExecutionResult,
-    KnowledgePreprocessingExecutionResult,
-    KnowledgePreprocessingMode,
+from src.domain.project_plane.knowledge_processing_modes import (
+    KnowledgeProcessingMode,
 )
 from src.domain.project_plane.model_usage_views import (
     ModelUsageEventCreate,
     ModelUsageSummaryView,
 )
+
+
+JsonScalar = str | int | float | bool | None
+JsonObject = dict[str, JsonScalar | list[object] | dict[str, object]]
+JsonSequence = Sequence[JsonObject]
+
+KnowledgeAnswerResolutionCase = JsonObject
+KnowledgeAnswerResolverExecutionResult = object
+KnowledgePreprocessingExecutionResult = object
+KnowledgePreprocessingMode = KnowledgeProcessingMode
 
 
 class KnowledgeDbPoolPort(Protocol):

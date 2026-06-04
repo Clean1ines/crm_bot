@@ -68,15 +68,15 @@ class WorkbenchProcessingOverviewReadService:
             if str(document["resume_policy"]) == "explicit_user_action"
         ]
 
-        total_sections = sum(int(document["section_count"]) for document in documents)
+        total_sections = sum(_int(document["section_count"]) for document in documents)
         processed_sections = sum(
-            int(document["processed_section_count"]) for document in documents
+            _int(document["processed_section_count"]) for document in documents
         )
         failed_sections = sum(
-            int(document["failed_section_count"]) for document in documents
+            _int(document["failed_section_count"]) for document in documents
         )
         pending_sections = sum(
-            int(document["pending_section_count"]) for document in documents
+            _int(document["pending_section_count"]) for document in documents
         )
 
         return {
@@ -190,7 +190,7 @@ def _nullable_text(value: object) -> str | None:
 def _int(value: object) -> int:
     if value is None:
         return 0
-    return int(value)
+    return int(str(value))
 
 
 def _iso(value: object) -> str | None:

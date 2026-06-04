@@ -11,7 +11,9 @@ def test_platform_admin_telegram_upload_uses_workbench_composition() -> None:
 
     assert "upload_faq_workbench_knowledge_file" in source
     assert "QueueRepository" in source
-    assert "normalize_preprocessing_mode" in source
+    assert "require_faq_workbench_mode" in source
+    assert "normalize_preprocessing_mode" not in source
+    assert "src.domain.project_plane.knowledge_preprocessing" not in source
 
     forbidden = (
         "src.interfaces.composition.knowledge_upload",

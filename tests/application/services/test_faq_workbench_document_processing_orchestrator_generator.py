@@ -13,7 +13,9 @@ def _join(*parts: str) -> str:
     return "".join(parts)
 
 
-def test_retired_markdown_document_generator_test_no_longer_imports_old_sequential_contract() -> None:
+def test_retired_markdown_document_generator_test_no_longer_imports_old_sequential_contract() -> (
+    None
+):
     source = Path(__file__).read_text(encoding="utf-8")
     import_block = source.split("ORCHESTRATOR =", 1)[0]
 
@@ -29,7 +31,9 @@ def test_retired_markdown_document_generator_test_no_longer_imports_old_sequenti
         assert marker not in import_block
 
 
-def test_legacy_sequential_orchestrator_is_not_the_prompt_c_parallel_runtime_contract() -> None:
+def test_legacy_sequential_orchestrator_is_not_the_prompt_c_parallel_runtime_contract() -> (
+    None
+):
     orchestrator = ORCHESTRATOR.read_text(encoding="utf-8")
     claim_observations_service = CLAIM_OBSERVATIONS_SERVICE.read_text(encoding="utf-8")
 
@@ -38,4 +42,7 @@ def test_legacy_sequential_orchestrator_is_not_the_prompt_c_parallel_runtime_con
     assert _join("Parsed", "Section", "Finding") not in claim_observations_service
 
     assert "claim_observations" in claim_observations_service
-    assert "canonicalization" in orchestrator or "process_existing_document" in orchestrator
+    assert (
+        "canonicalization" in orchestrator
+        or "process_existing_document" in orchestrator
+    )

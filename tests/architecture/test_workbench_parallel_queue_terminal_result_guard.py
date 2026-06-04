@@ -10,7 +10,9 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_parallel_handler_inspects_coordinator_result_before_returning_to_dispatcher() -> None:
+def test_parallel_handler_inspects_coordinator_result_before_returning_to_dispatcher() -> (
+    None
+):
     source = _read(HANDLER)
     handler_source = source.split(
         "async def handle_workbench_parallel_processing_job",
@@ -25,7 +27,9 @@ def test_parallel_handler_inspects_coordinator_result_before_returning_to_dispat
     assert "return result" in handler_source
 
 
-def test_parallel_handler_converts_non_terminal_result_to_queue_retry_or_failure() -> None:
+def test_parallel_handler_converts_non_terminal_result_to_queue_retry_or_failure() -> (
+    None
+):
     source = _read(HANDLER)
     guard_source = source.split(
         "def _ensure_parallel_processing_terminal_result",

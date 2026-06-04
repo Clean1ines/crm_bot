@@ -30,13 +30,9 @@ class LoadDocumentLocalClaimGraphsCommand:
 
     def __post_init__(self) -> None:
         if not self.project_id:
-            raise DomainInvariantError(
-                "local claim graph loading requires project_id"
-            )
+            raise DomainInvariantError("local claim graph loading requires project_id")
         if not self.document_id:
-            raise DomainInvariantError(
-                "local claim graph loading requires document_id"
-            )
+            raise DomainInvariantError("local claim graph loading requires document_id")
         if not self.processing_run_id:
             raise DomainInvariantError(
                 "local claim graph loading requires processing_run_id"
@@ -61,9 +57,7 @@ class DocumentLocalClaimGraph:
                 "document local claim graph requires node_run_id"
             )
         if not self.section_id:
-            raise DomainInvariantError(
-                "document local claim graph requires section_id"
-            )
+            raise DomainInvariantError("document local claim graph requires section_id")
 
 
 @dataclass(frozen=True, slots=True)

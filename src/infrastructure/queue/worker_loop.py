@@ -87,15 +87,13 @@ async def run_worker_loop(
                 )
                 await queue_repo.fail_job(
                     job_id,
-                    error=decision.error,
                     increment_attempt=True,
                     retry_delay_seconds=decision.backoff_seconds,
+                    error=str(exc),
                 )
                 if decision.exhausted and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT:
                     await mark_process_workbench_document_exhausted(
                         job_record,
-                        db_pool=dispatcher.db_pool,
-                        error=decision.error,
                     )
             else:
                 await queue_repo.complete_job(job_id, success=True)

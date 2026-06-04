@@ -70,9 +70,7 @@ def _unit() -> LocalClaimCanonicalizationUnit:
                 claim="Продукт является платформой управления AI-базами знаний.",
                 claim_kind="definition",
                 granularity="atomic",
-                triple_texts=(
-                    "Продукт is_a платформа управления AI-базами знаний",
-                ),
+                triple_texts=("Продукт is_a платформа управления AI-базами знаний",),
                 possible_questions=("Что такое продукт?",),
                 scope="Общее определение",
                 exclusion_scope="",
@@ -208,15 +206,22 @@ async def test_registry_merge_generator_now_returns_fact_registry_snapshot(
     result = await generator.generate_registry_updates(_command())
 
     assert result.fact_registry["version"] == 1
-    assert result.fact_registry["canonical_facts"][0]["fact_id"] == "cf_product_definition"
+    assert (
+        result.fact_registry["canonical_facts"][0]["fact_id"] == "cf_product_definition"
+    )
     assert result.registry_update_summary["created_fact_count"] == 1
     assert result.canonical_fact_count == 1
-    assert result.parsed_output_artifact_payload["fact_registry"] == result.fact_registry
+    assert (
+        result.parsed_output_artifact_payload["fact_registry"] == result.fact_registry
+    )
     assert "registry_updates" not in result.parsed_output_artifact_payload
 
     assert len(invocation.requests) == 1
     assert invocation.requests[0].operation_name == "faq_fact_registry_canonicalization"
-    assert invocation.requests[0].route_purpose == "workbench_fact_registry_canonicalization"
+    assert (
+        invocation.requests[0].route_purpose
+        == "workbench_fact_registry_canonicalization"
+    )
     assert "canonicalization_unit" in invocation.requests[0].prompt
     assert "registry_snapshot_payload" in invocation.requests[0].prompt
     assert "relevant_registry_state" in invocation.requests[0].prompt

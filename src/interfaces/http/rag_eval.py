@@ -407,14 +407,14 @@ async def apply_accepted_rag_eval_questions(
         user_repo=user_repo,
     )
 
-    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
-        WorkbenchRuntimeRetrievalRepository,
+    from src.infrastructure.db.workbench_rag_eval_edit_repository import (
+        WorkbenchRagEvalEditRepository,
     )
 
     try:
         summary = await RagEvalReviewService(
             rag_eval_repo,
-            knowledge_repo=WorkbenchRuntimeRetrievalRepository(pool),
+            knowledge_repo=WorkbenchRagEvalEditRepository(pool),
             queue_repo=queue_repo,
             rerun_eval_task_type=TASK_RUN_FULL_RAG_EVAL,
         ).apply_accepted_questions(
@@ -467,13 +467,13 @@ async def execute_rag_eval_result_actions(
         user_repo=user_repo,
     )
 
-    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
-        WorkbenchRuntimeRetrievalRepository,
+    from src.infrastructure.db.workbench_rag_eval_edit_repository import (
+        WorkbenchRagEvalEditRepository,
     )
 
     service = KnowledgeEditActionService(
         action_source=action_source,
-        knowledge_repo=WorkbenchRuntimeRetrievalRepository(pool),
+        knowledge_repo=WorkbenchRagEvalEditRepository(pool),
         queue_repo=queue_repo,
     )
 

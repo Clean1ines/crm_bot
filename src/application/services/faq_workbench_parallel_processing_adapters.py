@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from src.application.services.faq_workbench_canonicalization_barrier_service import (
+    ProcessDocumentCanonicalizationBarrierCommand,
+)
+from src.application.services.faq_workbench_parallel_processing_coordinator_service import (
+    ProcessParallelCanonicalizationBarrierCommand,
+)
+
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -93,12 +100,6 @@ __all__ = [
     "FaqWorkbenchParallelSectionProcessedResult",
     "FaqWorkbenchParallelSectionProcessorAdapter",
 ]
-from src.application.services.faq_workbench_canonicalization_barrier_service import (
-    ProcessDocumentCanonicalizationBarrierCommand,
-)
-from src.application.services.faq_workbench_parallel_processing_coordinator_service import (
-    ProcessParallelCanonicalizationBarrierCommand,
-)
 
 
 class CanonicalizationBarrierServicePort(Protocol):

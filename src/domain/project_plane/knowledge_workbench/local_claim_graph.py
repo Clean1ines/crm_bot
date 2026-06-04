@@ -39,7 +39,9 @@ class LocalEvidenceMention:
 
     def __post_init__(self) -> None:
         if not self.evidence_block.strip():
-            raise DomainInvariantError("local evidence mention evidence_block is required")
+            raise DomainInvariantError(
+                "local evidence mention evidence_block is required"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +81,9 @@ class LocalClaim:
         if not self.claim_kind.strip():
             raise DomainInvariantError("local claim_kind is required")
         if self.granularity not in {"atomic", "composite"}:
-            raise DomainInvariantError("local claim granularity must be atomic or composite")
+            raise DomainInvariantError(
+                "local claim granularity must be atomic or composite"
+            )
         if not self.triples:
             raise DomainInvariantError("local claim requires triples")
         if not 0 <= self.confidence <= 1:
@@ -101,7 +105,9 @@ class LocalClaimGraph:
         if not str(self.section_id).strip():
             raise DomainInvariantError("local claim graph section_id is required")
         if not self.claims:
-            raise DomainInvariantError("local claim graph requires non-empty claim_observations")
+            raise DomainInvariantError(
+                "local claim graph requires non-empty claim_observations"
+            )
 
 
 def local_claim_graph_from_claim_observations_payload(
@@ -117,7 +123,9 @@ def local_claim_graph_from_claim_observations_payload(
 
     raw_claims = payload.get("claim_observations")
     if not isinstance(raw_claims, list) or not raw_claims:
-        raise DomainInvariantError("local claim graph requires non-empty claim_observations")
+        raise DomainInvariantError(
+            "local claim graph requires non-empty claim_observations"
+        )
 
     claims: list[LocalClaim] = []
     for index, raw_claim in enumerate(raw_claims):
@@ -177,9 +185,13 @@ def _parse_local_claim(payload: dict[str, JsonValue], *, index: int) -> LocalCla
         scope=_optional_str(payload, "scope") or "",
         exclusion_scope=_optional_str(payload, "exclusion_scope") or "",
         local_relations=tuple(
-            _parse_local_relation(item, claim_index=index, relation_index=relation_index)
+            _parse_local_relation(
+                item, claim_index=index, relation_index=relation_index
+            )
             for relation_index, item in enumerate(
-                _required_list(payload, "local_relations", index=index, allow_empty=True)
+                _required_list(
+                    payload, "local_relations", index=index, allow_empty=True
+                )
             )
         ),
         confidence=_float(payload.get("confidence"), key="confidence"),

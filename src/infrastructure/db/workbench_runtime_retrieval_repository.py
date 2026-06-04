@@ -4,13 +4,13 @@ import math
 import re
 from dataclasses import dataclass
 import json
-from typing import Any
 
 import asyncpg
 
 from src.domain.project_plane.knowledge_views import (
     KnowledgeSearchResultView,
     KnowledgeSearchTraceView,
+    SourceRefView,
 )
 from src.utils.uuid_utils import ensure_uuid
 
@@ -123,7 +123,8 @@ class WorkbenchRuntimeRetrievalRepository:
             if score.score <= 0:
                 continue
 
-            source_refs = _text_tuple(row.get("source_refs"))
+            source_ref_texts = _text_tuple(row.get("source_refs"))
+            source_refs = _source_ref_views(source_ref_texts)
             possible_questions = _text_tuple(row.get("possible_questions"))
 
             results.append(
@@ -137,7 +138,7 @@ class WorkbenchRuntimeRetrievalRepository:
                     document_status="published",
                     entry_kind="faq_workbench_fact",
                     title=str(row["claim"]),
-                    source_excerpt=source_refs[0] if source_refs else None,
+                    source_excerpt=source_ref_texts[0] if source_ref_texts else None,
                     source_refs=source_refs,
                     embedding_text=str(row["embedding_text"]),
                     questions=(str(row["claim"]), *possible_questions),
@@ -147,8 +148,7 @@ class WorkbenchRuntimeRetrievalRepository:
                         matched_fields=score.matched_fields,
                         lexical_score=score.score,
                         vector_score=0.0,
-                        exact_claim_match="claim"
-                        in score.matched_fields,
+                        exact_question_match="claim" in score.matched_fields,
                         title_match="claim" in score.matched_fields,
                         length_penalty=0.0,
                         final_score=score.score,
@@ -162,13 +162,12 @@ class WorkbenchRuntimeRetrievalRepository:
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:limit]
 
-
     async def publish_fact_registry_runtime_entries(
         self,
         *,
         project_id: str,
         document_id: str,
-        fact_registry_payload: Any,
+        fact_registry_payload: object,
     ) -> int:
         del document_id
 
@@ -216,7 +215,7 @@ def _normalize_query(value: str) -> str:
     return " ".join(_WORD_RE.findall(value.lower()))
 
 
-def _field_text(value: Any) -> str:
+def _field_text(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
@@ -226,7 +225,7 @@ def _field_text(value: Any) -> str:
     return str(value)
 
 
-def _text_tuple(value: Any) -> tuple[str, ...]:
+def _text_tuple(value: object) -> tuple[str, ...]:
     if value is None:
         return ()
     if isinstance(value, str):
@@ -234,6 +233,14 @@ def _text_tuple(value: Any) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return (str(value),)
+
+
+def _source_ref_views(source_refs: tuple[str, ...]) -> tuple[SourceRefView, ...]:
+    return tuple(
+        SourceRefView(source_index=index, quote=source_ref)
+        for index, source_ref in enumerate(source_refs)
+        if source_ref.strip()
+    )
 
 
 def _score_runtime_row(row: asyncpg.Record, normalized_query: str) -> _RuntimeRowScore:
@@ -286,11 +293,12 @@ def _score_runtime_row(row: asyncpg.Record, normalized_query: str) -> _RuntimeRo
 
 __all__ = ["WorkbenchRuntimeRetrievalRepository"]
 
+
 def _runtime_rows_from_fact_registry(
     project_id: str,
-    canonical_facts: list[Any],
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+    canonical_facts: list[object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
 
     for raw_fact in canonical_facts:
         if not isinstance(raw_fact, dict):
@@ -343,7 +351,7 @@ def _embedding_text_from_fact(
     source_refs: tuple[str, ...],
     scope: str,
     exclusion_scope: str,
-    triples: Any,
+    triples: object,
 ) -> str:
     parts: list[str] = [
         f"claim: {claim}",
@@ -367,7 +375,7 @@ def _embedding_text_from_fact(
     return "\n".join(part for part in parts if part.strip())
 
 
-def _triple_texts(value: Any) -> tuple[str, ...]:
+def _triple_texts(value: object) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
 
@@ -388,7 +396,7 @@ def _triple_texts(value: Any) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _source_refs_from_fact(raw_fact: dict[str, Any]) -> tuple[str, ...]:
+def _source_refs_from_fact(raw_fact: dict[str, object]) -> tuple[str, ...]:
     direct = _text_list(raw_fact.get("source_refs"))
     if direct:
         return direct
@@ -420,23 +428,17 @@ def _source_refs_from_fact(raw_fact: dict[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(refs))
 
 
-def _text_list(value: Any) -> tuple[str, ...]:
+def _text_list(value: object) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(
-        text
-        for item in value
-        if (text := _clean_text(item))
-    )
+    return tuple(text for item in value if (text := _clean_text(item)))
 
 
-def _clean_text(value: Any) -> str:
+def _clean_text(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip()
 
 
-def _json(value: Any) -> str:
+def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-

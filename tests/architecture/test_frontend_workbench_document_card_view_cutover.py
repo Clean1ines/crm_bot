@@ -69,7 +69,9 @@ def test_delete_modal_uses_card_view_confirmation_copy() -> None:
     assert "{deleteDocumentConfirmation}" in source
 
 
-def test_workbench_document_card_renders_fact_registry_result_metrics_not_surfaces() -> None:
+def test_workbench_document_card_renders_fact_registry_result_metrics_not_surfaces() -> (
+    None
+):
     source = CARD.read_text(encoding="utf-8")
 
     assert "Факты:" in source
@@ -79,3 +81,34 @@ def test_workbench_document_card_renders_fact_registry_result_metrics_not_surfac
     assert "cardView.runtime.runtime_entry_count" in source
     assert "cardView.registry.final_snapshot_id" in source
     assert "Surfaces:" not in source
+
+
+def test_workbench_document_card_explains_processing_in_human_terms() -> None:
+    source = CARD.read_text(encoding="utf-8")
+
+    assert "Что происходит с документом" in source
+    assert "Прогресс" in source
+    assert "sectionProgressPercent" in source
+    assert "sectionProgressText" in source
+    assert "elapsedText" in source
+    assert "llmUsageText" in source
+    assert "cardView.timer.active_elapsed_seconds" in source
+    assert "cardView.timer.wall_elapsed_seconds" in source
+    assert "cardView.usage.total_tokens" in source
+    assert "cardView.usage.llm_call_count" in source
+    assert "LLM-выз." in source
+
+
+def test_document_card_does_not_mount_old_surface_compilation_summary() -> None:
+    source = Path(
+        "frontend/src/pages/knowledge/components/KnowledgeDocumentCard.tsx"
+    ).read_text(encoding="utf-8")
+
+    forbidden = (
+        "SurfaceCompilationSummary",
+        "surfacePipelineContract",
+        "knowledgeSurfaceApi",
+        "@shared/api/modules/knowledgeSurface",
+    )
+    for marker in forbidden:
+        assert marker not in source

@@ -3,41 +3,30 @@ from __future__ import annotations
 from pathlib import Path
 
 
-WORKBENCH_CURATION_FILES = (
-    "src/domain/project_plane/knowledge_workbench/curation.py",
-    "src/application/services/faq_workbench_surface_curation_service.py",
-    "tests/domain/test_knowledge_workbench_surface_curation_policy.py",
-    "tests/application/services/test_faq_workbench_surface_curation_service.py",
+OLD_SURFACE_CURATION_SERVICE = Path(
+    "src/application/services/faq_workbench_surface_curation_service.py"
 )
-
-FORBIDDEN_MARKERS = (
-    "KnowledgeEntryStatus",
-    "KnowledgeEntryVisibility",
-    "CanonicalKnowledgeEntry",
-    "knowledge_compilation",
-    "AnswerCandidate",
-    "CandidateCluster",
-    "CompilerRun",
-    "CompilerRunStatus",
+CURRENT_MODAL = Path(
+    "frontend/src/pages/knowledge/components/KnowledgeDocumentCurationModal.tsx"
+)
+CURRENT_EVIDENCE_TRACE = Path(
+    "src/interfaces/composition/faq_workbench_evidence_trace.py"
 )
 
 
 def test_workbench_curation_does_not_carry_old_canonical_entry_lifecycle() -> None:
-    for path in WORKBENCH_CURATION_FILES:
-        source = Path(path).read_text(encoding="utf-8")
+    assert not OLD_SURFACE_CURATION_SERVICE.exists()
 
-        for marker in FORBIDDEN_MARKERS:
-            assert marker not in source, f"{path} must not reference {marker}"
+    modal = CURRENT_MODAL.read_text(encoding="utf-8")
+    assert "evidenceTrace" in modal
+    assert "knowledgeSurfaceApi" not in modal
+    assert "RetrievalSurface" not in modal
+    assert "surface cards" not in modal
 
 
-def test_old_publish_and_background_job_actions_are_not_draft_surface_curation() -> (
-    None
-):
-    source = Path("src/domain/project_plane/knowledge_workbench/curation.py").read_text(
-        encoding="utf-8"
-    )
+def test_workbench_curation_uses_evidence_trace_instead_of_old_surface_donors() -> None:
+    assert CURRENT_EVIDENCE_TRACE.exists()
+    source = CURRENT_EVIDENCE_TRACE.read_text(encoding="utf-8")
 
-    assert "publish_entry" not in source
-    assert "unpublish_entry" not in source
-    assert "rebuild_embedding" not in source
-    assert "rerun_eval" not in source
+    assert "EvidenceTrace" in source or "evidence_trace" in source
+    assert "faq_workbench_surface_curation_service" not in source

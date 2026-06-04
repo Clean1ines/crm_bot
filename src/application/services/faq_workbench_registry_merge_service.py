@@ -330,15 +330,15 @@ class FaqWorkbenchRegistryMergeService:
         if not unit.unit_id:
             raise DomainInvariantError("registry merge requires canonicalization unit")
         if not unit.members:
-            raise DomainInvariantError("registry merge requires canonicalization members")
+            raise DomainInvariantError(
+                "registry merge requires canonicalization members"
+            )
 
     def _canonicalization_unit_metadata(
         self,
         unit: LocalClaimCanonicalizationUnit,
     ) -> dict[str, JsonValue]:
-        section_ids = tuple(
-            dict.fromkeys(member.section_id for member in unit.members)
-        )
+        section_ids = tuple(dict.fromkeys(member.section_id for member in unit.members))
         node_run_ids = tuple(
             dict.fromkeys(member.node_run_id for member in unit.members)
         )

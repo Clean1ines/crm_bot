@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -67,7 +66,7 @@ async def test_upload_success_uses_workbench_upload_composition(
 
     calls: dict[str, object] = {}
 
-    async def fake_workbench_upload(**kwargs: Any) -> _Result:
+    async def fake_workbench_upload(**kwargs: object) -> _Result:
         calls.update(kwargs)
         return _Result(
             {
@@ -255,7 +254,7 @@ async def test_upload_file_read_error_maps_to_http_400(
 
     with pytest.raises(HTTPException) as exc_info:
         try:
-            await knowledge._read_upload_bytes(BrokenUpload())  # type: ignore[arg-type]
+            await knowledge._read_upload_bytes(BrokenUpload())
         except HTTPException:
             raise
         except Exception as exc:
@@ -286,7 +285,7 @@ async def test_non_faq_upload_modes_fail_closed(
             user_repo=_FakeUserRepo(),
         )
 
-    assert exc_info.value.status_code == 422
+    assert exc_info.value.status_code == 400
     assert "Only FAQ Workbench uploads are supported" in str(exc_info.value.detail)
 
 
@@ -344,5 +343,5 @@ async def test_unknown_upload_mode_also_fails_closed(
             user_repo=_FakeUserRepo(),
         )
 
-    assert exc_info.value.status_code == 422
+    assert exc_info.value.status_code == 400
     assert "Only FAQ Workbench uploads are supported" in str(exc_info.value.detail)

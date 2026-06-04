@@ -23,7 +23,9 @@ def _function_body(source: str, signature: str) -> str:
     return source[start:end]
 
 
-def test_publish_ready_service_uses_current_final_snapshot_publication_contract() -> None:
+def test_publish_ready_service_uses_current_final_snapshot_publication_contract() -> (
+    None
+):
     source = PUBLISH_READY.read_text(encoding="utf-8")
 
     assert "class FaqWorkbenchPublishReadyService" in source
@@ -44,7 +46,9 @@ def test_publish_ready_service_uses_current_final_snapshot_publication_contract(
     assert "published_snapshot_id=snapshot_id" in method_body
 
 
-def test_publish_ready_composition_wraps_snapshot_publish_and_runtime_projection_in_transaction() -> None:
+def test_publish_ready_composition_wraps_snapshot_publish_and_runtime_projection_in_transaction() -> (
+    None
+):
     source = COMPOSITION.read_text(encoding="utf-8")
 
     assert "async with connection.transaction():" in source
@@ -66,7 +70,9 @@ def test_publish_ready_composition_wraps_snapshot_publish_and_runtime_projection
     )
 
 
-def test_publish_ready_composition_loads_only_final_published_fact_registry_snapshot() -> None:
+def test_publish_ready_composition_loads_only_final_published_fact_registry_snapshot() -> (
+    None
+):
     source = COMPOSITION.read_text(encoding="utf-8")
 
     helper_body = _function_body(

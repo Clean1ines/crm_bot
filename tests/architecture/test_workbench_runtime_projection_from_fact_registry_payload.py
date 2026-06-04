@@ -8,7 +8,9 @@ from src.infrastructure.db.workbench_runtime_retrieval_repository import (
 REPOSITORY = Path("src/infrastructure/db/workbench_runtime_retrieval_repository.py")
 
 
-def test_workbench_runtime_repository_projects_fact_registry_payload_to_runtime_rows() -> None:
+def test_workbench_runtime_repository_projects_fact_registry_payload_to_runtime_rows() -> (
+    None
+):
     rows = _runtime_rows_from_fact_registry(
         "project-1",
         [
@@ -43,7 +45,9 @@ def test_workbench_runtime_repository_projects_fact_registry_payload_to_runtime_
     assert "автоматические ответы" in row["embedding_text"]
 
 
-def test_workbench_runtime_repository_uses_runtime_fact_columns_not_old_surface_columns() -> None:
+def test_workbench_runtime_repository_uses_runtime_fact_columns_not_old_surface_columns() -> (
+    None
+):
     source = REPOSITORY.read_text(encoding="utf-8")
 
     assert "publish_fact_registry_runtime_entries" in source

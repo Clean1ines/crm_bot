@@ -5,13 +5,14 @@ from src.application.workbench_observability.progress import (
     WorkbenchProgressReadService,
 )
 from src.infrastructure.db.workbench_observability_repository import (
+    WorkbenchObservabilityDbPool,
     WorkbenchObservabilityRepository,
 )
 
 
 async def fetch_workbench_progress(
     *,
-    pool: object,
+    pool: WorkbenchObservabilityDbPool,
     project_id: str,
     document_id: str,
 ) -> dict[str, object]:

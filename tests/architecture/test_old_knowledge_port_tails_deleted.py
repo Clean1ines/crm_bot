@@ -55,6 +55,7 @@ def test_production_code_does_not_import_deleted_knowledge_port_tails() -> None:
                     f"{path} imports {imported}"
                 )
 
+
 def test_clean_roots_import_after_old_port_tail_deletion() -> None:
     modules = (
         "src.application.ports.knowledge",

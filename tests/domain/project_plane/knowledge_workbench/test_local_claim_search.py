@@ -88,7 +88,9 @@ def test_local_claim_search_text_includes_full_semantic_object() -> None:
         claim=graph.claims[0],
     )
 
-    assert "claim: Бот автоматически отвечает клиентам в Telegram." in document.search_text
+    assert (
+        "claim: Бот автоматически отвечает клиентам в Telegram." in document.search_text
+    )
     assert "claim_kind: capability" in document.search_text
     assert "granularity: atomic" in document.search_text
 

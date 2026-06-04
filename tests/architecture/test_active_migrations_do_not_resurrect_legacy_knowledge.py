@@ -59,11 +59,7 @@ def _active_migration_text() -> str:
 def test_active_migrations_do_not_resurrect_deleted_legacy_tables() -> None:
     source = _active_migration_text()
 
-    offenders = [
-        token
-        for token in FORBIDDEN_DEAD_TABLE_TOKENS
-        if token in source
-    ]
+    offenders = [token for token in FORBIDDEN_DEAD_TABLE_TOKENS if token in source]
 
     assert not offenders, "\n".join(offenders)
 
@@ -71,11 +67,7 @@ def test_active_migrations_do_not_resurrect_deleted_legacy_tables() -> None:
 def test_active_migrations_do_not_resurrect_deleted_surface_semantics() -> None:
     source = _active_migration_text()
 
-    offenders = [
-        token
-        for token in FORBIDDEN_DEAD_SEMANTIC_TOKENS
-        if token in source
-    ]
+    offenders = [token for token in FORBIDDEN_DEAD_SEMANTIC_TOKENS if token in source]
 
     assert not offenders, "\n".join(offenders)
 

@@ -58,7 +58,6 @@ class MonotonicIdFactory:
         return f"{prefix}-{next(self._counter)}"
 
 
-
 @dataclass(frozen=True, slots=True)
 class ProcessClaimObservationsCommand:
     section: DocumentSection
@@ -285,7 +284,7 @@ class FaqWorkbenchClaimObservationsService:
             error_message_internal=internal_message,
         )
 
-        route_attempts: list[dict[str, JsonValue]] = [
+        route_attempts: list[JsonValue] = [
             {
                 "provider_id": attempt.provider_id,
                 "model": attempt.model,
@@ -467,7 +466,6 @@ class FaqWorkbenchClaimObservationsService:
                 **command.llm_metrics,
             },
         }
-
 
         output_artifact = ProcessingNodeArtifact(
             artifact_id=output_artifact_id,

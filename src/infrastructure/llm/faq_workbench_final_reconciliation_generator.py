@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,18 +70,19 @@ class FaqWorkbenchFinalReconciliationGenerator(
                 "final reconciliation invocation returned empty JSON"
             )
 
-        advice = self.parse_final_reconciliation_payload(result.parsed_json)
+        parsed_json = _workbench_json_value(result.parsed_json)
+        advice = self.parse_final_reconciliation_payload(parsed_json)
         parsed_payload: JsonValue = {
-            "surface_adjustments": advice.surface_adjustments,
-            "relations": advice.relations,
-            "merge_decisions": advice.merge_decisions,
-            "warnings": advice.warnings,
+            "surface_adjustments": list(advice.surface_adjustments),
+            "relations": list(advice.relations),
+            "merge_decisions": list(advice.merge_decisions),
+            "warnings": list(advice.warnings),
             "metrics": advice.metrics,
         }
         raw_payload: JsonValue = {
             "operation_name": self.config.operation_name,
             "raw_text": result.raw_text,
-            "parsed_json": result.parsed_json,
+            "parsed_json": parsed_json,
         }
 
         return FaqWorkbenchFinalReconciliationGenerationResult(
@@ -111,12 +113,11 @@ class FaqWorkbenchFinalReconciliationGenerator(
                 "update_count": command.registry_snapshot.update_count,
             },
             "canonical_facts": [
-                self._registry_entry_payload(entry)
-                for entry in command.canonical_facts
+                self._registry_entry_payload(entry) for entry in command.canonical_facts
             ],
-            "proposed_final_surfaces": command.proposed_final_surfaces,
-            "proposed_relations": command.proposed_relations,
-            "proposed_merge_decisions": command.proposed_merge_decisions,
+            "proposed_final_surfaces": list(command.proposed_final_surfaces),
+            "proposed_relations": list(command.proposed_relations),
+            "proposed_merge_decisions": list(command.proposed_merge_decisions),
             "aggregate_metrics": command.aggregate_metrics,
         }
         return template + "\n\nINPUT_JSON:\n" + self._json_dumps(payload)
@@ -150,28 +151,28 @@ class FaqWorkbenchFinalReconciliationGenerator(
             "fact_id": getattr(entry, "fact_id"),
             "fact_key": getattr(entry, "fact_key"),
             "claim": getattr(entry, "claim"),
-            "question_variants": tuple(getattr(entry, "question_variants")),
+            "question_variants": list(getattr(entry, "question_variants")),
             "claim_kind": getattr(getattr(entry, "claim_kind"), "value", None),
             "answer": getattr(entry, "answer"),
             "short_answer": getattr(entry, "short_answer"),
             "answer_scope": getattr(entry, "answer_scope"),
             "retrieval_scope": getattr(entry, "retrieval_scope"),
             "exclusion_scope": getattr(entry, "exclusion_scope"),
-            "evidence_quotes": tuple(getattr(entry, "evidence_quotes")),
-            "source_refs": tuple(getattr(entry, "source_refs")),
-            "source_section_ids": tuple(getattr(entry, "source_section_ids")),
-            "source_chunk_indexes": tuple(getattr(entry, "source_chunk_indexes")),
-            "parent_fact_ids": tuple(getattr(entry, "parent_fact_ids")),
-            "child_fact_ids": tuple(getattr(entry, "child_fact_ids")),
-            "duplicate_fact_ids": tuple(getattr(entry, "duplicate_fact_ids")),
-            "overlap_fact_ids": tuple(getattr(entry, "overlap_fact_ids")),
+            "evidence_quotes": list(getattr(entry, "evidence_quotes")),
+            "source_refs": list(getattr(entry, "source_refs")),
+            "source_section_ids": list(getattr(entry, "source_section_ids")),
+            "source_chunk_indexes": list(getattr(entry, "source_chunk_indexes")),
+            "parent_fact_ids": list(getattr(entry, "parent_fact_ids")),
+            "child_fact_ids": list(getattr(entry, "child_fact_ids")),
+            "duplicate_fact_ids": list(getattr(entry, "duplicate_fact_ids")),
+            "overlap_fact_ids": list(getattr(entry, "overlap_fact_ids")),
             "role_label_metadata": getattr(entry, "role_label_metadata"),
             "status": getattr(getattr(entry, "status"), "value", None),
         }
 
     def _object_tuple(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         key: str,
     ) -> tuple[JsonValue, ...]:
         if key not in payload or payload[key] is None:
@@ -190,7 +191,7 @@ class FaqWorkbenchFinalReconciliationGenerator(
 
     def _string_tuple(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         key: str,
     ) -> tuple[str, ...]:
         if key not in payload or payload[key] is None:
@@ -211,7 +212,7 @@ class FaqWorkbenchFinalReconciliationGenerator(
 
     def _object_value(
         self,
-        payload: dict[str, object],
+        payload: dict[str, JsonValue],
         key: str,
         *,
         default: JsonValue,
@@ -226,6 +227,16 @@ class FaqWorkbenchFinalReconciliationGenerator(
             return json.dumps(value, ensure_ascii=False, sort_keys=True)
         except TypeError as exc:
             raise DomainInvariantError("value is not JSON serializable") from exc
+
+
+def _workbench_json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _workbench_json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_workbench_json_value(item) for item in value]
+    raise DomainInvariantError("LLM JSON payload contains non-JSON value")
 
 
 __all__ = [

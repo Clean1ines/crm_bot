@@ -35,29 +35,17 @@ class LocalClaimCanonicalizationMember:
                 "canonicalization member requires search_document_id"
             )
         if not self.project_id.strip():
-            raise DomainInvariantError(
-                "canonicalization member requires project_id"
-            )
+            raise DomainInvariantError("canonicalization member requires project_id")
         if not self.document_id.strip():
-            raise DomainInvariantError(
-                "canonicalization member requires document_id"
-            )
+            raise DomainInvariantError("canonicalization member requires document_id")
         if not self.local_ref.strip():
-            raise DomainInvariantError(
-                "canonicalization member requires local_ref"
-            )
+            raise DomainInvariantError("canonicalization member requires local_ref")
         if not self.section_id.strip():
-            raise DomainInvariantError(
-                "canonicalization member requires section_id"
-            )
+            raise DomainInvariantError("canonicalization member requires section_id")
         if not self.node_run_id.strip():
-            raise DomainInvariantError(
-                "canonicalization member requires node_run_id"
-            )
+            raise DomainInvariantError("canonicalization member requires node_run_id")
         if not self.claim.strip():
-            raise DomainInvariantError(
-                "canonicalization member requires claim"
-            )
+            raise DomainInvariantError("canonicalization member requires claim")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,13 +65,9 @@ class LocalClaimCanonicalizationEdge:
                 "canonicalization edge requires target_search_document_id"
             )
         if self.source_search_document_id == self.target_search_document_id:
-            raise DomainInvariantError(
-                "canonicalization edge cannot target itself"
-            )
+            raise DomainInvariantError("canonicalization edge cannot target itself")
         if self.score < 0 or self.score > 1:
-            raise DomainInvariantError(
-                "canonicalization edge score must be in [0, 1]"
-            )
+            raise DomainInvariantError("canonicalization edge score must be in [0, 1]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,8 +156,7 @@ def local_claim_canonicalization_units_from_retrieval(
     similarity_edges: tuple[LocalClaimSimilarityEdge, ...],
 ) -> tuple[LocalClaimCanonicalizationUnit, ...]:
     documents_by_id = {
-        document.search_document_id: document
-        for document in search_documents
+        document.search_document_id: document for document in search_documents
     }
     edges_by_group_members: dict[frozenset[str], list[LocalClaimSimilarityEdge]] = {}
 

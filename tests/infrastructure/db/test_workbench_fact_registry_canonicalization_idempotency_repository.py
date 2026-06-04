@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Callable, cast
 
 import pytest
 
 from src.infrastructure.db.knowledge_workbench_repository import (
     KnowledgeWorkbenchRepository,
 )
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)
 
 
 @dataclass(slots=True)
@@ -27,9 +35,11 @@ class FakeConnection:
 
 
 @pytest.mark.asyncio
-async def test_has_completed_fact_registry_canonicalization_queries_completed_parsed_prompt_c_artifact() -> None:
+async def test_has_completed_fact_registry_canonicalization_queries_completed_parsed_prompt_c_artifact() -> (
+    None
+):
     connection = FakeConnection(row={"completed": True})
-    repository = KnowledgeWorkbenchRepository(connection)  # type: ignore[arg-type]
+    repository = _workbench_repository(connection)
 
     completed = await repository.has_completed_fact_registry_canonicalization(
         project_id="project-1",
@@ -44,9 +54,14 @@ async def test_has_completed_fact_registry_canonicalization_queries_completed_pa
     normalized = " ".join(query.lower().split())
 
     assert "select exists" in normalized
-    assert "from knowledge_workbench_processing_node_artifacts as artifact" in normalized
+    assert (
+        "from knowledge_workbench_processing_node_artifacts as artifact" in normalized
+    )
     assert "join knowledge_workbench_processing_node_runs as node_run" in normalized
-    assert "artifact.metadata ->> 'contract' = 'fact_registry_canonicalization'" in normalized
+    assert (
+        "artifact.metadata ->> 'contract' = 'fact_registry_canonicalization'"
+        in normalized
+    )
     assert "artifact.artifact_type = 'parsed_llm_output'" in normalized
     assert "node_run.node_name = 'faq_surface_registry_merge'" in normalized
     assert "node_run.status = 'completed'" in normalized
@@ -56,9 +71,11 @@ async def test_has_completed_fact_registry_canonicalization_queries_completed_pa
 
 
 @pytest.mark.asyncio
-async def test_has_completed_fact_registry_canonicalization_returns_false_when_marker_absent() -> None:
+async def test_has_completed_fact_registry_canonicalization_returns_false_when_marker_absent() -> (
+    None
+):
     connection = FakeConnection(row={"completed": False})
-    repository = KnowledgeWorkbenchRepository(connection)  # type: ignore[arg-type]
+    repository = _workbench_repository(connection)
 
     completed = await repository.has_completed_fact_registry_canonicalization(
         project_id="project-1",
@@ -70,9 +87,11 @@ async def test_has_completed_fact_registry_canonicalization_returns_false_when_m
 
 
 @pytest.mark.asyncio
-async def test_has_completed_fact_registry_canonicalization_returns_false_when_no_row() -> None:
+async def test_has_completed_fact_registry_canonicalization_returns_false_when_no_row() -> (
+    None
+):
     connection = FakeConnection(row=None)
-    repository = KnowledgeWorkbenchRepository(connection)  # type: ignore[arg-type]
+    repository = _workbench_repository(connection)
 
     completed = await repository.has_completed_fact_registry_canonicalization(
         project_id="project-1",

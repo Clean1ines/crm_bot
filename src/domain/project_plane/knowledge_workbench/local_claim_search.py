@@ -33,9 +33,7 @@ class LocalClaimSearchDocument:
 
     def __post_init__(self) -> None:
         if not self.search_document_id.strip():
-            raise DomainInvariantError(
-                "local claim search document id is required"
-            )
+            raise DomainInvariantError("local claim search document id is required")
         if not str(self.project_id).strip():
             raise DomainInvariantError(
                 "local claim search document project_id is required"
@@ -57,9 +55,7 @@ class LocalClaimSearchDocument:
                 "local claim search document local_ref is required"
             )
         if not self.claim.strip():
-            raise DomainInvariantError(
-                "local claim search document claim is required"
-            )
+            raise DomainInvariantError("local claim search document claim is required")
         if not self.search_text.strip():
             raise DomainInvariantError(
                 "local claim search document search_text is required"

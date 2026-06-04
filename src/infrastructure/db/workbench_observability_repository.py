@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol
+from typing import Protocol, cast
+
 
 class WorkbenchObservabilityDbPool(Protocol):
     async def fetchrow(self, query: str, *args: object) -> object | None: ...
 
     async def fetch(self, query: str, *args: object) -> Sequence[object]: ...
+
 
 class WorkbenchObservabilityRepository:
     def __init__(self, pool: WorkbenchObservabilityDbPool) -> None:
@@ -80,7 +82,7 @@ class WorkbenchObservabilityRepository:
             document_id,
         )
         return {
-            str(row["status"]): int(row["count"])
+            str(row["status"]): _int(row["count"])
             for row in (_row_to_dict(item) or {} for item in rows)
             if row
         }
@@ -119,7 +121,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> dict[str, object] | None:
-        row = await self._connection.fetchrow(
+        row = await self._pool.fetchrow(
             """
             SELECT
                 document_id,
@@ -141,7 +143,7 @@ class WorkbenchObservabilityRepository:
         )
         if row is None:
             return None
-        return dict(row)
+        return _row_to_dict_required(row)
 
     async def list_evidence_trace_sections(
         self,
@@ -149,7 +151,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 section_id,
@@ -171,7 +173,7 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_evidence_trace_findings(
         self,
@@ -179,7 +181,61 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        return []
+        rows = await self._pool.fetch(
+            """
+            SELECT
+                artifact.artifact_id || ':' || (claim.ordinality - 1)::text
+                    AS claim_observation_id,
+                artifact.section_id,
+                'claim_observation' AS action,
+                node.status AS status,
+                NULL::text AS target_fact_id,
+                claim.item->>'local_ref' AS claim_local_ref,
+                claim.item->>'claim' AS title,
+                claim.item->>'claim' AS claim,
+                COALESCE(claim.item->>'claim_kind', 'other') AS claim_kind,
+                COALESCE(claim.item->>'scope', claim.item->>'claim') AS answer,
+                claim.item->>'claim' AS short_answer,
+                NULL::text AS claim_delta,
+                COALESCE(claim.item->'possible_questions', '[]'::jsonb) AS variants,
+                CASE
+                    WHEN COALESCE(claim.item->>'evidence_block', '') = ''
+                    THEN '[]'::jsonb
+                    ELSE jsonb_build_array(claim.item->>'evidence_block')
+                END AS evidence_quotes,
+                COALESCE(claim.item->'source_refs', '[]'::jsonb) AS source_refs,
+                COALESCE(claim.item->'source_chunk_indexes', '[]'::jsonb)
+                    AS source_chunk_indexes,
+                NULLIF(claim.item->>'confidence', '')::double precision AS confidence,
+                COALESCE(claim.item->>'exclusion_scope', '') AS reason,
+                artifact.created_at
+            FROM knowledge_workbench_processing_node_artifacts AS artifact
+            JOIN knowledge_workbench_processing_node_runs AS node
+              ON node.node_run_id = artifact.node_run_id
+             AND node.processing_run_id = artifact.processing_run_id
+             AND node.project_id = artifact.project_id
+             AND node.document_id = artifact.document_id
+            CROSS JOIN LATERAL jsonb_array_elements(
+                COALESCE(artifact.payload_json->'claim_observations', '[]'::jsonb)
+            ) WITH ORDINALITY AS claim(item, ordinality)
+            LEFT JOIN knowledge_workbench_document_sections AS section
+              ON section.section_id = artifact.section_id
+             AND section.document_id = artifact.document_id
+             AND section.project_id = artifact.project_id
+            WHERE artifact.project_id = $1
+              AND artifact.document_id = $2
+              AND node.node_name = 'faq_surface_claim_observations'
+              AND artifact.artifact_type = 'parsed_llm_output'
+            ORDER BY
+                section.section_index NULLS LAST,
+                artifact.created_at ASC,
+                claim.ordinality ASC,
+                artifact.artifact_id ASC
+            """,
+            project_id,
+            document_id,
+        )
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_evidence_trace_canonical_facts(
         self,
@@ -187,7 +243,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 f.fact_id AS fact_id,
@@ -239,7 +295,7 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_evidence_trace_surfaces(
         self,
@@ -247,7 +303,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 surface_id,
@@ -276,7 +332,7 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_workbench_documents(
         self,
@@ -285,7 +341,7 @@ class WorkbenchObservabilityRepository:
         limit: int,
         offset: int,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 d.document_id,
@@ -483,7 +539,7 @@ class WorkbenchObservabilityRepository:
             limit,
             offset,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def get_import_quality_document(
         self,
@@ -491,7 +547,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> dict[str, object] | None:
-        row = await self._connection.fetchrow(
+        row = await self._pool.fetchrow(
             """
             SELECT
                 document_id,
@@ -514,7 +570,7 @@ class WorkbenchObservabilityRepository:
         )
         if row is None:
             return None
-        return dict(row)
+        return _row_to_dict_required(row)
 
     async def list_import_quality_sections(
         self,
@@ -522,7 +578,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 section_id,
@@ -540,7 +596,7 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_import_quality_findings(
         self,
@@ -556,7 +612,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 f.fact_id AS fact_id,
@@ -591,7 +647,7 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_import_quality_surfaces(
         self,
@@ -599,7 +655,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 surface_id,
@@ -618,7 +674,7 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_import_quality_node_runs(
         self,
@@ -626,7 +682,7 @@ class WorkbenchObservabilityRepository:
         project_id: str,
         document_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 node_run_id,
@@ -645,14 +701,14 @@ class WorkbenchObservabilityRepository:
             project_id,
             document_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_processing_overview_documents(
         self,
         *,
         project_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 d.document_id,
@@ -720,14 +776,14 @@ class WorkbenchObservabilityRepository:
             """,
             project_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
 
     async def list_processing_overview_node_runs(
         self,
         *,
         project_id: str,
     ) -> list[dict[str, object]]:
-        rows = await self._connection.fetch(
+        rows = await self._pool.fetch(
             """
             SELECT
                 node_run_id,
@@ -746,9 +802,18 @@ class WorkbenchObservabilityRepository:
             """,
             project_id,
         )
-        return [dict(row) for row in rows]
+        return [_row_to_dict_required(row) for row in rows]
+
 
 def _row_to_dict(row: object | None) -> dict[str, object] | None:
     if row is None:
         return None
-    return dict(row)
+    return _row_to_dict_required(row)
+
+
+def _row_to_dict_required(row: object) -> dict[str, object]:
+    return dict(cast(Mapping[str, object], row))
+
+
+def _int(value: object) -> int:
+    return int(str(value))

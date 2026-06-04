@@ -174,13 +174,17 @@ def test_build_local_claim_similarity_edges_supports_relation_signal() -> None:
         search_document_id="s1:n1:c1",
         claim="Бот отвечает клиентам.",
         triples=("бот has_capability отвечать клиентам",),
-        relations=("sets_boundary_for -> c2: ручная передача менеджеру ограничивает автоматический ответ",),
+        relations=(
+            "sets_boundary_for -> c2: ручная передача менеджеру ограничивает автоматический ответ",
+        ),
     )
     right = _doc(
         search_document_id="s2:n2:c2",
         claim="Сложные вопросы передаются менеджеру.",
         triples=("сложные вопросы requires менеджер",),
-        relations=("sets_boundary_for -> c1: ручная передача менеджеру ограничивает автоматический ответ",),
+        relations=(
+            "sets_boundary_for -> c1: ручная передача менеджеру ограничивает автоматический ответ",
+        ),
     )
 
     edges = build_local_claim_similarity_edges((left, right), min_score=0.01)

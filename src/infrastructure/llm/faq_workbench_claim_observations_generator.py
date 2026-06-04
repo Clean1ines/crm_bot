@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,7 +38,9 @@ class FaqWorkbenchClaimObservationsGeneratorConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class FaqWorkbenchClaimObservationsGenerator(FaqWorkbenchClaimObservationsGeneratorPort):
+class FaqWorkbenchClaimObservationsGenerator(
+    FaqWorkbenchClaimObservationsGeneratorPort
+):
     llm_invocation: LlmJsonInvocationPort
     config: FaqWorkbenchClaimObservationsGeneratorConfig
 
@@ -68,15 +71,14 @@ class FaqWorkbenchClaimObservationsGenerator(FaqWorkbenchClaimObservationsGenera
                 "claim observation invocation returned empty JSON"
             )
 
-        claim_observations = self.parse_claim_observations_payload(
-            result.parsed_json
-        )
+        parsed_json = _workbench_json_value(result.parsed_json)
+        claim_observations = self.parse_claim_observations_payload(parsed_json)
         return FaqWorkbenchClaimObservationsGenerationResult(
             claim_observations=claim_observations,
             invocation=result,
-            raw_payload=result.parsed_json,
-            warnings=self._warnings_from_payload(result.parsed_json),
-            metrics=self._metrics_from_payload(result.parsed_json),
+            raw_payload=parsed_json,
+            warnings=self._warnings_from_payload(parsed_json),
+            metrics=self._metrics_from_payload(parsed_json),
         )
 
     def build_prompt(
@@ -467,6 +469,16 @@ class FaqWorkbenchClaimObservationsGenerator(FaqWorkbenchClaimObservationsGenera
             json.dumps(value, ensure_ascii=False)
         except TypeError as exc:
             raise DomainInvariantError("value is not JSON serializable") from exc
+
+
+def _workbench_json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _workbench_json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_workbench_json_value(item) for item in value]
+    raise DomainInvariantError("LLM JSON payload contains non-JSON value")
 
 
 __all__ = [

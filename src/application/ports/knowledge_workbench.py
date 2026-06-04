@@ -27,6 +27,7 @@ from src.domain.project_plane.knowledge_workbench import (
     WorkbenchSectionWorkItem,
 )
 
+
 class KnowledgeWorkbenchFreshUploadRepositoryPort(Protocol):
     async def create_document(self, document: KnowledgeDocument) -> None: ...
 
@@ -85,6 +86,7 @@ class KnowledgeWorkbenchFreshUploadRepositoryPort(Protocol):
         applied_registry_snapshot_id: str,
     ) -> None: ...
 
+
 class KnowledgeWorkbenchRestoreCheckpointRepositoryPort(Protocol):
     async def create_processing_node_run(self, node_run: ProcessingNodeRun) -> None: ...
 
@@ -100,6 +102,7 @@ class KnowledgeWorkbenchRestoreCheckpointRepositoryPort(Protocol):
         document_id: str,
         processing_run_id: str,
     ) -> tuple[ProcessingNodeArtifact, ...]: ...
+
 
 class KnowledgeWorkbenchSectionBatchQueueRepositoryPort(Protocol):
     async def create_parallel_section_batch_plan(
@@ -128,6 +131,7 @@ class KnowledgeWorkbenchSectionBatchQueueRepositoryPort(Protocol):
         self,
         item: SectionBatchQueueItem,
     ) -> None: ...
+
 
 class KnowledgeWorkbenchClaimObservationsRepositoryPort(Protocol):
     async def create_processing_node_run(self, node_run: ProcessingNodeRun) -> None: ...
@@ -174,6 +178,7 @@ class KnowledgeWorkbenchClaimObservationsRepositoryPort(Protocol):
     ) -> None: ...
 
     async def create_registry_snapshot(self, snapshot: RegistrySnapshot) -> None: ...
+
 
 class KnowledgeWorkbenchRegistryApplicationRepositoryPort(Protocol):
     async def get_fact_registry_for_run(
@@ -347,6 +352,7 @@ class KnowledgeWorkbenchRegistryApplicationRepositoryPort(Protocol):
         processing_run_id: str,
     ) -> None: ...
 
+
 class KnowledgeWorkbenchSectionBatchPlanningRepositoryPort(Protocol):
     async def create_processing_node_run(self, node_run: ProcessingNodeRun) -> None: ...
 
@@ -392,6 +398,7 @@ class KnowledgeWorkbenchSectionBatchPlanningRepositoryPort(Protocol):
         batch_plan_id: str,
     ) -> tuple[WorkbenchSectionWorkItem, ...]: ...
 
+
 class KnowledgeWorkbenchRuntimePublicationRepositoryPort(Protocol):
     async def get_document(
         self,
@@ -406,14 +413,14 @@ class KnowledgeWorkbenchRuntimePublicationRepositoryPort(Protocol):
         project_id: str,
         document_id: str,
         curation_session_id: str,
-    ) -> tuple[...]: ...
+    ) -> tuple[object, ...]: ...
 
     async def update_(
         self,
-        surfaces: tuple[...],
+        surfaces: tuple[object, ...],
     ) -> None: ...
 
     async def create_runtime_retrieval_entries(
         self,
-        entries: tuple[...],
+        entries: tuple[object, ...],
     ) -> None: ...

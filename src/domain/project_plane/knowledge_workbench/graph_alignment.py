@@ -53,11 +53,11 @@ class CandidateFactSet:
         if not self.local_claim_ref.strip():
             raise DomainInvariantError("candidate fact set local_claim_ref is required")
         if self.max_candidates < 1:
-            raise DomainInvariantError("candidate fact set max_candidates must be positive")
-        if len(self.candidates) > self.max_candidates:
             raise DomainInvariantError(
-                "candidate fact set exceeds max_candidates"
+                "candidate fact set max_candidates must be positive"
             )
+        if len(self.candidates) > self.max_candidates:
+            raise DomainInvariantError("candidate fact set exceeds max_candidates")
         seen: set[str] = set()
         for candidate in self.candidates:
             if candidate.fact_id in seen:
@@ -78,7 +78,9 @@ class GraphAlignmentDecision:
 
     def __post_init__(self) -> None:
         if not self.local_claim_ref.strip():
-            raise DomainInvariantError("graph alignment decision local_claim_ref is required")
+            raise DomainInvariantError(
+                "graph alignment decision local_claim_ref is required"
+            )
         _ensure_unit_interval(self.confidence, "graph alignment confidence")
         if not self.reason.strip():
             raise DomainInvariantError("graph alignment decision reason is required")

@@ -90,11 +90,17 @@ class FaqWorkbenchRegistryApplicationService:
 
         canonical_facts = command.fact_registry["canonical_facts"]
         fact_relations = command.fact_registry["fact_relations"]
+        if not isinstance(canonical_facts, list):
+            raise DomainInvariantError("fact_registry.canonical_facts must be a list")
+        if not isinstance(fact_relations, list):
+            raise DomainInvariantError("fact_registry.fact_relations must be a list")
 
         update_count = (
             _non_negative_int(command.registry_update_summary, "created_fact_count")
             + _non_negative_int(command.registry_update_summary, "updated_fact_count")
-            + _non_negative_int(command.registry_update_summary, "created_relation_count")
+            + _non_negative_int(
+                command.registry_update_summary, "created_relation_count"
+            )
         )
 
         snapshot = RegistrySnapshot(
@@ -141,7 +147,9 @@ class FaqWorkbenchRegistryApplicationService:
                 "previous_snapshot_sequence_number must be non-negative"
             )
         if not command.after_node_run_id.strip():
-            raise DomainInvariantError("fact registry snapshot requires after_node_run_id")
+            raise DomainInvariantError(
+                "fact registry snapshot requires after_node_run_id"
+            )
 
         self._validate_fact_registry(command.fact_registry)
         self._validate_registry_update_summary(command.registry_update_summary)
@@ -149,7 +157,9 @@ class FaqWorkbenchRegistryApplicationService:
     def _validate_fact_registry(self, fact_registry: dict[str, JsonValue]) -> None:
         version = fact_registry.get("version")
         if not isinstance(version, int) or version < 1:
-            raise DomainInvariantError("fact_registry.version must be a positive integer")
+            raise DomainInvariantError(
+                "fact_registry.version must be a positive integer"
+            )
 
         canonical_facts = fact_registry.get("canonical_facts")
         if not isinstance(canonical_facts, list):
@@ -248,7 +258,9 @@ def _non_negative_int(
 ) -> int:
     value = payload.get(key)
     if not isinstance(value, int) or value < 0:
-        raise DomainInvariantError(f"registry_update_summary.{key} must be a non-negative integer")
+        raise DomainInvariantError(
+            f"registry_update_summary.{key} must be a non-negative integer"
+        )
     return value
 
 

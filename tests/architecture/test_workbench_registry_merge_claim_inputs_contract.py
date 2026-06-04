@@ -5,7 +5,9 @@ GENERATOR = Path("src/infrastructure/llm/faq_workbench_registry_merge_generator.
 PROMPT = Path("src/agent/prompts/faq_surface_registry_merge.ru.txt")
 
 
-def test_prompt_c_contract_is_fact_registry_canonicalization_prompt_without_old_payload() -> None:
+def test_prompt_c_contract_is_fact_registry_canonicalization_prompt_without_old_payload() -> (
+    None
+):
     prompt = PROMPT.read_text(encoding="utf-8")
 
     assert "NODE: faq_fact_registry_canonicalization" in prompt
@@ -28,7 +30,9 @@ def test_prompt_c_contract_is_fact_registry_canonicalization_prompt_without_old_
         assert marker not in prompt
 
 
-def test_registry_merge_generator_uses_canonicalization_unit_contract_without_old_payload_keys() -> None:
+def test_registry_merge_generator_uses_canonicalization_unit_contract_without_old_payload_keys() -> (
+    None
+):
     source = GENERATOR.read_text(encoding="utf-8")
 
     assert "canonicalization_unit" in source
@@ -48,7 +52,9 @@ def test_registry_merge_generator_uses_canonicalization_unit_contract_without_ol
         assert marker not in source
 
 
-def test_registry_merge_port_exposes_canonicalization_unit_command_without_old_section_payload() -> None:
+def test_registry_merge_port_exposes_canonicalization_unit_command_without_old_section_payload() -> (
+    None
+):
     source = PORT.read_text(encoding="utf-8")
 
     assert "canonicalization_unit" in source

@@ -12,17 +12,15 @@ CHECKED = (
 
 MIGRATIONS = tuple(Path("migrations").glob("*.sql"))
 
-FORBIDDEN = (
-    "finding_count",
-)
+FORBIDDEN = ("finding_count",)
 
-REQUIRED = (
-    "claim_observation_count",
-)
+REQUIRED = ("claim_observation_count",)
 
 
 def _read(paths: tuple[Path, ...]) -> str:
-    return "\n".join(path.read_text(encoding="utf-8") for path in paths if path.exists())
+    return "\n".join(
+        path.read_text(encoding="utf-8") for path in paths if path.exists()
+    )
 
 
 def test_registry_snapshot_code_uses_claim_observation_count() -> None:

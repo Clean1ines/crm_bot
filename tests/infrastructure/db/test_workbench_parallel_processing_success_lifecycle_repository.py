@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
+from typing import Callable, cast
 
 import pytest
 
 from src.infrastructure.db.knowledge_workbench_repository import (
     KnowledgeWorkbenchRepository,
 )
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return factory(connection)
 
 
 @dataclass(slots=True)
@@ -44,9 +52,11 @@ class FakeConnection:
 
 
 @pytest.mark.asyncio
-async def test_mark_parallel_processing_completed_updates_document_and_run_terminal_success() -> None:
+async def test_mark_parallel_processing_completed_updates_document_and_run_terminal_success() -> (
+    None
+):
     connection = FakeConnection()
-    repository = KnowledgeWorkbenchRepository(connection)  # type: ignore[arg-type]
+    repository = _workbench_repository(connection)
 
     await repository.mark_parallel_processing_completed(
         project_id="project-1",

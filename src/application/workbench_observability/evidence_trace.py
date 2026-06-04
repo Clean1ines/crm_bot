@@ -109,11 +109,11 @@ class WorkbenchEvidenceTraceReadService:
 
         unassigned_findings: list[dict[str, object]] = []
         for finding in findings:
-            section = by_section.get(str(finding.get("section_id") or ""))
-            if section is None:
+            finding_section = by_section.get(str(finding.get("section_id") or ""))
+            if finding_section is None:
                 unassigned_findings.append(finding)
             else:
-                _append_child(section, "findings", finding)
+                _append_child(finding_section, "findings", finding)
 
         unassigned_canonical_facts: list[dict[str, object]] = []
         for entry in canonical_facts:
@@ -290,7 +290,6 @@ def _finding_payload(row: Mapping[str, object]) -> dict[str, object]:
         "action": _text(row.get("action")),
         "status": _text(row.get("status")),
         "target_fact_id": _nullable_text(row.get("target_fact_id")),
-        "target_fact_id": _nullable_text(row.get("target_fact_id")),
         "claim_local_ref": _nullable_text(row.get("claim_local_ref")),
         "title": _nullable_text(row.get("title")),
         "claim": _nullable_text(row.get("claim")),
@@ -391,13 +390,13 @@ def _nullable_text(value: object) -> str | None:
 def _int(value: object) -> int:
     if value is None:
         return 0
-    return int(value)
+    return int(str(value))
 
 
 def _nullable_float(value: object) -> float | None:
     if value is None:
         return None
-    return float(value)
+    return float(str(value))
 
 
 def _iso(value: object) -> str | None:

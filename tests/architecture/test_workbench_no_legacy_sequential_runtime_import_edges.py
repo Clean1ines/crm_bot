@@ -50,7 +50,9 @@ def _imports(path: Path) -> list[str]:
     return imports
 
 
-def test_production_runtime_does_not_import_retired_sequential_workbench_graph() -> None:
+def test_production_runtime_does_not_import_retired_sequential_workbench_graph() -> (
+    None
+):
     offenders: list[str] = []
 
     for path in _python_files():
@@ -62,7 +64,9 @@ def test_production_runtime_does_not_import_retired_sequential_workbench_graph()
     assert offenders == []
 
 
-def test_legacy_workbench_document_handler_is_guard_only_not_orchestrator_wiring() -> None:
+def test_legacy_workbench_document_handler_is_guard_only_not_orchestrator_wiring() -> (
+    None
+):
     source = Path("src/infrastructure/queue/handlers/workbench_document.py").read_text(
         encoding="utf-8"
     )

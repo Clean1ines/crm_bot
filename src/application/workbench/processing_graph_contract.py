@@ -260,11 +260,11 @@ FAQ_SURFACE_SECTION_FINDINGS_NODE = FaqWorkbenchProcessingGraphNodeSpec(
     operation_name="faq_surface_claim_observations",
     execution_mode=FaqWorkbenchGraphExecutionMode.PER_SECTION_PARALLEL,
     input_contract=(
-            "canonicalization_unit",
-            "registry_snapshot_payload",
-            "relevant_registry_state",
-            "canonical_facts",
-        ),
+        "canonicalization_unit",
+        "registry_snapshot_payload",
+        "relevant_registry_state",
+        "canonical_facts",
+    ),
     output_contract=("claim_observations", "warnings", "metrics"),
     artifact_contract=(
         FaqWorkbenchArtifactContract.INPUT_SNAPSHOT,

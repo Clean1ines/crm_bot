@@ -66,7 +66,9 @@ def _iter_files() -> list[Path]:
     return sorted(files)
 
 
-def test_dropped_legacy_knowledge_tables_are_not_referenced_by_source_or_migrations() -> None:
+def test_dropped_legacy_knowledge_tables_are_not_referenced_by_source_or_migrations() -> (
+    None
+):
     offenders: list[str] = []
 
     for path in _iter_files():
@@ -78,7 +80,9 @@ def test_dropped_legacy_knowledge_tables_are_not_referenced_by_source_or_migrati
     assert not offenders, "\n".join(offenders)
 
 
-def test_dropped_surface_semantics_are_not_referenced_by_workbench_production_code() -> None:
+def test_dropped_surface_semantics_are_not_referenced_by_workbench_production_code() -> (
+    None
+):
     checked_roots = (
         Path("src/application"),
         Path("src/domain"),

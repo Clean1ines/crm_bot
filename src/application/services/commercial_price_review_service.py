@@ -12,15 +12,22 @@ from src.application.services.commercial_truth_review_service import (
     CommercialTruthReviewService,
     commercial_source_descriptor_from_price_document,
 )
-from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
+from src.domain.commercial.commercial_truth import (
+    CommercialSourceDescriptor,
+    CommercialTruthResolutionPolicy,
+)
 from src.domain.commercial.price_knowledge import (
     PriceDocument,
     PublishedPriceFact,
 )
+from src.domain.project_plane.knowledge_views import KnowledgeDocumentDetailView
 
 
 class CommercialKnowledgeDocumentMetadataPort(Protocol):
-    async def get_document(self, document_id: str) -> object | None: ...
+    async def get_document(
+        self,
+        document_id: str,
+    ) -> object | None: ...
 
 
 class CommercialPriceReviewService:
@@ -47,10 +54,15 @@ class CommercialPriceReviewService:
             return _price_facts_empty_response(document_id=document_id)
 
         facts = await self._repo.list_price_facts_for_document(
-            price_document_id=str(price_document.id),
+            project_id=price_document.project_id,
+            price_document_id=price_document.id,
             include_non_runtime=True,
         )
-        return _price_facts_response(document_id=document_id, facts=facts)
+        return _price_facts_response(
+            document_id=document_id,
+            price_document_id=price_document.id,
+            facts=facts,
+        )
 
     async def publish_price_facts(
         self,
@@ -64,16 +76,18 @@ class CommercialPriceReviewService:
         )
 
         affected = await self._repo.publish_price_facts(
-            price_document_id=str(price_document.id),
+            project_id=price_document.project_id,
+            price_document_id=price_document.id,
             fact_ids=tuple(fact_ids),
-            reviewed_by=reviewed_by,
         )
         facts = await self._repo.list_price_facts_for_document(
-            price_document_id=str(price_document.id),
+            project_id=price_document.project_id,
+            price_document_id=price_document.id,
             include_non_runtime=True,
         )
         return _price_facts_mutation_response(
             document_id=document_id,
+            price_document_id=price_document.id,
             affected_count=int(affected or 0),
             facts=facts,
         )
@@ -91,17 +105,19 @@ class CommercialPriceReviewService:
         )
 
         affected = await self._repo.reject_price_facts(
-            price_document_id=str(price_document.id),
+            project_id=price_document.project_id,
+            price_document_id=price_document.id,
             fact_ids=tuple(fact_ids),
-            reviewed_by=reviewed_by,
             reason=reason,
         )
         facts = await self._repo.list_price_facts_for_document(
-            price_document_id=str(price_document.id),
+            project_id=price_document.project_id,
+            price_document_id=price_document.id,
             include_non_runtime=True,
         )
         return _price_facts_mutation_response(
             document_id=document_id,
+            price_document_id=price_document.id,
             affected_count=int(affected or 0),
             facts=facts,
         )
@@ -115,7 +131,7 @@ class CommercialPriceReviewService:
         price_documents = await self._repo.list_price_documents_for_project(
             project_id=project_id
         )
-        price_document_ids = tuple(str(document.id) for document in price_documents)
+        price_document_ids = tuple(document.id for document in price_documents)
 
         facts = await self._repo.list_price_facts_for_documents(
             project_id=project_id,
@@ -128,7 +144,7 @@ class CommercialPriceReviewService:
         )
 
         return self._truth_review.review_price_facts(
-            facts,
+            facts=facts,
             sources_by_price_document_id=sources_by_price_document_id,
             policy=policy,
         ).to_dict()
@@ -142,13 +158,14 @@ class CommercialPriceReviewService:
         price_document = await self._price_document_for_knowledge_document(document_id)
         if price_document is None:
             return self._truth_review.review_price_facts(
-                (),
+                facts=(),
                 sources_by_price_document_id={},
                 policy=policy,
             ).to_dict()
 
         facts = await self._repo.list_price_facts_for_document(
-            price_document_id=str(price_document.id),
+            project_id=price_document.project_id,
+            price_document_id=price_document.id,
             include_non_runtime=True,
         )
         knowledge_document = await self._knowledge_document_repo.get_document(
@@ -156,15 +173,18 @@ class CommercialPriceReviewService:
         )
         source = commercial_source_descriptor_from_price_document(
             price_document,
-            knowledge_document=knowledge_document,
+            knowledge_document=cast(
+                KnowledgeDocumentDetailView | None,
+                knowledge_document,
+            ),
         )
 
         # Important product boundary:
         # current document policy preview is read-only and document-scoped.
         # Cross-document conflicts are handled by project_commercial_truth_review.
         return self._truth_review.review_price_facts(
-            facts,
-            sources_by_price_document_id={str(price_document.id): source},
+            facts=facts,
+            sources_by_price_document_id={price_document.id: source},
             policy=policy,
         ).to_dict()
 
@@ -172,8 +192,17 @@ class CommercialPriceReviewService:
         self,
         document_id: str,
     ) -> PriceDocument | None:
+        knowledge_document = await self._knowledge_document_repo.get_document(
+            document_id
+        )
+        if knowledge_document is None:
+            return None
+        project_id = getattr(knowledge_document, "project_id", None)
+        if project_id is None:
+            return None
         return await self._repo.get_price_document_by_knowledge_document(
-            knowledge_document_id=document_id
+            project_id=str(project_id),
+            knowledge_document_id=document_id,
         )
 
     async def _require_price_document_for_knowledge_document(
@@ -190,62 +219,53 @@ class CommercialPriceReviewService:
     async def _sources_by_price_document_id(
         self,
         price_documents: Sequence[PriceDocument],
-    ) -> dict[str, object]:
-        sources_by_price_document_id: dict[str, object] = {}
+    ) -> dict[str, CommercialSourceDescriptor]:
+        sources_by_price_document_id: dict[str, CommercialSourceDescriptor] = {}
         for price_document in price_documents:
             knowledge_document = await self._knowledge_document_repo.get_document(
-                str(price_document.knowledge_document_id)
+                price_document.knowledge_document_id
             )
-            sources_by_price_document_id[str(price_document.id)] = (
+            sources_by_price_document_id[price_document.id] = (
                 commercial_source_descriptor_from_price_document(
                     price_document,
-                    knowledge_document=knowledge_document,
+                    knowledge_document=cast(
+                        KnowledgeDocumentDetailView | None,
+                        knowledge_document,
+                    ),
                 )
             )
         return sources_by_price_document_id
 
 
 def _price_facts_empty_response(*, document_id: str) -> dict[str, object]:
-    try:
-        return KnowledgePriceFactsResponseDto.empty(document_id=document_id).to_dict()
-    except TypeError:
-        return KnowledgePriceFactsResponseDto.empty().to_dict()
+    return KnowledgePriceFactsResponseDto.empty(
+        knowledge_document_id=document_id,
+    ).to_dict()
 
 
 def _price_facts_response(
     *,
     document_id: str,
+    price_document_id: str,
     facts: Sequence[PublishedPriceFact],
 ) -> dict[str, object]:
-    try:
-        return KnowledgePriceFactsResponseDto.from_facts(
-            document_id=document_id,
-            facts=tuple(facts),
-        ).to_dict()
-    except TypeError:
-        return KnowledgePriceFactsResponseDto.from_facts(tuple(facts)).to_dict()
+    return KnowledgePriceFactsResponseDto.from_facts(
+        knowledge_document_id=document_id,
+        price_document_id=price_document_id,
+        facts=tuple(facts),
+    ).to_dict()
 
 
 def _price_facts_mutation_response(
     *,
     document_id: str,
+    price_document_id: str,
     affected_count: int,
     facts: Sequence[PublishedPriceFact],
 ) -> dict[str, object]:
-    try:
-        return KnowledgePriceFactsMutationResultDto.from_facts(
-            document_id=document_id,
-            affected_count=affected_count,
-            facts=tuple(facts),
-        ).to_dict()
-    except TypeError:
-        try:
-            return KnowledgePriceFactsMutationResultDto.from_facts(
-                affected_count=affected_count,
-                facts=tuple(facts),
-            ).to_dict()
-        except TypeError:
-            return cast(
-                KnowledgePriceFactsMutationResultDto,
-                KnowledgePriceFactsMutationResultDto.from_facts(tuple(facts)),
-            ).to_dict()
+    return KnowledgePriceFactsMutationResultDto.from_facts(
+        knowledge_document_id=document_id,
+        price_document_id=price_document_id,
+        affected_count=affected_count,
+        facts=tuple(facts),
+    ).to_dict()

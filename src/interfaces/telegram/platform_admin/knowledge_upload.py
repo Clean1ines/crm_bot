@@ -6,15 +6,11 @@ import aiohttp
 import asyncpg
 from telegram import InlineKeyboardMarkup
 
-from src.application.dto.knowledge_dto import KnowledgeUploadResultDto
-from src.domain.project_plane.knowledge_preprocessing import (
-    KnowledgePreprocessingValidationError,
-    normalize_preprocessing_mode,
-)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
-from src.domain.project_plane.knowledge_preprocessing import (
-    MODE_FAQ,
+from src.domain.project_plane.knowledge_processing_modes import (
+    KnowledgeProcessingModeValidationError,
+    require_faq_workbench_mode,
 )
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.interfaces.composition.faq_workbench_upload import (
@@ -27,6 +23,17 @@ from src.interfaces.telegram.platform_admin.state import (
 )
 
 logger = get_logger(__name__)
+
+
+def _normalize_workbench_upload_mode(value: object) -> str:
+    try:
+        return require_faq_workbench_mode(value)
+    except KnowledgeProcessingModeValidationError as exc:
+        raise ValueError(
+            "Only FAQ Workbench uploads are supported by the platform admin bot "
+            "until legacy non-FAQ modes have first-class Workbench implementations."
+        ) from exc
+
 
 DocumentPayload = dict[str, object]
 UploadResult = tuple[str, InlineKeyboardMarkup | None]
@@ -57,10 +64,10 @@ async def _upload_context_for_upload(chat_id: str) -> tuple[str | None, str]:
     data = await get_admin_data(chat_id)
     project_id = data.get("project_id")
     try:
-        preprocessing_mode = normalize_preprocessing_mode(
+        preprocessing_mode = _normalize_workbench_upload_mode(
             data.get("preprocessing_mode")
         )
-    except KnowledgePreprocessingValidationError:
+    except ValueError:
         preprocessing_mode = "faq"
 
     if project_id is None:
@@ -134,20 +141,8 @@ async def _queue_knowledge_upload(
     filename: str,
     file_content: bytes,
     preprocessing_mode: str,
-) -> KnowledgeUploadResultDto:
-    try:
-        mode = normalize_preprocessing_mode(preprocessing_mode)
-    except KnowledgePreprocessingValidationError as exc:
-        raise ValueError(
-            "Only FAQ Workbench uploads are supported by the platform admin bot "
-            "until legacy non-FAQ modes have first-class Workbench implementations."
-        ) from exc
-
-    if mode != MODE_FAQ:
-        raise ValueError(
-            "Only FAQ Workbench uploads are supported by the platform admin bot "
-            "until legacy non-FAQ modes have first-class Workbench implementations."
-        )
+):
+    _normalize_workbench_upload_mode(preprocessing_mode)
 
     queue_repo = QueueRepository(pool)
     return await upload_faq_workbench_knowledge_file(

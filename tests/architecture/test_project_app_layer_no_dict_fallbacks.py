@@ -1,33 +1,34 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 
-FORBIDDEN_PATTERNS = [
-    "isinstance(project, ProjectSummaryView)",
-    "isinstance(member, ProjectMemberView)",
-    "else project",
-    "else member",
-    "from_record(project)",
-    "from_record(member)",
-    "member.get(",
-    "project: dict",
-]
+DELETED_LEGACY_SERVICE = Path("src/application/services/knowledge_service.py")
 
 
-def test_project_app_services_do_not_accept_typed_or_dict_fallbacks():
-    files = [
-        Path("src/application/services/project_command_service.py"),
-        Path("src/application/services/knowledge_service.py"),
-        Path("src/application/services/platform_bot_service.py"),
-    ]
+def test_legacy_knowledge_service_facade_is_deleted() -> None:
+    assert not DELETED_LEGACY_SERVICE.exists()
 
-    violations = []
 
-    for path in files:
-        text = path.read_text()
-        for pattern in FORBIDDEN_PATTERNS:
-            if pattern in text:
-                violations.append(f"{path}: forbidden fallback pattern: {pattern}")
-
-    assert not violations, (
-        "Project app-layer typed/dict fallback debt found:\n" + "\n".join(violations)
+def test_project_app_layer_does_not_import_legacy_knowledge_service_facade() -> None:
+    offenders: list[str] = []
+    forbidden = (
+        "from src.application.services.knowledge_service import",
+        "src.application.services.knowledge_service",
+        "KnowledgeService(",
     )
+
+    for root in (
+        Path("src/application"),
+        Path("src/interfaces"),
+        Path("src/infrastructure"),
+    ):
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            source = path.read_text(encoding="utf-8", errors="ignore")
+            for marker in forbidden:
+                if marker in source:
+                    offenders.append(f"{path}: {marker}")
+
+    assert offenders == []

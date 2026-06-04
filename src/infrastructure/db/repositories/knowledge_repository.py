@@ -22,13 +22,6 @@ from src.application.errors import (
     KnowledgeDocumentDeletedDuringProcessingError,
 )
 
-from src.domain.project_plane.knowledge_artifact_cleanup import (
-    KnowledgeArtifactCleanupPlan,
-    KnowledgeArtifactCleanupResult,
-    build_document_delete_cleanup_plan,
-    build_document_reset_cleanup_plan,
-    build_project_clear_cleanup_plan,
-)
 from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentDetailView,
     KnowledgeDocumentView,
@@ -37,11 +30,7 @@ from src.domain.project_plane.knowledge_views import (
 from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
-from src.infrastructure.db.repositories.knowledge_artifact_cleanup import (
-    cleanup_document_artifacts as run_cleanup_document_artifacts,
-    cleanup_project_artifacts as run_cleanup_project_artifacts,
-)
+from src.domain.project_plane.knowledge_processing_modes import KnowledgeProcessingMode
 from src.infrastructure.db.repositories.model_usage_repository import (
     ModelUsageRepository,
 )
@@ -132,7 +121,7 @@ class KnowledgeRepository:
         *,
         project_id: str,
         document_id: str,
-        mode: KnowledgePreprocessingMode,
+        mode: KnowledgeProcessingMode,
         model: str | None = None,
         prompt_version: str | None = None,
         metrics: JsonObject | None = None,
@@ -157,27 +146,19 @@ class KnowledgeRepository:
             )
 
     async def cleanup_document_artifacts(
-        self,
-        plan: KnowledgeArtifactCleanupPlan,
-    ) -> KnowledgeArtifactCleanupResult:
-        if plan.document_id is None:
-            raise ValueError("document cleanup plan requires document_id")
-
-        return await run_cleanup_document_artifacts(
-            self.pool,
-            project_id=plan.project_id,
-            document_id=plan.document_id,
-            plan=plan,
+        self, *args: object, **kwargs: object
+    ) -> object:
+        raise RuntimeError(
+            "Legacy KnowledgeRepository artifact cleanup API is retired. "
+            "Use Workbench delete/clear command handlers instead."
         )
 
     async def cleanup_project_artifacts(
-        self,
-        plan: KnowledgeArtifactCleanupPlan,
-    ) -> KnowledgeArtifactCleanupResult:
-        return await run_cleanup_project_artifacts(
-            self.pool,
-            project_id=plan.project_id,
-            plan=plan,
+        self, *args: object, **kwargs: object
+    ) -> object:
+        raise RuntimeError(
+            "Legacy KnowledgeRepository artifact cleanup API is retired. "
+            "Use Workbench delete/clear command handlers instead."
         )
 
     async def search(
@@ -400,7 +381,7 @@ class KnowledgeRepository:
         self,
         document_id: str,
         *,
-        mode: KnowledgePreprocessingMode,
+        mode: KnowledgeProcessingMode,
         status: str,
         error: str | None = None,
         model: str | None = None,
@@ -465,45 +446,20 @@ class KnowledgeRepository:
             project_id,
         )
 
-    async def delete_document_chunks(self, document_id: str) -> None:
-        """Deprecated wrapper; use cleanup_document_artifacts with a cleanup plan."""
-
-        document = await self.get_document(document_id)
-        if document is None:
-            return
-
-        await self.cleanup_document_artifacts(
-            build_document_reset_cleanup_plan(
-                project_id=str(document.project_id),
-                document_id=document_id,
-            )
+    async def delete_document_chunks(self, *args: object, **kwargs: object) -> object:
+        raise RuntimeError(
+            "Legacy KnowledgeRepository artifact cleanup API is retired. "
+            "Use Workbench delete/clear command handlers instead."
         )
 
-    async def delete_document(self, document_id: str) -> None:
-        logger.info("Deleting knowledge document", extra={"document_id": document_id})
-
-        document = await self.get_document(document_id)
-        if document is None:
-            logger.info(
-                "Document delete skipped; document not found",
-                extra={"document_id": document_id},
-            )
-            return
-
-        await self.cleanup_document_artifacts(
-            build_document_delete_cleanup_plan(
-                project_id=str(document.project_id),
-                document_id=document_id,
-            )
+    async def delete_document(self, *args: object, **kwargs: object) -> object:
+        raise RuntimeError(
+            "Legacy KnowledgeRepository artifact cleanup API is retired. "
+            "Use Workbench delete/clear command handlers instead."
         )
 
-        logger.info("Document deleted", extra={"document_id": document_id})
-
-    async def clear_project_knowledge(self, project_id: str) -> None:
-        logger.info("Clearing project knowledge", extra={"project_id": project_id})
-
-        await self.cleanup_project_artifacts(
-            build_project_clear_cleanup_plan(project_id=project_id)
+    async def clear_project_knowledge(self, *args: object, **kwargs: object) -> object:
+        raise RuntimeError(
+            "Legacy KnowledgeRepository artifact cleanup API is retired. "
+            "Use Workbench delete/clear command handlers instead."
         )
-
-        logger.info("Project knowledge cleared", extra={"project_id": project_id})

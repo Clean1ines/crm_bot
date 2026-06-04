@@ -4,7 +4,9 @@ from pathlib import Path
 HANDLER = Path("src/infrastructure/queue/handlers/workbench_document.py")
 DISPATCHER = Path("src/infrastructure/queue/job_dispatcher.py")
 UPLOAD = Path("src/interfaces/composition/faq_workbench_upload.py")
-PARALLEL_HANDLER = Path("src/infrastructure/queue/handlers/workbench_parallel_processing.py")
+PARALLEL_HANDLER = Path(
+    "src/infrastructure/queue/handlers/workbench_parallel_processing.py"
+)
 
 
 def _read(path: Path) -> str:

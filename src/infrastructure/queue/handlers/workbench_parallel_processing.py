@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import uuid4
 
+from src.application.ports.faq_workbench_claim_observations_generator import (
+    FaqWorkbenchClaimObservationsGeneratorPort,
+)
+from src.application.ports.knowledge_workbench import (
+    KnowledgeWorkbenchClaimObservationsRepositoryPort,
+)
+from src.application.ports.llm_json_invocation import LlmJsonInvocationPort
 from src.application.services.faq_workbench_claim_observations_service import (
     FaqWorkbenchClaimObservationsService,
     ProcessClaimObservationsCommand,
@@ -27,7 +34,11 @@ from src.application.services.faq_workbench_parallel_processing_coordinator_serv
     FaqWorkbenchParallelProcessingCoordinatorService,
     RunParallelWorkbenchProcessingCommand,
 )
-from src.domain.project_plane.knowledge_workbench import DomainInvariantError
+from src.domain.project_plane.knowledge_workbench import (
+    DomainInvariantError,
+    FactRegistry,
+    RegistrySnapshot,
+)
 from src.infrastructure.queue.job_exceptions import (
     PermanentJobError,
     TransientJobError,
@@ -43,6 +54,43 @@ from src.interfaces.composition.faq_workbench_parallel_processing import (
 
 
 PARALLEL_WORKBENCH_PROCESSING_TASK_TYPE = "process_workbench_parallel_processing"
+
+
+class IdFactory(Protocol):
+    def new_id(self, prefix: str) -> str: ...
+
+
+class TimeProvider(Protocol):
+    def now(self) -> datetime: ...
+
+
+class ClaimObservationsRunnerRepositoryPort(
+    KnowledgeWorkbenchClaimObservationsRepositoryPort,
+    Protocol,
+):
+    async def get_fact_registry_for_run(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> FactRegistry | None: ...
+
+    async def get_latest_registry_snapshot(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> RegistrySnapshot | None: ...
+
+
+def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
+    repository_factory = cast(
+        Callable[[object], KnowledgeWorkbenchRepository],
+        KnowledgeWorkbenchRepository,
+    )
+    return repository_factory(connection)
 
 
 class ParallelWorkbenchProcessingCoordinatorPort(Protocol):
@@ -161,7 +209,6 @@ async def handle_workbench_parallel_processing_job(
     return result
 
 
-
 @dataclass(frozen=True, slots=True)
 class DefaultClaimObservationsRunner:
     """Production Prompt A runner for leased section work items.
@@ -170,8 +217,8 @@ class DefaultClaimObservationsRunner:
     It does not run Prompt C and does not update the canonical registry.
     """
 
-    repository: object
-    generator: object
+    repository: ClaimObservationsRunnerRepositoryPort
+    generator: FaqWorkbenchClaimObservationsGeneratorPort
     persistence_service: FaqWorkbenchClaimObservationsService
 
     async def process_leased_claim_observations(
@@ -188,37 +235,57 @@ class DefaultClaimObservationsRunner:
                 "claim observations runner requires fact registry"
             )
 
+        latest_registry_snapshot = await self.repository.get_latest_registry_snapshot(
+            project_id=command.queue_item.project_id,
+            document_id=command.queue_item.document_id,
+            processing_run_id=command.queue_item.processing_run_id,
+        )
+        if latest_registry_snapshot is None:
+            raise DomainInvariantError(
+                "claim observations runner requires latest registry snapshot"
+            )
+        registry_snapshot_payload = latest_registry_snapshot.entries_payload
+
         generation_result = None
         try:
             generation_result = await self.generator.generate_findings(
                 section=command.section,
-                registry_snapshot=command.latest_registry_snapshot.entries_payload,
+                registry_snapshot=registry_snapshot_payload,
             )
         except Exception as exc:
-            invocation = getattr(exc, "args", (None,))[0] if getattr(exc, "args", ()) else None
+            invocation = (
+                getattr(exc, "args", (None,))[0] if getattr(exc, "args", ()) else None
+            )
             if invocation is not None:
                 await self.persistence_service.persist_claim_observations_generation_error(
                     ProcessClaimObservationsGenerationErrorCommand(
                         section=command.section,
                         registry=registry,
-                        registry_snapshot_payload=(
-                            command.latest_registry_snapshot.entries_payload
-                        ),
+                        registry_snapshot_payload=(registry_snapshot_payload),
                         invocation=invocation,
                     )
                 )
             raise
 
+        successful_attempt = next(
+            (
+                attempt
+                for attempt in generation_result.invocation.attempts
+                if attempt.status.value == "success"
+            ),
+            generation_result.invocation.attempts[-1],
+        )
+
         persisted = await self.persistence_service.persist_claim_observations(
             ProcessClaimObservationsCommand(
                 section=command.section,
                 registry=registry,
-                registry_snapshot_payload=command.latest_registry_snapshot.entries_payload,
+                registry_snapshot_payload=registry_snapshot_payload,
                 claim_observations=tuple(generation_result.claim_observations),
-                model_name=generation_result.invocation.selected_model,
+                model_name=successful_attempt.model,
                 prompt_version="faq_claim_observations.v1",
-                model_provider=generation_result.invocation.selected_provider_id,
-                api_key_slot=generation_result.invocation.selected_api_key_slot,
+                model_provider=successful_attempt.provider_id,
+                api_key_slot=successful_attempt.api_key_slot,
                 prompt_tokens=generation_result.invocation.token_usage.prompt_tokens,
                 completion_tokens=(
                     generation_result.invocation.token_usage.completion_tokens
@@ -252,7 +319,7 @@ class DefaultClaimObservationsRunner:
 
 def make_workbench_claim_observations_generator(
     *,
-    llm_json_invocation: object | None = None,
+    llm_json_invocation: LlmJsonInvocationPort | None = None,
     prompt_path: Path = Path("src/agent/prompts/faq_surface_claim_observations.ru.txt"),
 ) -> FaqWorkbenchClaimObservationsGenerator:
     return FaqWorkbenchClaimObservationsGenerator(
@@ -267,10 +334,10 @@ def make_workbench_claim_observations_generator(
 
 def make_workbench_claim_observations_runner(
     *,
-    repository: object,
-    id_factory: object,
-    time_provider: object | None = None,
-    llm_json_invocation: object | None = None,
+    repository: ClaimObservationsRunnerRepositoryPort,
+    id_factory: IdFactory,
+    time_provider: TimeProvider | None = None,
+    llm_json_invocation: LlmJsonInvocationPort | None = None,
     prompt_path: Path = Path("src/agent/prompts/faq_surface_claim_observations.ru.txt"),
 ) -> DefaultClaimObservationsRunner:
     return DefaultClaimObservationsRunner(
@@ -286,13 +353,14 @@ def make_workbench_claim_observations_runner(
         ),
     )
 
+
 def make_workbench_parallel_processing_dependencies(
     *,
-    repository: object,
-    id_factory: object | None = None,
-    time_provider: object | None = None,
+    repository: ClaimObservationsRunnerRepositoryPort,
+    id_factory: IdFactory | None = None,
+    time_provider: TimeProvider | None = None,
     claim_observations_runner: object | None = None,
-    llm_json_invocation: object | None = None,
+    llm_json_invocation: LlmJsonInvocationPort | None = None,
     registry_application_service: object | None = None,
     claim_observations_prompt_path: Path = Path(
         "src/agent/prompts/faq_surface_claim_observations.ru.txt"
@@ -347,15 +415,15 @@ def make_workbench_parallel_processing_coordinator(
     connection: object,
     *,
     claim_observations_runner: object | None = None,
-    llm_json_invocation: object | None = None,
+    llm_json_invocation: LlmJsonInvocationPort | None = None,
     registry_application_service: object | None = None,
-    id_factory: object | None = None,
-    time_provider: object | None = None,
+    id_factory: IdFactory | None = None,
+    time_provider: TimeProvider | None = None,
     claim_observations_prompt_path: Path = Path(
         "src/agent/prompts/faq_surface_claim_observations.ru.txt"
     ),
 ) -> FaqWorkbenchParallelProcessingCoordinatorService:
-    repository = KnowledgeWorkbenchRepository(connection)  # type: ignore[arg-type]
+    repository = _workbench_repository(connection)
     dependencies = make_workbench_parallel_processing_dependencies(
         repository=repository,
         id_factory=id_factory,
@@ -376,7 +444,7 @@ async def handle_workbench_parallel_processing_job_from_connection(
     payload: WorkbenchParallelProcessingJobPayloadDto | Mapping[str, object],
     connection: object,
     claim_observations_runner: object | None = None,
-    llm_json_invocation: object | None = None,
+    llm_json_invocation: LlmJsonInvocationPort | None = None,
     registry_application_service: object | None = None,
     claim_observations_prompt_path: Path = Path(
         "src/agent/prompts/faq_surface_claim_observations.ru.txt"
@@ -392,7 +460,6 @@ async def handle_workbench_parallel_processing_job_from_connection(
             claim_observations_prompt_path=claim_observations_prompt_path,
         ),
     )
-
 
 
 def _ensure_parallel_processing_terminal_result(result: object) -> None:
@@ -431,7 +498,9 @@ def _ensure_parallel_processing_terminal_result(result: object) -> None:
         "wait_for_snapshot",
         "keep_draining",
     }
-    blocker = next((outcome for outcome in outcomes if outcome in transient_blockers), None)
+    blocker = next(
+        (outcome for outcome in outcomes if outcome in transient_blockers), None
+    )
     if blocker is not None:
         raise TransientJobError(
             f"parallel Workbench processing is not terminal: {blocker}"

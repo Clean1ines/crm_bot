@@ -8,7 +8,7 @@ from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_document_lifecycle import (
     LEGACY_USER_CANCELLED_MESSAGE,
 )
-from src.domain.project_plane.knowledge_preprocessing import KnowledgePreprocessingMode
+from src.domain.project_plane.knowledge_processing_modes import KnowledgeProcessingMode
 from src.utils.uuid_utils import ensure_uuid
 
 
@@ -63,7 +63,7 @@ async def update_document_preprocessing_status(
     conn: asyncpg.Connection,
     *,
     document_id: str,
-    mode: KnowledgePreprocessingMode,
+    mode: KnowledgeProcessingMode,
     status: str,
     error: str | None = None,
     model: str | None = None,
@@ -130,7 +130,7 @@ async def resume_document_processing(
     *,
     project_id: str,
     document_id: str,
-    mode: KnowledgePreprocessingMode,
+    mode: KnowledgeProcessingMode,
     model: str | None = None,
     prompt_version: str | None = None,
     metrics: JsonObject | None = None,

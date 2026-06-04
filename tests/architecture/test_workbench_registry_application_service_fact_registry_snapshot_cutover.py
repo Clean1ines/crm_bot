@@ -4,7 +4,9 @@ from pathlib import Path
 SERVICE = Path("src/application/services/faq_workbench_registry_application_service.py")
 
 
-def test_registry_application_service_applies_fact_registry_snapshot_not_surface_entries() -> None:
+def test_registry_application_service_applies_fact_registry_snapshot_not_surface_entries() -> (
+    None
+):
     source = SERVICE.read_text(encoding="utf-8")
 
     assert "ApplyFactRegistrySnapshotCommand" in source

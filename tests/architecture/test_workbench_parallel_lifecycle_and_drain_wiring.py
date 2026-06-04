@@ -15,7 +15,9 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_parallel_composition_dependencies_carry_lifecycle_and_durable_drain_ports() -> None:
+def test_parallel_composition_dependencies_carry_lifecycle_and_durable_drain_ports() -> (
+    None
+):
     source = _read(COMPOSITION)
     dependency_block = source.split(
         "class FaqWorkbenchParallelProcessingDependencies",
@@ -29,7 +31,9 @@ def test_parallel_composition_dependencies_carry_lifecycle_and_durable_drain_por
     assert "lifecycle_completion_port: object | None = None" in dependency_block
 
 
-def test_parallel_composition_passes_lifecycle_and_durable_drain_ports_into_coordinator() -> None:
+def test_parallel_composition_passes_lifecycle_and_durable_drain_ports_into_coordinator() -> (
+    None
+):
     source = _read(COMPOSITION)
     factory = source.split(
         "def make_workbench_parallel_processing_coordinator_from_repository",
@@ -46,7 +50,9 @@ def test_parallel_composition_passes_lifecycle_and_durable_drain_ports_into_coor
     assert "else repository" in factory
 
 
-def test_parallel_queue_handler_wires_repository_as_lifecycle_and_durable_drain_provider() -> None:
+def test_parallel_queue_handler_wires_repository_as_lifecycle_and_durable_drain_provider() -> (
+    None
+):
     source = _read(HANDLER)
     dependency_factory = source.split(
         "def make_workbench_parallel_processing_dependencies",
@@ -60,7 +66,9 @@ def test_parallel_queue_handler_wires_repository_as_lifecycle_and_durable_drain_
     assert dependency_factory.count("lifecycle_completion_port=repository") >= 2
 
 
-def test_repository_supports_lifecycle_completion_and_durable_drain_methods_used_by_coordinator() -> None:
+def test_repository_supports_lifecycle_completion_and_durable_drain_methods_used_by_coordinator() -> (
+    None
+):
     coordinator = _read(COORDINATOR)
     repository = _read(REPOSITORY)
 
