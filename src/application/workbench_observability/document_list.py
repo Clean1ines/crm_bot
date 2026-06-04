@@ -39,9 +39,71 @@ class WorkbenchDocumentListReadService:
 
 
 def _document_payload(row: Mapping[str, object]) -> dict[str, object]:
-    total_sections = _int(row.get("section_count"))
-    processed_sections = _int(row.get("processed_section_count"))
+    processing_summary = _mapping(row.get("processing_summary"))
+
+    total_sections = _summary_int(
+        row,
+        processing_summary,
+        row_key="section_count",
+        summary_key="document_section_count",
+    )
+    processed_sections = _summary_int(
+        row,
+        processing_summary,
+        row_key="processed_section_count",
+        summary_key="document_section_count",
+    )
     failed_sections = _int(row.get("failed_section_count"))
+    pending_sections = _int(row.get("pending_section_count"))
+
+    canonical_fact_count = _summary_int(
+        row,
+        processing_summary,
+        row_key="canonical_fact_count",
+        summary_key="canonical_fact_count",
+    )
+    runtime_entry_count = _summary_int(
+        row,
+        processing_summary,
+        row_key="runtime_entry_count",
+        summary_key="published_runtime_fact_count",
+    )
+    final_registry_snapshot_id = _summary_nullable_text(
+        row,
+        processing_summary,
+        row_key="final_registry_snapshot_id",
+        summary_key="final_snapshot_id",
+    )
+
+    result_metrics: dict[str, object] = {
+        "canonical_fact_count": canonical_fact_count,
+        "runtime_entry_count": runtime_entry_count,
+        "registry_retained": _bool(row.get("registry_retained")),
+        "final_registry_snapshot_id": final_registry_snapshot_id,
+    }
+    if processing_summary:
+        result_metrics.update(
+            {
+                "processing_summary": processing_summary,
+                "total_prompt_tokens": _int(
+                    processing_summary.get("total_prompt_tokens")
+                ),
+                "total_completion_tokens": _int(
+                    processing_summary.get("total_completion_tokens")
+                ),
+                "total_tokens": _int(processing_summary.get("total_tokens")),
+                "total_llm_calls": _int(processing_summary.get("total_llm_calls")),
+                "active_elapsed_seconds": _int(
+                    processing_summary.get("active_elapsed_seconds")
+                ),
+                "wall_elapsed_seconds": _int(
+                    processing_summary.get("wall_elapsed_seconds")
+                ),
+                "published_surface_count": _int(
+                    processing_summary.get("published_surface_count")
+                ),
+            }
+        )
 
     return {
         "document_id": _text(row.get("document_id")),
@@ -64,27 +126,19 @@ def _document_payload(row: Mapping[str, object]) -> dict[str, object]:
         "total_sections": total_sections,
         "processed_section_count": processed_sections,
         "failed_section_count": failed_sections,
-        "pending_section_count": _int(row.get("pending_section_count")),
+        "pending_section_count": pending_sections,
         "progress": {
             "total_sections": total_sections,
             "processed_sections": processed_sections,
             "failed_sections": failed_sections,
-            "pending_sections": _int(row.get("pending_section_count")),
+            "pending_sections": pending_sections,
         },
-        "result_metrics": {
-            "canonical_fact_count": _int(row.get("canonical_fact_count")),
-            "runtime_entry_count": _int(row.get("runtime_entry_count")),
-            "registry_retained": _bool(row.get("registry_retained")),
-            "final_registry_snapshot_id": _nullable_text(
-                row.get("final_registry_snapshot_id")
-            ),
-        },
-        "canonical_fact_count": _int(row.get("canonical_fact_count")),
-        "runtime_entry_count": _int(row.get("runtime_entry_count")),
+        "result_metrics": result_metrics,
+        "canonical_fact_count": canonical_fact_count,
+        "runtime_entry_count": runtime_entry_count,
         "registry_retained": _bool(row.get("registry_retained")),
-        "final_registry_snapshot_id": _nullable_text(
-            row.get("final_registry_snapshot_id")
-        ),
+        "final_registry_snapshot_id": final_registry_snapshot_id,
+        "processing_summary": processing_summary,
         "uploaded_by_user_id": _nullable_text(row.get("uploaded_by_user_id")),
         "uploaded_by_actor_type": _text(row.get("uploaded_by_actor_type")),
         "uploaded_by_actor_id": _nullable_text(row.get("uploaded_by_actor_id")),
@@ -127,3 +181,35 @@ def _iso(value: object) -> str | None:
     if callable(isoformat):
         return str(isoformat())
     return str(value)
+
+
+def _mapping(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _summary_int(
+    row: Mapping[str, object],
+    summary: Mapping[str, object],
+    *,
+    row_key: str,
+    summary_key: str,
+) -> int:
+    row_value = _int(row.get(row_key))
+    if row_value != 0:
+        return row_value
+    return _int(summary.get(summary_key))
+
+
+def _summary_nullable_text(
+    row: Mapping[str, object],
+    summary: Mapping[str, object],
+    *,
+    row_key: str,
+    summary_key: str,
+) -> str | None:
+    row_value = _nullable_text(row.get(row_key))
+    if row_value is not None:
+        return row_value
+    return _nullable_text(summary.get(summary_key))

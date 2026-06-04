@@ -27,6 +27,7 @@ class WorkbenchObservabilityRepository:
                 project_id,
                 file_name,
                 status,
+                processing_summary,
                 created_at,
                 updated_at
             FROM knowledge_workbench_documents
@@ -131,6 +132,7 @@ class WorkbenchObservabilityRepository:
                 file_size_bytes,
                 status,
                 current_processing_run_id,
+                processing_summary,
                 created_at,
                 updated_at,
                 deleted_at
@@ -557,6 +559,7 @@ class WorkbenchObservabilityRepository:
                 file_size_bytes,
                 status,
                 current_processing_run_id,
+                processing_summary,
                 created_at,
                 updated_at,
                 deleted_at
