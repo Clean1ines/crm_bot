@@ -522,7 +522,7 @@ class WorkbenchObservabilityRepository:
             LEFT JOIN LATERAL (
                 SELECT q.next_attempt_at AS auto_resume_scheduled_at
                 FROM execution_queue AS q
-                WHERE q.task_type = 'process_workbench_document'
+                WHERE q.task_type = 'process_workbench_parallel_processing'
                   AND q.payload::jsonb ->> 'project_id' = d.project_id::text
                   AND q.payload::jsonb ->> 'document_id' = d.document_id
                   AND q.status IN ('pending', 'queued', 'scheduled', 'retry')
