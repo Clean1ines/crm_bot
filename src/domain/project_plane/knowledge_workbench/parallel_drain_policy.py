@@ -178,10 +178,7 @@ def decide_parallel_canonicalization_readiness(
             reason="canonicalization artifacts are already persisted",
         )
 
-    if (
-        counts.completed_section_extraction_count
-        != integrity.section_queue_items_total
-    ):
+    if counts.completed_section_extraction_count != integrity.section_queue_items_total:
         return ParallelFinalizationReadiness(
             decision=ParallelFinalizationDecision.KEEP_DRAINING,
             counts=counts,

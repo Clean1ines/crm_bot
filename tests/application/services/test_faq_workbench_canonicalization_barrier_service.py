@@ -59,6 +59,14 @@ class FakeRepository:
     registry_calls: int = 0
     snapshot_calls: int = 0
     facts_calls: int = 0
+    created_node_runs: list[object] = field(default_factory=list)
+    created_artifacts: list[object] = field(default_factory=list)
+
+    async def create_processing_node_run(self, node_run):
+        self.created_node_runs.append(node_run)
+
+    async def create_processing_node_artifact(self, artifact):
+        self.created_artifacts.append(artifact)
 
     async def has_completed_fact_registry_canonicalization(self, **kwargs):
         self.completion_guard_calls += 1
@@ -371,6 +379,19 @@ async def test_canonicalization_barrier_runs_prompt_c_persists_and_applies_snaps
     assert application_service.commands[1].previous_snapshot_sequence_number == 1
     assert application_service.commands[0].after_section_id is None
     assert application_service.commands[1].after_section_id is None
+
+    assert len(_repository.created_node_runs) == 1
+    assert len(_repository.created_artifacts) == 1
+    marker_node_run = _repository.created_node_runs[0]
+    marker_artifact = _repository.created_artifacts[0]
+    assert marker_node_run.node_run_id == marker_artifact.node_run_id
+    assert (
+        marker_artifact.metadata["contract"] == "fact_registry_canonicalization_barrier"
+    )
+    assert marker_artifact.metadata["status"] == "completed"
+    assert marker_artifact.metadata["expected_unit_count"] == 2
+    assert marker_artifact.metadata["completed_unit_count"] == 2
+    assert marker_artifact.metadata["final_snapshot_id"] == "snapshot-2"
 
 
 def test_canonicalization_barrier_command_validates_required_fields() -> None:

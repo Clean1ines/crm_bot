@@ -2252,21 +2252,23 @@ class KnowledgeWorkbenchRepository(
             """
             SELECT EXISTS (
                 SELECT 1
-                FROM knowledge_workbench_processing_node_artifacts AS artifact
-                JOIN knowledge_workbench_processing_node_runs AS node_run
-                  ON node_run.node_run_id = artifact.node_run_id
-                 AND node_run.project_id = artifact.project_id
-                 AND node_run.document_id = artifact.document_id
-                 AND node_run.processing_run_id = artifact.processing_run_id
-                WHERE artifact.project_id = $1
-                  AND artifact.document_id = $2
-                  AND artifact.processing_run_id = $3
-                  AND artifact.section_id IS NULL
-                  AND artifact.artifact_type = 'parsed_llm_output'
-                  AND artifact.metadata ->> 'contract' = 'fact_registry_canonicalization'
-                  AND node_run.section_id IS NULL
-                  AND node_run.node_name = 'faq_surface_registry_merge'
-                  AND node_run.status = 'completed'
+                FROM knowledge_workbench_processing_node_artifacts AS marker
+                JOIN knowledge_workbench_registry_snapshots AS snapshot
+                  ON snapshot.snapshot_id = marker.metadata ->> 'final_snapshot_id'
+                 AND snapshot.project_id = marker.project_id
+                 AND snapshot.document_id = marker.document_id
+                 AND snapshot.processing_run_id = marker.processing_run_id
+                WHERE marker.project_id = $1::uuid
+                  AND marker.document_id = $2
+                  AND marker.processing_run_id = $3
+                  AND marker.section_id IS NULL
+                  AND marker.artifact_type = 'parsed_llm_output'
+                  AND marker.metadata ->> 'contract' = 'fact_registry_canonicalization_barrier'
+                  AND marker.metadata ->> 'status' = 'completed'
+                  AND (marker.metadata ->> 'expected_unit_count')::int
+                    = (marker.metadata ->> 'completed_unit_count')::int
+                  AND snapshot.entries_payload ->> 'contract' = 'fact_registry'
+                  AND snapshot.entry_count >= 0
                 LIMIT 1
             ) AS completed
             """,

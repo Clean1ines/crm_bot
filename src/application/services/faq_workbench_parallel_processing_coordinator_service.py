@@ -466,12 +466,10 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
             readiness = decide_parallel_finalization(counts)
             return readiness.decision.value
 
-        integrity = (
-            await self._integrity_counts_provider.get_parallel_processing_integrity_counts(
-                project_id=command.project_id,
-                document_id=command.document_id,
-                processing_run_id=command.processing_run_id,
-            )
+        integrity = await self._integrity_counts_provider.get_parallel_processing_integrity_counts(
+            project_id=command.project_id,
+            document_id=command.document_id,
+            processing_run_id=command.processing_run_id,
         )
         readiness = decide_parallel_canonicalization_readiness(
             counts=counts,

@@ -43,9 +43,7 @@ SQL_HINTS = (
     "REFERENCES ",
 )
 
-SCAN_PATHS = (
-    ROOT / "src",
-)
+SCAN_PATHS = (ROOT / "src",)
 
 
 def _python_files() -> list[Path]:
@@ -54,9 +52,7 @@ def _python_files() -> list[Path]:
         if not root.exists():
             continue
         files.extend(
-            path
-            for path in root.rglob("*.py")
-            if "__pycache__" not in path.parts
+            path for path in root.rglob("*.py") if "__pycache__" not in path.parts
         )
     return sorted(files)
 

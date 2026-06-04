@@ -24,6 +24,12 @@ from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
     FactRegistry,
     JsonValue,
+    ProcessingNodeArtifact,
+    ProcessingNodeArtifactType,
+    ProcessingNodeKind,
+    ProcessingNodeName,
+    ProcessingNodeRun,
+    ProcessingNodeStatus,
     RegistrySnapshot,
 )
 
@@ -56,6 +62,16 @@ class CanonicalizationBarrierRepositoryPort(Protocol):
         document_id: str,
         processing_run_id: str,
     ) -> tuple[CanonicalFact, ...]: ...
+
+    async def create_processing_node_run(
+        self,
+        node_run: ProcessingNodeRun,
+    ) -> None: ...
+
+    async def create_processing_node_artifact(
+        self,
+        artifact: ProcessingNodeArtifact,
+    ) -> None: ...
 
     async def has_completed_fact_registry_canonicalization(
         self,
@@ -289,6 +305,21 @@ class FaqWorkbenchCanonicalizationBarrierService:
                 "registry_update_summary": applied.registry_update_summary,
             }
 
+        if previous_snapshot_id is None:
+            raise DomainInvariantError(
+                "canonicalization barrier completed without final registry snapshot"
+            )
+
+        await self._persist_canonicalization_barrier_completion_marker(
+            command=command,
+            expected_unit_count=retrieval_result.unit_count,
+            completed_unit_count=prompt_c_success_count,
+            final_snapshot_id=previous_snapshot_id,
+            final_snapshot_sequence_number=previous_snapshot_sequence_number,
+            claim_count=retrieval_result.claim_count,
+            snapshot_apply_count=snapshot_apply_count,
+        )
+
         return ProcessDocumentCanonicalizationBarrierResult(
             outcome="canonicalized",
             claim_count=retrieval_result.claim_count,
@@ -298,6 +329,75 @@ class FaqWorkbenchCanonicalizationBarrierService:
             latest_snapshot_id=previous_snapshot_id,
             latest_snapshot_sequence_number=previous_snapshot_sequence_number,
         )
+
+    async def _persist_canonicalization_barrier_completion_marker(
+        self,
+        *,
+        command: ProcessDocumentCanonicalizationBarrierCommand,
+        expected_unit_count: int,
+        completed_unit_count: int,
+        final_snapshot_id: str,
+        final_snapshot_sequence_number: int,
+        claim_count: int,
+        snapshot_apply_count: int,
+    ) -> None:
+        if expected_unit_count != completed_unit_count:
+            raise DomainInvariantError(
+                "canonicalization barrier marker requires all units completed"
+            )
+        if not final_snapshot_id:
+            raise DomainInvariantError(
+                "canonicalization barrier marker requires final_snapshot_id"
+            )
+
+        marker_node_run_id = self._id_factory.new_id("barrier-marker")
+        marker_artifact_id = self._id_factory.new_id("artifact")
+
+        marker_node_run = ProcessingNodeRun(
+            node_run_id=marker_node_run_id,
+            processing_run_id=command.processing_run_id,
+            project_id=command.project_id,
+            document_id=command.document_id,
+            section_id=None,
+            node_name=ProcessingNodeName.REGISTRY_SNAPSHOT,
+            node_kind=ProcessingNodeKind.CONTROL_FLOW,
+            status=ProcessingNodeStatus.COMPLETED,
+            output_snapshot_id=marker_artifact_id,
+        )
+        marker_artifact = ProcessingNodeArtifact(
+            artifact_id=marker_artifact_id,
+            node_run_id=marker_node_run_id,
+            processing_run_id=command.processing_run_id,
+            project_id=command.project_id,
+            document_id=command.document_id,
+            section_id=None,
+            artifact_type=ProcessingNodeArtifactType.DETERMINISTIC_RESULT,
+            payload_json={
+                "contract": "fact_registry_canonicalization_barrier",
+                "status": "completed",
+                "expected_unit_count": expected_unit_count,
+                "completed_unit_count": completed_unit_count,
+                "final_snapshot_id": final_snapshot_id,
+                "final_snapshot_sequence_number": final_snapshot_sequence_number,
+                "claim_count": claim_count,
+                "snapshot_apply_count": snapshot_apply_count,
+            },
+            schema_version=1,
+            created_at=None,
+            metadata={
+                "contract": "fact_registry_canonicalization_barrier",
+                "status": "completed",
+                "expected_unit_count": expected_unit_count,
+                "completed_unit_count": completed_unit_count,
+                "final_snapshot_id": final_snapshot_id,
+                "final_snapshot_sequence_number": final_snapshot_sequence_number,
+                "claim_count": claim_count,
+                "snapshot_apply_count": snapshot_apply_count,
+                "worker_id": command.worker_id,
+            },
+        )
+        await self._repository.create_processing_node_run(marker_node_run)
+        await self._repository.create_processing_node_artifact(marker_artifact)
 
     def _snapshot_payload(
         self,

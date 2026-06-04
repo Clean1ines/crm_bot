@@ -42,7 +42,9 @@ def test_claim_observation_status_without_artifacts_keeps_draining() -> None:
     )
 
     assert readiness.decision is ParallelFinalizationDecision.KEEP_DRAINING
-    assert readiness.reason == "Prompt A section statuses are ahead of persisted artifacts"
+    assert (
+        readiness.reason == "Prompt A section statuses are ahead of persisted artifacts"
+    )
 
 
 def test_partial_section_extraction_keeps_draining() -> None:
@@ -82,7 +84,10 @@ def test_missing_section_queue_coverage_keeps_draining() -> None:
     )
 
     assert readiness.decision is ParallelFinalizationDecision.KEEP_DRAINING
-    assert readiness.reason == "parallel section queue does not cover every document section"
+    assert (
+        readiness.reason
+        == "parallel section queue does not cover every document section"
+    )
 
 
 def test_failed_section_blocks_barrier() -> None:
@@ -123,4 +128,6 @@ def test_ready_section_keeps_draining_before_barrier() -> None:
     )
 
     assert readiness.decision is ParallelFinalizationDecision.KEEP_DRAINING
-    assert readiness.reason == "parallel section extraction still has drainable work items"
+    assert (
+        readiness.reason == "parallel section extraction still has drainable work items"
+    )

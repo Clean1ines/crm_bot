@@ -93,11 +93,7 @@ def _read_database_url_from_env_file(path: Path) -> str:
             continue
 
         cleaned = value.strip()
-        if (
-            len(cleaned) >= 2
-            and cleaned[0] == cleaned[-1]
-            and cleaned[0] in {"'", '"'}
-        ):
+        if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {"'", '"'}:
             cleaned = cleaned[1:-1]
 
         assert cleaned, f"{path} DATABASE_URL must not be empty"
@@ -126,10 +122,7 @@ async def _fetch_existing_columns(
         ORDER BY table_name, ordinal_position
         """
     )
-    return {
-        (str(row["table_name"]), str(row["column_name"]))
-        for row in rows
-    }
+    return {(str(row["table_name"]), str(row["column_name"])) for row in rows}
 
 
 async def _fetch_existing_tables(connection: asyncpg.Connection) -> set[str]:

@@ -1,61 +1,40 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 
-REPOSITORY = Path("src/infrastructure/db/knowledge_workbench_repository.py")
-PORT = Path("src/application/ports/knowledge_workbench.py")
-BARRIER = Path(
+REPOSITORY_PATH = Path("src/infrastructure/db/knowledge_workbench_repository.py")
+BARRIER_SERVICE_PATH = Path(
     "src/application/services/faq_workbench_canonicalization_barrier_service.py"
 )
 
 
-def _read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+def test_canonicalization_completion_guard_uses_document_level_barrier_marker() -> None:
+    source = REPOSITORY_PATH.read_text()
+
+    assert "fact_registry_canonicalization_barrier" in source
+    assert "knowledge_workbench_registry_snapshots AS snapshot" in source
+    assert "marker.metadata ->> 'final_snapshot_id'" in source
+    assert "snapshot.entries_payload ->> 'contract' = 'fact_registry'" in source
+    assert "snapshot.entry_count >= 0" in source
 
 
-def test_fact_registry_canonicalization_completion_guard_is_declared_in_ports_and_used_by_barrier() -> (
+def test_canonicalization_completion_guard_does_not_use_single_prompt_c_unit_artifact() -> (
     None
 ):
-    port = _read(PORT)
-    barrier = _read(BARRIER)
-
-    assert "has_completed_fact_registry_canonicalization" in port
-    assert "has_completed_fact_registry_canonicalization" in barrier
-    assert "already_canonicalized" in barrier
-
-
-def test_fact_registry_canonicalization_completion_guard_uses_completed_parsed_prompt_c_artifact() -> (
-    None
-):
-    source = _read(REPOSITORY)
-
-    assert "async def has_completed_fact_registry_canonicalization" in source
-    assert "knowledge_workbench_processing_node_artifacts" in source
-    assert "knowledge_workbench_processing_node_runs" in source
-    assert (
-        "artifact.metadata ->> 'contract' = 'fact_registry_canonicalization'" in source
-    )
-    assert "artifact.artifact_type = 'parsed_llm_output'" in source
-    assert "node_run.node_name = 'faq_surface_registry_merge'" in source
-    assert "node_run.status = 'completed'" in source
-    assert "artifact.section_id IS NULL" in source
-    assert "node_run.section_id IS NULL" in source
-
-
-def test_fact_registry_canonicalization_completion_guard_does_not_use_raw_artifact_or_section_prompt_a() -> (
-    None
-):
-    source = _read(REPOSITORY)
+    source = REPOSITORY_PATH.read_text()
     method_source = source.split(
-        "async def has_completed_fact_registry_canonicalization",
-        1,
-    )[1].split(
-        "async def get_parallel_processing_drain_counts",
-        1,
-    )[0]
+        "async def has_completed_fact_registry_canonicalization", 1
+    )[1].split("async def get_parallel_processing_drain_counts", 1)[0]
 
-    assert "raw_llm_output" not in method_source
-    assert "claim_observations" not in method_source
-    assert "faq_surface_claim_observations" not in method_source
-    assert "artifact_type = 'raw_llm_output'" not in method_source
+    assert "fact_registry_canonicalization'" not in method_source
+    assert "faq_surface_registry_merge" not in method_source
+    assert "node_run.status = 'completed'" not in method_source
+
+
+def test_canonicalization_barrier_persists_completion_marker_after_all_units() -> None:
+    source = BARRIER_SERVICE_PATH.read_text()
+
+    assert "_persist_canonicalization_barrier_completion_marker" in source
+    assert "expected_unit_count=retrieval_result.unit_count" in source
+    assert "completed_unit_count=prompt_c_success_count" in source
+    assert "final_snapshot_id=previous_snapshot_id" in source
+    assert '"contract": "fact_registry_canonicalization_barrier"' in source
