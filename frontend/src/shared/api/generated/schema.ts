@@ -427,8 +427,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Publish Selected Knowledge Surfaces */
-        post: operations["publish_selected_knowledge_surfaces_api_projects__project_id__knowledge__document_id__surfaces_publish_selected_post"];
+        /** Publish Selected Workbench Surfaces */
+        post: operations["publish_selected_workbench_surfaces_api_projects__project_id__knowledge__document_id__surfaces_publish_selected_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2746,7 +2746,7 @@ export interface operations {
             };
         };
     };
-    publish_selected_knowledge_surfaces_api_projects__project_id__knowledge__document_id__surfaces_publish_selected_post: {
+    publish_selected_workbench_surfaces_api_projects__project_id__knowledge__document_id__surfaces_publish_selected_post: {
         parameters: {
             query?: never;
             header?: {
