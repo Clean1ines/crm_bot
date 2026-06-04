@@ -3,6 +3,7 @@ from .parallel_drain_policy import (
     ParallelProcessingIntegrityCounts,
     ParallelFinalizationDecision,
     ParallelFinalizationReadiness,
+    decide_parallel_canonicalization_readiness,
     decide_parallel_finalization,
     ensure_parallel_processing_can_finalize,
 )
@@ -228,6 +229,7 @@ __all__ = [
     "ParallelProcessingIntegrityCounts",
     "ParallelFinalizationDecision",
     "ParallelFinalizationReadiness",
+    "decide_parallel_canonicalization_readiness",
     "decide_parallel_finalization",
     "ensure_parallel_processing_can_finalize",
     "CrossDocumentSurfaceRelation",

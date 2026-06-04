@@ -277,7 +277,7 @@ class WorkbenchObservabilityRepository:
             FROM knowledge_workbench_canonical_facts AS f
             LEFT JOIN knowledge_workbench_fact_mentions AS m
               ON m.fact_id = f.fact_id
-             AND m.fact_registry_id = f.fact_registry_id
+             AND m.registry_id = f.registry_id
             WHERE f.project_id = $1
               AND f.document_id = $2
               AND f.status <> 'deleted'
@@ -454,7 +454,7 @@ class WorkbenchObservabilityRepository:
 
                 LEFT JOIN knowledge_workbench_canonical_facts AS f
 
-                  ON f.fact_registry_id = fr.fact_registry_id
+                  ON f.registry_id = fr.registry_id
 
                  AND f.project_id = fr.project_id
 
@@ -637,7 +637,7 @@ class WorkbenchObservabilityRepository:
             FROM knowledge_workbench_canonical_facts AS f
             LEFT JOIN knowledge_workbench_fact_mentions AS m
               ON m.fact_id = f.fact_id
-             AND m.fact_registry_id = f.fact_registry_id
+             AND m.registry_id = f.registry_id
             WHERE f.project_id = $1
               AND f.document_id = $2
               AND f.status <> 'deleted'

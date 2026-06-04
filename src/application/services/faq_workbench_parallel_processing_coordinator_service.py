@@ -8,6 +8,7 @@ from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
     ParallelDrainWorkCounts,
     ParallelProcessingIntegrityCounts,
+    decide_parallel_canonicalization_readiness,
     decide_parallel_finalization,
 )
 
@@ -334,6 +335,7 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
             cycles.append(cycle)
 
             if not cycle.made_progress:
+                await self._assert_parallel_processing_integrity(command)
                 await self._mark_success_lifecycle_if_terminal(
                     command=command,
                     cycle=cycle,
@@ -460,7 +462,21 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
             document_id=command.document_id,
             processing_run_id=command.processing_run_id,
         )
-        readiness = decide_parallel_finalization(counts)
+        if self._integrity_counts_provider is None:
+            readiness = decide_parallel_finalization(counts)
+            return readiness.decision.value
+
+        integrity = (
+            await self._integrity_counts_provider.get_parallel_processing_integrity_counts(
+                project_id=command.project_id,
+                document_id=command.document_id,
+                processing_run_id=command.processing_run_id,
+            )
+        )
+        readiness = decide_parallel_canonicalization_readiness(
+            counts=counts,
+            integrity=integrity,
+        )
         return readiness.decision.value
 
     async def _drain_registry_writer(
