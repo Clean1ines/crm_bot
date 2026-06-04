@@ -214,6 +214,20 @@ class FakeRegistryApplicationService:
         )
 
 
+@dataclass(slots=True)
+class FakeRegistryMaterializationService:
+    snapshots: list[RegistrySnapshot] = field(default_factory=list)
+
+    async def materialize_fact_registry_snapshot(self, command):
+        self.snapshots.append(command.snapshot)
+        return SimpleNamespace(
+            canonical_fact_count=command.snapshot.entry_count,
+            fact_mention_count=0,
+            fact_relation_count=command.snapshot.relation_count,
+            surface_count=command.snapshot.entry_count,
+        )
+
+
 def _registry() -> FactRegistry:
     return FactRegistry(
         registry_id="registry-1",
@@ -282,6 +296,7 @@ def _service(
     generator = FakeRegistryMergeGenerator()
     merge_service = FakeRegistryMergeService()
     application_service = FakeRegistryApplicationService()
+    materialization_service = FakeRegistryMaterializationService()
     id_factory = MonotonicIdFactory()
 
     service = FaqWorkbenchCanonicalizationBarrierService(
@@ -290,16 +305,31 @@ def _service(
         registry_merge_generator=generator,
         registry_merge_service=merge_service,
         registry_application_service=application_service,
+        registry_materialization_service=materialization_service,
         id_factory=id_factory,
     )
-    return service, repository, retrieval, generator, merge_service, application_service
+    return (
+        service,
+        repository,
+        retrieval,
+        generator,
+        merge_service,
+        application_service,
+        materialization_service,
+    )
 
 
 @pytest.mark.asyncio
 async def test_canonicalization_barrier_returns_no_work_when_no_units() -> None:
-    service, repository, retrieval, generator, merge_service, application_service = (
-        _service(retrieval_result=_retrieval_result())
-    )
+    (
+        service,
+        repository,
+        retrieval,
+        generator,
+        merge_service,
+        application_service,
+        materialization_service,
+    ) = _service(retrieval_result=_retrieval_result())
 
     result = await service.process_document_canonicalization_barrier(
         ProcessDocumentCanonicalizationBarrierCommand(
@@ -327,9 +357,15 @@ async def test_canonicalization_barrier_returns_no_work_when_no_units() -> None:
 async def test_canonicalization_barrier_runs_prompt_c_persists_and_applies_snapshot_per_unit() -> (
     None
 ):
-    service, _repository, _retrieval, generator, merge_service, application_service = (
-        _service(retrieval_result=_retrieval_result(_unit("c1"), _unit("c2")))
-    )
+    (
+        service,
+        _repository,
+        _retrieval,
+        generator,
+        merge_service,
+        application_service,
+        materialization_service,
+    ) = _service(retrieval_result=_retrieval_result(_unit("c1"), _unit("c2")))
 
     result = await service.process_document_canonicalization_barrier(
         ProcessDocumentCanonicalizationBarrierCommand(
@@ -380,6 +416,9 @@ async def test_canonicalization_barrier_runs_prompt_c_persists_and_applies_snaps
     assert application_service.commands[1].previous_snapshot_sequence_number == 1
     assert application_service.commands[0].after_section_id is None
     assert application_service.commands[1].after_section_id is None
+    assert [snapshot.snapshot_id for snapshot in materialization_service.snapshots] == [
+        "snapshot-2"
+    ]
 
     assert len(_repository.created_node_runs) == 1
     assert len(_repository.created_artifacts) == 1
@@ -426,11 +465,17 @@ def test_canonicalization_barrier_command_validates_required_fields() -> None:
 async def test_canonicalization_barrier_is_document_level_idempotent_when_completion_marker_exists() -> (
     None
 ):
-    service, repository, retrieval, generator, merge_service, application_service = (
-        _service(
-            retrieval_result=_retrieval_result(_unit("c1")),
-            canonicalization_completed=True,
-        )
+    (
+        service,
+        repository,
+        retrieval,
+        generator,
+        merge_service,
+        application_service,
+        materialization_service,
+    ) = _service(
+        retrieval_result=_retrieval_result(_unit("c1")),
+        canonicalization_completed=True,
     )
 
     result = await service.process_document_canonicalization_barrier(
@@ -517,12 +562,14 @@ async def test_canonicalization_barrier_persists_prompt_c_generation_error() -> 
     generator = FailingRegistryMergeGenerator(error)
     merge_service = RecordingRegistryMergeService()
     application_service = FakeRegistryApplicationService()
+    materialization_service = FakeRegistryMaterializationService()
     service = FaqWorkbenchCanonicalizationBarrierService(
         repository=repository,
         local_claim_retrieval_service=retrieval,
         registry_merge_generator=generator,
         registry_merge_service=merge_service,
         registry_application_service=application_service,
+        registry_materialization_service=materialization_service,
         id_factory=MonotonicIdFactory(),
     )
 
@@ -549,3 +596,4 @@ async def test_canonicalization_barrier_persists_prompt_c_generation_error() -> 
     assert application_service.commands == []
     assert repository.created_node_runs == []
     assert repository.created_artifacts == []
+    assert materialization_service.snapshots == []

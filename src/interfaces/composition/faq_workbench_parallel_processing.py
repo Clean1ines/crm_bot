@@ -22,6 +22,9 @@ from src.application.services.faq_workbench_registry_application_service import 
 from src.application.services.faq_workbench_registry_merge_service import (
     FaqWorkbenchRegistryMergeService,
 )
+from src.application.services.faq_workbench_registry_materialization_service import (
+    FaqWorkbenchRegistryMaterializationService,
+)
 from src.infrastructure.llm.faq_workbench_registry_merge_generator import (
     FaqWorkbenchRegistryMergeGenerator,
     FaqWorkbenchRegistryMergeGeneratorConfig,
@@ -240,6 +243,10 @@ def make_workbench_canonicalization_barrier_service_from_repository(
             time_provider=dependencies.time_provider,
         )
     )
+    registry_materialization_service = _instantiate_with_available_kwargs(
+        FaqWorkbenchRegistryMaterializationService,
+        repository=repository,
+    )
 
     return _instantiate_with_available_kwargs(
         FaqWorkbenchCanonicalizationBarrierService,
@@ -248,6 +255,7 @@ def make_workbench_canonicalization_barrier_service_from_repository(
         registry_merge_generator=registry_merge_generator,
         registry_merge_service=registry_merge_service,
         registry_application_service=registry_application_service,
+        registry_materialization_service=registry_materialization_service,
         id_factory=dependencies.id_factory,
     )
 

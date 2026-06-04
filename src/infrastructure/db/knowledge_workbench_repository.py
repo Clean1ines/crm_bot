@@ -69,6 +69,18 @@ def _publish_ready_text_tuple(value: object) -> tuple[str, ...]:
     return (str(value),)
 
 
+def _text_tuple_from_object(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        stripped = value.strip()
+        return (stripped,) if stripped else ()
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    stripped = str(value).strip()
+    return (stripped,) if stripped else ()
+
+
 def _publish_ready_datetime(value: object) -> datetime | None:
     if value is None:
         return None
@@ -1349,6 +1361,290 @@ class KnowledgeWorkbenchRepository(
             node_run.error_message_user,
             node_run.error_message_internal,
         )
+
+    async def replace_canonical_facts_for_snapshot(
+        self,
+        *,
+        snapshot: RegistrySnapshot,
+        canonical_facts: tuple[Mapping[str, object], ...],
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_canonical_facts
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND processing_run_id = $3
+                  AND registry_id = $4
+                """,
+                snapshot.project_id,
+                snapshot.document_id,
+                snapshot.processing_run_id,
+                snapshot.registry_id,
+            )
+
+            for fact in canonical_facts:
+                await self._connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_canonical_facts (
+                        fact_id,
+                        registry_id,
+                        project_id,
+                        document_id,
+                        processing_run_id,
+                        claim,
+                        claim_kind,
+                        granularity,
+                        possible_questions,
+                        scope,
+                        exclusion_scope,
+                        derived_fact_notes,
+                        status,
+                        updated_at
+                    )
+                    VALUES (
+                        $1, $2, $3::uuid, $4, $5, $6, $7, $8,
+                        $9::jsonb, $10, $11, $12::jsonb, $13, now()
+                    )
+                    ON CONFLICT (fact_id) DO UPDATE SET
+                        registry_id = EXCLUDED.registry_id,
+                        project_id = EXCLUDED.project_id,
+                        document_id = EXCLUDED.document_id,
+                        processing_run_id = EXCLUDED.processing_run_id,
+                        claim = EXCLUDED.claim,
+                        claim_kind = EXCLUDED.claim_kind,
+                        granularity = EXCLUDED.granularity,
+                        possible_questions = EXCLUDED.possible_questions,
+                        scope = EXCLUDED.scope,
+                        exclusion_scope = EXCLUDED.exclusion_scope,
+                        derived_fact_notes = EXCLUDED.derived_fact_notes,
+                        status = EXCLUDED.status,
+                        updated_at = now()
+                    """,
+                    fact["fact_id"],
+                    fact["registry_id"],
+                    fact["project_id"],
+                    fact["document_id"],
+                    fact["processing_run_id"],
+                    fact["claim"],
+                    fact["claim_kind"],
+                    fact["granularity"],
+                    self._json(
+                        list(_text_tuple_from_object(fact["possible_questions"]))
+                    ),
+                    fact["scope"],
+                    fact["exclusion_scope"],
+                    self._json(self._json_value_from_db(fact["derived_fact_notes"])),
+                    fact["status"],
+                )
+
+        return len(canonical_facts)
+
+    async def replace_fact_mentions_for_snapshot(
+        self,
+        *,
+        snapshot: RegistrySnapshot,
+        fact_mentions: tuple[Mapping[str, object], ...],
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_fact_mentions
+                WHERE registry_id = $1
+                  AND fact_id IN (
+                    SELECT fact_id
+                    FROM knowledge_workbench_canonical_facts
+                    WHERE project_id = $2::uuid
+                      AND document_id = $3
+                      AND processing_run_id = $4
+                      AND registry_id = $1
+                  )
+                """,
+                snapshot.registry_id,
+                snapshot.project_id,
+                snapshot.document_id,
+                snapshot.processing_run_id,
+            )
+
+            for mention in fact_mentions:
+                await self._connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_fact_mentions (
+                        mention_id,
+                        fact_id,
+                        registry_id,
+                        source_section_id,
+                        source_section_ref,
+                        source_local_ref,
+                        evidence_block,
+                        mention_relation
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    ON CONFLICT (mention_id) DO UPDATE SET
+                        fact_id = EXCLUDED.fact_id,
+                        registry_id = EXCLUDED.registry_id,
+                        source_section_id = EXCLUDED.source_section_id,
+                        source_section_ref = EXCLUDED.source_section_ref,
+                        source_local_ref = EXCLUDED.source_local_ref,
+                        evidence_block = EXCLUDED.evidence_block,
+                        mention_relation = EXCLUDED.mention_relation
+                    """,
+                    mention["mention_id"],
+                    mention["fact_id"],
+                    mention["registry_id"],
+                    mention["source_section_id"],
+                    mention["source_section_ref"],
+                    mention["source_local_ref"],
+                    mention["evidence_block"],
+                    mention["mention_relation"],
+                )
+
+        return len(fact_mentions)
+
+    async def replace_fact_relations_for_snapshot(
+        self,
+        *,
+        snapshot: RegistrySnapshot,
+        fact_relations: tuple[Mapping[str, object], ...],
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_fact_relations
+                WHERE registry_id = $1
+                """,
+                snapshot.registry_id,
+            )
+
+            for relation in fact_relations:
+                await self._connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_fact_relations (
+                        relation_id,
+                        registry_id,
+                        source_fact_id,
+                        target_fact_id,
+                        relation,
+                        reason
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (relation_id) DO UPDATE SET
+                        registry_id = EXCLUDED.registry_id,
+                        source_fact_id = EXCLUDED.source_fact_id,
+                        target_fact_id = EXCLUDED.target_fact_id,
+                        relation = EXCLUDED.relation,
+                        reason = EXCLUDED.reason
+                    """,
+                    relation["relation_id"],
+                    relation["registry_id"],
+                    relation["source_fact_id"],
+                    relation["target_fact_id"],
+                    relation["relation"],
+                    relation["reason"],
+                )
+
+        return len(fact_relations)
+
+    async def replace_surfaces_for_snapshot(
+        self,
+        *,
+        snapshot: RegistrySnapshot,
+        surfaces: tuple[Mapping[str, object], ...],
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_surfaces
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND fact_id IN (
+                    SELECT fact_id
+                    FROM knowledge_workbench_canonical_facts
+                    WHERE project_id = $1::uuid
+                      AND document_id = $2
+                      AND processing_run_id = $3
+                      AND registry_id = $4
+                  )
+                """,
+                snapshot.project_id,
+                snapshot.document_id,
+                snapshot.processing_run_id,
+                snapshot.registry_id,
+            )
+
+            for surface in surfaces:
+                await self._connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_surfaces (
+                        surface_id,
+                        project_id,
+                        document_id,
+                        fact_id,
+                        title,
+                        claim,
+                        question_variants,
+                        answer,
+                        short_answer,
+                        answer_scope,
+                        retrieval_scope,
+                        exclusion_scope,
+                        evidence_quotes,
+                        source_refs,
+                        source_section_ids,
+                        claim_kind,
+                        status,
+                        curation_state,
+                        updated_at
+                    )
+                    VALUES (
+                        $1, $2::uuid, $3, $4, $5, $6, $7::jsonb, $8, $9,
+                        $10, $11, $12, $13::jsonb, $14::jsonb, $15::jsonb,
+                        $16, $17, $18, now()
+                    )
+                    ON CONFLICT (surface_id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        claim = EXCLUDED.claim,
+                        question_variants = EXCLUDED.question_variants,
+                        answer = EXCLUDED.answer,
+                        short_answer = EXCLUDED.short_answer,
+                        answer_scope = EXCLUDED.answer_scope,
+                        retrieval_scope = EXCLUDED.retrieval_scope,
+                        exclusion_scope = EXCLUDED.exclusion_scope,
+                        evidence_quotes = EXCLUDED.evidence_quotes,
+                        source_refs = EXCLUDED.source_refs,
+                        source_section_ids = EXCLUDED.source_section_ids,
+                        claim_kind = EXCLUDED.claim_kind,
+                        status = EXCLUDED.status,
+                        curation_state = EXCLUDED.curation_state,
+                        updated_at = now()
+                    """,
+                    surface["surface_id"],
+                    surface["project_id"],
+                    surface["document_id"],
+                    surface["fact_id"],
+                    surface["title"],
+                    surface["claim"],
+                    self._json(
+                        list(_text_tuple_from_object(surface["question_variants"]))
+                    ),
+                    surface["answer"],
+                    surface["short_answer"],
+                    surface["answer_scope"],
+                    surface["retrieval_scope"],
+                    surface["exclusion_scope"],
+                    self._json(
+                        list(_text_tuple_from_object(surface["evidence_quotes"]))
+                    ),
+                    self._json(list(_text_tuple_from_object(surface["source_refs"]))),
+                    self._json(
+                        list(_text_tuple_from_object(surface["source_section_ids"]))
+                    ),
+                    surface["claim_kind"],
+                    surface["status"],
+                    surface["curation_state"],
+                )
+
+        return len(surfaces)
 
     async def create_processing_node_artifact(
         self,

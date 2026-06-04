@@ -21,6 +21,10 @@ from src.application.services.faq_workbench_registry_merge_service import (
     PersistRegistryMergeNodeOutputCommand,
     ProcessRegistryMergeGenerationErrorCommand,
 )
+from src.application.services.faq_workbench_registry_materialization_service import (
+    FaqWorkbenchRegistryMaterializationService,
+    MaterializeFactRegistrySnapshotCommand,
+)
 from src.domain.project_plane.knowledge_workbench import (
     CanonicalFact,
     DomainInvariantError,
@@ -147,6 +151,7 @@ class FaqWorkbenchCanonicalizationBarrierService:
         registry_merge_generator: FaqWorkbenchRegistryMergeGeneratorPort,
         registry_merge_service: FaqWorkbenchRegistryMergeService,
         registry_application_service: FaqWorkbenchRegistryApplicationService,
+        registry_materialization_service: FaqWorkbenchRegistryMaterializationService,
         id_factory: IdFactory,
     ) -> None:
         self._repository = repository
@@ -154,6 +159,7 @@ class FaqWorkbenchCanonicalizationBarrierService:
         self._registry_merge_generator = registry_merge_generator
         self._registry_merge_service = registry_merge_service
         self._registry_application_service = registry_application_service
+        self._registry_materialization_service = registry_materialization_service
         self._id_factory = id_factory
 
     async def process_document_canonicalization_barrier(
@@ -330,6 +336,11 @@ class FaqWorkbenchCanonicalizationBarrierService:
             raise DomainInvariantError(
                 "canonicalization barrier completed without final registry snapshot"
             )
+
+        final_snapshot = applied.snapshot
+        await self._registry_materialization_service.materialize_fact_registry_snapshot(
+            MaterializeFactRegistrySnapshotCommand(snapshot=final_snapshot)
+        )
 
         await self._persist_canonicalization_barrier_completion_marker(
             command=command,
