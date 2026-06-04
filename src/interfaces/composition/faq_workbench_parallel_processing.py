@@ -82,6 +82,7 @@ class FaqWorkbenchParallelProcessingDependencies:
     claim_observations_runner: object | None = None
     canonicalization_barrier_service: object | None = None
     drain_counts_provider: object | None = None
+    integrity_counts_provider: object | None = None
     lifecycle_completion_port: object | None = None
     registry_application_service: object | None = None
     llm_json_invocation: object | None = None
@@ -143,6 +144,11 @@ def make_workbench_parallel_processing_coordinator_from_repository(
         drain_counts_provider=(
             dependencies.drain_counts_provider
             if dependencies.drain_counts_provider is not None
+            else repository
+        ),
+        integrity_counts_provider=(
+            dependencies.integrity_counts_provider
+            if dependencies.integrity_counts_provider is not None
             else repository
         ),
         lifecycle_completion_port=(

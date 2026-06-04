@@ -1,5 +1,6 @@
 from .parallel_drain_policy import (
     ParallelDrainWorkCounts,
+    ParallelProcessingIntegrityCounts,
     ParallelFinalizationDecision,
     ParallelFinalizationReadiness,
     decide_parallel_finalization,
@@ -224,6 +225,7 @@ __all__ = [
     "FactCurationSessionStatus",
     "ensure_curation_change_not_runtime_mutation",
     "ParallelDrainWorkCounts",
+    "ParallelProcessingIntegrityCounts",
     "ParallelFinalizationDecision",
     "ParallelFinalizationReadiness",
     "decide_parallel_finalization",

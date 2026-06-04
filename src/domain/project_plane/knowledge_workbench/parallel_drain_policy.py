@@ -87,6 +87,14 @@ class ParallelDrainWorkCounts:
 
 
 @dataclass(frozen=True, slots=True)
+class ParallelProcessingIntegrityCounts:
+    document_sections_total: int
+    section_queue_items_total: int
+    claim_observation_artifacts_total: int
+    canonicalization_artifacts_total: int
+
+
+@dataclass(frozen=True, slots=True)
 class ParallelFinalizationReadiness:
     decision: ParallelFinalizationDecision
     counts: ParallelDrainWorkCounts
@@ -149,6 +157,7 @@ def ensure_parallel_processing_can_finalize(
 
 __all__ = [
     "ParallelDrainWorkCounts",
+    "ParallelProcessingIntegrityCounts",
     "ParallelFinalizationDecision",
     "ParallelFinalizationReadiness",
     "decide_parallel_finalization",

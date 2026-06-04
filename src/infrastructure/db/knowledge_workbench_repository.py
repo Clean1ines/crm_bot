@@ -38,6 +38,7 @@ from src.domain.project_plane.knowledge_workbench import (
     RegistryApplicationQueueItem,
     RegistryApplicationQueueItemStatus,
     ParallelDrainWorkCounts,
+    ParallelProcessingIntegrityCounts,
     RegistryUpdateApplication,
 )
 
@@ -883,6 +884,84 @@ class KnowledgeWorkbenchRepository(
                 transition.resume_policy_after.value,
                 transition.reason,
             )
+
+    async def get_parallel_processing_integrity_counts(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> ParallelProcessingIntegrityCounts:
+        row = await self._connection.fetchrow(
+            """
+            SELECT
+                (
+                    SELECT COUNT(*)::int
+                    FROM knowledge_workbench_document_sections AS section
+                    WHERE section.project_id = $1
+                      AND section.document_id = $2
+                      AND section.status <> 'deleted'
+                ) AS document_sections_total,
+                (
+                    SELECT COUNT(*)::int
+                    FROM knowledge_workbench_section_batch_queue_items AS item
+                    WHERE item.project_id = $1
+                      AND item.document_id = $2
+                      AND item.processing_run_id = $3
+                ) AS section_queue_items_total,
+                (
+                    SELECT COUNT(*)::int
+                    FROM knowledge_workbench_processing_node_artifacts AS artifact
+                    JOIN knowledge_workbench_processing_node_runs AS node
+                      ON node.node_run_id = artifact.node_run_id
+                     AND node.processing_run_id = artifact.processing_run_id
+                     AND node.project_id = artifact.project_id
+                     AND node.document_id = artifact.document_id
+                    WHERE artifact.project_id = $1
+                      AND artifact.document_id = $2
+                      AND artifact.processing_run_id = $3
+                      AND artifact.artifact_type = 'parsed_llm_output'
+                      AND node.node_name = 'faq_surface_claim_observations'
+                ) AS claim_observation_artifacts_total,
+                (
+                    SELECT COUNT(*)::int
+                    FROM knowledge_workbench_processing_node_artifacts AS artifact
+                    JOIN knowledge_workbench_processing_node_runs AS node
+                      ON node.node_run_id = artifact.node_run_id
+                     AND node.processing_run_id = artifact.processing_run_id
+                     AND node.project_id = artifact.project_id
+                     AND node.document_id = artifact.document_id
+                    WHERE artifact.project_id = $1
+                      AND artifact.document_id = $2
+                      AND artifact.processing_run_id = $3
+                      AND artifact.artifact_type = 'parsed_llm_output'
+                      AND node.node_name = 'faq_surface_registry_merge'
+                ) AS canonicalization_artifacts_total
+            """,
+            project_id,
+            document_id,
+            processing_run_id,
+        )
+        if row is None:
+            return ParallelProcessingIntegrityCounts(
+                document_sections_total=0,
+                section_queue_items_total=0,
+                claim_observation_artifacts_total=0,
+                canonicalization_artifacts_total=0,
+            )
+
+        return ParallelProcessingIntegrityCounts(
+            document_sections_total=self._int_from_db(row["document_sections_total"]),
+            section_queue_items_total=self._int_from_db(
+                row["section_queue_items_total"]
+            ),
+            claim_observation_artifacts_total=self._int_from_db(
+                row["claim_observation_artifacts_total"]
+            ),
+            canonicalization_artifacts_total=self._int_from_db(
+                row["canonicalization_artifacts_total"]
+            ),
+        )
 
     async def restore_stale_section_work_item_leases(
         self,

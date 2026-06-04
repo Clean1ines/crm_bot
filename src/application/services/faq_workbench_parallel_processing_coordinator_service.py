@@ -7,6 +7,7 @@ from typing import Protocol
 from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
     ParallelDrainWorkCounts,
+    ParallelProcessingIntegrityCounts,
     decide_parallel_finalization,
 )
 
@@ -32,6 +33,27 @@ class CanonicalizationBarrierProcessorPort(Protocol):
     ) -> object: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ParallelProcessingIntegrityError(RuntimeError):
+    project_id: str
+    document_id: str
+    processing_run_id: str
+    document_sections_total: int
+    section_queue_items_total: int
+    claim_observation_artifacts_total: int
+    canonicalization_artifacts_total: int
+
+    def __str__(self) -> str:
+        return (
+            "Parallel Workbench integrity violation for document "
+            f"{self.document_id} / run {self.processing_run_id}: "
+            f"document_sections_total={self.document_sections_total}, "
+            f"section_queue_items_total={self.section_queue_items_total}, "
+            f"claim_observation_artifacts_total={self.claim_observation_artifacts_total}, "
+            f"canonicalization_artifacts_total={self.canonicalization_artifacts_total}"
+        )
+
+
 class ParallelDrainCountsProviderPort(Protocol):
     async def get_parallel_processing_drain_counts(
         self,
@@ -40,6 +62,16 @@ class ParallelDrainCountsProviderPort(Protocol):
         document_id: str,
         processing_run_id: str,
     ) -> ParallelDrainWorkCounts: ...
+
+
+class ParallelProcessingIntegrityCountsProviderPort(Protocol):
+    async def get_parallel_processing_integrity_counts(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> ParallelProcessingIntegrityCounts: ...
 
 
 class ParallelProcessingLifecycleCompletionPort(Protocol):
@@ -260,6 +292,8 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
         canonicalization_barrier_processor: CanonicalizationBarrierProcessorPort
         | None = None,
         drain_counts_provider: ParallelDrainCountsProviderPort | None = None,
+        integrity_counts_provider: ParallelProcessingIntegrityCountsProviderPort
+        | None = None,
         lifecycle_completion_port: ParallelProcessingLifecycleCompletionPort
         | None = None,
     ) -> None:
@@ -267,6 +301,7 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
         self._registry_processor = registry_processor
         self._canonicalization_barrier_processor = canonicalization_barrier_processor
         self._drain_counts_provider = drain_counts_provider
+        self._integrity_counts_provider = integrity_counts_provider
         self._lifecycle_completion_port = lifecycle_completion_port
 
     async def run_parallel_processing(
@@ -317,11 +352,39 @@ class FaqWorkbenchParallelProcessingCoordinatorService:
             return
         if not _cycle_is_terminal_success(cycle):
             return
+        await self._assert_parallel_processing_integrity(command)
         await self._lifecycle_completion_port.mark_parallel_processing_completed(
             project_id=command.project_id,
             document_id=command.document_id,
             processing_run_id=command.processing_run_id,
         )
+
+    async def _assert_parallel_processing_integrity(
+        self,
+        command: RunParallelWorkbenchProcessingCommand,
+    ) -> None:
+        if self._integrity_counts_provider is None:
+            return
+
+        counts = await self._integrity_counts_provider.get_parallel_processing_integrity_counts(
+            project_id=command.project_id,
+            document_id=command.document_id,
+            processing_run_id=command.processing_run_id,
+        )
+
+        if (
+            counts.document_sections_total > 0
+            and counts.section_queue_items_total != counts.document_sections_total
+        ):
+            raise ParallelProcessingIntegrityError(
+                project_id=command.project_id,
+                document_id=command.document_id,
+                processing_run_id=command.processing_run_id,
+                document_sections_total=counts.document_sections_total,
+                section_queue_items_total=counts.section_queue_items_total,
+                claim_observation_artifacts_total=counts.claim_observation_artifacts_total,
+                canonicalization_artifacts_total=counts.canonicalization_artifacts_total,
+            )
 
     async def _run_section_worker_wave(
         self,
@@ -489,6 +552,9 @@ __all__ = [
     "CanonicalizationBarrierProcessorPort",
     "FaqWorkbenchParallelProcessingCoordinatorService",
     "ParallelDrainCountsProviderPort",
+    "ParallelProcessingIntegrityCounts",
+    "ParallelProcessingIntegrityCountsProviderPort",
+    "ParallelProcessingIntegrityError",
     "ParallelProcessingLifecycleCompletionPort",
     "ParallelWorkbenchProcessingCycle",
     "ProcessParallelCanonicalizationBarrierCommand",
