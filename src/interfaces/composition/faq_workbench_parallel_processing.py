@@ -16,6 +16,10 @@ from src.application.services.faq_workbench_local_claim_graph_loader_service imp
 from src.application.services.faq_workbench_local_claim_retrieval_service import (
     FaqWorkbenchLocalClaimRetrievalService,
 )
+from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
+    FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService,
+    LocalClaimRetrievalSurfaceRepositoryPort,
+)
 from src.application.services.faq_workbench_registry_application_service import (
     FaqWorkbenchRegistryApplicationService,
 )
@@ -31,6 +35,9 @@ from src.infrastructure.llm.faq_workbench_registry_merge_generator import (
 )
 from src.infrastructure.llm.groq_llm_json_invocation import (
     GroqLlmJsonInvocationAdapter,
+)
+from src.infrastructure.llm.workbench_local_claim_embedding_adapter import (
+    WorkbenchLocalClaimEmbeddingAdapter,
 )
 from src.application.services.faq_workbench_parallel_processing_adapters import (
     FaqWorkbenchCanonicalizationBarrierProcessorAdapter,
@@ -185,12 +192,27 @@ def make_workbench_section_processor_from_repository(
             "parallel Workbench composition requires claim_observations_runner"
         )
 
+    graph_loader = _instantiate_with_available_kwargs(
+        FaqWorkbenchLocalClaimGraphLoaderService,
+        repository=repository,
+    )
+    local_claim_retrieval_surface_indexing_service = (
+        FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService(
+            graph_loader=graph_loader,
+            repository=cast(LocalClaimRetrievalSurfaceRepositoryPort, repository),
+            embedding_service=WorkbenchLocalClaimEmbeddingAdapter(),
+        )
+    )
+
     return _instantiate_with_available_kwargs(
         FaqWorkbenchSectionWorkItemProcessorService,
         repository=repository,
         claim_observations_runner=dependencies.claim_observations_runner,
         id_factory=dependencies.id_factory,
         time_provider=dependencies.time_provider,
+        local_claim_retrieval_surface_indexing_service=(
+            local_claim_retrieval_surface_indexing_service
+        ),
     )
 
 
@@ -211,8 +233,16 @@ def make_workbench_canonicalization_barrier_service_from_repository(
         FaqWorkbenchLocalClaimGraphLoaderService,
         repository=repository,
     )
+    local_claim_retrieval_surface_indexing_service = (
+        FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService(
+            graph_loader=graph_loader,
+            repository=cast(LocalClaimRetrievalSurfaceRepositoryPort, repository),
+            embedding_service=WorkbenchLocalClaimEmbeddingAdapter(),
+        )
+    )
     local_claim_retrieval_service = FaqWorkbenchLocalClaimRetrievalService(
         graph_loader=graph_loader,
+        retrieval_surface_indexing_service=local_claim_retrieval_surface_indexing_service,
     )
     llm_json_invocation = (
         dependencies.llm_json_invocation

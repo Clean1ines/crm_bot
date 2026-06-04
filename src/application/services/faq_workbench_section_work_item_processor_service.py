@@ -9,6 +9,9 @@ from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
     JsonValue,
 )
+from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
+    IndexDocumentLocalClaimRetrievalSurfaceCommand,
+)
 from src.domain.project_plane.knowledge_workbench.section_batch_queue import (
     SectionBatchQueueItem,
     SectionBatchQueueItemStatus,
@@ -76,6 +79,13 @@ class LeasedClaimObservationsRunnerPort(Protocol):
     ) -> ProcessLeasedClaimObservationsResult: ...
 
 
+class LocalClaimRetrievalSurfaceIndexingPort(Protocol):
+    async def index_document_local_claim_retrieval_surface(
+        self,
+        command: IndexDocumentLocalClaimRetrievalSurfaceCommand,
+    ) -> object: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessOneSectionWorkItemCommand:
     queue_item: SectionBatchQueueItem
@@ -107,6 +117,9 @@ class FaqWorkbenchSectionWorkItemProcessorService:
     claim_observations_runner: LeasedClaimObservationsRunnerPort
     id_factory: IdFactory
     time_provider: TimeProvider = SystemTimeProvider()
+    local_claim_retrieval_surface_indexing_service: (
+        LocalClaimRetrievalSurfaceIndexingPort | None
+    ) = None
 
     async def process_claim_observations_persisted_section_work_item(
         self,
@@ -134,6 +147,8 @@ class FaqWorkbenchSectionWorkItemProcessorService:
             raise DomainInvariantError(
                 "cannot recover claim observations persisted section item without section"
             )
+
+        await self._index_local_claim_retrieval_surface(queue_item)
 
         return ProcessClaimObservationsPersistedSectionWorkItemResult(
             section=section,
@@ -179,11 +194,28 @@ class FaqWorkbenchSectionWorkItemProcessorService:
         await self.repository.update_section_batch_queue_item(
             claim_observations_persisted_item
         )
+        await self._index_local_claim_retrieval_surface(
+            claim_observations_persisted_item
+        )
 
         return ProcessOneSectionWorkItemResult(
             section=section,
             claim_observations_result=claim_observations_result,
             claim_observations_persisted_item=claim_observations_persisted_item,
+        )
+
+    async def _index_local_claim_retrieval_surface(
+        self,
+        queue_item: SectionBatchQueueItem,
+    ) -> None:
+        if self.local_claim_retrieval_surface_indexing_service is None:
+            return
+        await self.local_claim_retrieval_surface_indexing_service.index_document_local_claim_retrieval_surface(
+            IndexDocumentLocalClaimRetrievalSurfaceCommand(
+                project_id=queue_item.project_id,
+                document_id=queue_item.document_id,
+                processing_run_id=queue_item.processing_run_id,
+            )
         )
 
     @staticmethod
@@ -204,6 +236,7 @@ __all__ = [
     "FaqWorkbenchSectionWorkItemProcessorService",
     "IdFactory",
     "LeasedClaimObservationsRunnerPort",
+    "LocalClaimRetrievalSurfaceIndexingPort",
     "ProcessClaimObservationsPersistedSectionWorkItemResult",
     "ProcessLeasedClaimObservationsCommand",
     "ProcessLeasedClaimObservationsResult",

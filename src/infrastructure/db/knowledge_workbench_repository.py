@@ -5,6 +5,9 @@ from collections.abc import Awaitable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Protocol, cast
 
+from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
+    LocalClaimRetrievalSurfaceEntry,
+)
 from src.application.ports.knowledge_workbench import (
     KnowledgeWorkbenchFreshUploadRepositoryPort,
     KnowledgeWorkbenchRegistryApplicationRepositoryPort,
@@ -150,6 +153,99 @@ class KnowledgeWorkbenchRepository(
 ):
     def __init__(self, connection: WorkbenchDbConnection) -> None:
         self._connection = connection
+
+    async def replace_local_claim_retrieval_entries(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+        entries: tuple[LocalClaimRetrievalSurfaceEntry, ...],
+    ) -> int:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_local_claim_retrieval_entries
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND processing_run_id = $3
+                """,
+                project_id,
+                document_id,
+                processing_run_id,
+            )
+
+            for entry in entries:
+                await self._connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_local_claim_retrieval_entries (
+                        entry_id,
+                        project_id,
+                        document_id,
+                        processing_run_id,
+                        section_id,
+                        node_run_id,
+                        search_document_id,
+                        local_ref,
+                        claim,
+                        claim_kind,
+                        granularity,
+                        search_text,
+                        triples_payload,
+                        possible_questions_payload,
+                        scope,
+                        exclusion_scope,
+                        evidence_block,
+                        relation_texts_payload,
+                        embedding,
+                        embedding_text_version,
+                        status
+                    )
+                    VALUES (
+                        $1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                        $11, $12, $13::jsonb, $14::jsonb, $15, $16, $17,
+                        $18::jsonb, $19::vector, 'workbench_local_claim_retrieval_v1',
+                        $20
+                    )
+                    ON CONFLICT (entry_id) DO UPDATE SET
+                        claim = EXCLUDED.claim,
+                        claim_kind = EXCLUDED.claim_kind,
+                        granularity = EXCLUDED.granularity,
+                        search_text = EXCLUDED.search_text,
+                        triples_payload = EXCLUDED.triples_payload,
+                        possible_questions_payload = EXCLUDED.possible_questions_payload,
+                        scope = EXCLUDED.scope,
+                        exclusion_scope = EXCLUDED.exclusion_scope,
+                        evidence_block = EXCLUDED.evidence_block,
+                        relation_texts_payload = EXCLUDED.relation_texts_payload,
+                        embedding = EXCLUDED.embedding,
+                        embedding_text_version = EXCLUDED.embedding_text_version,
+                        status = EXCLUDED.status,
+                        updated_at = now()
+                    """,
+                    entry.entry_id,
+                    entry.project_id,
+                    entry.document_id,
+                    entry.processing_run_id,
+                    entry.section_id,
+                    entry.node_run_id,
+                    entry.search_document_id,
+                    entry.local_ref,
+                    entry.claim,
+                    entry.claim_kind,
+                    entry.granularity,
+                    entry.search_text,
+                    self._json(list(entry.triple_texts)),
+                    self._json(list(entry.possible_questions)),
+                    entry.scope,
+                    entry.exclusion_scope,
+                    entry.evidence_block,
+                    self._json(list(entry.relation_texts)),
+                    self._pg_vector_text(entry.embedding),
+                    entry.status,
+                )
+
+        return len(entries)
 
     async def create_parallel_section_batch_plan(
         self,
@@ -948,7 +1044,15 @@ class KnowledgeWorkbenchRepository(
                       AND artifact.processing_run_id = $3
                       AND artifact.artifact_type = 'parsed_llm_output'
                       AND node.node_name = 'faq_surface_registry_merge'
-                ) AS canonicalization_artifacts_total
+                ) AS canonicalization_artifacts_total,
+                (
+                    SELECT COUNT(DISTINCT entry.node_run_id)::int
+                    FROM knowledge_workbench_local_claim_retrieval_entries AS entry
+                    WHERE entry.project_id = $1::uuid
+                      AND entry.document_id = $2
+                      AND entry.processing_run_id = $3
+                      AND entry.status = 'indexed'
+                ) AS local_claim_retrieval_indexed_artifacts_total
             """,
             project_id,
             document_id,
@@ -960,6 +1064,7 @@ class KnowledgeWorkbenchRepository(
                 section_queue_items_total=0,
                 claim_observation_artifacts_total=0,
                 canonicalization_artifacts_total=0,
+                local_claim_retrieval_indexed_artifacts_total=0,
             )
 
         return ParallelProcessingIntegrityCounts(
@@ -972,6 +1077,9 @@ class KnowledgeWorkbenchRepository(
             ),
             canonicalization_artifacts_total=self._int_from_db(
                 row["canonicalization_artifacts_total"]
+            ),
+            local_claim_retrieval_indexed_artifacts_total=self._int_from_db(
+                row["local_claim_retrieval_indexed_artifacts_total"]
             ),
         )
 
@@ -1105,6 +1213,9 @@ class KnowledgeWorkbenchRepository(
             created_at=self._datetime_from_db(row["created_at"]),
             updated_at=self._datetime_from_db(row["updated_at"]),
         )
+
+    def _pg_vector_text(self, values: tuple[float, ...]) -> str:
+        return "[" + ",".join(str(float(value)) for value in values) + "]"
 
     def _row_count_from_execute_result(self, result: object) -> int:
         parts = str(result).split()

@@ -6,3 +6,11 @@
 --
 -- Old question-registry retention migration was removed because the Workbench
 -- registry model is now fact-registry based.
+--
+-- Keep this as executable SQL because asyncpg.execute() may fail on a
+-- comment-only migration body.
+
+DO $$
+BEGIN
+    NULL;
+END $$;

@@ -68,7 +68,9 @@ def _fact_registry_payload() -> Mapping[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_runtime_publication_writes_debug_and_production_retrieval_projection_once() -> None:
+async def test_runtime_publication_writes_debug_and_production_retrieval_projection_once() -> (
+    None
+):
     debug_repository = FakeWorkbenchRuntimeRepository()
     retrieval_surface = FakeRetrievalSurfacePublicationService()
     service = FaqWorkbenchRuntimePublicationService(
@@ -94,7 +96,9 @@ async def test_runtime_publication_writes_debug_and_production_retrieval_project
 
 
 @pytest.mark.asyncio
-async def test_runtime_publication_keeps_legacy_debug_projection_when_surface_projection_disabled() -> None:
+async def test_runtime_publication_keeps_legacy_debug_projection_when_surface_projection_disabled() -> (
+    None
+):
     debug_repository = FakeWorkbenchRuntimeRepository()
     service = FaqWorkbenchRuntimePublicationService(debug_repository)
 

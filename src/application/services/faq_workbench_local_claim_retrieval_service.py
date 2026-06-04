@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from src.application.services.faq_workbench_local_claim_graph_loader_service import (
     FaqWorkbenchLocalClaimGraphLoaderService,
     LoadDocumentLocalClaimGraphsCommand,
+)
+from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
+    IndexDocumentLocalClaimRetrievalSurfaceCommand,
 )
 from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
@@ -17,6 +21,13 @@ from src.domain.project_plane.knowledge_workbench import (
     local_claim_canonicalization_units_from_retrieval,
     local_claim_search_documents_from_graphs,
 )
+
+
+class LocalClaimRetrievalSurfaceIndexingPort(Protocol):
+    async def index_document_local_claim_retrieval_surface(
+        self,
+        command: IndexDocumentLocalClaimRetrievalSurfaceCommand,
+    ) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +85,9 @@ class DocumentLocalClaimRetrievalResult:
 @dataclass(frozen=True, slots=True)
 class FaqWorkbenchLocalClaimRetrievalService:
     graph_loader: FaqWorkbenchLocalClaimGraphLoaderService
+    retrieval_surface_indexing_service: (
+        LocalClaimRetrievalSurfaceIndexingPort | None
+    ) = None
 
     async def build_document_local_claim_retrieval(
         self,
@@ -89,9 +103,17 @@ class FaqWorkbenchLocalClaimRetrievalService:
 
         graphs = tuple(item.graph for item in graph_result.graphs)
         search_documents = local_claim_search_documents_from_graphs(graphs)
-        similarity_edges = build_local_claim_hybrid_similarity_edges(
+        vector_edges = await self._index_and_get_vector_edges(
+            command=command,
+            search_documents=search_documents,
+        )
+        deterministic_edges = build_local_claim_hybrid_similarity_edges(
             search_documents,
             min_score=command.min_similarity_score,
+        )
+        similarity_edges = _merge_similarity_edges(
+            deterministic_edges=deterministic_edges,
+            vector_edges=vector_edges,
         )
         candidate_groups = build_local_claim_candidate_groups(
             search_documents,
@@ -110,9 +132,78 @@ class FaqWorkbenchLocalClaimRetrievalService:
             canonicalization_units=canonicalization_units,
         )
 
+    async def _index_and_get_vector_edges(
+        self,
+        *,
+        command: BuildDocumentLocalClaimRetrievalCommand,
+        search_documents: tuple[LocalClaimSearchDocument, ...],
+    ) -> tuple[LocalClaimSimilarityEdge, ...]:
+        if self.retrieval_surface_indexing_service is None:
+            return ()
+
+        indexing_result = await self.retrieval_surface_indexing_service.index_document_local_claim_retrieval_surface(
+            IndexDocumentLocalClaimRetrievalSurfaceCommand(
+                project_id=command.project_id,
+                document_id=command.document_id,
+                processing_run_id=command.processing_run_id,
+                search_documents=search_documents,
+            )
+        )
+        vector_edges = getattr(indexing_result, "vector_similarity_edges", ())
+        if isinstance(vector_edges, tuple) and all(
+            isinstance(edge, LocalClaimSimilarityEdge) for edge in vector_edges
+        ):
+            return vector_edges
+        return ()
+
+
+def _merge_similarity_edges(
+    *,
+    deterministic_edges: tuple[LocalClaimSimilarityEdge, ...],
+    vector_edges: tuple[LocalClaimSimilarityEdge, ...],
+) -> tuple[LocalClaimSimilarityEdge, ...]:
+    merged: dict[tuple[str, str], LocalClaimSimilarityEdge] = {}
+
+    for edge in deterministic_edges + vector_edges:
+        left_id, right_id = sorted(
+            (
+                edge.source_search_document_id,
+                edge.target_search_document_id,
+            )
+        )
+        key: tuple[str, str] = (left_id, right_id)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = edge
+            continue
+
+        merged[key] = LocalClaimSimilarityEdge(
+            source_search_document_id=existing.source_search_document_id,
+            target_search_document_id=existing.target_search_document_id,
+            score=max(existing.score, edge.score),
+            signals=tuple(
+                sorted(
+                    existing.signals + edge.signals,
+                    key=lambda signal: signal.signal_type,
+                )
+            ),
+        )
+
+    return tuple(
+        sorted(
+            merged.values(),
+            key=lambda item: (
+                -item.score,
+                item.source_search_document_id,
+                item.target_search_document_id,
+            ),
+        )
+    )
+
 
 __all__ = [
     "BuildDocumentLocalClaimRetrievalCommand",
     "DocumentLocalClaimRetrievalResult",
     "FaqWorkbenchLocalClaimRetrievalService",
+    "LocalClaimRetrievalSurfaceIndexingPort",
 ]

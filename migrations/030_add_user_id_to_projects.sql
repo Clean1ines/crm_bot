@@ -11,7 +11,7 @@ SET user_id = u.id
 FROM auth_identities ai
 JOIN users u ON u.id = ai.user_id
 WHERE ai.provider = 'telegram'
-  AND ai.provider_id = p.owner_id
+  AND ai.provider_id = p.owner_id::text
   AND p.user_id IS NULL;
 
 -- Optional: if any projects still have no user_id and owner_id looks like a UUID,

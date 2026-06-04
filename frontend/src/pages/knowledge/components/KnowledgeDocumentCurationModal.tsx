@@ -403,10 +403,19 @@ export const KnowledgeDocumentCurationModal: React.FC<{
     publishSelectedMutation.isPending;
 
   const normalizedFilter = filter.trim().toLowerCase();
-  const sections = traceQuery.data?.source_units ?? [];
+  const sections = useMemo(
+    () => traceQuery.data?.source_units ?? [],
+    [traceQuery.data?.source_units],
+  );
   const findings = traceQuery.data?.findings ?? [];
-  const canonicalFacts = traceQuery.data?.canonical_facts ?? [];
-  const surfaces = traceQuery.data?.surfaces ?? [];
+  const canonicalFacts = useMemo(
+    () => traceQuery.data?.canonical_facts ?? [],
+    [traceQuery.data?.canonical_facts],
+  );
+  const surfaces = useMemo(
+    () => traceQuery.data?.surfaces ?? [],
+    [traceQuery.data?.surfaces],
+  );
   const coverage = traceQuery.data?.coverage ?? {};
   const gaps = traceQuery.data?.gaps ?? {};
 

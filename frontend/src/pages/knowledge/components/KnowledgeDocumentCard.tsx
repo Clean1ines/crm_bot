@@ -117,10 +117,6 @@ const visibleSecondaryActions = (
       ),
   );
 
-const hasWorkbenchCard = (doc: DocCardDocument): doc is DocCardDocument & {
-  card_view: WorkbenchDocumentCardView;
-} => Boolean(doc.card_view);
-
 export const KnowledgeDocumentCard: React.FC<{
   doc: DocCardDocument;
   statusBadge: { className: string; label: string };

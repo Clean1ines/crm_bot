@@ -7,7 +7,9 @@ RUNTIME_PUBLICATION_SERVICE_PATH = Path(
 )
 
 
-def test_publish_ready_composition_delegates_runtime_projection_to_runtime_publication_service() -> None:
+def test_publish_ready_composition_delegates_runtime_projection_to_runtime_publication_service() -> (
+    None
+):
     source = COMPOSITION_PATH.read_text()
 
     assert "FaqWorkbenchRuntimePublicationService" in source
@@ -18,7 +20,9 @@ def test_publish_ready_composition_delegates_runtime_projection_to_runtime_publi
     assert "publish_workbench_fact_retrieval_surface" not in source
 
 
-def test_runtime_publication_service_is_single_owner_of_workbench_runtime_projections() -> None:
+def test_runtime_publication_service_is_single_owner_of_workbench_runtime_projections() -> (
+    None
+):
     source = RUNTIME_PUBLICATION_SERVICE_PATH.read_text()
 
     assert "publish_fact_registry_runtime_entries" in source

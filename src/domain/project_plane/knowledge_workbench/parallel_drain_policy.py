@@ -95,6 +95,7 @@ class ParallelProcessingIntegrityCounts:
     section_queue_items_total: int
     claim_observation_artifacts_total: int
     canonicalization_artifacts_total: int
+    local_claim_retrieval_indexed_artifacts_total: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,10 +196,21 @@ def decide_parallel_canonicalization_readiness(
             reason="Prompt A section statuses are ahead of persisted artifacts",
         )
 
+    if (
+        integrity.local_claim_retrieval_indexed_artifacts_total is not None
+        and integrity.local_claim_retrieval_indexed_artifacts_total
+        < integrity.claim_observation_artifacts_total
+    ):
+        return ParallelFinalizationReadiness(
+            decision=ParallelFinalizationDecision.KEEP_DRAINING,
+            counts=counts,
+            reason="local claim retrieval surface is not indexed for every Prompt A artifact",
+        )
+
     return ParallelFinalizationReadiness(
         decision=ParallelFinalizationDecision.CAN_FINALIZE,
         counts=counts,
-        reason="all section claim observations are persisted",
+        reason="all section claim observations are indexed for retrieval",
     )
 
 
