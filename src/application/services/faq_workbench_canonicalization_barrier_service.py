@@ -5,6 +5,7 @@ from typing import Protocol
 
 from src.application.ports.faq_workbench_registry_merge_generator import (
     FaqWorkbenchRegistryMergeGenerationCommand,
+    FaqWorkbenchRegistryMergeGenerationError,
     FaqWorkbenchRegistryMergeGeneratorPort,
 )
 from src.application.services.faq_workbench_local_claim_retrieval_service import (
@@ -18,6 +19,7 @@ from src.application.services.faq_workbench_registry_application_service import 
 from src.application.services.faq_workbench_registry_merge_service import (
     FaqWorkbenchRegistryMergeService,
     PersistRegistryMergeNodeOutputCommand,
+    ProcessRegistryMergeGenerationErrorCommand,
 )
 from src.domain.project_plane.knowledge_workbench import (
     CanonicalFact,
@@ -244,25 +246,44 @@ class FaqWorkbenchCanonicalizationBarrierService:
 
         for index, unit in enumerate(retrieval_result.canonicalization_units, start=1):
             node_run_id = self._id_factory.new_id("node-run")
-            generation_result = (
-                await self._registry_merge_generator.generate_registry_updates(
-                    FaqWorkbenchRegistryMergeGenerationCommand(
+            try:
+                generation_result = (
+                    await self._registry_merge_generator.generate_registry_updates(
+                        FaqWorkbenchRegistryMergeGenerationCommand(
+                            node_run_id=node_run_id,
+                            canonicalization_unit=unit,
+                            registry=registry,
+                            canonical_facts=canonical_facts,
+                            registry_snapshot_payload=current_registry_snapshot_payload,
+                            relevant_registry_state={
+                                "contract": "relevant_fact_registry_state",
+                                "worker_id": command.worker_id,
+                                "unit_index": index,
+                                "unit_count": retrieval_result.unit_count,
+                                "latest_snapshot_id": previous_snapshot_id,
+                                "latest_fact_registry": current_fact_registry_payload,
+                            },
+                        )
+                    )
+                )
+            except FaqWorkbenchRegistryMergeGenerationError as error:
+                await self._registry_merge_service.persist_registry_merge_generation_error(
+                    ProcessRegistryMergeGenerationErrorCommand(
                         node_run_id=node_run_id,
                         canonicalization_unit=unit,
                         registry=registry,
-                        canonical_facts=canonical_facts,
-                        registry_snapshot_payload=current_registry_snapshot_payload,
-                        relevant_registry_state={
-                            "contract": "relevant_fact_registry_state",
-                            "worker_id": command.worker_id,
-                            "unit_index": index,
-                            "unit_count": retrieval_result.unit_count,
-                            "latest_snapshot_id": previous_snapshot_id,
-                            "latest_fact_registry": current_fact_registry_payload,
-                        },
+                        error=error,
                     )
                 )
-            )
+                return ProcessDocumentCanonicalizationBarrierResult(
+                    outcome="prompt_c_failed",
+                    claim_count=retrieval_result.claim_count,
+                    canonicalization_unit_count=retrieval_result.unit_count,
+                    prompt_c_success_count=prompt_c_success_count,
+                    snapshot_apply_count=snapshot_apply_count,
+                    latest_snapshot_id=previous_snapshot_id,
+                    latest_snapshot_sequence_number=previous_snapshot_sequence_number,
+                )
             prompt_c_success_count += 1
 
             persisted = (

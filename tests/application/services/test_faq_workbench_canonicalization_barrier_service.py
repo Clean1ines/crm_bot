@@ -32,6 +32,7 @@ from src.domain.project_plane.knowledge_workbench import (
     RegistrySnapshot,
 )
 from src.domain.project_plane.llm_routing import (
+    LlmInvocationFailure,
     LlmInvocationStatus,
     LlmJsonInvocationResult,
     LlmRouteAttempt,
@@ -455,3 +456,96 @@ async def test_canonicalization_barrier_is_document_level_idempotent_when_comple
     assert generator.commands == []
     assert merge_service.commands == []
     assert application_service.commands == []
+
+
+class FailingRegistryMergeGenerator:
+    def __init__(self, error):
+        self.error = error
+        self.commands = []
+
+    async def generate_registry_updates(self, command):
+        self.commands.append(command)
+        raise self.error
+
+
+@dataclass(slots=True)
+class RecordingRegistryMergeService(FakeRegistryMergeService):
+    error_commands: list[object] = field(default_factory=list)
+
+    async def persist_registry_merge_generation_error(self, command):
+        self.error_commands.append(command)
+        return SimpleNamespace(
+            node_run=SimpleNamespace(node_run_id=command.node_run_id),
+            error_artifact=SimpleNamespace(),
+            lifecycle=SimpleNamespace(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_canonicalization_barrier_persists_prompt_c_generation_error() -> None:
+    from src.application.ports.faq_workbench_registry_merge_generator import (
+        FaqWorkbenchRegistryMergeGenerationError,
+    )
+
+    error_invocation = LlmJsonInvocationResult(
+        status=LlmInvocationStatus.INVALID_JSON,
+        parsed_json=None,
+        raw_text="{broken json",
+        token_usage=LlmTokenUsage(prompt_tokens=1, completion_tokens=1),
+        attempts=(
+            LlmRouteAttempt(
+                provider_id="groq",
+                model="llama-3.1-8b-instant",
+                api_key_slot="slot-1",
+                attempt_index=0,
+                status=LlmRouteAttemptStatus.FAILED,
+                error_kind="invalid_json",
+            ),
+        ),
+        failure=LlmInvocationFailure(
+            status=LlmInvocationStatus.INVALID_JSON,
+            error_kind="invalid_json",
+            user_message="Prompt C returned invalid JSON.",
+            internal_message="Prompt C invocation returned invalid JSON.",
+            cooldown_seconds=None,
+        ),
+    )
+    error = FaqWorkbenchRegistryMergeGenerationError(error_invocation)
+
+    repository = FakeRepository(registry=_registry())
+    retrieval = FakeRetrievalService(result=_retrieval_result(_unit("c1"), _unit("c2")))
+    generator = FailingRegistryMergeGenerator(error)
+    merge_service = RecordingRegistryMergeService()
+    application_service = FakeRegistryApplicationService()
+    service = FaqWorkbenchCanonicalizationBarrierService(
+        repository=repository,
+        local_claim_retrieval_service=retrieval,
+        registry_merge_generator=generator,
+        registry_merge_service=merge_service,
+        registry_application_service=application_service,
+        id_factory=MonotonicIdFactory(),
+    )
+
+    result = await service.process_document_canonicalization_barrier(
+        ProcessDocumentCanonicalizationBarrierCommand(
+            project_id="project-1",
+            document_id="document-1",
+            processing_run_id="processing-run-1",
+            worker_id="worker-1",
+        )
+    )
+
+    assert result.outcome == "prompt_c_failed"
+    assert result.made_progress is True
+    assert result.canonicalization_unit_count == 2
+    assert result.prompt_c_success_count == 0
+    assert result.snapshot_apply_count == 0
+    assert len(generator.commands) == 1
+    assert len(merge_service.error_commands) == 1
+    assert merge_service.error_commands[0].node_run_id == "node-run-1"
+    assert merge_service.error_commands[0].canonicalization_unit.unit_id == "unit-c1"
+    assert merge_service.error_commands[0].registry.registry_id == "registry-1"
+    assert merge_service.error_commands[0].error is error
+    assert application_service.commands == []
+    assert repository.created_node_runs == []
+    assert repository.created_artifacts == []
