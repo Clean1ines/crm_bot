@@ -2482,12 +2482,23 @@ class KnowledgeWorkbenchRepository(
         document_id: str,
         processing_run_id: str,
     ) -> None:
-        """Delete processing workspace after successful publication.
+        """Delete transient processing workspace after successful publication.
 
-        Final registry rows survive because migration 071 switches their
-        processing_run FKs to ON DELETE SET NULL. Node runs/artifacts,
-        findings, update applications and materialization results are deleted
-        through the processing_run cascade.
+        Durable state after publication:
+        - the Workbench document row;
+        - the final published fact registry snapshot;
+        - materialized canonical facts / relations / surfaces;
+        - production runtime vectors in knowledge_entries and
+          knowledge_retrieval_surface with entry_kind='faq_workbench_fact';
+        - persisted document/card summary fields.
+
+        Transient state removed here:
+        - pending execution queue jobs;
+        - pre-Prompt-C local claim retrieval vectors;
+        - Workbench-only debug runtime retrieval entries;
+        - non-final registry snapshots for the processing run;
+        - processing run workspace, including node runs/artifacts through FK
+          cascade.
         """
 
         async with _optional_workbench_transaction(self._connection):
@@ -2497,6 +2508,34 @@ class KnowledgeWorkbenchRepository(
                 WHERE task_type = 'process_workbench_document'
                   AND payload::jsonb ->> 'project_id' = $1
                   AND payload::jsonb ->> 'document_id' = $2
+                """,
+                project_id,
+                document_id,
+            )
+
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_local_claim_retrieval_entries
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND processing_run_id = $3
+                """,
+                project_id,
+                document_id,
+                processing_run_id,
+            )
+
+            await self._connection.execute(
+                """
+                DELETE FROM knowledge_workbench_runtime_retrieval_entries
+                WHERE project_id = $1::uuid
+                  AND fact_id IN (
+                      SELECT fact.fact_id
+                      FROM knowledge_workbench_canonical_facts AS fact
+                      WHERE fact.project_id = $1::uuid
+                        AND fact.document_id = $2
+                        AND fact.status = 'active'
+                  )
                 """,
                 project_id,
                 document_id,
