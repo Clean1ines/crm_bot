@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Awaitable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -28,6 +28,15 @@ class LocalClaimRetrievalSurfaceEmbeddingPort(Protocol):
 
 
 class LocalClaimRetrievalSurfaceRepositoryPort(Protocol):
+    async def has_indexed_local_claim_retrieval_entries_for_node_run(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+        node_run_id: str,
+    ) -> bool: ...
+
     async def replace_local_claim_retrieval_entries(
         self,
         *,
@@ -68,6 +77,37 @@ class LocalClaimRetrievalSurfaceEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class CheckLocalClaimRetrievalSurfaceIndexedCommand:
+    project_id: str
+    document_id: str
+    processing_run_id: str
+    node_run_id: str
+
+    def __post_init__(self) -> None:
+        if not self.project_id:
+            raise DomainInvariantError(
+                "local claim retrieval surface index check requires project_id"
+            )
+        if not self.document_id:
+            raise DomainInvariantError(
+                "local claim retrieval surface index check requires document_id"
+            )
+        if not self.processing_run_id:
+            raise DomainInvariantError(
+                "local claim retrieval surface index check requires processing_run_id"
+            )
+        if not self.node_run_id:
+            raise DomainInvariantError(
+                "local claim retrieval surface index check requires node_run_id"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CheckLocalClaimRetrievalSurfaceIndexedResult:
+    indexed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class IndexDocumentLocalClaimRetrievalSurfaceCommand:
     project_id: str
     document_id: str
@@ -88,10 +128,7 @@ class IndexDocumentLocalClaimRetrievalSurfaceCommand:
             raise DomainInvariantError(
                 "local claim retrieval surface indexing requires processing_run_id"
             )
-        if (
-            self.min_vector_similarity_score < 0
-            or self.min_vector_similarity_score > 1
-        ):
+        if self.min_vector_similarity_score < 0 or self.min_vector_similarity_score > 1:
             raise DomainInvariantError(
                 "local claim retrieval surface min_vector_similarity_score must be in [0, 1]"
             )
@@ -113,6 +150,18 @@ class FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService:
     graph_loader: FaqWorkbenchLocalClaimGraphLoaderService
     repository: LocalClaimRetrievalSurfaceRepositoryPort
     embedding_service: LocalClaimRetrievalSurfaceEmbeddingPort
+
+    async def has_indexed_node_run(
+        self,
+        command: CheckLocalClaimRetrievalSurfaceIndexedCommand,
+    ) -> CheckLocalClaimRetrievalSurfaceIndexedResult:
+        indexed = await self.repository.has_indexed_local_claim_retrieval_entries_for_node_run(
+            project_id=command.project_id,
+            document_id=command.document_id,
+            processing_run_id=command.processing_run_id,
+            node_run_id=command.node_run_id,
+        )
+        return CheckLocalClaimRetrievalSurfaceIndexedResult(indexed=indexed)
 
     async def index_document_local_claim_retrieval_surface(
         self,
@@ -285,6 +334,8 @@ def _cosine_score_0_1(
 
 
 __all__ = [
+    "CheckLocalClaimRetrievalSurfaceIndexedCommand",
+    "CheckLocalClaimRetrievalSurfaceIndexedResult",
     "FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService",
     "IndexDocumentLocalClaimRetrievalSurfaceCommand",
     "IndexDocumentLocalClaimRetrievalSurfaceResult",

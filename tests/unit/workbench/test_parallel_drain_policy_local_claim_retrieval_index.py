@@ -6,7 +6,9 @@ from src.domain.project_plane.knowledge_workbench import (
 )
 
 
-def test_barrier_waits_until_every_prompt_a_artifact_has_local_claim_retrieval_index() -> None:
+def test_barrier_waits_until_every_prompt_a_artifact_has_local_claim_retrieval_index() -> (
+    None
+):
     counts = ParallelDrainWorkCounts(
         section_claim_observations_persisted=3,
     )
@@ -47,4 +49,6 @@ def test_barrier_can_start_after_prompt_a_artifacts_are_indexed_for_retrieval() 
     )
 
     assert readiness.decision is ParallelFinalizationDecision.CAN_FINALIZE
-    assert readiness.reason == "all section claim observations are indexed for retrieval"
+    assert (
+        readiness.reason == "all section claim observations are indexed for retrieval"
+    )

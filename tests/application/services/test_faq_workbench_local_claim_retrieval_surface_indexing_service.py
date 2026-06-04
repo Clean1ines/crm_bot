@@ -133,7 +133,9 @@ async def test_indexes_local_claim_search_documents_and_returns_vector_edges() -
 
 
 @pytest.mark.asyncio
-async def test_empty_local_claim_documents_replace_existing_index_with_empty_set() -> None:
+async def test_empty_local_claim_documents_replace_existing_index_with_empty_set() -> (
+    None
+):
     repository = FakeRepository()
     service = FaqWorkbenchLocalClaimRetrievalSurfaceIndexingService(
         graph_loader=FakeGraphLoader(),

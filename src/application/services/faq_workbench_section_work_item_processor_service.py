@@ -10,6 +10,7 @@ from src.domain.project_plane.knowledge_workbench import (
     JsonValue,
 )
 from src.application.services.faq_workbench_local_claim_retrieval_surface_indexing_service import (
+    CheckLocalClaimRetrievalSurfaceIndexedCommand,
     IndexDocumentLocalClaimRetrievalSurfaceCommand,
 )
 from src.domain.project_plane.knowledge_workbench.section_batch_queue import (
@@ -80,6 +81,11 @@ class LeasedClaimObservationsRunnerPort(Protocol):
 
 
 class LocalClaimRetrievalSurfaceIndexingPort(Protocol):
+    async def has_indexed_node_run(
+        self,
+        command: CheckLocalClaimRetrievalSurfaceIndexedCommand,
+    ) -> object: ...
+
     async def index_document_local_claim_retrieval_surface(
         self,
         command: IndexDocumentLocalClaimRetrievalSurfaceCommand,
@@ -210,6 +216,22 @@ class FaqWorkbenchSectionWorkItemProcessorService:
     ) -> None:
         if self.local_claim_retrieval_surface_indexing_service is None:
             return
+        if queue_item.claim_observations_node_run_id is None:
+            raise DomainInvariantError(
+                "local claim retrieval surface indexing requires claim observations node run"
+            )
+
+        indexed_result = await self.local_claim_retrieval_surface_indexing_service.has_indexed_node_run(
+            CheckLocalClaimRetrievalSurfaceIndexedCommand(
+                project_id=queue_item.project_id,
+                document_id=queue_item.document_id,
+                processing_run_id=queue_item.processing_run_id,
+                node_run_id=queue_item.claim_observations_node_run_id,
+            )
+        )
+        if bool(getattr(indexed_result, "indexed", False)):
+            return
+
         await self.local_claim_retrieval_surface_indexing_service.index_document_local_claim_retrieval_surface(
             IndexDocumentLocalClaimRetrievalSurfaceCommand(
                 project_id=queue_item.project_id,

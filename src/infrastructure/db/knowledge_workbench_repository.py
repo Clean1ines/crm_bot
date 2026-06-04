@@ -154,6 +154,32 @@ class KnowledgeWorkbenchRepository(
     def __init__(self, connection: WorkbenchDbConnection) -> None:
         self._connection = connection
 
+    async def has_indexed_local_claim_retrieval_entries_for_node_run(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+        node_run_id: str,
+    ) -> bool:
+        row = await self._connection.fetchrow(
+            """
+            SELECT 1 AS indexed
+            FROM knowledge_workbench_local_claim_retrieval_entries
+            WHERE project_id = $1::uuid
+              AND document_id = $2
+              AND processing_run_id = $3
+              AND node_run_id = $4
+              AND status = 'indexed'
+            LIMIT 1
+            """,
+            project_id,
+            document_id,
+            processing_run_id,
+            node_run_id,
+        )
+        return row is not None
+
     async def replace_local_claim_retrieval_entries(
         self,
         *,
