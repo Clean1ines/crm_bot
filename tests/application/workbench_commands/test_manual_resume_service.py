@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from datetime import datetime, timezone
 
 import pytest
@@ -293,3 +295,12 @@ async def test_manual_resume_rejects_deleted_document() -> None:
         )
 
     assert queue.payloads == []
+
+
+def test_manual_resume_service_is_queue_type_agnostic() -> None:
+    source = Path("src/application/workbench_commands/manual_resume.py").read_text()
+
+    assert "WorkbenchQueueAdapter" not in source
+    assert "WorkbenchParallelQueueAdapter" not in source
+    assert "src.infrastructure.queue.workbench_queue" not in source
+    assert "src.infrastructure.queue.workbench_parallel_queue" not in source
