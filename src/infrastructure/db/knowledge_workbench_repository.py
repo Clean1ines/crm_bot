@@ -48,6 +48,7 @@ from src.domain.project_plane.knowledge_workbench import (
     ParallelDrainWorkCounts,
     ParallelProcessingIntegrityCounts,
     FactRegistry,
+    FactRegistryStatus,
     RegistryUpdateApplication,
 )
 from src.domain.project_plane.knowledge_workbench.local_claim_retrieval import (
@@ -1092,6 +1093,48 @@ class KnowledgeWorkbenchRepository(
                 )
             )
         return tuple(sections)
+
+    async def get_fact_registry_for_run(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> FactRegistry | None:
+        row = await self._connection.fetchrow(
+            """
+            SELECT
+                registry_id,
+                project_id,
+                document_id,
+                processing_run_id,
+                status,
+                version,
+                created_at,
+                updated_at
+            FROM knowledge_workbench_fact_registries
+            WHERE project_id = $1::uuid
+              AND document_id = $2
+              AND processing_run_id = $3
+            ORDER BY version DESC, updated_at DESC
+            LIMIT 1
+            """,
+            project_id,
+            document_id,
+            processing_run_id,
+        )
+        if row is None:
+            return None
+        return FactRegistry(
+            registry_id=str(row["registry_id"]),
+            project_id=str(row["project_id"]),
+            document_id=str(row["document_id"]),
+            processing_run_id=str(row["processing_run_id"]),
+            status=FactRegistryStatus(str(row["status"])),
+            version=self._int_from_db(row["version"]),
+            created_at=self._datetime_from_db(row["created_at"]),
+            updated_at=self._datetime_from_db(row["updated_at"]),
+        )
 
     async def get_processing_run(
         self,
