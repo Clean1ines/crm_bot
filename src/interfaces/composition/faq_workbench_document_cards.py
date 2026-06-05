@@ -61,13 +61,7 @@ class WorkbenchDocumentCardsQuery:
                 COALESCE(registry_summary.canonical_fact_count, 0) AS canonical_fact_count,
                 registry_summary.final_registry_snapshot_id,
                 COALESCE(runtime_summary.runtime_entry_count, 0) AS runtime_entry_count,
-                NULL::text AS publication_id,
-                0::int AS surface_draft_count,
-                0::int AS surface_ready_count,
-                0::int AS surface_published_count,
-                0::int AS surface_rejected_count,
-                NULL::text AS curation_session_id,
-                NULL::text AS curation_session_status
+                NULL::text AS publication_id
             FROM knowledge_workbench_documents AS d
             LEFT JOIN knowledge_workbench_processing_runs AS pr
               ON pr.project_id = d.project_id
@@ -108,8 +102,16 @@ class WorkbenchDocumentCardsQuery:
                 SELECT COUNT(*)::int AS runtime_entry_count
                 FROM knowledge_workbench_runtime_retrieval_entries AS rte
                 WHERE rte.project_id = d.project_id
-                  AND rte.document_id = d.document_id
                   AND rte.status = 'published'
+                  AND rte.visibility = 'runtime'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM knowledge_workbench_canonical_facts AS f
+                      WHERE f.project_id = d.project_id
+                        AND f.document_id = d.document_id
+                        AND f.fact_id = rte.fact_id
+                        AND f.status <> 'deleted'
+                  )
             ) AS runtime_summary ON TRUE
             WHERE d.project_id = $1
               AND d.deleted_at IS NULL
