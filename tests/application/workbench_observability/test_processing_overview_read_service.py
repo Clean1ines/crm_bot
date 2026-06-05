@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import Mapping, Sequence
 
 import pytest
 
@@ -122,7 +122,12 @@ async def test_processing_overview_summarizes_workbench_documents_and_node_runs(
     ).fetch_processing_overview(project_id="project-1")
 
     assert payload["project_id"] == "project-1"
-    assert payload["items"] is payload["documents"]
+
+    # Single-source card invariant:
+    # GET /knowledge is the only endpoint allowed to return document cards.
+    assert "documents" not in payload
+    assert "items" not in payload
+
     assert payload["summary"] == {
         "documents_total": 2,
         "active_documents": 1,
@@ -147,9 +152,9 @@ async def test_processing_overview_summarizes_workbench_documents_and_node_runs(
         "completed": 1,
         "failed": 1,
     }
-    assert payload["active_documents"][0]["document_id"] == "document-1"
-    assert payload["failed_documents"][0]["document_id"] == "document-2"
-    assert payload["resumable_documents"][0]["document_id"] == "document-2"
+    assert payload["active_document_ids"] == ["document-1"]
+    assert payload["failed_document_ids"] == ["document-2"]
+    assert payload["resumable_document_ids"] == ["document-2"]
     assert query.calls == ["documents:project-1", "node_runs:project-1"]
 
 
@@ -162,7 +167,11 @@ async def test_processing_overview_allows_empty_project() -> None:
     ).fetch_processing_overview(project_id="project-1")
 
     assert payload["summary"]["documents_total"] == 0
-    assert payload["documents"] == []
+    assert "documents" not in payload
+    assert "items" not in payload
+    assert payload["active_document_ids"] == []
+    assert payload["failed_document_ids"] == []
+    assert payload["resumable_document_ids"] == []
     assert payload["status_counts"] == {
         "documents": {},
         "processing_runs": {},
