@@ -176,6 +176,124 @@ class KnowledgeWorkbenchRepository(
     def __init__(self, connection: WorkbenchDbConnection) -> None:
         self._connection = connection
 
+    async def persist_document_delete_transition(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        current_processing_run_id: str | None,
+        document_status: KnowledgeDocumentStatus,
+        processing_run_status: ProcessingRunStatus | None,
+        deleted_at: datetime,
+    ) -> None:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_documents
+                SET status = $3,
+                    current_processing_run_id = NULL,
+                    deleted_at = $4,
+                    updated_at = $4
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+                document_status.value,
+                deleted_at,
+            )
+
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_document_sections
+                SET status = 'deleted',
+                    updated_at = $3
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND status <> 'deleted'
+                """,
+                project_id,
+                document_id,
+                deleted_at,
+            )
+
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_section_batch_queue_items
+                SET status = 'cancelled',
+                    claimed_by_worker_id = NULL,
+                    lease_expires_at = NULL,
+                    error_kind = 'document_deleted',
+                    updated_at = $3
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND status IN ('ready', 'leased')
+                """,
+                project_id,
+                document_id,
+                deleted_at,
+            )
+
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_fact_registry_application_queue
+                SET status = 'cancelled',
+                    claimed_by_worker_id = NULL,
+                    lease_expires_at = NULL,
+                    updated_at = $3
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                  AND status IN ('ready', 'leased')
+                """,
+                project_id,
+                document_id,
+                deleted_at,
+            )
+
+            if (
+                current_processing_run_id is not None
+                and processing_run_status is not None
+            ):
+                await self._connection.execute(
+                    """
+                    UPDATE knowledge_workbench_processing_runs
+                    SET status = $4,
+                        resume_policy = 'forbidden',
+                        stopped_at = COALESCE(stopped_at, $5),
+                        completed_at = COALESCE(completed_at, $5),
+                        deleted_at = $5,
+                        last_error_kind = 'document_deleted',
+                        last_user_message = 'Документ удалён пользователем.',
+                        last_internal_error = NULL
+                    WHERE project_id = $1::uuid
+                      AND document_id = $2
+                      AND processing_run_id = $3
+                    """,
+                    project_id,
+                    document_id,
+                    current_processing_run_id,
+                    processing_run_status.value,
+                    deleted_at,
+                )
+
+            await self._connection.execute(
+                """
+                UPDATE execution_queue
+                SET status = 'cancelled',
+                    locked_by = NULL,
+                    locked_at = NULL,
+                    error_message = 'document_deleted',
+                    updated_at = $3
+                WHERE task_type = 'process_workbench_parallel_processing'
+                  AND status IN ('pending', 'processing')
+                  AND payload ->> 'project_id' = $1
+                  AND payload ->> 'document_id' = $2
+                """,
+                project_id,
+                document_id,
+                deleted_at,
+            )
+
     async def cleanup_document_final_retrieval_projections(
         self,
         *,
