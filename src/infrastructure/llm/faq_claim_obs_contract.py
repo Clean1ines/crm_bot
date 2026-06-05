@@ -23,7 +23,9 @@ _ALLOWED = {
 
 class FaqClaimObsContractGenerator(FaqWorkbenchClaimObservationsGenerator):
     def _parse_claim_observation(self, raw_observation: dict[str, JsonValue], *, index: int) -> dict[str, JsonValue]:
-        parsed = dict(super()._parse_claim_observation(raw_observation, index=index))
+        normalized = dict(raw_observation)
+        normalized["scope"] = self._optional_str(raw_observation, "scope", index=index) or "__global__"
+        parsed = dict(super()._parse_claim_observation(normalized, index=index))
         parsed["scope"] = self._optional_str(raw_observation, "scope", index=index) or ""
         parsed["local_relations"] = self._relations(raw_observation, index=index)
         self._assert_json_value(cast(JsonValue, parsed))

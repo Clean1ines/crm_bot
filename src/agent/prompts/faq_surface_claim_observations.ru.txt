@@ -1,9 +1,10 @@
 NODE: faq_claim_observations
-Ты получаешь один фрагмент документа.
 
-Задача: извлечь claims — самостоятельные единицы знания, которые пользователь может захотеть получить из документа.
+Ты получаешь один фрагмент документа и возвращаешь только один JSON object.
 
-Claim — это единица знания, подтверждённая текстом. Claim может быть атомарным или составным.
+Твоя задача: извлечь claims — самостоятельные единицы знания, подтверждённые текстом фрагмента.
+
+Claim — это единица знания, которую пользователь может захотеть найти или получить как ответ. Claim может быть атомарным или составным.
 
 Claim может описывать:
 
@@ -19,63 +20,172 @@ Claim может описывать:
 * критерий;
 * набор примеров;
 * ценность;
-* исключение.
+* исключение;
+* другое знание.
 
 Факт не обязан быть микрофактом.
 Если список, процесс, набор условий или набор примеров вместе отвечают на один смысловой запрос, оставь их одним composite claim.
 Дроби только тогда, когда часть блока является самостоятельным знанием, которое полезно искать отдельно.
 
-Для каждого claim верни:
+КРИТИЧЕСКИЕ ПРАВИЛА JSON-КОНТРАКТА
 
-* краткую canonical формулировку;
-* тип claim;
-* granularity;
-* RDF-like triples;
-* evidence_block;
-* possible_questions;
-* scope;
-* exclusion_scope;
-* связи с другими claims внутри этого же результата.
+1. Верни только JSON object. Никакого markdown, комментариев, пояснений, текста до или после JSON.
+2. Top-level ключ должен быть ровно: "claims".
+3. "claims" всегда должен быть массивом. Если во фрагменте нет полезных claims, верни "claims": [].
+4. Каждый claim object обязан содержать все поля из схемы ниже.
+5. Не пропускай обязательные поля.
+6. Не используй null.
+7. Для неизвестных или отсутствующих границ используй пустую строку "".
+8. Для отсутствующих списков используй пустой массив [].
+9. Значения enum-полей — это технические токены. Их нельзя переводить, склонять, заменять синонимами или придумывать.
+10. Если подходящего enum-токена нет, используй ближайший разрешённый токен или "other" только для claim_kind.
+11. Никогда не используй predicate/relation вне controlled list.
+12. Никогда не используй естественные синонимы вместо enum-токенов: например, нельзя "helps", "contains", "means", "relates_to", "describes", если их нет в controlled list.
 
-Controlled claim_kind:
+Controlled claim_kind — используй только один из этих токенов:
+
 definition | property | capability | limitation | rule | condition | process | list | comparison | criterion | example_set | value | exception | other
 
-Controlled predicates:
+Как выбирать claim_kind:
+
+* definition — текст объясняет, что такое объект/понятие;
+* property — текст описывает свойство объекта;
+* capability — текст говорит, что объект/система может делать;
+* limitation — текст говорит, чего объект/система не может или где есть ограничение;
+* rule — текст задаёт правило;
+* condition — текст задаёт условие;
+* process — текст описывает последовательность действий;
+* list — текст даёт список элементов;
+* comparison — текст сравнивает объекты;
+* criterion — текст задаёт критерий оценки/выбора;
+* example_set — текст даёт набор примеров;
+* value — текст описывает ценность/пользу;
+* exception — текст задаёт исключение;
+* other — только если ни один другой тип не подходит.
+
+Controlled predicates — используй только один из этих токенов:
+
 is_a | is_not | has_property | has_capability | has_limitation | requires | supports | uses | produces | includes | has_item | has_step | has_condition | has_result | has_value | has_example | differs_from | excludes | causes | enables | prevents | depends_on | applies_when
 
-Controlled local relation:
+Как выбирать predicate:
+
+* is_a — субъект является типом/примером/определением объекта;
+* is_not — субъект явно не является объектом;
+* has_property — субъект имеет свойство;
+* has_capability — субъект может выполнять действие;
+* has_limitation — субъект имеет ограничение;
+* requires — субъект требует prerequisite/условие/ресурс;
+* supports — субъект объясняет, подтверждает или обосновывает объект;
+* uses — субъект использует объект/инструмент/ресурс;
+* produces — субъект создаёт результат;
+* includes — субъект включает несколько частей/элементов;
+* has_item — список/набор содержит элемент;
+* has_step — процесс содержит шаг;
+* has_condition — правило/процесс содержит условие;
+* has_result — действие/процесс имеет результат;
+* has_value — объект имеет ценность/пользу;
+* has_example — объект имеет пример;
+* differs_from — субъект отличается от объекта;
+* excludes — субъект явно исключает объект;
+* causes — субъект вызывает объект;
+* enables — субъект делает объект возможным;
+* prevents — субъект предотвращает объект;
+* depends_on — субъект зависит от объекта;
+* applies_when — claim применим при условии/контексте.
+
+Важно:
+
+* Не используй "helps". Если смысл “система помогает делать X”, обычно это has_capability или enables.
+* Не используй "contains". Если смысл “содержит/включает”, используй includes или has_item.
+* Не используй "means". Если смысл “является/означает”, используй is_a или has_property.
+* Не используй "relates_to". Если связь не ясна, не создавай triple или relation.
+
+Controlled local relation — используй только один из этих токенов:
+
 part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for
 
 Relation meanings:
-same_meaning — claims express the same knowledge.
-part_of — source claim is a component of target claim.
-has_part — source claim contains target claim as a component.
-narrows — source claim is a more specific case.
-broadens — source claim is more general.
-refines — source claim makes wording, boundary, condition, or scope more precise without adding a large new content block.
-extends — source claim adds new substantial content.
-overlaps — claims share topic but assert different aspects.
-contradicts — claims are incompatible.
-supports — source claim explains or justifies target claim.
-sets_boundary_for — source claim defines what target claim does not cover.
+
+* same_meaning — claims выражают одно и то же знание;
+* part_of — source claim является компонентом target claim;
+* has_part — source claim содержит target claim как компонент;
+* narrows — source claim является более узким случаем target claim;
+* broadens — source claim является более общим знанием;
+* refines — source claim уточняет формулировку, границу, условие или scope без большого нового блока содержания;
+* extends — source claim добавляет новое существенное содержание;
+* overlaps — claims относятся к одной теме, но утверждают разные аспекты;
+* contradicts — claims несовместимы;
+* supports — source claim объясняет или обосновывает target claim;
+* sets_boundary_for — source claim задаёт границу применимости target claim.
+
+Правила для local_relations:
+
+1. local_relations описывает связи только между claims внутри текущего результата.
+2. target_ref должен ссылаться на существующий local_ref из этого же массива claims.
+3. Каждый объект local_relations обязан содержать target_ref, relation и reason.
+4. reason обязателен. Не пропускай reason.
+5. reason — короткое объяснение на русском языке, почему эта связь существует.
+6. Если связи между claims не очевидны, верни local_relations: [].
+7. Если claim только один, обычно верни local_relations: [].
+8. Не создавай placeholder-связи.
 
 RDF-like triple:
+
 subject → predicate → object
 
-Use only predicates from the controlled predicate list.
+Правила для triples:
 
-JSON output:
+1. Каждый claim обязан иметь хотя бы один triple.
+2. Каждый triple обязан содержать subject, predicate, object, qualifiers.
+3. qualifiers всегда массив.
+4. Если qualifiers нет, используй [].
+5. predicate обязан быть одним из controlled predicates.
+6. subject и object должны быть короткими текстовыми формулировками, основанными на evidence_block.
+7. Не добавляй triple, если он не подтверждён фрагментом.
+
+Правила для evidence_block:
+
+1. evidence_block обязателен.
+2. evidence_block должен быть точной или близкой цитатой/выдержкой из исходного фрагмента.
+3. Не добавляй claim без evidence_block.
+4. Не выдумывай evidence.
+
+Правила для possible_questions:
+
+1. possible_questions всегда массив строк.
+2. Вопросы должны быть такими, которые пользователь реально мог бы задать.
+3. Если вопрос не очевиден, используй [].
+4. Не создавай слишком много вопросов: обычно 1–3 достаточно.
+
+Правила для scope и exclusion_scope:
+
+1. scope — граница, внутри которой claim верен.
+2. Если граница не указана в источнике, используй "".
+3. exclusion_scope — что claim явно не покрывает или исключает.
+4. Если исключение не указано в источнике, используй "".
+5. Не выдумывай scope или exclusion_scope.
+
+Правила для confidence:
+
+1. confidence — число от 0.0 до 1.0.
+2. Используй 0.9–1.0, если claim прямо подтверждён текстом.
+3. Используй 0.7–0.89, если claim требует небольшой интерпретации.
+4. Используй меньше 0.7 только если claim слабый, но всё ещё полезный.
+5. Не добавляй claim, если confidence ниже 0.5.
+
+JSON output schema:
+
 {
 "claims": [
 {
 "local_ref": "c1",
 "claim": "",
-"claim_kind": "definition | property | capability | limitation | rule | condition | process | list | comparison | criterion | example_set | value | exception | other",
-"granularity": "atomic | composite",
+"claim_kind": "definition",
+"granularity": "atomic",
 "triples": [
 {
 "subject": "",
-"predicate": "is_a | is_not | has_property | has_capability | has_limitation | requires | supports | uses | produces | includes | has_item | has_step | has_condition | has_result | has_value | has_example | differs_from | excludes | causes | enables | prevents | depends_on | applies_when",
+"predicate": "has_capability",
 "object": "",
 "qualifiers": []
 }
@@ -84,14 +194,77 @@ JSON output:
 "possible_questions": [],
 "scope": "",
 "exclusion_scope": "",
-"local_relations": [
-{
-"target_ref": "c2",
-"relation": "part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for",
-"reason": ""
-}
-],
-"confidence": 0.0
+"local_relations": [],
+"confidence": 0.9
 }
 ]
 }
+
+Пример валидного результата:
+
+{
+"claims": [
+{
+"local_ref": "c1",
+"claim": "Бот может отвечать клиентам в Telegram.",
+"claim_kind": "capability",
+"granularity": "atomic",
+"triples": [
+{
+"subject": "бот",
+"predicate": "has_capability",
+"object": "отвечать клиентам в Telegram",
+"qualifiers": []
+}
+],
+"evidence_block": "Бот отвечает клиентам в Telegram",
+"possible_questions": [
+"Может ли бот отвечать клиентам в Telegram?"
+],
+"scope": "Telegram",
+"exclusion_scope": "",
+"local_relations": [],
+"confidence": 0.9
+},
+{
+"local_ref": "c2",
+"claim": "Бот передаёт сложные вопросы менеджеру.",
+"claim_kind": "capability",
+"granularity": "atomic",
+"triples": [
+{
+"subject": "бот",
+"predicate": "has_capability",
+"object": "передавать сложные вопросы менеджеру",
+"qualifiers": []
+}
+],
+"evidence_block": "передаёт сложные вопросы менеджеру",
+"possible_questions": [
+"Что бот делает со сложными вопросами?"
+],
+"scope": "",
+"exclusion_scope": "",
+"local_relations": [
+{
+"target_ref": "c1",
+"relation": "extends",
+"reason": "Claim c2 добавляет к возможности отвечать клиентам отдельное действие для сложных вопросов."
+}
+],
+"confidence": 0.9
+}
+]
+}
+
+Перед финальным ответом проверь себя:
+
+* top-level ключ ровно "claims";
+* каждый claim содержит все обязательные поля;
+* каждый triple содержит subject, predicate, object, qualifiers;
+* каждый predicate взят только из controlled predicates;
+* каждый local_relation содержит target_ref, relation, reason;
+* каждый relation взят только из controlled local relation;
+* нет null;
+* нет markdown;
+* нет текста вне JSON.
