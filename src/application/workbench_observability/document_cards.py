@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 
-class WorkbenchDocumentListQueryPort:
+class WorkbenchDocumentListQueryPort(Protocol):
     async def list_workbench_documents(
         self,
         *,
@@ -62,9 +63,7 @@ def _document_payload(row: Mapping[str, object]) -> dict[str, object]:
         "chunk_count": _int(row.get("section_count")),
         "created_at": _iso(row.get("created_at")),
         "updated_at": _iso(row.get("updated_at")),
-        "current_processing_run_id": _nullable_text(
-            row.get("current_processing_run_id")
-        )
+        "current_processing_run_id": _nullable_text(row.get("current_processing_run_id"))
         or _nullable_text(row.get("processing_run_id")),
         "preprocessing_metrics": _legacy_metrics(row, card_view),
         "card_view": card_view,
@@ -72,8 +71,6 @@ def _document_payload(row: Mapping[str, object]) -> dict[str, object]:
 
 
 def _card_view(row: Mapping[str, object]) -> dict[str, object]:
-    document_id = _text(row.get("document_id"))
-    project_id = _text(row.get("project_id"))
     processing_status = _nullable_text(row.get("processing_status"))
     document_status = _text(row.get("status")) or "uploaded"
     lifecycle_state = processing_status or document_status
@@ -97,10 +94,9 @@ def _card_view(row: Mapping[str, object]) -> dict[str, object]:
         "processed",
         "completed",
     }
-
     return {
-        "document_id": document_id,
-        "project_id": project_id,
+        "document_id": _text(row.get("document_id")),
+        "project_id": _text(row.get("project_id")),
         "file_name": _text(row.get("file_name")) or "document",
         "source_type": _text(row.get("source_type")) or "markdown",
         "lifecycle_state": lifecycle_state,
@@ -109,7 +105,6 @@ def _card_view(row: Mapping[str, object]) -> dict[str, object]:
         "resume_available": _resume_available(row, lifecycle_state),
         "status_i18n_key": f"knowledge.workbench.status.{_status_bucket(lifecycle_state)}",
         "default_status_label": _status_label(
-            lifecycle_state,
             is_published=is_published,
             is_failed=is_failed,
             is_running=is_running,
@@ -119,7 +114,6 @@ def _card_view(row: Mapping[str, object]) -> dict[str, object]:
             f"knowledge.workbench.statusDescription.{_status_bucket(lifecycle_state)}"
         ),
         "default_status_description": _status_description(
-            lifecycle_state,
             is_published=is_published,
             is_failed=is_failed,
             is_running=is_running,
@@ -144,12 +138,6 @@ def _card_view(row: Mapping[str, object]) -> dict[str, object]:
             "final_snapshot_id": _nullable_text(row.get("final_registry_snapshot_id")),
             "retained": _bool(row.get("registry_retained")),
         },
-        "surfaces": {
-            "draft_count": _int(row.get("surface_draft_count")),
-            "ready_count": _int(row.get("surface_ready_count")),
-            "published_count": _int(row.get("surface_published_count")),
-            "rejected_count": _int(row.get("surface_rejected_count")),
-        },
         "runtime": {
             "publication_id": _nullable_text(row.get("publication_id")),
             "runtime_entry_count": runtime_entry_count,
@@ -162,16 +150,11 @@ def _card_view(row: Mapping[str, object]) -> dict[str, object]:
             "processing_run_id": _nullable_text(row.get("processing_run_id")),
             "processing_status": processing_status,
             "processing_trigger": _nullable_text(row.get("processing_trigger")),
-            "curation_session_id": _nullable_text(row.get("curation_session_id")),
-            "curation_session_status": _nullable_text(row.get("curation_session_status")),
         },
     }
 
 
-def _legacy_metrics(
-    row: Mapping[str, object],
-    card_view: Mapping[str, object],
-) -> dict[str, object]:
+def _legacy_metrics(row: Mapping[str, object], card_view: Mapping[str, object]) -> dict[str, object]:
     return {
         "status_message": card_view["default_status_description"],
         "raw_source_chunk_count": _int(row.get("section_count")),
@@ -185,7 +168,11 @@ def _legacy_metrics(
 
 
 def _timer(row: Mapping[str, object], lifecycle_state: str) -> dict[str, object]:
-    mode = "running" if lifecycle_state in {"pending", "queued", "running", "processing", "sectioned"} else "stopped"
+    mode = (
+        "running"
+        if lifecycle_state in {"pending", "queued", "running", "processing", "sectioned"}
+        else "stopped"
+    )
     if lifecycle_state in {"completed", "processed"}:
         mode = "completed"
     if lifecycle_state == "published":
@@ -235,44 +222,13 @@ def _recovery(row: Mapping[str, object]) -> dict[str, object]:
 def _actions(row: Mapping[str, object], lifecycle_state: str) -> list[dict[str, object]]:
     running = lifecycle_state in {"pending", "queued", "running", "processing", "sectioned"}
     resume = _resume_available(row, lifecycle_state)
-    publish_ready = _int(row.get("surface_ready_count")) > 0 or _int(row.get("canonical_fact_count")) > 0
+    publish_ready = _int(row.get("canonical_fact_count")) > 0
     return [
-        _action(
-            "cancel_processing",
-            visible=running,
-            enabled=running,
-            tone="warning",
-            label="Остановить",
-        ),
-        _action(
-            "resume_processing",
-            visible=resume,
-            enabled=resume,
-            tone="primary",
-            label="Продолжить обработку",
-        ),
-        _action(
-            "open_curation",
-            visible=True,
-            enabled=True,
-            tone="secondary",
-            label="Trace и курация",
-        ),
-        _action(
-            "publish_ready",
-            visible=publish_ready,
-            enabled=publish_ready and not running,
-            tone="primary",
-            label="Опубликовать",
-        ),
-        _action(
-            "delete_document",
-            visible=True,
-            enabled=True,
-            tone="danger",
-            label="Удалить",
-            confirmation="Удалить документ и связанные данные?",
-        ),
+        _action("cancel_processing", visible=running, enabled=running, tone="warning", label="Остановить"),
+        _action("resume_processing", visible=resume, enabled=resume, tone="primary", label="Продолжить обработку"),
+        _action("open_curation", visible=True, enabled=True, tone="secondary", label="Trace"),
+        _action("publish_ready", visible=publish_ready, enabled=publish_ready and not running, tone="primary", label="Опубликовать"),
+        _action("delete_document", visible=True, enabled=True, tone="danger", label="Удалить", confirmation="Удалить документ?"),
     ]
 
 
@@ -299,59 +255,24 @@ def _action(
 
 
 def _messages(row: Mapping[str, object], lifecycle_state: str) -> list[dict[str, object]]:
-    error_message = _nullable_text(row.get("processing_last_user_message")) or _nullable_text(
-        row.get("last_error_message")
-    )
+    error_message = _nullable_text(row.get("processing_last_user_message")) or _nullable_text(row.get("last_error_message"))
     if error_message:
-        return [
-            {
-                "code": _nullable_text(row.get("processing_last_error_kind")) or "processing_error",
-                "severity": "error",
-                "i18n_key": "knowledge.workbench.messages.processingError",
-                "default_message": error_message,
-                "debug_ref": _nullable_text(row.get("last_error_report_id")),
-            }
-        ]
+        return [{"code": _nullable_text(row.get("processing_last_error_kind")) or "processing_error", "severity": "error", "i18n_key": "knowledge.workbench.messages.processingError", "default_message": error_message, "debug_ref": _nullable_text(row.get("last_error_report_id"))}]
     if lifecycle_state in {"pending", "queued", "running", "processing", "sectioned"}:
-        return [
-            {
-                "code": "processing",
-                "severity": "info",
-                "i18n_key": "knowledge.workbench.messages.processing",
-                "default_message": "Документ принят и обрабатывается Workbench-пайплайном.",
-                "debug_ref": None,
-            }
-        ]
+        return [{"code": "processing", "severity": "info", "i18n_key": "knowledge.workbench.messages.processing", "default_message": "Документ принят и обрабатывается Workbench-пайплайном.", "debug_ref": None}]
     return []
 
 
 def _error(row: Mapping[str, object]) -> dict[str, object] | None:
-    message = _nullable_text(row.get("processing_last_user_message")) or _nullable_text(
-        row.get("last_error_message")
-    )
+    message = _nullable_text(row.get("processing_last_user_message")) or _nullable_text(row.get("last_error_message"))
     if not message:
         return None
     reason = _nullable_text(row.get("processing_last_error_kind")) or "processing_error"
-    return {
-        "reason_code": reason,
-        "user_message": {
-            "code": reason,
-            "severity": "error",
-            "i18n_key": "knowledge.workbench.error.processing",
-            "default_message": message,
-            "debug_ref": _nullable_text(row.get("last_error_report_id")),
-        },
-        "recoverable": _resume_available(row, _nullable_text(row.get("processing_status")) or ""),
-        "retry_available": _resume_available(row, _nullable_text(row.get("processing_status")) or ""),
-        "internal_error_ref": _nullable_text(row.get("last_error_report_id")),
-    }
+    return {"reason_code": reason, "user_message": {"code": reason, "severity": "error", "i18n_key": "knowledge.workbench.error.processing", "default_message": message, "debug_ref": _nullable_text(row.get("last_error_report_id"))}, "recoverable": _resume_available(row, _nullable_text(row.get("processing_status")) or ""), "retry_available": _resume_available(row, _nullable_text(row.get("processing_status")) or ""), "internal_error_ref": _nullable_text(row.get("last_error_report_id"))}
 
 
 def _resume_available(row: Mapping[str, object], lifecycle_state: str) -> bool:
-    return _nullable_text(row.get("resume_policy")) in {
-        "explicit_user_action",
-        "manual_only",
-    } or lifecycle_state in {"cancelled_by_user"}
+    return _nullable_text(row.get("resume_policy")) in {"explicit_user_action", "manual_only"} or lifecycle_state == "cancelled_by_user"
 
 
 def _status_bucket(lifecycle_state: str) -> str:
@@ -366,14 +287,7 @@ def _status_bucket(lifecycle_state: str) -> str:
     return lifecycle_state or "unknown"
 
 
-def _status_label(
-    lifecycle_state: str,
-    *,
-    is_published: bool,
-    is_failed: bool,
-    is_running: bool,
-    is_completed: bool,
-) -> str:
+def _status_label(*, is_published: bool, is_failed: bool, is_running: bool, is_completed: bool) -> str:
     if is_published:
         return "Опубликовано"
     if is_failed:
@@ -382,36 +296,23 @@ def _status_label(
         return "Обрабатывается"
     if is_completed:
         return "Обработано"
-    if lifecycle_state.startswith("paused"):
-        return "На паузе"
     return "Загружено"
 
 
-def _status_description(
-    lifecycle_state: str,
-    *,
-    is_published: bool,
-    is_failed: bool,
-    is_running: bool,
-    is_completed: bool,
-) -> str:
+def _status_description(*, is_published: bool, is_failed: bool, is_running: bool, is_completed: bool) -> str:
     if is_published:
         return "Факты опубликованы в runtime retrieval."
     if is_failed:
-        return "Обработка остановлена ошибкой. Подробности доступны в карточке и trace."
+        return "Обработка остановлена ошибкой."
     if is_running:
-        return "Документ разбит на секции и обрабатывается Workbench-пайплайном."
+        return "Документ обрабатывается Workbench-пайплайном."
     if is_completed:
-        return "Документ обработан, можно открыть trace или опубликовать результат."
-    if lifecycle_state.startswith("paused"):
-        return "Обработка приостановлена и может быть продолжена по доступному действию."
+        return "Документ обработан."
     return "Документ загружен и ожидает обработки."
 
 
 def _text(value: object) -> str:
-    if value is None:
-        return ""
-    return str(value)
+    return "" if value is None else str(value)
 
 
 def _nullable_text(value: object) -> str | None:
@@ -444,5 +345,4 @@ def _iso(value: object) -> str | None:
     isoformat = getattr(value, "isoformat", None)
     if callable(isoformat):
         return str(isoformat())
-    text = str(value).strip()
-    return text or None
+    return _nullable_text(value)
