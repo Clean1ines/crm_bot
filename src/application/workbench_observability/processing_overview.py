@@ -81,8 +81,6 @@ class WorkbenchProcessingOverviewReadService:
 
         return {
             "project_id": project_id,
-            "documents": documents,
-            "items": documents,
             "summary": {
                 "documents_total": len(documents),
                 "active_documents": len(active_documents),
@@ -104,9 +102,15 @@ class WorkbenchProcessingOverviewReadService:
                 "processing_runs": dict(sorted(processing_status_counts.items())),
                 "node_runs": dict(sorted(node_status_counts.items())),
             },
-            "active_documents": _document_refs(active_documents),
-            "failed_documents": _document_refs(failed_documents),
-            "resumable_documents": _document_refs(resumable_documents),
+            "active_document_ids": [
+                _text(document.get("document_id")) for document in active_documents
+            ],
+            "failed_document_ids": [
+                _text(document.get("document_id")) for document in failed_documents
+            ],
+            "resumable_document_ids": [
+                _text(document.get("document_id")) for document in resumable_documents
+            ],
         }
 
 
@@ -188,17 +192,26 @@ def _card_view(
         "lifecycle_state": status,
         "retention_state": "active",
         "transient_purged": False,
-        "resume_available": _nullable_text(row.get("resume_policy")) == "explicit_user_action",
+        "resume_available": _nullable_text(row.get("resume_policy"))
+        == "explicit_user_action",
         "status_i18n_key": f"knowledge.workbench.status.{_status_bucket(status)}",
-        "default_status_label": _status_label(failed=failed, running=running, completed=completed),
+        "default_status_label": _status_label(
+            failed=failed, running=running, completed=completed
+        ),
         "status_description_i18n_key": "knowledge.workbench.statusDescription.processing",
-        "default_status_description": _status_description(failed=failed, running=running, completed=completed),
+        "default_status_description": _status_description(
+            failed=failed, running=running, completed=completed
+        ),
         "timer": {
             "mode": "running" if running else "stopped",
             "active_elapsed_seconds": 0,
             "wall_elapsed_seconds": 0,
-            "current_active_started_at": _iso(row.get("started_at")) if running else None,
-            "i18n_key": "knowledge.workbench.timer.running" if running else "knowledge.workbench.timer.stopped",
+            "current_active_started_at": _iso(row.get("started_at"))
+            if running
+            else None,
+            "i18n_key": "knowledge.workbench.timer.running"
+            if running
+            else "knowledge.workbench.timer.stopped",
             "default_label": "Обработка идёт" if running else "Обработка остановлена",
         },
         "usage": {
@@ -224,14 +237,20 @@ def _card_view(
             "runtime_entry_count": 0,
         },
         "recovery": {
-            "mode": "manual_only" if _nullable_text(row.get("resume_policy")) == "explicit_user_action" else "none",
+            "mode": "manual_only"
+            if _nullable_text(row.get("resume_policy")) == "explicit_user_action"
+            else "none",
             "scheduled_at": None,
             "can_cancel_scheduled_resume": False,
             "reason_code": _nullable_text(row.get("resume_policy")) or "none",
             "i18n_key": "knowledge.workbench.recovery.none",
             "default_message": "Восстановление не требуется",
         },
-        "actions": _actions(running=running, resumable=_nullable_text(row.get("resume_policy")) == "explicit_user_action"),
+        "actions": _actions(
+            running=running,
+            resumable=_nullable_text(row.get("resume_policy"))
+            == "explicit_user_action",
+        ),
         "messages": _messages(row, running=running),
         "error": _error(row) if failed else None,
         "metadata": {
@@ -244,14 +263,36 @@ def _card_view(
 
 def _actions(*, running: bool, resumable: bool) -> list[dict[str, object]]:
     return [
-        _action("cancel_processing", visible=running, enabled=running, tone="warning", label="Остановить"),
-        _action("resume_processing", visible=resumable, enabled=resumable, tone="primary", label="Продолжить обработку"),
-        _action("open_curation", visible=True, enabled=True, tone="secondary", label="Trace"),
-        _action("delete_document", visible=True, enabled=True, tone="danger", label="Удалить"),
+        _action(
+            "cancel_processing",
+            visible=running,
+            enabled=running,
+            tone="warning",
+            label="Остановить",
+        ),
+        _action(
+            "resume_processing",
+            visible=resumable,
+            enabled=resumable,
+            tone="primary",
+            label="Продолжить обработку",
+        ),
+        _action(
+            "open_curation", visible=True, enabled=True, tone="secondary", label="Trace"
+        ),
+        _action(
+            "delete_document",
+            visible=True,
+            enabled=True,
+            tone="danger",
+            label="Удалить",
+        ),
     ]
 
 
-def _action(action_id: str, *, visible: bool, enabled: bool, tone: str, label: str) -> dict[str, object]:
+def _action(
+    action_id: str, *, visible: bool, enabled: bool, tone: str, label: str
+) -> dict[str, object]:
     return {
         "action_id": action_id,
         "visible": visible,
@@ -268,9 +309,26 @@ def _action(action_id: str, *, visible: bool, enabled: bool, tone: str, label: s
 def _messages(row: Mapping[str, object], *, running: bool) -> list[dict[str, object]]:
     error_message = _nullable_text(row.get("last_error_message"))
     if error_message:
-        return [{"code": _nullable_text(row.get("last_error_kind")) or "processing_error", "severity": "error", "i18n_key": "knowledge.workbench.messages.processingError", "default_message": error_message, "debug_ref": None}]
+        return [
+            {
+                "code": _nullable_text(row.get("last_error_kind"))
+                or "processing_error",
+                "severity": "error",
+                "i18n_key": "knowledge.workbench.messages.processingError",
+                "default_message": error_message,
+                "debug_ref": None,
+            }
+        ]
     if running:
-        return [{"code": "processing", "severity": "info", "i18n_key": "knowledge.workbench.messages.processing", "default_message": "Документ обрабатывается Workbench-пайплайном.", "debug_ref": None}]
+        return [
+            {
+                "code": "processing",
+                "severity": "info",
+                "i18n_key": "knowledge.workbench.messages.processing",
+                "default_message": "Документ обрабатывается Workbench-пайплайном.",
+                "debug_ref": None,
+            }
+        ]
     return []
 
 
@@ -279,10 +337,24 @@ def _error(row: Mapping[str, object]) -> dict[str, object] | None:
     if not message:
         return None
     reason = _nullable_text(row.get("last_error_kind")) or "processing_error"
-    return {"reason_code": reason, "user_message": {"code": reason, "severity": "error", "i18n_key": "knowledge.workbench.error.processing", "default_message": message, "debug_ref": None}, "recoverable": False, "retry_available": False, "internal_error_ref": None}
+    return {
+        "reason_code": reason,
+        "user_message": {
+            "code": reason,
+            "severity": "error",
+            "i18n_key": "knowledge.workbench.error.processing",
+            "default_message": message,
+            "debug_ref": None,
+        },
+        "recoverable": False,
+        "retry_available": False,
+        "internal_error_ref": None,
+    }
 
 
-def _document_refs(documents: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def _document_refs(
+    documents: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
     return [
         {
             "document_id": _text(document.get("document_id")),

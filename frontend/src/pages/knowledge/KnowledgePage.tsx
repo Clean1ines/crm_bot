@@ -881,13 +881,7 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
     refetchInterval: baseHasProcessingDocuments ? 3000 : false,
   });
-  const overviewDocuments = Array.isArray(
-    processingOverviewQuery.data?.documents,
-  )
-    ? (processingOverviewQuery.data.documents as unknown as Document[])
-    : [];
-  const documents =
-    overviewDocuments.length > 0 ? overviewDocuments : baseDocuments;
+  const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
   const reportableDocuments = documents.filter(
     (doc) =>
