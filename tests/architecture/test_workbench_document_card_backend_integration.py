@@ -1,75 +1,83 @@
-from __future__ import annotations
-
 from pathlib import Path
 
 
-PROJECTION = Path("src/application/workbench/document_card_projection.py")
-COMPOSITION = Path("src/interfaces/composition/faq_workbench_documents.py")
-OBS_REPO = Path("src/infrastructure/db/workbench_observability_repository.py")
-
-
-def test_documents_composition_attaches_card_view_to_list_payload() -> None:
-    source = COMPOSITION.read_text(encoding="utf-8")
-
-    assert "with_workbench_document_card_views" in source
-    assert "payload = await service.list_documents(" in source
-    assert (
-        "return cast(dict[str, object], with_workbench_document_card_views(payload))"
-        in source
-    )
+OBSERVABILITY_REPOSITORY = Path(
+    "src/infrastructure/db/workbench_observability_repository.py"
+)
+DOCUMENT_CARDS = Path("src/application/workbench_observability/document_cards.py")
+APP = Path("src/interfaces/http/app.py")
 
 
 def test_observability_document_list_selects_card_view_source_fields() -> None:
-    source = OBS_REPO.read_text(encoding="utf-8")
+    source = OBSERVABILITY_REPOSITORY.read_text(encoding="utf-8")
 
-    required = (
-        "d.retention_state",
-        "pr.active_elapsed_seconds",
-        "pr.wall_elapsed_seconds",
-        "pr.total_prompt_tokens",
-        "pr.total_completion_tokens",
-        "pr.total_tokens",
-        "pr.total_llm_calls",
-        "pr.last_user_message",
-        "registry_summary.canonical_fact_count",
-        "registry_summary.final_registry_snapshot_id",
-        "surface_summary.ready_count",
-        "surface_summary.published_count",
-        "curation.curation_session_id",
-        "runtime_summary.runtime_entry_count",
-        "auto_recovery.auto_resume_scheduled_at",
+    required_markers = (
+        "knowledge_workbench_documents",
+        "knowledge_workbench_processing_runs",
+        "knowledge_workbench_document_sections",
+        "knowledge_workbench_fact_registries",
+        "knowledge_workbench_canonical_facts",
+        "knowledge_workbench_registry_snapshots",
+        "knowledge_workbench_runtime_retrieval_entries",
+        "section_count",
+        "canonical_fact_count",
+        "runtime_entry_count",
+        "processing_status",
+        "processing_last_error_kind",
+        "processing_last_user_message",
     )
-    for marker in required:
+
+    for marker in required_markers:
+        assert marker in source
+
+    forbidden_markers = (
+        "surface_summary.ready_count",
+        "surface_summary.draft_count",
+        "surface_summary.published_count",
+        "surface_summary.rejected_count",
+        "FROM knowledge_workbench_surfaces",
+        "JOIN knowledge_workbench_surfaces",
+    )
+
+    for marker in forbidden_markers:
+        assert marker not in source
+
+
+def test_document_card_builder_exposes_frontend_required_card_view_fields() -> None:
+    source = DOCUMENT_CARDS.read_text(encoding="utf-8")
+
+    required_markers = (
+        '"id"',
+        '"document_id"',
+        '"file_name"',
+        '"file_size"',
+        '"file_size_bytes"',
+        '"preprocessing_status"',
+        '"card_view"',
+        '"actions"',
+        '"timer"',
+        '"usage"',
+        '"sections"',
+        '"registry"',
+        '"runtime"',
+        '"recovery"',
+        '"messages"',
+        '"error"',
+        '"metadata"',
+    )
+
+    for marker in required_markers:
         assert marker in source
 
 
-def test_document_card_projection_keeps_new_card_contract_as_source_of_truth() -> None:
-    source = PROJECTION.read_text(encoding="utf-8")
-
-    assert "WorkbenchDocumentCardSource" in source
-    assert "build_workbench_document_card_view" in source
-    assert 'document["card_view"]' in source
-    assert "with_workbench_document_card_views" in source
-
-
-def test_document_card_backend_integration_does_not_restore_legacy_compiler_model() -> (
+def test_fastapi_app_registers_workbench_card_list_before_legacy_knowledge_router() -> (
     None
 ):
-    combined = (
-        PROJECTION.read_text(encoding="utf-8")
-        + COMPOSITION.read_text(encoding="utf-8")
-        + OBS_REPO.read_text(encoding="utf-8")
-    )
+    source = APP.read_text(encoding="utf-8")
 
-    forbidden = (
-        "KnowledgeReadyAnswerPublicationService",
-        "KnowledgeService(",
-        "KnowledgeRepository(",
-        "process_knowledge_upload",
-        "knowledge_compilation",
-        "AnswerCandidate",
-        "CandidateCluster",
-        "CanonicalKnowledgeEntry",
-    )
-    for marker in forbidden:
-        assert marker not in combined
+    explicit_route = '@app.get("/api/projects/{project_id}/knowledge")'
+    include_router = "app.include_router(knowledge_router"
+
+    assert explicit_route in source
+    assert include_router in source
+    assert source.index(explicit_route) < source.index(include_router)
