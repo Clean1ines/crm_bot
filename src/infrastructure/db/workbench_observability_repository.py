@@ -308,28 +308,57 @@ class WorkbenchObservabilityRepository:
         rows = await self._pool.fetch(
             """
             SELECT
-                surface_id,
-                fact_id,
-                title,
-                claim,
-                question_variants,
-                answer,
-                short_answer,
-                answer_scope,
-                retrieval_scope,
-                exclusion_scope,
-                evidence_quotes,
-                source_refs,
-                source_section_ids,
-                claim_kind,
-                status,
-                curation_state,
-                created_at,
-                updated_at
-            FROM knowledge_workbench_surfaces
-            WHERE project_id = $1 AND document_id = $2
-              AND status <> 'deleted'
-            ORDER BY created_at ASC, surface_id ASC
+                f.fact_id AS surface_id,
+                f.fact_id AS fact_id,
+                f.canonical_label AS title,
+                f.canonical_statement AS claim,
+                COALESCE(f.question_variants, '[]'::jsonb) AS question_variants,
+                f.canonical_statement AS answer,
+                f.canonical_statement AS short_answer,
+                COALESCE(f.scope, '') AS answer_scope,
+                COALESCE(f.scope, '') AS retrieval_scope,
+                COALESCE(f.exclusion_scope, '') AS exclusion_scope,
+                COALESCE(
+                    jsonb_agg(DISTINCT m.evidence_block)
+                        FILTER (WHERE COALESCE(m.evidence_block, '') <> ''),
+                    '[]'::jsonb
+                ) AS evidence_quotes,
+                COALESCE(
+                    jsonb_agg(DISTINCT m.source_section_ref)
+                        FILTER (WHERE COALESCE(m.source_section_ref, '') <> ''),
+                    '[]'::jsonb
+                ) AS source_refs,
+                COALESCE(
+                    jsonb_agg(DISTINCT m.source_section_id)
+                        FILTER (WHERE m.source_section_id IS NOT NULL),
+                    '[]'::jsonb
+                ) AS source_section_ids,
+                COALESCE(f.fact_kind, 'other') AS claim_kind,
+                f.status,
+                'canonical_fact'::text AS curation_state,
+                f.created_at,
+                f.updated_at
+            FROM knowledge_workbench_canonical_facts AS f
+            LEFT JOIN knowledge_workbench_fact_mentions AS m
+              ON m.project_id = f.project_id
+             AND m.document_id = f.document_id
+             AND m.registry_id = f.registry_id
+             AND m.fact_id = f.fact_id
+            WHERE f.project_id = $1
+              AND f.document_id = $2
+              AND f.status <> 'deleted'
+            GROUP BY
+                f.fact_id,
+                f.canonical_label,
+                f.canonical_statement,
+                f.question_variants,
+                f.scope,
+                f.exclusion_scope,
+                f.fact_kind,
+                f.status,
+                f.created_at,
+                f.updated_at
+            ORDER BY f.created_at ASC NULLS LAST, f.fact_id ASC
             """,
             project_id,
             document_id,
@@ -391,10 +420,10 @@ class WorkbenchObservabilityRepository:
                 registry_summary.final_registry_snapshot_id,
                 COALESCE(registry_summary.registry_retained, FALSE) AS registry_retained,
 
-                COALESCE(surface_summary.draft_count, 0) AS surface_draft_count,
-                COALESCE(surface_summary.ready_count, 0) AS surface_ready_count,
-                COALESCE(surface_summary.published_count, 0) AS surface_published_count,
-                COALESCE(surface_summary.rejected_count, 0) AS surface_rejected_count,
+                0::int AS surface_draft_count,
+                0::int AS surface_ready_count,
+                0::int AS surface_published_count,
+                0::int AS surface_rejected_count,
 
                 curation.curation_session_id,
                 curation.status AS curation_session_status,
@@ -471,25 +500,6 @@ class WorkbenchObservabilityRepository:
             ) AS registry_summary ON TRUE
             LEFT JOIN LATERAL (
                 SELECT
-                    COUNT(*) FILTER (
-                        WHERE s.status IN ('draft', 'needs_review')
-                    )::int AS draft_count,
-                    COUNT(*) FILTER (
-                        WHERE s.status IN ('ready', 'publish_ready')
-                    )::int AS ready_count,
-                    COUNT(*) FILTER (
-                        WHERE s.status = 'published'
-                    )::int AS published_count,
-                    COUNT(*) FILTER (
-                        WHERE s.status IN ('rejected', 'deleted')
-                    )::int AS rejected_count
-                FROM knowledge_workbench_surfaces AS s
-                WHERE s.project_id = d.project_id
-                  AND s.document_id = d.document_id
-                  AND s.status <> 'deleted'
-            ) AS surface_summary ON TRUE
-            LEFT JOIN LATERAL (
-                SELECT
                     cs.curation_session_id,
                     cs.status
                 FROM knowledge_workbench_surface_curation_sessions AS cs
@@ -502,12 +512,7 @@ class WorkbenchObservabilityRepository:
                 SELECT
                     latest_publication.publication_id,
                     COUNT(rte.runtime_entry_id)::int AS runtime_entry_count
-                FROM knowledge_workbench_surfaces AS s
-                JOIN knowledge_workbench_runtime_retrieval_entries AS rte
-                  ON rte.surface_id = s.surface_id
-                 AND rte.project_id = s.project_id
-                 AND rte.status = 'published'
-                 AND rte.visibility = 'runtime'
+                FROM knowledge_workbench_runtime_retrieval_entries AS rte
                 LEFT JOIN LATERAL (
                     SELECT publication_id
                     FROM knowledge_workbench_runtime_publications AS rp
@@ -516,9 +521,10 @@ class WorkbenchObservabilityRepository:
                     ORDER BY rp.published_at DESC NULLS LAST, rp.created_at DESC
                     LIMIT 1
                 ) AS latest_publication ON TRUE
-                WHERE s.project_id = d.project_id
-                  AND s.document_id = d.document_id
-                  AND s.status = 'published'
+                WHERE rte.project_id = d.project_id
+                  AND rte.document_id = d.document_id
+                  AND rte.status = 'published'
+                  AND rte.visibility = 'runtime'
                 GROUP BY latest_publication.publication_id
             ) AS runtime_summary ON TRUE
             LEFT JOIN LATERAL (
@@ -661,18 +667,36 @@ class WorkbenchObservabilityRepository:
         rows = await self._pool.fetch(
             """
             SELECT
-                surface_id,
-                fact_id,
-                status,
-                curation_state,
-                evidence_quotes,
-                source_refs,
-                source_section_ids
-            FROM knowledge_workbench_surfaces
-            WHERE project_id = $1
-              AND document_id = $2
-              AND status <> 'deleted'
-            ORDER BY created_at ASC, surface_id ASC
+                f.fact_id AS surface_id,
+                f.fact_id AS fact_id,
+                f.status,
+                'canonical_fact'::text AS curation_state,
+                COALESCE(
+                    jsonb_agg(DISTINCT m.evidence_block)
+                        FILTER (WHERE COALESCE(m.evidence_block, '') <> ''),
+                    '[]'::jsonb
+                ) AS evidence_quotes,
+                COALESCE(
+                    jsonb_agg(DISTINCT m.source_section_ref)
+                        FILTER (WHERE COALESCE(m.source_section_ref, '') <> ''),
+                    '[]'::jsonb
+                ) AS source_refs,
+                COALESCE(
+                    jsonb_agg(DISTINCT m.source_section_id)
+                        FILTER (WHERE m.source_section_id IS NOT NULL),
+                    '[]'::jsonb
+                ) AS source_section_ids
+            FROM knowledge_workbench_canonical_facts AS f
+            LEFT JOIN knowledge_workbench_fact_mentions AS m
+              ON m.project_id = f.project_id
+             AND m.document_id = f.document_id
+             AND m.registry_id = f.registry_id
+             AND m.fact_id = f.fact_id
+            WHERE f.project_id = $1
+              AND f.document_id = $2
+              AND f.status <> 'deleted'
+            GROUP BY f.fact_id, f.status
+            ORDER BY f.fact_id ASC
             """,
             project_id,
             document_id,

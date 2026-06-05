@@ -37,7 +37,7 @@ class FakeConnection:
 
 
 @pytest.mark.asyncio
-async def test_persist_document_delete_transition_marks_document_run_and_queues() -> (
+async def test_persist_document_delete_transition_marks_document_run_and_workbench_queues() -> (
     None
 ):
     connection = FakeConnection()
@@ -53,7 +53,7 @@ async def test_persist_document_delete_transition_marks_document_run_and_queues(
         deleted_at=deleted_at,
     )
 
-    sql = "\n".join(query for query, _ in connection.calls)
+    sql = "\\n".join(query for query, _ in connection.calls)
 
     assert "UPDATE knowledge_workbench_documents" in sql
     assert "current_processing_run_id = NULL" in sql
@@ -62,8 +62,11 @@ async def test_persist_document_delete_transition_marks_document_run_and_queues(
     assert "UPDATE knowledge_workbench_section_batch_queue_items" in sql
     assert "UPDATE knowledge_workbench_fact_registry_application_queue" in sql
     assert "UPDATE knowledge_workbench_processing_runs" in sql
-    assert "UPDATE execution_queue" in sql
     assert "document_deleted" in sql
+
+    assert "UPDATE execution_queue" not in sql
+    assert "locked_by" not in sql
+    assert "locked_at" not in sql
 
 
 @pytest.mark.asyncio
@@ -80,7 +83,8 @@ async def test_persist_document_delete_transition_allows_document_without_run() 
         deleted_at=datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc),
     )
 
-    sql = "\n".join(query for query, _ in connection.calls)
+    sql = "\\n".join(query for query, _ in connection.calls)
 
     assert "UPDATE knowledge_workbench_documents" in sql
     assert "UPDATE knowledge_workbench_processing_runs" not in sql
+    assert "UPDATE execution_queue" not in sql

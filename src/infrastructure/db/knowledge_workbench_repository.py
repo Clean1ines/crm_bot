@@ -276,24 +276,6 @@ class KnowledgeWorkbenchRepository(
                     deleted_at,
                 )
 
-            await self._connection.execute(
-                """
-                UPDATE execution_queue
-                SET status = 'cancelled',
-                    locked_by = NULL,
-                    locked_at = NULL,
-                    error_message = 'document_deleted',
-                    updated_at = $3
-                WHERE task_type = 'process_workbench_parallel_processing'
-                  AND status IN ('pending', 'processing')
-                  AND payload ->> 'project_id' = $1
-                  AND payload ->> 'document_id' = $2
-                """,
-                project_id,
-                document_id,
-                deleted_at,
-            )
-
     async def cleanup_document_final_retrieval_projections(
         self,
         *,
