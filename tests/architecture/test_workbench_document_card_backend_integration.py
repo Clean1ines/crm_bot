@@ -44,9 +44,15 @@ def test_observability_document_list_selects_card_view_source_fields() -> None:
 
 
 def test_document_card_builder_exposes_frontend_required_card_view_fields() -> None:
-    source = DOCUMENT_CARDS.read_text(encoding="utf-8")
+    adapter_source = DOCUMENT_CARDS.read_text(encoding="utf-8")
+    contract_source = Path(
+        "src/application/workbench/document_card_contract.py"
+    ).read_text(encoding="utf-8")
+    builder_source = Path(
+        "src/application/workbench/document_card_builder.py"
+    ).read_text(encoding="utf-8")
 
-    required_markers = (
+    adapter_required_markers = (
         '"id"',
         '"document_id"',
         '"file_name"',
@@ -54,20 +60,47 @@ def test_document_card_builder_exposes_frontend_required_card_view_fields() -> N
         '"file_size_bytes"',
         '"preprocessing_status"',
         '"card_view"',
-        '"actions"',
-        '"timer"',
-        '"usage"',
-        '"sections"',
-        '"registry"',
-        '"runtime"',
-        '"recovery"',
-        '"messages"',
-        '"error"',
-        '"metadata"',
+        "with_workbench_document_card_view",
     )
 
-    for marker in required_markers:
-        assert marker in source
+    for marker in adapter_required_markers:
+        assert marker in adapter_source
+
+    canonical_card_markers = (
+        "timer:",
+        "usage:",
+        "sections:",
+        "registry:",
+        "runtime:",
+        "recovery:",
+        "actions:",
+        "messages:",
+        "error:",
+        "metadata:",
+    )
+
+    for marker in canonical_card_markers:
+        assert marker in contract_source
+
+    for marker in (
+        '"workbench_phase"',
+        '"workbench_claim_preview"',
+        '"workbench_claim_preview_count"',
+    ):
+        assert marker in builder_source
+
+    forbidden_adapter_markers = (
+        "def _card_view(",
+        "def _timer(",
+        "def _actions(",
+        "def _messages(",
+        "def _recovery(",
+        'row.get("started_at")',
+        'row.get("wall_elapsed_seconds")',
+    )
+
+    for marker in forbidden_adapter_markers:
+        assert marker not in adapter_source
 
 
 def test_fastapi_app_registers_workbench_card_list_before_legacy_knowledge_router() -> (
