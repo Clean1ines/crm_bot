@@ -284,6 +284,7 @@ class FaqWorkbenchFreshUploadService:
             status=ProcessingRunStatus.RUNNING,
             resume_policy=ResumePolicy.FORBIDDEN,
             started_at=now,
+            current_active_started_at=now,
             total_prompt_tokens=0,
             total_completion_tokens=0,
             total_tokens=0,

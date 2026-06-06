@@ -24,6 +24,7 @@ def test_projection_builds_running_card_view_from_document_row() -> None:
         "processing_status": "running",
         "resume_policy": "manual_only",
         "started_at": _NOW,
+        "current_active_started_at": _NOW,
         "active_elapsed_seconds": 90,
         "wall_elapsed_seconds": 120,
         "prompt_tokens": 100,

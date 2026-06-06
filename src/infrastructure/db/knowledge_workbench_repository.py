@@ -1254,6 +1254,7 @@ class KnowledgeWorkbenchRepository(
                 status,
                 resume_policy,
                 started_at,
+                current_active_started_at,
                 stopped_at,
                 completed_at,
                 deleted_at,
@@ -1286,6 +1287,9 @@ class KnowledgeWorkbenchRepository(
             status=ProcessingRunStatus(str(row["status"])),
             resume_policy=ResumePolicy(str(row["resume_policy"])),
             started_at=self._datetime_from_db(row["started_at"]),
+            current_active_started_at=self._datetime_from_db(
+                row["current_active_started_at"]
+            ),
             stopped_at=self._datetime_from_db(row["stopped_at"]),
             completed_at=self._datetime_from_db(row["completed_at"]),
             deleted_at=self._datetime_from_db(row["deleted_at"]),
@@ -1402,6 +1406,24 @@ class KnowledgeWorkbenchRepository(
                 SET status = $4,
                     resume_policy = $5,
                     last_error = $6,
+                    active_elapsed_seconds =
+                        active_elapsed_seconds
+                        + CASE
+                            WHEN current_active_started_at IS NULL THEN 0
+                            ELSE GREATEST(
+                                EXTRACT(EPOCH FROM (now() - current_active_started_at))::int,
+                                0
+                            )
+                          END,
+                    wall_elapsed_seconds = CASE
+                        WHEN started_at IS NULL THEN wall_elapsed_seconds
+                        ELSE GREATEST(
+                            wall_elapsed_seconds,
+                            EXTRACT(EPOCH FROM (now() - started_at))::int
+                        )
+                    END,
+                    stopped_at = now(),
+                    current_active_started_at = NULL,
                     updated_at = now()
                 WHERE project_id = $1
                   AND document_id = $2
@@ -1413,6 +1435,56 @@ class KnowledgeWorkbenchRepository(
                 transition.processing_run_status_after.value,
                 transition.resume_policy_after.value,
                 transition.reason,
+            )
+
+    async def persist_processing_manual_resume_transition(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> None:
+        async with _optional_workbench_transaction(self._connection):
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_documents
+                SET status = 'processing',
+                    last_error_kind = NULL,
+                    last_error_message = NULL,
+                    last_error_at = NULL,
+                    updated_at = now()
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND current_processing_run_id = $3
+                  AND status = 'cancelled'
+                """,
+                project_id,
+                document_id,
+                processing_run_id,
+            )
+            await self._connection.execute(
+                """
+                UPDATE knowledge_workbench_processing_runs
+                SET status = 'running',
+                    resume_policy = 'forbidden',
+                    stopped_at = NULL,
+                    completed_at = NULL,
+                    current_active_started_at = now(),
+                    last_error = NULL,
+                    last_error_kind = NULL,
+                    last_user_message = NULL,
+                    last_internal_error = NULL,
+                    updated_at = now()
+                WHERE project_id = $1
+                  AND document_id = $2
+                  AND processing_run_id = $3
+                  AND status = 'cancelled_by_user'
+                  AND resume_policy = 'manual_only'
+                  AND current_active_started_at IS NULL
+                """,
+                project_id,
+                document_id,
+                processing_run_id,
             )
 
     async def get_parallel_processing_integrity_counts(
@@ -1877,6 +1949,7 @@ class KnowledgeWorkbenchRepository(
                 status,
                 resume_policy,
                 started_at,
+                current_active_started_at,
                 stopped_at,
                 completed_at,
                 deleted_at,
@@ -1891,7 +1964,7 @@ class KnowledgeWorkbenchRepository(
                 last_user_message,
                 last_internal_error
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
             """,
             run.processing_run_id,
             run.project_id,
@@ -1901,6 +1974,7 @@ class KnowledgeWorkbenchRepository(
             run.status.value,
             run.resume_policy.value,
             run.started_at,
+            run.current_active_started_at,
             run.stopped_at,
             run.completed_at,
             run.deleted_at,
@@ -3347,8 +3421,25 @@ class KnowledgeWorkbenchRepository(
                 UPDATE knowledge_workbench_processing_runs
                 SET status = 'completed',
                     resume_policy = 'forbidden',
+                    active_elapsed_seconds =
+                        active_elapsed_seconds
+                        + CASE
+                            WHEN current_active_started_at IS NULL THEN 0
+                            ELSE GREATEST(
+                                EXTRACT(EPOCH FROM (now() - current_active_started_at))::int,
+                                0
+                            )
+                          END,
+                    wall_elapsed_seconds = CASE
+                        WHEN started_at IS NULL THEN wall_elapsed_seconds
+                        ELSE GREATEST(
+                            wall_elapsed_seconds,
+                            EXTRACT(EPOCH FROM (now() - started_at))::int
+                        )
+                    END,
                     completed_at = COALESCE(completed_at, now()),
                     stopped_at = COALESCE(stopped_at, now()),
+                    current_active_started_at = NULL,
                     last_error_kind = NULL,
                     last_error_report_id = NULL,
                     last_user_message = NULL,

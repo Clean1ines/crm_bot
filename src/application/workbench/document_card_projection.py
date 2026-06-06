@@ -51,7 +51,9 @@ def card_source_from_document_row(
 ) -> WorkbenchDocumentCardSource:
     processing_status = _optional_str(row, "processing_status")
     current_started_at = (
-        _datetime(row.get("started_at")) if _is_running(processing_status) else None
+        _datetime(row.get("current_active_started_at"))
+        if _is_running(processing_status)
+        else None
     )
 
     runtime_entry_count = _int(row, "runtime_entry_count")

@@ -99,6 +99,17 @@ class FakeRepository:
         self.calls.append(f"run:{project_id}:{document_id}:{processing_run_id}")
         return self.run
 
+    async def persist_processing_manual_resume_transition(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> None:
+        self.calls.append(
+            f"resume-transition:{project_id}:{document_id}:{processing_run_id}"
+        )
+
 
 class MissingDocumentRepository(FakeRepository):
     def __init__(self) -> None:
@@ -150,6 +161,7 @@ async def test_manual_resume_reuses_current_run_and_enqueues_workbench_resume() 
     assert repository.calls == [
         "document:project-1:document-1",
         "run:project-1:document-1:processing-run-1",
+        "resume-transition:project-1:document-1:processing-run-1",
     ]
     assert len(queue.payloads) == 1
     payload = queue.payloads[0]

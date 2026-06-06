@@ -68,6 +68,7 @@ class KnowledgeProcessingRun:
     status: ProcessingRunStatus
     resume_policy: ResumePolicy
     started_at: datetime | None = None
+    current_active_started_at: datetime | None = None
     stopped_at: datetime | None = None
     completed_at: datetime | None = None
     deleted_at: datetime | None = None
@@ -92,6 +93,18 @@ class KnowledgeProcessingRun:
             )
         if self.status is ProcessingRunStatus.DELETED and self.deleted_at is None:
             raise DomainInvariantError("deleted processing run must have deleted_at")
+        if (
+            self.current_active_started_at is not None
+            and self.started_at is not None
+            and self.current_active_started_at < self.started_at
+        ):
+            raise DomainInvariantError(
+                "current_active_started_at cannot be before started_at"
+            )
+        if self.active_elapsed_seconds < 0:
+            raise DomainInvariantError("active_elapsed_seconds must be non-negative")
+        if self.wall_elapsed_seconds < 0:
+            raise DomainInvariantError("wall_elapsed_seconds must be non-negative")
         if (
             self.trigger is ProcessingTrigger.FRESH_UPLOAD
             and self.status

@@ -48,6 +48,7 @@ class WorkbenchDocumentCardsQuery:
                 pr.completed_at,
                 COALESCE(pr.active_elapsed_seconds, 0) AS active_elapsed_seconds,
                 COALESCE(pr.wall_elapsed_seconds, 0) AS wall_elapsed_seconds,
+                pr.current_active_started_at AS current_active_started_at,
                 COALESCE(pr.total_prompt_tokens, 0) AS prompt_tokens,
                 COALESCE(pr.total_completion_tokens, 0) AS completion_tokens,
                 COALESCE(pr.total_tokens, 0) AS total_tokens,

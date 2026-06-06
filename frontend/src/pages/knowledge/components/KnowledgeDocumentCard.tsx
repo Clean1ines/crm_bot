@@ -299,10 +299,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const timerStartedAtMs = timerStartedAt ? Date.parse(timerStartedAt) : Number.NaN;
   const liveActiveElapsedSeconds =
     isLiveTimer && Number.isFinite(timerStartedAtMs)
-      ? Math.max(
-          cardView.timer.active_elapsed_seconds,
-          Math.floor((nowMs - timerStartedAtMs) / 1000),
-        )
+      ? cardView.timer.active_elapsed_seconds +
+        Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
       : cardView.timer.active_elapsed_seconds;
   const liveWallElapsedSeconds =
     isLiveTimer && Number.isFinite(timerStartedAtMs)
@@ -468,10 +466,11 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 font-medium text-[var(--text-primary)]">
-              Runtime
+              Итог
             </div>
             <div className="text-[var(--text-muted)]">
-              {formatNumber(cardView.runtime.runtime_entry_count)} записей
+              Факты: {formatNumber(cardView.registry.entry_count)} · Runtime:{' '}
+              {formatNumber(cardView.runtime.runtime_entry_count)}
             </div>
           </div>
         </div>
@@ -657,83 +656,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         )}
       </div>
 
-      <div className="mt-4 space-y-3">
-        <details className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
-          <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
-            Подробности обработки
-          </summary>
-
-          <div className="mt-3 space-y-3">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                <div className="font-medium text-[var(--text-primary)]">
-                  Секции
-                </div>
-                <div className="mt-1">
-                  {promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0
-                    ? `Prompt A: ${formatNumber(promptACompleted)} из ${formatNumber(
-                        cardView.sections.total,
-                      )} · активно ${formatNumber(
-                        sectionQueueLeased,
-                      )} · в очереди ${formatNumber(sectionQueueReady)}`
-                    : `Обработано ${formatNumber(
-                        cardView.sections.processed,
-                      )} из ${formatNumber(cardView.sections.total)}${
-                        cardView.sections.failed > 0
-                          ? ` · ошибок: ${formatNumber(cardView.sections.failed)}`
-                          : ''
-                      }`}
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                <div className="font-medium text-[var(--text-primary)]">
-                  Расход ИИ
-                </div>
-                <div className="mt-1">
-                  {formatNumber(cardView.usage.total_tokens)} токенов ·{' '}
-                  {formatNumber(cardView.usage.llm_call_count)} LLM-выз.
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                <div className="font-medium text-[var(--text-primary)]">
-                  Canonical / runtime итог
-                </div>
-                <div className="mt-1">
-                  {formatNumber(cardView.registry.entry_count)} фактов ·{' '}
-                  {formatNumber(cardView.runtime.runtime_entry_count)} runtime-записей
-                </div>
-              </div>
-
-              <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                <div className="font-medium text-[var(--text-primary)]">
-                  Время
-                </div>
-                <div className="mt-1">{elapsedText}</div>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onOpenCuration}
-                className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
-              >
-                Открыть trace и курацию
-              </button>
-              {cardView.registry.final_snapshot_id && (
-                <span
-                  className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[var(--text-muted)]"
-                  title={cardView.registry.final_snapshot_id}
-                >
-                  Snapshot сохранён
-                </span>
-              )}
-            </div>
-          </div>
-        </details>
-      </div>
     </div>
   );
 };

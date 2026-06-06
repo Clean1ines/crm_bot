@@ -48,6 +48,14 @@ class WorkbenchManualResumeRepositoryPort(Protocol):
         processing_run_id: str,
     ) -> KnowledgeProcessingRun | None: ...
 
+    async def persist_processing_manual_resume_transition(
+        self,
+        *,
+        project_id: str,
+        document_id: str,
+        processing_run_id: str,
+    ) -> None: ...
+
 
 class WorkbenchManualResumeQueuePort(Protocol):
     async def enqueue_process_workbench_document(
@@ -133,6 +141,12 @@ class WorkbenchManualResumeService:
                 document_id=command.document_id,
                 processing_run_id=processing_run_id,
             )
+
+        await self.repository.persist_processing_manual_resume_transition(
+            project_id=command.project_id,
+            document_id=command.document_id,
+            processing_run_id=processing_run_id,
+        )
 
         payload = WorkbenchProcessDocumentJobPayloadDto.explicit_user_resume(
             project_id=command.project_id,

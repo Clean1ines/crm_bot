@@ -94,10 +94,11 @@ def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
         "runtime_entry_count",
         "registry.entry_count",
         "Промежуточные данные очищены",
-        "Подробности обработки",
-        "Открыть trace и курацию",
+        "Локально извлечённые claims Prompt A",
     ):
         assert marker in source
+
+    assert "Подробности обработки" not in source
 
 
 def test_frontend_action_mapping_uses_current_workbench_action_ids() -> None:
