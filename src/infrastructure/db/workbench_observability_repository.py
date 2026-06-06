@@ -250,22 +250,21 @@ class WorkbenchObservabilityRepository:
             SELECT
                 f.fact_id AS fact_id,
                 f.fact_id AS fact_key,
-                f.claim,
-                f.possible_questions AS question_variants,
-                f.claim_kind,
-                COALESCE(NULLIF(f.scope, ''), f.claim) AS answer,
-                f.claim AS short_answer,
-                f.scope AS answer_scope,
-                f.scope AS retrieval_scope,
-                f.exclusion_scope,
+                f.claim AS claim,
+                f.claim_kind AS claim_kind,
+                f.granularity AS granularity,
+                COALESCE(f.possible_questions, '[]'::jsonb) AS possible_questions,
+                COALESCE(f.scope, '') AS scope,
+                COALESCE(f.exclusion_scope, '') AS exclusion_scope,
+                COALESCE(f.derived_fact_notes, '[]'::jsonb) AS derived_fact_notes,
                 COALESCE(
                     jsonb_agg(DISTINCT m.evidence_block)
-                        FILTER (WHERE m.evidence_block <> ''),
+                        FILTER (WHERE COALESCE(m.evidence_block, '') <> ''),
                     '[]'::jsonb
                 ) AS evidence_quotes,
                 COALESCE(
                     jsonb_agg(DISTINCT m.source_section_ref)
-                        FILTER (WHERE m.source_section_ref <> ''),
+                        FILTER (WHERE COALESCE(m.source_section_ref, '') <> ''),
                     '[]'::jsonb
                 ) AS source_refs,
                 COALESCE(
@@ -286,10 +285,12 @@ class WorkbenchObservabilityRepository:
             GROUP BY
                 f.fact_id,
                 f.claim,
-                f.possible_questions,
                 f.claim_kind,
+                f.granularity,
+                f.possible_questions,
                 f.scope,
                 f.exclusion_scope,
+                f.derived_fact_notes,
                 f.status,
                 f.updated_at
             ORDER BY f.fact_id ASC
@@ -310,11 +311,11 @@ class WorkbenchObservabilityRepository:
             SELECT
                 f.fact_id AS surface_id,
                 f.fact_id AS fact_id,
-                f.canonical_label AS title,
-                f.canonical_statement AS claim,
-                COALESCE(f.question_variants, '[]'::jsonb) AS question_variants,
-                f.canonical_statement AS answer,
-                f.canonical_statement AS short_answer,
+                f.claim AS title,
+                f.claim AS claim,
+                COALESCE(f.possible_questions, '[]'::jsonb) AS question_variants,
+                f.claim AS answer,
+                f.claim AS short_answer,
                 COALESCE(f.scope, '') AS answer_scope,
                 COALESCE(f.scope, '') AS retrieval_scope,
                 COALESCE(f.exclusion_scope, '') AS exclusion_scope,
@@ -333,7 +334,7 @@ class WorkbenchObservabilityRepository:
                         FILTER (WHERE m.source_section_id IS NOT NULL),
                     '[]'::jsonb
                 ) AS source_section_ids,
-                COALESCE(f.fact_kind, 'other') AS claim_kind,
+                COALESCE(f.claim_kind, 'other') AS claim_kind,
                 f.status,
                 'canonical_fact'::text AS curation_state,
                 f.created_at,
@@ -347,12 +348,11 @@ class WorkbenchObservabilityRepository:
               AND f.status <> 'deleted'
             GROUP BY
                 f.fact_id,
-                f.canonical_label,
-                f.canonical_statement,
-                f.question_variants,
+                f.claim,
+                f.possible_questions,
                 f.scope,
                 f.exclusion_scope,
-                f.fact_kind,
+                f.claim_kind,
                 f.status,
                 f.created_at,
                 f.updated_at
@@ -627,12 +627,12 @@ class WorkbenchObservabilityRepository:
                 f.status,
                 COALESCE(
                     jsonb_agg(DISTINCT m.evidence_block)
-                        FILTER (WHERE m.evidence_block <> ''),
+                        FILTER (WHERE COALESCE(m.evidence_block, '') <> ''),
                     '[]'::jsonb
                 ) AS evidence_quotes,
                 COALESCE(
                     jsonb_agg(DISTINCT m.source_section_ref)
-                        FILTER (WHERE m.source_section_ref <> ''),
+                        FILTER (WHERE COALESCE(m.source_section_ref, '') <> ''),
                     '[]'::jsonb
                 ) AS source_refs,
                 COALESCE(
