@@ -7,7 +7,7 @@ from src.infrastructure.queue.handlers.workbench_parallel_processing import (
     WorkbenchParallelProcessingJobPayloadDto,
     handle_workbench_parallel_processing_job_from_connection,
 )
-from src.infrastructure.queue.job_exceptions import PermanentJobError
+from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
 
 
 async def handle_workbench_parallel_processing_job_terminal(
@@ -26,6 +26,12 @@ async def handle_workbench_parallel_processing_job_terminal(
             connection=connection,
         )
     except DomainInvariantError as exc:
+        if _is_retryable_prompt_a_contract_failure(exc):
+            raise TransientJobError(
+                f"retryable Prompt A output contract failure: {exc}",
+                retry_after_seconds=1.0,
+            ) from exc
+
         await _mark_workbench_processing_failed(
             connection=connection,
             payload=dto,
@@ -34,6 +40,33 @@ async def handle_workbench_parallel_processing_job_terminal(
             internal_error=str(exc),
         )
         raise PermanentJobError(str(exc)) from exc
+
+
+def _is_retryable_prompt_a_output_contract_failure(exc: DomainInvariantError) -> bool:
+    message = str(exc)
+    retryable_markers = (
+        "claim observation",
+        "claim observations payload",
+        "claim_observations",
+        "claims",
+        "unknown claim observations payload keys",
+        "unknown claim observation",
+        "requires non-empty string evidence_block",
+        "requires non-empty triples list",
+        "requires reason",
+        "unsupported predicate",
+        "unsupported relation",
+        "must be list",
+        "must be object",
+        "must be exactly claims",
+        "LLM JSON payload contains non-JSON value",
+        "value is not JSON serializable",
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
+def _is_retryable_prompt_a_contract_failure(exc: DomainInvariantError) -> bool:
+    return _is_retryable_prompt_a_output_contract_failure(exc)
 
 
 async def _mark_workbench_processing_failed(

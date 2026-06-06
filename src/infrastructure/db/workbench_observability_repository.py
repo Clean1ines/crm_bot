@@ -713,7 +713,7 @@ class WorkbenchObservabilityRepository:
                 node_name,
                 status,
                 error_kind,
-                error_message,
+                COALESCE(error_message_user, error_message_internal, '') AS error_message,
                 started_at,
                 completed_at
             FROM knowledge_workbench_processing_node_runs
