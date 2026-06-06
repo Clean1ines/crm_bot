@@ -98,6 +98,10 @@ class Settings(BaseSettings):
     EVENT_STORE_ENABLED: bool = False
     EVENT_TTL_DAYS: int = 90
     PRO_MODE_ENABLED: bool = False
+    ENABLE_AI_PLAYGROUND: bool = Field(
+        False,
+        description="Enable the stateless AI Playground endpoint and UI",
+    )
     RATE_LIMIT_BURST: int = 10
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
     TOOL_HTTP_ALLOWED_DOMAINS: str | None = None

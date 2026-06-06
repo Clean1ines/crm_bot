@@ -15,6 +15,7 @@ from src.infrastructure.logging.logger import (
     get_logger,
 )
 from src.interfaces.composition.fastapi_lifespan import lifespan
+from src.interfaces.http.ai_playground import router as ai_playground_router
 from src.interfaces.http.auth import router as auth_router
 from src.interfaces.http.bot import router as bot_router
 from src.interfaces.http.chat import router as chat_router
@@ -219,6 +220,7 @@ app.include_router(webhooks_router)
 # Register the explicit card-shaped GET endpoint before the legacy knowledge router;
 # the router still owns POST/upload and document-scoped Workbench commands.
 app.include_router(knowledge_router)
+app.include_router(ai_playground_router)
 # Workbench cutover note: legacy compiler-backed knowledge curation and old RAG eval HTTP surfaces are quarantined from app import.
 app.include_router(auth_router)
 app.include_router(bot_router)

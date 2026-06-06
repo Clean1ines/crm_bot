@@ -34,6 +34,7 @@ import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
 import { KnowledgeDocumentCurationModal } from "./components/KnowledgeDocumentCurationModal";
+import { AiPlaygroundPanel } from "./components/AiPlaygroundPanel";
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -528,6 +529,9 @@ export const KnowledgePage: React.FC = () => {
     null,
   );
   const [isDebugMode, setIsDebugMode] = useState(false);
+  const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<
+    "documents" | "ai_playground"
+  >("documents");
   const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<
     Record<string, string>
   >({});
@@ -1445,6 +1449,35 @@ export const KnowledgePage: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 rounded-2xl bg-[var(--surface-elevated)] p-2 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setActiveKnowledgeTab("documents")}
+          className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+            activeKnowledgeTab === "documents"
+              ? "bg-[var(--accent-primary)] text-white"
+              : "text-[var(--text-muted)] hover:bg-[var(--surface-secondary)]"
+          }`}
+        >
+          Документы
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveKnowledgeTab("ai_playground")}
+          className={`rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+            activeKnowledgeTab === "ai_playground"
+              ? "bg-[var(--accent-primary)] text-white"
+              : "text-[var(--text-muted)] hover:bg-[var(--surface-secondary)]"
+          }`}
+        >
+          Проверка AI-запроса
+        </button>
+      </div>
+
+      {activeKnowledgeTab === "ai_playground" ? (
+        <AiPlaygroundPanel projectId={projectId || ""} />
+      ) : (
+        <>
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-sm sm:p-5 lg:p-6">
         <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
@@ -1727,6 +1760,8 @@ export const KnowledgePage: React.FC = () => {
               );
             })}
           </div>
+        </>
+      )}
         </>
       )}
 
