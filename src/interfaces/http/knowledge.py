@@ -347,32 +347,6 @@ async def knowledge_processing_progress(
         ) from exc
 
 
-@router.get("/processing-overview")
-async def knowledge_processing_overview(
-    project_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Returns project-level FAQ Workbench processing overview."""
-
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-    from src.interfaces.composition.faq_workbench_processing_overview import (
-        fetch_workbench_processing_overview,
-    )
-
-    return await fetch_workbench_processing_overview(
-        pool=pool,
-        project_id=project_id,
-    )
-
-
 @router.post("/preview")
 async def preview_knowledge():
     _legacy_endpoint_gone(

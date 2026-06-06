@@ -13,7 +13,6 @@ __all__ = [
     "WorkbenchDocumentListReadService",
     "WorkbenchImportQualityNotFoundError",
     "WorkbenchImportQualityReadService",
-    "WorkbenchProcessingOverviewReadService",
 ]
 from src.application.workbench_observability.evidence_trace import (
     WorkbenchEvidenceTraceNotFoundError,
@@ -28,8 +27,4 @@ from src.application.workbench_observability.document_list import (
 from src.application.workbench_observability.import_quality import (
     WorkbenchImportQualityNotFoundError,
     WorkbenchImportQualityReadService,
-)
-
-from src.application.workbench_observability.processing_overview import (
-    WorkbenchProcessingOverviewReadService,
 )

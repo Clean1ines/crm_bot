@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 OBSERVABILITY_REPOSITORY = Path(
@@ -6,19 +7,23 @@ OBSERVABILITY_REPOSITORY = Path(
 )
 
 
-def _method(source: str, name: str, next_name: str) -> str:
+def _method(source: str, name: str) -> str:
     start = source.index(f"async def {name}(")
-    end = source.index(f"async def {next_name}(", start)
+
+    next_method = re.search(
+        r"\n    async def [A-Za-z_][A-Za-z0-9_]*\(",
+        source[start + 1 :],
+    )
+    if next_method is None:
+        return source[start:]
+
+    end = start + 1 + next_method.start()
     return source[start:end]
 
 
 def test_import_quality_node_runs_uses_real_error_columns() -> None:
     source = OBSERVABILITY_REPOSITORY.read_text(encoding="utf-8")
-    method = _method(
-        source,
-        "list_import_quality_node_runs",
-        "list_processing_overview_documents",
-    )
+    method = _method(source, "list_import_quality_node_runs")
 
     assert (
         "COALESCE(error_message_user, error_message_internal, '') AS error_message"

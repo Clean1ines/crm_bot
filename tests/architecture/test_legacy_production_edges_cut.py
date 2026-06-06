@@ -50,12 +50,35 @@ def test_retired_knowledge_service_processing_report_is_not_a_legacy_path() -> N
     assert not Path("src/application/services/knowledge_ingestion_service.py").exists()
 
     source = _read("src/interfaces/http/knowledge.py")
-    workbench_overview = _read(
-        "src/interfaces/composition/faq_workbench_processing_overview.py"
-    )
 
-    assert "fetch_workbench_processing_overview" in source
     assert "KnowledgeService(" not in source
     assert "knowledge_source_material_builder" not in source
     assert "knowledge_ingestion_service" not in source
-    assert "WorkbenchObservabilityRepository" in workbench_overview
+
+
+def test_processing_overview_backend_path_is_retired() -> None:
+    assert not Path(
+        "src/interfaces/composition/faq_workbench_processing_overview.py"
+    ).exists()
+    assert not Path(
+        "src/application/workbench_observability/processing_overview.py"
+    ).exists()
+
+    knowledge_http = Path("src/interfaces/http/knowledge.py").read_text(
+        encoding="utf-8"
+    )
+    repository = Path(
+        "src/infrastructure/db/workbench_observability_repository.py"
+    ).read_text(encoding="utf-8")
+
+    forbidden = (
+        '"/processing-overview"',
+        "fetch_workbench_processing_overview",
+        "knowledge_processing_overview",
+        "list_processing_overview_documents",
+        "list_processing_overview_node_runs",
+    )
+
+    for marker in forbidden:
+        assert marker not in knowledge_http
+        assert marker not in repository
