@@ -32,7 +32,6 @@ import { SourceUnitsSummary } from "./components/SourceUnitsSummary";
 import { SourceUnitsModal } from "./components/SourceUnitsModal";
 import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
-import { DocumentProcessingBlock } from "./components/DocumentProcessingBlock";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
 import { KnowledgeDocumentCurationModal } from "./components/KnowledgeDocumentCurationModal";
 
@@ -81,29 +80,9 @@ interface Document {
     | "cancelled"
     | string;
   error?: string | null;
-  chunk_count: number;
   created_at: string;
   updated_at?: string | null;
   preprocessing_mode?: KnowledgePreprocessingMode | string | null;
-  preprocessing_status?:
-    | "not_requested"
-    | "processing"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | string
-    | null;
-  preprocessing_error?: string | null;
-  preprocessing_model?: string | null;
-  preprocessing_prompt_version?: string | null;
-  preprocessing_metrics?: KnowledgeProcessingMetrics | null;
-  structured_entries?: number;
-  structured_chunk_count?: number;
-  llm_tokens_input?: number;
-  llm_tokens_output?: number;
-  llm_tokens_total?: number;
-  llm_usage_events_count?: number;
-  llm_models?: string | null;
   card_view?: WorkbenchDocumentCardView | null;
 }
 
@@ -210,42 +189,41 @@ const metricNumber = (
   return null;
 };
 
-const isLikelyEmbeddingModel = (model: string): boolean => {
-  const normalized = model.toLowerCase();
-
-  return (
-    normalized.includes("embedding") ||
-    normalized.includes("voyage") ||
-    normalized.includes("jina") ||
-    normalized.includes("minilm") ||
-    normalized.includes("e5") ||
-    normalized.includes("bge")
-  );
-};
-
-const processingModelLabel = (doc: Document): string => {
-  const candidates = [
-    metricText(doc.preprocessing_metrics, "model"),
-    doc.preprocessing_model,
-  ].filter((value): value is string => Boolean(value && value.trim()));
-
-  return (
-    candidates.find((model) => !isLikelyEmbeddingModel(model)) ||
-    t("knowledge.processing.modelPending")
-  );
-};
-
-const metricText = (
-  metrics: KnowledgeProcessingMetrics | null | undefined,
+const cardMetadataRootNumber = (
+  doc: Document,
   key: string,
-): string | null => {
-  const value = metrics?.[key];
-  return typeof value === "string" && value.trim() !== "" ? value : null;
+): number => {
+  const metadata = doc.card_view?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return 0;
+
+  const value = (metadata as Record<string, unknown>)[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
 };
+
+const workbenchClaimPreviewCount = (doc: Document): number =>
+  cardMetadataRootNumber(doc, "workbench_claim_preview_count");
+
+const hasWorkbenchCardArtifacts = (doc: Document): boolean => {
+  const cardView = doc.card_view;
+  if (!cardView) return false;
+
+  return (
+    cardView.registry.entry_count > 0 ||
+    cardView.runtime.runtime_entry_count > 0 ||
+    workbenchClaimPreviewCount(doc) > 0
+  );
+};
+
+const processingModelLabel = (_doc: Document): string =>
+  t("knowledge.processing.modelPending");
 
 const rawDocumentIssueText = (doc: Document): string | null => {
-  const message = doc.preprocessing_error?.trim() || doc.error?.trim() || "";
-
+  const message = doc.error?.trim() || "";
   return message || null;
 };
 
@@ -265,7 +243,6 @@ const isDocumentCancelled = (doc: Document): boolean => {
 
   return (
     doc.status === "cancelled" ||
-    doc.preprocessing_status === "cancelled" ||
     issueText.includes(STOPPED_BY_USER_ISSUE_NEEDLE) ||
     issueText.includes("cancelled") ||
     issueText.includes("canceled")
@@ -274,7 +251,7 @@ const isDocumentCancelled = (doc: Document): boolean => {
 
 const isDocumentFailed = (doc: Document): boolean => {
   if (doc.card_view) return doc.card_view.lifecycle_state === "failed";
-  return doc.status === "error" || doc.preprocessing_status === "failed";
+  return doc.status === "error";
 };
 
 const workbenchPhaseNumber = (
@@ -337,9 +314,7 @@ const isDocumentProcessing = (doc: Document): boolean => {
   return (
     !isDocumentCancelled(doc) &&
     !isDocumentFailed(doc) &&
-    (doc.status === "pending" ||
-      doc.status === "processing" ||
-      doc.preprocessing_status === "processing")
+    (doc.status === "pending" || doc.status === "processing")
   );
 };
 
@@ -352,360 +327,69 @@ const knowledgeProcessingModeLabel = (
   t("knowledge.common.unspecified");
 
 const processingProgressPercent = (doc: Document): number | null => {
-  const current =
-    metricNumber(
-      doc.preprocessing_metrics,
-      "technical_chunk_processed_count",
-    ) ??
-    metricNumber(doc.preprocessing_metrics, "technical_compiler_call_count");
-  const total =
-    metricNumber(doc.preprocessing_metrics, "technical_chunk_total_count") ??
-    metricNumber(doc.preprocessing_metrics, "technical_compiler_total_count");
+  const total = doc.card_view?.sections.total ?? 0;
+  if (total <= 0) return null;
 
-  if (current === null || total === null || total <= 0) return null;
+  const promptACompleted = workbenchPhaseNumber(
+    doc,
+    "prompt_a_completed_sections",
+  );
+  const current =
+    promptACompleted > 0
+      ? promptACompleted
+      : (doc.card_view?.sections.processed ?? 0) +
+        (doc.card_view?.sections.failed ?? 0);
 
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 };
 
 const processingProgressLabel = (doc: Document): string => {
-  const metrics = doc.preprocessing_metrics;
+  const total = doc.card_view?.sections.total ?? 0;
+  if (total <= 0) return t("knowledge.document.preparingProcessing");
+
+  const promptACompleted = workbenchPhaseNumber(
+    doc,
+    "prompt_a_completed_sections",
+  );
   const current =
-    metricNumber(metrics, "technical_chunk_processed_count") ??
-    metricNumber(metrics, "technical_compiler_call_count");
-  const total =
-    metricNumber(metrics, "technical_chunk_total_count") ??
-    metricNumber(metrics, "technical_compiler_total_count");
+    promptACompleted > 0
+      ? promptACompleted
+      : (doc.card_view?.sections.processed ?? 0) +
+        (doc.card_view?.sections.failed ?? 0);
 
-  if (current !== null && total !== null && total > 0) {
-    return t("knowledge.progress.stepOf", {
-      current: formatNumber(current),
-      total: formatNumber(total),
-    });
-  }
-
-  if (doc.status === "pending")
-    return t("knowledge.document.pendingProcessing");
-  return t("knowledge.document.preparingProcessing");
+  return t("knowledge.progress.stepOf", {
+    current: formatNumber(current),
+    total: formatNumber(total),
+  });
 };
 
-const answerResolutionCount = (doc: Document): number | null =>
-  metricNumber(doc.preprocessing_metrics, "answer_resolution_call_count");
+const answerResolutionCount = (_doc: Document): number | null => null;
 
-const metricObject = (
-  metrics: KnowledgeProcessingMetrics | null | undefined,
-  key: string,
-): KnowledgeProcessingMetrics | null => {
-  const value = metrics?.[key];
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as KnowledgeProcessingMetrics)
-    : null;
-};
-
-const retightenMetrics = (doc: Document): KnowledgeProcessingMetrics | null =>
-  metricObject(doc.preprocessing_metrics, "answer_resolution");
+const retightenMetrics = (_doc: Document): KnowledgeProcessingMetrics | null => null;
 
 const retightenStatusText = (
-  metrics: KnowledgeProcessingMetrics,
-): string | null => {
-  const status = metricText(metrics, "status");
-  const reason = metricText(metrics, "reason");
+  _metrics: KnowledgeProcessingMetrics,
+): string | null => null;
 
-  if (!status && !reason) return null;
-  if (status && reason) return `${status}: ${reason}`;
-  return status || reason;
-};
-
-const retightenReportRows = (doc: Document): string[] => {
-  const metrics = retightenMetrics(doc);
-  if (!metrics) return [];
-
-  const rows: string[] = [];
-  const statusText = retightenStatusText(metrics);
-  const before = metricNumber(metrics, "entry_count_before");
-  const after = metricNumber(metrics, "entry_count_after");
-  const groups = metricNumber(metrics, "candidate_case_count");
-  const decisions = metricNumber(metrics, "decision_count");
-  const resolvedAnswers = metricNumber(metrics, "resolved_answer_count");
-  const rejectedNoisyResolutions = metricNumber(
-    metrics,
-    "rejected_noisy_resolved_answer_count",
-  );
-  const combinedEntries = metricNumber(metrics, "collapsed_entry_count");
-  const llmCalls = metricNumber(metrics, "llm_call_count");
-  const cleanupOriginalUnits = metricNumber(
-    metrics,
-    "retighten_cleanup_original_unit_count",
-  );
-  const cleanupRemovedUnits = metricNumber(
-    metrics,
-    "retighten_cleanup_removed_unit_count",
-  );
-  const deterministicCombined = metricNumber(
-    metrics,
-    "deterministic_collapsed_entry_count",
-  );
-  const deterministicExactAnswer = metricNumber(
-    metrics,
-    "deterministic_exact_answer_merge_count",
-  );
-  const deterministicContainment = metricNumber(
-    metrics,
-    "deterministic_answer_containment_merge_count",
-  );
-  const dedupedQuestions = metricNumber(
-    metrics,
-    "deduped_question_variant_count",
-  );
-  const suspiciousMeta = metricNumber(metrics, "suspicious_meta_entry_count");
-  const answerResolutionCombined = metricNumber(
-    metrics,
-    "llm_resolved_entry_count",
-  );
-
-  if (statusText) {
-    rows.push(t("knowledge.retightenReport.status", { status: statusText }));
-  }
-  if (before !== null && after !== null) {
-    rows.push(
-      t("knowledge.retightenReport.entries", {
-        before: formatNumber(before),
-        after: formatNumber(after),
-      }),
-    );
-  }
-  if (combinedEntries !== null) {
-    rows.push(
-      t("knowledge.retightenReport.combinedEntries", {
-        count: formatNumber(combinedEntries),
-      }),
-    );
-  }
-  if (deterministicCombined !== null) {
-    rows.push(
-      t("knowledge.retightenReport.deterministicCombined", {
-        count: formatNumber(deterministicCombined),
-      }),
-    );
-  }
-  if (deterministicExactAnswer !== null) {
-    rows.push(
-      t("knowledge.retightenReport.deterministicExactAnswer", {
-        count: formatNumber(deterministicExactAnswer),
-      }),
-    );
-  }
-  if (deterministicContainment !== null) {
-    rows.push(
-      t("knowledge.retightenReport.deterministicContainment", {
-        count: formatNumber(deterministicContainment),
-      }),
-    );
-  }
-  if (answerResolutionCombined !== null) {
-    rows.push(
-      t("knowledge.retightenReport.answerResolutionCombined", {
-        count: formatNumber(answerResolutionCombined),
-      }),
-    );
-  }
-  if (dedupedQuestions !== null) {
-    rows.push(
-      t("knowledge.retightenReport.dedupedQuestions", {
-        count: formatNumber(dedupedQuestions),
-      }),
-    );
-  }
-  if (suspiciousMeta !== null) {
-    rows.push(
-      t("knowledge.retightenReport.suspiciousMeta", {
-        count: formatNumber(suspiciousMeta),
-      }),
-    );
-  }
-  if (groups !== null) {
-    rows.push(
-      t("knowledge.retightenReport.groups", { count: formatNumber(groups) }),
-    );
-  }
-  if (decisions !== null) {
-    rows.push(
-      t("knowledge.retightenReport.decisions", {
-        count: formatNumber(decisions),
-      }),
-    );
-  }
-  if (resolvedAnswers !== null) {
-    rows.push(
-      t("knowledge.retightenReport.resolvedAnswers", {
-        count: formatNumber(resolvedAnswers),
-      }),
-    );
-  }
-  if (rejectedNoisyResolutions !== null) {
-    rows.push(
-      t("knowledge.retightenReport.rejectedNoisyResolutions", {
-        count: formatNumber(rejectedNoisyResolutions),
-      }),
-    );
-  }
-  if (llmCalls !== null) {
-    rows.push(
-      t("knowledge.retightenReport.llmCalls", {
-        count: formatNumber(llmCalls),
-      }),
-    );
-  }
-  if (cleanupOriginalUnits !== null) {
-    rows.push(
-      t("knowledge.retightenReport.cleanupOriginalUnits", {
-        count: formatNumber(cleanupOriginalUnits),
-      }),
-    );
-  }
-  if (cleanupRemovedUnits !== null) {
-    rows.push(
-      t("knowledge.retightenReport.cleanupRemovedUnits", {
-        count: formatNumber(cleanupRemovedUnits),
-      }),
-    );
-  }
-
-  return rows;
-};
+const retightenReportRows = (_doc: Document): string[] => [];
 
 const ANSWER_RESOLUTION_STEP_ID = "answer_resolution";
 
 const positiveMetric = (value: number | null): number | null =>
   value !== null && value > 0 ? value : null;
 
-const sourceChunkCount = (doc: Document): number | null =>
-  positiveMetric(
-    metricNumber(doc.preprocessing_metrics, "raw_source_chunk_count"),
-  ) ??
-  positiveMetric(
-    metricNumber(doc.preprocessing_metrics, "source_chunk_count"),
-  ) ??
-  (Number.isFinite(doc.chunk_count) && doc.chunk_count > 0
-    ? doc.chunk_count
-    : null);
-
-const incomingAnswerCandidateCount = (doc: Document): number | null =>
-  metricNumber(doc.preprocessing_metrics, "incoming_entry_count") ??
-  metricNumber(doc.preprocessing_metrics, "answer_candidate_count");
-
-const processingDetailRows = (doc: Document): string[] => {
-  const metrics = doc.preprocessing_metrics;
-  const rows: string[] = [];
-  const totalParts =
-    metricNumber(metrics, "technical_chunk_total_count") ??
-    metricNumber(metrics, "technical_compiler_total_count");
-  const completedParts =
-    metricNumber(metrics, "technical_chunk_processed_count") ??
-    metricNumber(metrics, "technical_compiler_call_count");
-  const failedParts = metricNumber(metrics, "failed_part_count");
-  const rawDrafts =
-    metricNumber(metrics, "raw_draft_count") ??
-    metricNumber(metrics, "draft_answer_count");
-  const safelyCombined =
-    metricNumber(metrics, "duplicates_collapsed_safely_count") ??
-    metricNumber(
-      metricObject(metrics, "deterministic_cleanup"),
-      "exact_duplicate_candidate_collapse_count",
-    );
-  const answerResolution = metricObject(metrics, "answer_resolution");
-  const resolutionPasses = answerResolution
-    ? 1
-    : metricNumber(metrics, "answer_resolution_pass_count");
-  const answerResolutionCases = metricNumber(
-    answerResolution,
-    "candidate_case_count",
-  );
-  const appliedAnswerResolutions = metricNumber(
-    answerResolution,
-    "resolved_answer_count",
-  );
-  const keptSeparate = metricNumber(answerResolution, "kept_separate_count");
-  const invalidResolverOutputs = metricNumber(
-    answerResolution,
-    "invalid_resolution_output_count",
-  );
-  const publishedEntries =
-    metricNumber(metrics, "canonical_entry_count") ??
-    metricNumber(metrics, "published_entry_count");
-
-  if (totalParts !== null)
-    rows.push(
-      t("knowledge.document.technicalPartsTotal", {
-        total: formatNumber(totalParts),
-      }),
-    );
-  if (completedParts !== null && totalParts !== null) {
-    rows.push(
-      t("knowledge.document.extractedPartsProgress", {
-        current: formatNumber(completedParts),
-        total: formatNumber(totalParts),
-      }),
-    );
-  }
-  if (failedParts !== null)
-    rows.push(
-      t("knowledge.document.failedParts", { count: formatNumber(failedParts) }),
-    );
-  if (rawDrafts !== null)
-    rows.push(
-      t("knowledge.document.rawDraftsSaved", {
-        count: formatNumber(rawDrafts),
-      }),
-    );
-  if (safelyCombined !== null)
-    rows.push(
-      t("knowledge.document.duplicateAnswersCombinedSafely", {
-        count: formatNumber(safelyCombined),
-      }),
-    );
-  if (resolutionPasses !== null)
-    rows.push(
-      t("knowledge.document.answerResolutionPasses", {
-        count: formatNumber(resolutionPasses),
-      }),
-    );
-  if (answerResolutionCases !== null)
-    rows.push(
-      t("knowledge.document.answerResolverCases", {
-        count: formatNumber(answerResolutionCases),
-      }),
-    );
-  if (appliedAnswerResolutions !== null)
-    rows.push(
-      t("knowledge.document.answerResolutionsApplied", {
-        count: formatNumber(appliedAnswerResolutions),
-      }),
-    );
-  if (keptSeparate !== null)
-    rows.push(
-      t("knowledge.document.keptSeparateByResolver", {
-        count: formatNumber(keptSeparate),
-      }),
-    );
-  if (invalidResolverOutputs !== null)
-    rows.push(
-      t("knowledge.document.rejectedInvalidResolverOutputs", {
-        count: formatNumber(invalidResolverOutputs),
-      }),
-    );
-  if (publishedEntries !== null)
-    rows.push(
-      t("knowledge.document.publishedEntries", {
-        count: formatNumber(publishedEntries),
-      }),
-    );
-
-  return rows;
+const sourceChunkCount = (doc: Document): number | null => {
+  const total = doc.card_view?.sections.total ?? 0;
+  return total > 0 ? total : null;
 };
 
+const incomingAnswerCandidateCount = (_doc: Document): number | null => null;
+
+const processingDetailRows = (_doc: Document): string[] => [];
+
 const processingStatusMessage = (doc: Document): string => {
-  const message = metricText(doc.preprocessing_metrics, "status_message");
-  if (message) return message;
+  const cardView = doc.card_view;
+  if (cardView?.default_status_description) return cardView.default_status_description;
   if (isDocumentProcessing(doc))
     return t("knowledge.document.draftStatus.processing");
   if (doc.status === "error") return t("knowledge.document.draftStatus.error");
@@ -713,20 +397,15 @@ const processingStatusMessage = (doc: Document): string => {
 };
 
 const documentLlmTokenText = (doc: Document): string | null => {
-  const total =
-    doc.llm_tokens_total ??
-    metricNumber(doc.preprocessing_metrics, "llm_tokens_total");
-  if (total === null || total <= 0) return null;
+  const total = doc.card_view?.usage.total_tokens ?? 0;
+  if (total <= 0) return null;
 
   return t("knowledge.progress.processingUnits", {
     total: formatNumber(total),
   });
 };
 
-const documentLlmModels = (doc: Document): string | null => {
-  const models = doc.llm_models?.trim();
-  return models || null;
-};
+const documentLlmModels = (_doc: Document): string | null => null;
 
 const formatDurationSeconds = (seconds: number): string => {
   const safeSeconds = Math.max(0, Math.floor(seconds));
@@ -751,40 +430,18 @@ const formatDurationSeconds = (seconds: number): string => {
 };
 
 const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
-  const metricElapsed =
-    metricNumber(doc.preprocessing_metrics, "elapsed_seconds") ?? 0;
-  const elapsedBeforeResume =
-    metricNumber(doc.preprocessing_metrics, "elapsed_before_resume_seconds") ??
-    metricElapsed;
-  const processingStartedAtEpoch = metricNumber(
-    doc.preprocessing_metrics,
-    "processing_started_at_epoch",
-  );
-  const startedAt = Date.parse(doc.created_at || "");
-  const updatedAt = Date.parse(doc.updated_at || "");
+  const timer = doc.card_view?.timer;
+  if (!timer) return 0;
 
-  if (isDocumentProcessing(doc)) {
-    if (processingStartedAtEpoch !== null && processingStartedAtEpoch > 0) {
-      return Math.max(
-        0,
-        elapsedBeforeResume + (nowMs / 1000 - processingStartedAtEpoch),
-      );
-    }
-    if (Number.isFinite(startedAt)) {
-      return Math.max(metricElapsed, Math.max(0, (nowMs - startedAt) / 1000));
-    }
-    return metricElapsed;
+  const activeElapsed = Math.max(0, timer.active_elapsed_seconds || 0);
+  if (timer.mode !== "running" || !timer.current_active_started_at) {
+    return activeElapsed;
   }
 
-  if (metricElapsed > 0) return metricElapsed;
-  if (
-    Number.isFinite(startedAt) &&
-    Number.isFinite(updatedAt) &&
-    updatedAt >= startedAt
-  ) {
-    return Math.max(0, (updatedAt - startedAt) / 1000);
-  }
-  return metricElapsed;
+  const startedAt = Date.parse(timer.current_active_started_at);
+  if (!Number.isFinite(startedAt)) return activeElapsed;
+
+  return activeElapsed + Math.max(0, (nowMs - startedAt) / 1000);
 };
 
 const PreviewResultCard: React.FC<{
@@ -918,11 +575,10 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId,
     retry: false,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return Array.isArray(data) && data.some(isDocumentProcessing) ? 1500 : false;
-    },
-    refetchIntervalInBackground: false,
+    refetchInterval: projectId ? 1500 : false,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 
   const baseDocuments = Array.isArray(documentsQuery.data)
@@ -947,7 +603,7 @@ export const KnowledgePage: React.FC = () => {
       isDocumentProcessing(doc) ||
       isDocumentFailed(doc) ||
       isDocumentCancelled(doc) ||
-      Boolean(doc.structured_entries),
+      hasWorkbenchCardArtifacts(doc),
   );
   const reportableDocumentIds = reportableDocuments.map((doc) => doc.id).sort();
   const processingReportsQuery = useQuery({
@@ -1099,9 +755,7 @@ export const KnowledgePage: React.FC = () => {
               const sourceCount =
                 metricNumber(report.metrics, "raw_source_chunk_count") ??
                 metricNumber(report.metrics, "source_chunk_count") ??
-                (document && Number.isFinite(document.chunk_count)
-                  ? document.chunk_count
-                  : 0);
+                (document?.card_view?.sections.total ?? 0);
               return (
                 Boolean(document && isDocumentProcessing(document)) ||
                 sourceCount > 0

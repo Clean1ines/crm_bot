@@ -302,14 +302,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       ? cardView.timer.active_elapsed_seconds +
         Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
       : cardView.timer.active_elapsed_seconds;
-  const liveWallElapsedSeconds =
-    isLiveTimer && Number.isFinite(timerStartedAtMs)
-      ? Math.max(cardView.timer.wall_elapsed_seconds, liveActiveElapsedSeconds)
-      : cardView.timer.wall_elapsed_seconds;
-
-  const elapsedText = `активно ${formatDuration(
-    liveActiveElapsedSeconds,
-  )} · всего ${formatDuration(liveWallElapsedSeconds)}`;
+  const elapsedText = formatDuration(liveActiveElapsedSeconds);
 
   const llmUsageText = `${formatNumber(
     cardView.usage.total_tokens,

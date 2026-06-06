@@ -87,7 +87,6 @@ def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
         "rounded-2xl bg-[var(--surface-elevated)] p-4",
         "Что происходит с документом",
         "active_elapsed_seconds",
-        "wall_elapsed_seconds",
         "total_tokens",
         "llm_call_count",
         "sectionProgressPercent",
@@ -95,8 +94,13 @@ def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
         "registry.entry_count",
         "Промежуточные данные очищены",
         "Локально извлечённые claims Prompt A",
+        "liveActiveElapsedSeconds",
     ):
         assert marker in source
+
+    assert "wall_elapsed_seconds" not in source
+    assert "liveWallElapsedSeconds" not in source
+    assert " · всего " not in source
 
     assert "Подробности обработки" not in source
 

@@ -60,16 +60,10 @@ def _document_payload(row: Mapping[str, object]) -> dict[str, object]:
         canonical_document = dict(row)
 
     card_view = _mapping(canonical_document.get("card_view"))
-    sections = _mapping(card_view.get("sections"))
-    registry = _mapping(card_view.get("registry"))
-    runtime = _mapping(card_view.get("runtime"))
-    usage = _mapping(card_view.get("usage"))
-    timer = _mapping(card_view.get("timer"))
 
     document_id = _text(row.get("document_id"))
     file_size = _int(row.get("file_size_bytes"))
     status = _text(row.get("status")) or "uploaded"
-    processing_status = _nullable_text(row.get("processing_status"))
 
     return {
         "id": document_id,
@@ -81,50 +75,13 @@ def _document_payload(row: Mapping[str, object]) -> dict[str, object]:
         "file_size_bytes": file_size,
         "status": status,
         "preprocessing_mode": "faq",
-        "preprocessing_status": processing_status or status,
-        "structured_entries": _int(registry.get("entry_count")),
-        "chunk_count": _int(sections.get("total")),
         "created_at": _iso(row.get("created_at")),
         "updated_at": _iso(row.get("updated_at")),
         "current_processing_run_id": _nullable_text(
             row.get("current_processing_run_id")
         )
         or _nullable_text(row.get("processing_run_id")),
-        # Temporary top-level compatibility for legacy UI helpers.
-        # Values are derived from canonical card_view, not rebuilt separately.
-        "preprocessing_metrics": _compat_metrics(
-            card_view=card_view,
-            sections=sections,
-            registry=registry,
-            runtime=runtime,
-            usage=usage,
-            timer=timer,
-        ),
         "card_view": card_view,
-    }
-
-
-def _compat_metrics(
-    *,
-    card_view: Mapping[str, object],
-    sections: Mapping[str, object],
-    registry: Mapping[str, object],
-    runtime: Mapping[str, object],
-    usage: Mapping[str, object],
-    timer: Mapping[str, object],
-) -> dict[str, object]:
-    active_elapsed_seconds = _int(timer.get("active_elapsed_seconds"))
-
-    return {
-        "status_message": _text(card_view.get("default_status_description")),
-        "raw_source_chunk_count": _int(sections.get("total")),
-        "source_chunk_count": _int(sections.get("total")),
-        "canonical_entry_count": _int(registry.get("entry_count")),
-        "published_entry_count": _int(runtime.get("runtime_entry_count")),
-        "llm_tokens_total": _int(usage.get("total_tokens")),
-        # Compatibility only. Do not expose wall-time as processing timer.
-        "elapsed_seconds": active_elapsed_seconds,
-        "elapsed_before_resume_seconds": active_elapsed_seconds,
     }
 
 

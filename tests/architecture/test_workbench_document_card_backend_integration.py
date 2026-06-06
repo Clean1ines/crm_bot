@@ -58,7 +58,6 @@ def test_document_card_builder_exposes_frontend_required_card_view_fields() -> N
         '"file_name"',
         '"file_size"',
         '"file_size_bytes"',
-        '"preprocessing_status"',
         '"card_view"',
         "with_workbench_document_card_view",
     )
@@ -97,6 +96,7 @@ def test_document_card_builder_exposes_frontend_required_card_view_fields() -> N
         "def _recovery(",
         'row.get("started_at")',
         'row.get("wall_elapsed_seconds")',
+        '"preprocessing_status"',
     )
 
     for marker in forbidden_adapter_markers:
