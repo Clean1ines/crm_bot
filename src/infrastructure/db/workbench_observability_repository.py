@@ -414,6 +414,25 @@ class WorkbenchObservabilityRepository:
                 COALESCE(section_counts.failed_sections, 0) AS failed_section_count,
                 COALESCE(section_counts.pending_sections, 0) AS pending_section_count,
 
+                COALESCE(section_queue_stats.ready_count, 0) AS section_queue_ready_count,
+                COALESCE(section_queue_stats.leased_count, 0) AS section_queue_leased_count,
+                COALESCE(section_queue_stats.claim_observations_persisted_count, 0) AS prompt_a_completed_sections,
+                COALESCE(section_queue_stats.registry_application_queued_count, 0) AS section_queue_registry_application_queued_count,
+                COALESCE(section_queue_stats.registry_application_applied_count, 0) AS section_queue_registry_application_applied_count,
+                COALESCE(section_queue_stats.waiting_for_fresh_registry_count, 0) AS section_queue_waiting_for_fresh_registry_count,
+                COALESCE(section_queue_stats.failed_count, 0) AS section_queue_failed_count,
+                COALESCE(section_queue_stats.total_attempt_count, 0) AS section_queue_total_attempt_count,
+                COALESCE(section_queue_stats.max_attempt_count, 0) AS section_queue_max_attempt_count,
+
+                COALESCE(registry_queue_stats.ready_count, 0) AS registry_application_ready_count,
+                COALESCE(registry_queue_stats.leased_count, 0) AS registry_application_leased_count,
+                COALESCE(registry_queue_stats.waiting_for_fresh_registry_count, 0) AS registry_application_waiting_for_fresh_registry_count,
+                COALESCE(registry_queue_stats.applied_count, 0) AS registry_application_applied_count,
+                COALESCE(registry_queue_stats.failed_count, 0) AS registry_application_failed_count,
+
+                COALESCE(local_claim_index_stats.indexed_claim_count, 0) AS embedding_indexed_claims,
+                COALESCE(local_claim_index_stats.indexed_node_run_count, 0) AS embedding_indexed_node_runs,
+
                 COALESCE(registry_summary.canonical_fact_count, 0) AS canonical_fact_count,
                 registry_summary.final_registry_snapshot_id,
                 COALESCE(registry_summary.registry_retained, FALSE) AS registry_retained,
@@ -496,6 +515,53 @@ class WorkbenchObservabilityRepository:
                   AND fr.document_id = d.document_id
 
             ) AS registry_summary ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) FILTER (WHERE q.status = 'ready')::int AS ready_count,
+                    COUNT(*) FILTER (WHERE q.status = 'leased')::int AS leased_count,
+                    COUNT(*) FILTER (WHERE q.status = 'claim_observations_persisted')::int AS claim_observations_persisted_count,
+                    COUNT(*) FILTER (WHERE q.status = 'registry_application_queued')::int AS registry_application_queued_count,
+                    COUNT(*) FILTER (WHERE q.status = 'registry_application_applied')::int AS registry_application_applied_count,
+                    COUNT(*) FILTER (WHERE q.status = 'waiting_for_fresh_registry')::int AS waiting_for_fresh_registry_count,
+                    COUNT(*) FILTER (WHERE q.status = 'failed')::int AS failed_count,
+                    COALESCE(SUM(q.attempt_count), 0)::int AS total_attempt_count,
+                    COALESCE(MAX(q.attempt_count), 0)::int AS max_attempt_count
+                FROM knowledge_workbench_section_batch_queue_items AS q
+                WHERE q.project_id = d.project_id
+                  AND q.document_id = d.document_id
+                  AND (
+                    d.current_processing_run_id IS NULL
+                    OR q.processing_run_id = d.current_processing_run_id
+                  )
+            ) AS section_queue_stats ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) FILTER (WHERE rq.status = 'ready')::int AS ready_count,
+                    COUNT(*) FILTER (WHERE rq.status = 'leased')::int AS leased_count,
+                    COUNT(*) FILTER (WHERE rq.status = 'waiting_for_fresh_registry')::int AS waiting_for_fresh_registry_count,
+                    COUNT(*) FILTER (WHERE rq.status = 'applied')::int AS applied_count,
+                    COUNT(*) FILTER (WHERE rq.status = 'failed')::int AS failed_count
+                FROM knowledge_workbench_fact_registry_application_queue AS rq
+                WHERE rq.project_id = d.project_id
+                  AND rq.document_id = d.document_id
+                  AND (
+                    d.current_processing_run_id IS NULL
+                    OR rq.processing_run_id = d.current_processing_run_id
+                  )
+            ) AS registry_queue_stats ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*)::int AS indexed_claim_count,
+                    COUNT(DISTINCT lcr.node_run_id)::int AS indexed_node_run_count
+                FROM knowledge_workbench_local_claim_retrieval_entries AS lcr
+                WHERE lcr.project_id = d.project_id
+                  AND lcr.document_id = d.document_id
+                  AND lcr.status = 'indexed'
+                  AND (
+                    d.current_processing_run_id IS NULL
+                    OR lcr.processing_run_id = d.current_processing_run_id
+                  )
+            ) AS local_claim_index_stats ON TRUE
             LEFT JOIN LATERAL (
                 SELECT
                     cs.curation_session_id,

@@ -131,7 +131,7 @@ def _persisted_item() -> SectionBatchQueueItem:
 
 
 @pytest.mark.asyncio
-async def test_persisted_section_work_item_skips_local_claim_reindex_when_node_run_is_indexed() -> (
+async def test_persisted_section_work_item_does_not_touch_local_claim_index_when_node_run_is_indexed() -> (
     None
 ):
     indexing_service = FakeIndexingService(indexed=True)
@@ -147,13 +147,12 @@ async def test_persisted_section_work_item_skips_local_claim_reindex_when_node_r
     )
 
     assert isinstance(result, ProcessClaimObservationsPersistedSectionWorkItemResult)
-    assert len(indexing_service.checks) == 1
-    assert indexing_service.checks[0].node_run_id == "node-run-1"
+    assert indexing_service.checks == []
     assert indexing_service.index_commands == []
 
 
 @pytest.mark.asyncio
-async def test_persisted_section_work_item_indexes_local_claims_when_node_run_is_missing() -> (
+async def test_persisted_section_work_item_does_not_index_local_claims_when_node_run_is_missing() -> (
     None
 ):
     indexing_service = FakeIndexingService(indexed=False)
@@ -168,6 +167,5 @@ async def test_persisted_section_work_item_indexes_local_claims_when_node_run_is
         queue_item=_persisted_item()
     )
 
-    assert len(indexing_service.checks) == 1
-    assert len(indexing_service.index_commands) == 1
-    assert indexing_service.index_commands[0].processing_run_id == "run-1"
+    assert indexing_service.checks == []
+    assert indexing_service.index_commands == []

@@ -60,6 +60,25 @@ class WorkbenchDocumentCardSource:
     sections_failed: int = 0
     sections_pending: int = 0
 
+    section_queue_ready_count: int = 0
+    section_queue_leased_count: int = 0
+    prompt_a_completed_sections: int = 0
+    section_queue_registry_application_queued_count: int = 0
+    section_queue_registry_application_applied_count: int = 0
+    section_queue_waiting_for_fresh_registry_count: int = 0
+    section_queue_failed_count: int = 0
+    section_queue_total_attempt_count: int = 0
+    section_queue_max_attempt_count: int = 0
+
+    registry_application_ready_count: int = 0
+    registry_application_leased_count: int = 0
+    registry_application_waiting_for_fresh_registry_count: int = 0
+    registry_application_applied_count: int = 0
+    registry_application_failed_count: int = 0
+
+    embedding_indexed_claims: int = 0
+    embedding_indexed_node_runs: int = 0
+
     canonical_fact_count: int = 0
     final_registry_snapshot_id: str | None = None
     registry_retained: bool = False
@@ -169,6 +188,42 @@ def build_workbench_document_card_view(
             "current_processing_run_id": source.current_processing_run_id,
             "curation_session_id": source.curation_session_id,
             "curation_session_status": source.curation_session_status,
+            "workbench_phase": {
+                "prompt_a_completed_sections": source.prompt_a_completed_sections,
+                "section_queue_ready_count": source.section_queue_ready_count,
+                "section_queue_leased_count": source.section_queue_leased_count,
+                "section_queue_registry_application_queued_count": (
+                    source.section_queue_registry_application_queued_count
+                ),
+                "section_queue_registry_application_applied_count": (
+                    source.section_queue_registry_application_applied_count
+                ),
+                "section_queue_waiting_for_fresh_registry_count": (
+                    source.section_queue_waiting_for_fresh_registry_count
+                ),
+                "section_queue_failed_count": source.section_queue_failed_count,
+                "section_queue_total_attempt_count": (
+                    source.section_queue_total_attempt_count
+                ),
+                "section_queue_max_attempt_count": source.section_queue_max_attempt_count,
+                "registry_application_ready_count": (
+                    source.registry_application_ready_count
+                ),
+                "registry_application_leased_count": (
+                    source.registry_application_leased_count
+                ),
+                "registry_application_waiting_for_fresh_registry_count": (
+                    source.registry_application_waiting_for_fresh_registry_count
+                ),
+                "registry_application_applied_count": (
+                    source.registry_application_applied_count
+                ),
+                "registry_application_failed_count": (
+                    source.registry_application_failed_count
+                ),
+                "embedding_indexed_claims": source.embedding_indexed_claims,
+                "embedding_indexed_node_runs": source.embedding_indexed_node_runs,
+            },
         },
     )
 
@@ -295,7 +350,12 @@ def _timer(
         mode = WorkbenchTimerMode.PAUSED
         started_at = None
         label_key = "knowledge.workbench.card.timer.paused"
-        label = "Обработка на паузе"
+        label = (
+            "Ожидает автопродолжение"
+            if lifecycle_state
+            is WorkbenchDocumentLifecycleState.AUTO_RECOVERY_SCHEDULED
+            else "Обработка на паузе"
+        )
     else:
         mode = WorkbenchTimerMode.STOPPED
         started_at = None

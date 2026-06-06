@@ -10,6 +10,8 @@ from src.application.services.faq_workbench_parallel_processing_coordinator_serv
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.infrastructure.logging.logger import get_logger
+
 from src.application.services.faq_workbench_parallel_processing_coordinator_service import (
     ProcessParallelRegistryApplicationWorkItemCommand,
     ProcessParallelSectionWorkItemCommand,
@@ -26,6 +28,9 @@ from src.application.services.faq_workbench_section_work_item_processor_service 
     FaqWorkbenchSectionWorkItemProcessorService,
     ProcessOneSectionWorkItemCommand,
 )
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,15 +65,60 @@ class FaqWorkbenchParallelSectionProcessorAdapter:
         )
 
         if claim_result.leased_item is None:
+            if claim_result.restored_stale_lease_count:
+                logger.info(
+                    "Workbench section worker restored stale leases",
+                    extra={
+                        "project_id": command.project_id,
+                        "document_id": command.document_id,
+                        "processing_run_id": command.processing_run_id,
+                        "worker_id": command.worker_id,
+                        "restored_stale_lease_count": claim_result.restored_stale_lease_count,
+                    },
+                )
             return FaqWorkbenchParallelSectionNoWorkResult(
                 restored_stale_lease_count=claim_result.restored_stale_lease_count,
             )
+
+        leased_item = claim_result.leased_item
+        logger.info(
+            "Workbench section worker leased item",
+            extra={
+                "project_id": command.project_id,
+                "document_id": command.document_id,
+                "processing_run_id": command.processing_run_id,
+                "worker_id": command.worker_id,
+                "queue_item_id": leased_item.queue_item_id,
+                "section_id": leased_item.section_id,
+                "section_index": leased_item.section_index,
+                "lane_id": leased_item.lane_id,
+                "lane_index": leased_item.lane_index,
+                "attempt_count": leased_item.attempt_count,
+            },
+        )
 
         processed_result = await self.processor.process_one_section_work_item(
             ProcessOneSectionWorkItemCommand(
                 queue_item=claim_result.leased_item,
                 worker_id=command.worker_id,
             )
+        )
+        persisted_item = processed_result.claim_observations_persisted_item
+        logger.info(
+            "Workbench section worker completed item",
+            extra={
+                "project_id": command.project_id,
+                "document_id": command.document_id,
+                "processing_run_id": command.processing_run_id,
+                "worker_id": command.worker_id,
+                "queue_item_id": persisted_item.queue_item_id,
+                "section_id": persisted_item.section_id,
+                "section_index": persisted_item.section_index,
+                "lane_id": persisted_item.lane_id,
+                "lane_index": persisted_item.lane_index,
+                "status": persisted_item.status.value,
+                "claim_observations_node_run_id": persisted_item.claim_observations_node_run_id,
+            },
         )
         return FaqWorkbenchParallelSectionProcessedResult(
             processed_result=processed_result,

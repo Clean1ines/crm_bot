@@ -154,8 +154,6 @@ class FaqWorkbenchSectionWorkItemProcessorService:
                 "cannot recover claim observations persisted section item without section"
             )
 
-        await self._index_local_claim_retrieval_surface(queue_item)
-
         return ProcessClaimObservationsPersistedSectionWorkItemResult(
             section=section,
             claim_observations_persisted_item=queue_item,
@@ -198,9 +196,6 @@ class FaqWorkbenchSectionWorkItemProcessorService:
             )
         )
         await self.repository.update_section_batch_queue_item(
-            claim_observations_persisted_item
-        )
-        await self._index_local_claim_retrieval_surface(
             claim_observations_persisted_item
         )
 

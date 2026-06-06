@@ -44,6 +44,31 @@ const formatDuration = (seconds: number): string => {
   return `${minutes}:${restSeconds.toString().padStart(2, '0')}`;
 };
 
+type WorkbenchPhaseMetadata = Record<
+  string,
+  string | number | boolean | null | undefined
+>;
+
+type WorkbenchCardMetadata = {
+  workbench_phase?: WorkbenchPhaseMetadata | null;
+};
+
+const metadataNumber = (
+  metadata: WorkbenchCardMetadata | undefined,
+  key: string,
+): number => {
+  const phase = metadata?.workbench_phase;
+  if (!phase || typeof phase !== 'object' || Array.isArray(phase)) return 0;
+
+  const value = phase[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
 const translateDynamic = t as (key: string) => string;
 
 const cardText = (i18nKey: string | null | undefined, fallback: string): string => {
@@ -134,22 +159,62 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     (action) => action.action_id === 'delete_document',
   );
 
+  const cardMetadata = cardView.metadata as WorkbenchCardMetadata | undefined;
+
+  const promptACompleted = metadataNumber(
+    cardMetadata,
+    'prompt_a_completed_sections',
+  );
+  const sectionQueueLeased = metadataNumber(
+    cardMetadata,
+    'section_queue_leased_count',
+  );
+  const sectionQueueReady = metadataNumber(
+    cardMetadata,
+    'section_queue_ready_count',
+  );
+  const registryApplicationPending =
+    metadataNumber(cardMetadata, 'registry_application_ready_count') +
+    metadataNumber(cardMetadata, 'registry_application_leased_count') +
+    metadataNumber(
+      cardMetadata,
+      'registry_application_waiting_for_fresh_registry_count',
+    );
+  const embeddingIndexedClaims = metadataNumber(
+    cardMetadata,
+    'embedding_indexed_claims',
+  );
+
+  const sectionProgressCurrent =
+    promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0
+      ? promptACompleted
+      : cardView.sections.processed + cardView.sections.failed;
+
   const sectionProgressPercent =
     cardView.sections.total > 0
-      ? Math.round(
-          ((cardView.sections.processed + cardView.sections.failed) /
-            cardView.sections.total) *
-            100,
-        )
+      ? Math.round((sectionProgressCurrent / cardView.sections.total) * 100)
       : 0;
 
-  const sectionProgressText = `${formatNumber(
-    cardView.sections.processed,
-  )} из ${formatNumber(cardView.sections.total)} секций обработано${
-    cardView.sections.failed > 0
-      ? ` · ${formatNumber(cardView.sections.failed)} с ошибкой`
-      : ''
-  }`;
+  const sectionProgressText =
+    promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0
+      ? `Prompt A: ${formatNumber(promptACompleted)} из ${formatNumber(
+          cardView.sections.total,
+        )} секций${
+          sectionQueueLeased > 0
+            ? ` · активно ${formatNumber(sectionQueueLeased)}`
+            : ''
+        }${
+          sectionQueueReady > 0
+            ? ` · в очереди ${formatNumber(sectionQueueReady)}`
+            : ''
+        }`
+      : `${formatNumber(cardView.sections.processed)} из ${formatNumber(
+          cardView.sections.total,
+        )} секций обработано${
+          cardView.sections.failed > 0
+            ? ` · ${formatNumber(cardView.sections.failed)} с ошибкой`
+            : ''
+        }`;
 
   const elapsedText = `активно ${formatDuration(
     cardView.timer.active_elapsed_seconds,
@@ -326,6 +391,25 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
             Runtime: {formatNumber(cardView.runtime.runtime_entry_count)} записей
           </span>
+          {(promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0) && (
+            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              Prompt A: {formatNumber(promptACompleted)} /{' '}
+              {formatNumber(cardView.sections.total)}
+              {sectionQueueLeased > 0
+                ? ` · leased ${formatNumber(sectionQueueLeased)}`
+                : ''}
+            </span>
+          )}
+          {registryApplicationPending > 0 && (
+            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              Registry queue: {formatNumber(registryApplicationPending)}
+            </span>
+          )}
+          {embeddingIndexedClaims > 0 && (
+            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              Embeddings: {formatNumber(embeddingIndexedClaims)} claims
+            </span>
+          )}
           {cardView.registry.final_snapshot_id && (
             <span
               className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]"
@@ -385,11 +469,19 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                   Секции
                 </div>
                 <div className="mt-1">
-                  Обработано {formatNumber(cardView.sections.processed)} из{' '}
-                  {formatNumber(cardView.sections.total)}
-                  {cardView.sections.failed > 0
-                    ? ` · ошибок: ${formatNumber(cardView.sections.failed)}`
-                    : ''}
+                  {promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0
+                    ? `Prompt A: ${formatNumber(promptACompleted)} из ${formatNumber(
+                        cardView.sections.total,
+                      )} · активно ${formatNumber(
+                        sectionQueueLeased,
+                      )} · в очереди ${formatNumber(sectionQueueReady)}`
+                    : `Обработано ${formatNumber(
+                        cardView.sections.processed,
+                      )} из ${formatNumber(cardView.sections.total)}${
+                        cardView.sections.failed > 0
+                          ? ` · ошибок: ${formatNumber(cardView.sections.failed)}`
+                          : ''
+                      }`}
                 </div>
               </div>
 

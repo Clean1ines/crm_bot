@@ -85,6 +85,49 @@ def card_source_from_document_row(
         sections_processed=_int(row, "processed_section_count"),
         sections_failed=_int(row, "failed_section_count"),
         sections_pending=_int(row, "pending_section_count"),
+        section_queue_ready_count=_int(row, "section_queue_ready_count"),
+        section_queue_leased_count=_int(row, "section_queue_leased_count"),
+        prompt_a_completed_sections=_int(row, "prompt_a_completed_sections"),
+        section_queue_registry_application_queued_count=_int(
+            row,
+            "section_queue_registry_application_queued_count",
+        ),
+        section_queue_registry_application_applied_count=_int(
+            row,
+            "section_queue_registry_application_applied_count",
+        ),
+        section_queue_waiting_for_fresh_registry_count=_int(
+            row,
+            "section_queue_waiting_for_fresh_registry_count",
+        ),
+        section_queue_failed_count=_int(row, "section_queue_failed_count"),
+        section_queue_total_attempt_count=_int(
+            row,
+            "section_queue_total_attempt_count",
+        ),
+        section_queue_max_attempt_count=_int(row, "section_queue_max_attempt_count"),
+        registry_application_ready_count=_int(
+            row,
+            "registry_application_ready_count",
+        ),
+        registry_application_leased_count=_int(
+            row,
+            "registry_application_leased_count",
+        ),
+        registry_application_waiting_for_fresh_registry_count=_int(
+            row,
+            "registry_application_waiting_for_fresh_registry_count",
+        ),
+        registry_application_applied_count=_int(
+            row,
+            "registry_application_applied_count",
+        ),
+        registry_application_failed_count=_int(
+            row,
+            "registry_application_failed_count",
+        ),
+        embedding_indexed_claims=_int(row, "embedding_indexed_claims"),
+        embedding_indexed_node_runs=_int(row, "embedding_indexed_node_runs"),
         canonical_fact_count=_int(row, "canonical_fact_count"),
         final_registry_snapshot_id=final_snapshot_id,
         registry_retained=registry_retained,

@@ -7,7 +7,21 @@ from secrets import SystemRandom
 from typing import Mapping
 
 MAX_RETRIES = 3
-MIN_TRANSIENT_RETRY_SECONDS = 60.0
+PROVIDER_TRANSIENT_RETRY_SECONDS = 60.0
+
+_PROVIDER_TRANSIENT_ERROR_MARKERS = (
+    "rate_limit",
+    "rate limited",
+    "daily_limit",
+    "daily limited",
+    "quota",
+    "provider_error",
+    "provider error",
+    "provider request failed",
+    "temporary_provider_error",
+    "temporary provider error",
+    "timeout",
+)
 
 
 def _coerce_int(value: object, default: int) -> int:
@@ -49,6 +63,11 @@ def calculate_backoff(attempt: int) -> float:
     return delay + jitter
 
 
+def _requires_provider_slow_retry(error: str) -> bool:
+    normalized = " ".join(str(error or "").lower().replace("-", "_").split())
+    return any(marker in normalized for marker in _PROVIDER_TRANSIENT_ERROR_MARKERS)
+
+
 def build_retry_decision(
     job: Mapping[str, object],
     error: str,
@@ -67,7 +86,9 @@ def build_retry_decision(
     exhausted = attempts + 1 >= max_attempts
     resolved_backoff = calculate_backoff(attempts)
     if retry_after_seconds is not None:
-        resolved_backoff = max(float(retry_after_seconds), MIN_TRANSIENT_RETRY_SECONDS)
+        resolved_backoff = max(float(retry_after_seconds), 0.0)
+    if _requires_provider_slow_retry(error):
+        resolved_backoff = max(resolved_backoff, PROVIDER_TRANSIENT_RETRY_SECONDS)
 
     return RetryDecision(
         should_retry=not exhausted,
