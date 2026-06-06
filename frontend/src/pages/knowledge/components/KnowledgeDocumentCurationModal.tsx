@@ -134,10 +134,10 @@ const FindingCard: React.FC<{ finding: WorkbenchEvidenceTraceFinding }> = ({
 }) => (
   <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-3">
     <div className="text-sm font-semibold text-[var(--text-primary)]">
-      {finding.claim || finding.title || finding.claim_local_ref || 'Claim observation'}
+      {finding.claim || finding.title || finding.claim_local_ref || 'Извлечённый фрагмент'}
     </div>
     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">Prompt A</span>
+      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">Извлечение</span>
       {finding.claim_kind && (
         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
           {finding.claim_kind}
@@ -162,28 +162,28 @@ const FindingCard: React.FC<{ finding: WorkbenchEvidenceTraceFinding }> = ({
 
     <details className="mt-3 text-xs text-[var(--text-secondary)]">
       <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-        Детали claim
+        Детали извлечения
       </summary>
 
       <div className="mt-3 space-y-3">
-        <TraceDetailRow label="Evidence">
+        <TraceDetailRow label="Цитата / основание">
           <EvidenceList values={finding.evidence_quotes} />
         </TraceDetailRow>
 
         {finding.scope && (
-          <TraceDetailRow label="Scope">
+          <TraceDetailRow label="Область действия">
             {finding.scope}
           </TraceDetailRow>
         )}
 
         {finding.exclusion_scope && (
-          <TraceDetailRow label="Exclusion scope">
+          <TraceDetailRow label="Исключения">
             {finding.exclusion_scope}
           </TraceDetailRow>
         )}
 
         {Array.isArray(finding.variants) && finding.variants.length > 0 && (
-          <TraceDetailRow label="Possible questions">
+          <TraceDetailRow label="Возможные вопросы">
             <ul className="list-disc space-y-1 pl-4 text-[var(--text-secondary)]">
               {finding.variants.map((variant, index) => (
                 <li key={`${String(variant)}-${index}`}>{String(variant)}</li>
@@ -192,16 +192,16 @@ const FindingCard: React.FC<{ finding: WorkbenchEvidenceTraceFinding }> = ({
           </TraceDetailRow>
         )}
 
-        <TraceDetailRow label="Triples">
+        <TraceDetailRow label="Структурные связи">
           <JsonBlock value={finding.triples} />
         </TraceDetailRow>
 
-        <TraceDetailRow label="Local relations">
+        <TraceDetailRow label="Связи внутри секции">
           <JsonBlock value={finding.local_relations} />
         </TraceDetailRow>
 
         {(finding.node_run_id || finding.artifact_id) && (
-          <TraceDetailRow label="Trace IDs">
+          <TraceDetailRow label="Технические ID">
             <div className="space-y-1 break-all text-[var(--text-secondary)]">
               {finding.node_run_id && <div>node_run_id: {finding.node_run_id}</div>}
               {finding.artifact_id && <div>artifact_id: {finding.artifact_id}</div>}
@@ -523,14 +523,14 @@ export const KnowledgeDocumentCurationModal: React.FC<{
     });
 
     return [
-      ['prompt_a', `Prompt A · ${formatNumber(findings.length)}`],
+      ['prompt_a', `Извлечения · ${formatNumber(findings.length)}`],
       ...(canonicalFacts.length > 0
-        ? ([['facts', `Canonical · ${formatNumber(canonicalFacts.length)}`]] as const)
+        ? ([['facts', `Итоговые факты · ${formatNumber(canonicalFacts.length)}`]] as const)
         : []),
       ...(surfaces.length > 0
-        ? ([['surfaces', `Surfaces · ${formatNumber(surfaces.length)}`]] as const)
+        ? ([['surfaces', `Карточки · ${formatNumber(surfaces.length)}`]] as const)
         : []),
-      ...(hasGaps ? ([['gaps', 'Пробелы / warnings']] as const) : []),
+      ...(hasGaps ? ([['gaps', 'Пробелы и предупреждения']] as const) : []),
     ] as Array<[TraceTabId, string]>;
   }, [canonicalFacts.length, findings.length, gaps, surfaces.length]);
 
@@ -597,7 +597,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
     <BaseModal
       isOpen
       onClose={onClose}
-      title="Workbench trace & surface curation"
+      title="Разбор документа"
       maxWidthClassName="max-w-6xl"
     >
       <div className="space-y-4">
@@ -606,18 +606,18 @@ export const KnowledgeDocumentCurationModal: React.FC<{
             {documentName}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-            Trace показывает результат Prompt A по секциям: какие claims извлечены, на каком evidence они стоят и какие triples/relations вернул LLM.
+            Здесь видно, какие знания уже извлечены из документа, из каких секций они взяты и на какие цитаты опираются.
           </p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-            <span>Prompt A секций: {formatNumber(promptAProcessedSections.length)} / {formatNumber(sections.length)}</span>
-            <span>Claims: {formatNumber(findings.length)}</span>
+            <span>Секций с извлечениями: {formatNumber(promptAProcessedSections.length)} / {formatNumber(sections.length)}</span>
+            <span>Извлечённых фрагментов: {formatNumber(findings.length)}</span>
             {canonicalFacts.length > 0 && (
-              <span>Canonical facts: {formatNumber(canonicalFacts.length)}</span>
+              <span>Итоговых фактов: {formatNumber(canonicalFacts.length)}</span>
             )}
             {surfaces.length > 0 && (
-              <span>Surfaces: {formatNumber(surfaces.length)}</span>
+              <span>Готовых карточек: {formatNumber(surfaces.length)}</span>
             )}
-            <span>Coverage facts: {formatNumber(Number(coverage.canonical_facts_with_evidence ?? 0))}</span>
+            <span>Фактов с источниками: {formatNumber(Number(coverage.canonical_facts_with_evidence ?? 0))}</span>
           </div>
         </div>
 
@@ -644,7 +644,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
             <input
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              placeholder="Поиск по Prompt A claims, evidence, triples"
+              placeholder="Поиск по извлечённым знаниям, цитатам и секциям"
               className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </div>
@@ -653,28 +653,28 @@ export const KnowledgeDocumentCurationModal: React.FC<{
         {traceQuery.isLoading ? (
           <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Загружаю trace документа…</span>
+            <span>Загружаю разбор документа…</span>
           </div>
         ) : traceQuery.error ? (
           <div className="rounded-xl bg-[var(--accent-danger-bg)] p-4 text-sm text-[var(--accent-danger-text)]">
-            {getErrorMessage(traceQuery.error, 'Не удалось загрузить trace документа')}
+            {getErrorMessage(traceQuery.error, 'Не удалось загрузить разбор документа')}
           </div>
         ) : activeTab === 'prompt_a' ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--surface-secondary)] p-3">
               <div>
                 <div className="text-sm font-semibold text-[var(--text-primary)]">
-                  Prompt A: обработанные секции и claims
+                  Извлечённые знания по секциям
                 </div>
                 <div className="mt-1 text-xs text-[var(--text-muted)]">
-                  По умолчанию показаны секции, по которым уже есть Prompt A artifacts.
+                  По умолчанию показаны только секции, из которых уже удалось извлечь знания.
                 </div>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {[
-                  ['processed', `с claims ${formatNumber(promptAProcessedSections.length)}`],
+                  ['processed', `с извлечениями ${formatNumber(promptAProcessedSections.length)}`],
                   ['all', `все ${formatNumber(sections.length)}`],
-                  ['empty', `пустые ${formatNumber(promptAEmptySections.length)}`],
+                  ['empty', `без извлечений ${formatNumber(promptAEmptySections.length)}`],
                 ].map(([id, label]) => (
                   <button
                     key={id}
@@ -695,7 +695,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
             <div className="max-h-[64vh] space-y-2 overflow-y-auto pr-1">
             {filteredPromptASections.length === 0 ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                Prompt A claims не найдены для выбранного фильтра.
+                Извлечённые знания не найдены для выбранного фильтра. Если документ ещё обрабатывается, данные появятся здесь автоматически после завершения очередных секций.
               </div>
             ) : filteredPromptASections.map((section) => {
               const isExpanded = expandedSectionIds.includes(section.section_id);
@@ -719,10 +719,10 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
                         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                          {section.findings.length > 0 ? 'Prompt A processed' : 'Prompt A pending/empty'}
+                          {section.findings.length > 0 ? 'Есть извлечения' : 'Пока нет извлечений'}
                         </span>
                         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                          claims {formatNumber(section.findings.length)}
+                          извлечений {formatNumber(section.findings.length)}
                         </span>
                         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
                           section status: {section.status}
@@ -740,7 +740,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                         </div>
                       </TraceDetailRow>
 
-                      <TraceDetailRow label="Извлечённые claims">
+                      <TraceDetailRow label="Извлечённые фрагменты">
                         {section.findings.length === 0 ? (
                           <span className="text-[var(--text-muted)]">Claims не найдены.</span>
                         ) : (
@@ -766,7 +766,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
           <div className="max-h-[64vh] space-y-2 overflow-y-auto pr-1">
             {filteredFacts.length === 0 ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                Canonical facts не найдены.
+                Итоговые факты не найдены.
               </div>
             ) : filteredFacts.map((fact) => (
               <CanonicalFactCard
@@ -781,7 +781,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
           <div className="max-h-[64vh] space-y-2 overflow-y-auto pr-1">
             {filteredSurfaces.length === 0 ? (
               <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                Surfaces не найдены.
+                Карточки не найдены.
               </div>
             ) : filteredSurfaces.map((surface) => (
               <SurfaceCard
@@ -797,12 +797,12 @@ export const KnowledgeDocumentCurationModal: React.FC<{
           </div>
         ) : (
           <div className="max-h-[64vh] space-y-3 overflow-y-auto pr-1">
-            <TraceDetailRow label="Coverage">
+            <TraceDetailRow label="Покрытие источниками">
               <pre className="overflow-x-auto rounded-lg bg-[var(--control-bg)] p-3 text-xs text-[var(--text-secondary)]">
                 {JSON.stringify(coverage, null, 2)}
               </pre>
             </TraceDetailRow>
-            <TraceDetailRow label="Gaps / warnings">
+            <TraceDetailRow label="Пробелы и предупреждения">
               <pre className="overflow-x-auto rounded-lg bg-[var(--control-bg)] p-3 text-xs text-[var(--text-secondary)]">
                 {JSON.stringify(gaps, null, 2)}
               </pre>

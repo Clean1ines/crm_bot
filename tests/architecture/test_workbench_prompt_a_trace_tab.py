@@ -13,9 +13,9 @@ def test_trace_modal_has_prompt_a_tab_via_evidence_trace() -> None:
     source = MODAL.read_text(encoding="utf-8")
 
     assert "knowledgeApi.evidenceTrace" in source
-    assert "Prompt A: обработанные секции и claims" in source
+    assert "Извлечённые знания по секциям" in source
     assert "prompt_a" in source
-    assert "Prompt A processed" in source
+    assert "Есть извлечения" in source
     assert "activeTab === 'sections'" not in source
     assert "Секции и claims" not in source
 
@@ -27,7 +27,7 @@ def test_prompt_a_tab_keeps_canonical_and_surface_views_out_of_section_claims() 
         1,
     )[0]
 
-    assert "Извлечённые claims" in prompt_a_block
+    assert "Извлечённые фрагменты" in prompt_a_block
     assert "Canonical facts из этой секции" not in prompt_a_block
     assert "Surfaces из этой секции" not in prompt_a_block
 

@@ -26,16 +26,16 @@ def test_curation_modal_reads_workbench_evidence_trace_not_old_surface_curation(
 def test_curation_modal_renders_prompt_a_trace_vocabulary() -> None:
     source = MODAL.read_text(encoding="utf-8")
 
-    assert "Prompt A: обработанные секции и claims" in source
-    assert "Prompt A processed" in source
-    assert "Prompt A pending/empty" in source
-    assert "Извлечённые claims" in source
-    assert "Детали claim" in source
-    assert "Evidence" in source
-    assert "Triples" in source
-    assert "Local relations" in source
-    assert "Coverage" in source
-    assert "Пробелы / warnings" in source
+    assert "Извлечённые знания по секциям" in source
+    assert "Есть извлечения" in source
+    assert "Пока нет извлечений" in source
+    assert "Извлечённые фрагменты" in source
+    assert "Детали извлечения" in source
+    assert "Цитата / основание" in source
+    assert "Структурные связи" in source
+    assert "Связи внутри секции" in source
+    assert "Покрытие источниками" in source
+    assert "Пробелы и предупреждения" in source
     assert "section.findings" in source
     assert "traceQuery.data?.source_units" in source
     assert "traceQuery.data?.findings" in source

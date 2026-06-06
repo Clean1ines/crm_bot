@@ -93,7 +93,7 @@ def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
         "runtime_entry_count",
         "registry.entry_count",
         "Промежуточные данные очищены",
-        "Локально извлечённые claims Prompt A",
+        "Извлечённые знания",
         "liveActiveElapsedSeconds",
     ):
         assert marker in source

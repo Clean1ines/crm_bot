@@ -532,7 +532,7 @@ def _actions(
         actions.append(
             _action(
                 WorkbenchCardActionId.OPEN_WORKBENCH,
-                label="Открыть Workbench",
+                label="Посмотреть разбор",
             )
         )
 

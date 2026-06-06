@@ -277,7 +277,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
   const sectionProgressText =
     promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0
-      ? `Prompt A: ${formatNumber(promptACompleted)} из ${formatNumber(
+      ? `Разбор: ${formatNumber(promptACompleted)} из ${formatNumber(
           cardView.sections.total,
         )} секций${
           sectionQueueLeased > 0
@@ -471,7 +471,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         <div className="flex flex-wrap gap-2 text-xs">
           {(promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0) && (
             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Prompt A: {formatNumber(promptACompleted)} /{' '}
+              Разбор: {formatNumber(promptACompleted)} /{' '}
               {formatNumber(cardView.sections.total)}
               {sectionQueueLeased > 0
                 ? ` · активно ${formatNumber(sectionQueueLeased)}`
@@ -483,7 +483,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           )}
           {claimPreviewCount > 0 && (
             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Локальные claims: {formatNumber(claimPreviewCount)}
+              Извлечения: {formatNumber(claimPreviewCount)}
             </span>
           )}
           {registryApplicationPending > 0 && (
@@ -537,7 +537,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="font-semibold text-[var(--text-primary)]">
-                Локально извлечённые claims Prompt A
+                Извлечённые знания
               </div>
               <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
                 {formatNumber(claimPreviewCount)}
@@ -552,7 +552,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                   `claim-${index + 1}`;
                 const isExpanded = expandedClaimIds.has(claimId);
                 const claimText =
-                  metadataText(claim.claim) || `Claim ${index + 1}`;
+                  metadataText(claim.claim) || `Фрагмент ${index + 1}`;
                 const evidence = metadataText(claim.evidence_block);
                 const triples = stringifyDetails(claim.triples);
                 const relations = stringifyDetails(claim.local_relations);
@@ -575,7 +575,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                           {claimText}
                         </span>
                         <span className="mt-1 block text-[var(--text-muted)]">
-                          {metadataText(claim.claim_kind) || 'claim'} · секция{' '}
+                          {metadataText(claim.claim_kind) || 'фрагмент'} · секция{' '}
                           {metadataText(claim.section_index) || '?'}
                           {metadataText(claim.local_ref)
                             ? ` · ${metadataText(claim.local_ref)}`
@@ -592,7 +592,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                         {evidence && (
                           <div>
                             <div className="font-medium text-[var(--text-primary)]">
-                              Evidence
+                              Цитата / основание
                             </div>
                             <div className="mt-1 whitespace-pre-wrap">
                               {evidence}
@@ -602,7 +602,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                         {metadataText(claim.scope) && (
                           <div>
                             <span className="font-medium text-[var(--text-primary)]">
-                              Scope:
+                              Область действия:
                             </span>{' '}
                             {metadataText(claim.scope)}
                           </div>
@@ -622,7 +622,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                         {triples && (
                           <div>
                             <div className="font-medium text-[var(--text-primary)]">
-                              Triples
+                              Структурные связи
                             </div>
                             <pre className="mt-1 overflow-x-auto rounded bg-[var(--control-bg)] p-2">
                               {triples}
@@ -632,7 +632,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                         {relations && (
                           <div>
                             <div className="font-medium text-[var(--text-primary)]">
-                              Relations
+                              Связи внутри секции
                             </div>
                             <pre className="mt-1 overflow-x-auto rounded bg-[var(--control-bg)] p-2">
                               {relations}
