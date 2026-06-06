@@ -29,6 +29,7 @@ from src.infrastructure.llm.faq_workbench_claim_observations_generator import (
 )
 from src.infrastructure.llm.workbench_qwen_json_invocation import (
     WorkbenchQwenLlmJsonInvocationAdapter,
+    workbench_qwen_worker_context,
 )
 from src.application.services.faq_workbench_parallel_processing_coordinator_service import (
     FaqWorkbenchParallelProcessingCoordinatorService,
@@ -248,11 +249,13 @@ class DefaultClaimObservationsRunner:
         registry_snapshot_payload = latest_registry_snapshot.entries_payload
 
         generation_result = None
+        worker_id = command.queue_item.claimed_by_worker_id
         try:
-            generation_result = await self.generator.generate_findings(
-                section=command.section,
-                registry_snapshot=registry_snapshot_payload,
-            )
+            with workbench_qwen_worker_context(worker_id):
+                generation_result = await self.generator.generate_findings(
+                    section=command.section,
+                    registry_snapshot=registry_snapshot_payload,
+                )
         except Exception as exc:
             invocation = _llm_json_invocation_from_exception(exc)
             if invocation is not None:

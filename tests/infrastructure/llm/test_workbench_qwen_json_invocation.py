@@ -7,6 +7,7 @@ from src.infrastructure.llm.workbench_qwen_json_invocation import (
     WORKBENCH_QWEN_MODEL,
     WorkbenchQwenLlmJsonInvocationAdapter,
     sanitize_workbench_qwen_json_text,
+    workbench_qwen_worker_key_slot,
 )
 
 
@@ -15,7 +16,7 @@ def test_workbench_qwen_adapter_uses_fixed_qwen_model() -> None:
         client=object(),
         config=GroqLlmJsonInvocationConfig(
             default_model=WORKBENCH_QWEN_MODEL,
-            max_completion_tokens=4096,
+            max_completion_tokens=None,
         ),
     )
 
@@ -42,10 +43,40 @@ def test_workbench_qwen_adapter_parses_json_after_think_block() -> None:
         client=object(),
         config=GroqLlmJsonInvocationConfig(
             default_model=WORKBENCH_QWEN_MODEL,
-            max_completion_tokens=4096,
+            max_completion_tokens=None,
         ),
     )
 
     assert adapter._loads_json_value('<think>abc</think>{"claims":[]}') == {
         "claims": []
     }
+
+
+def test_workbench_qwen_worker_key_slot_maps_section_workers_to_unique_keys() -> None:
+    assert (
+        workbench_qwen_worker_key_slot(
+            "workbench-parallel-section-1-1",
+            key_count=3,
+        )
+        == 1
+    )
+    assert (
+        workbench_qwen_worker_key_slot(
+            "workbench-parallel-section-1-2",
+            key_count=3,
+        )
+        == 2
+    )
+    assert (
+        workbench_qwen_worker_key_slot(
+            "workbench-parallel-section-1-3",
+            key_count=3,
+        )
+        == 3
+    )
+
+
+def test_workbench_qwen_worker_key_slot_falls_back_without_worker_context() -> None:
+    assert workbench_qwen_worker_key_slot(None, key_count=3) is None
+    assert workbench_qwen_worker_key_slot("", key_count=3) is None
+    assert workbench_qwen_worker_key_slot("registry-writer", key_count=3) is None
