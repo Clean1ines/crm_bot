@@ -93,7 +93,7 @@ class WorkbenchDocumentCardsQuery:
                 0::int AS embedding_indexed_node_runs,
 
                 COALESCE(local_claim_preview.claim_preview, '[]'::jsonb) AS workbench_claim_preview,
-                COALESCE(local_claim_preview.claim_count, 0) AS workbench_claim_preview_count,
+                COALESCE(local_claim_count.claim_count, 0) AS workbench_claim_preview_count,
 
                 COALESCE(registry_summary.canonical_fact_count, 0) AS canonical_fact_count,
                 registry_summary.final_registry_snapshot_id,
@@ -142,7 +142,20 @@ class WorkbenchDocumentCardsQuery:
             ) AS section_queue_stats ON TRUE
             LEFT JOIN LATERAL (
                 SELECT
-                    COUNT(*)::int AS claim_count,
+                    COALESCE(SUM(jsonb_array_length(
+                        COALESCE(a.payload_json -> 'claim_observations', '[]'::jsonb)
+                    )), 0)::int AS claim_count
+                FROM knowledge_workbench_processing_node_artifacts AS a
+                WHERE a.project_id = d.project_id
+                  AND a.document_id = d.document_id
+                  AND (
+                    d.current_processing_run_id IS NULL
+                    OR a.processing_run_id = d.current_processing_run_id
+                  )
+                  AND a.payload_json ? 'claim_observations'
+            ) AS local_claim_count ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
                     COALESCE(
                         jsonb_agg(
                             jsonb_build_object(
@@ -191,7 +204,10 @@ class WorkbenchDocumentCardsQuery:
                         OR a.processing_run_id = d.current_processing_run_id
                       )
                       AND a.payload_json ? 'claim_observations'
-                    ORDER BY s.section_index NULLS LAST, claim_items.ordinality
+                    ORDER BY
+                        a.created_at DESC NULLS LAST,
+                        s.section_index DESC NULLS LAST,
+                        claim_items.ordinality DESC
                     LIMIT 20
                 ) AS claim_rows
             ) AS local_claim_preview ON TRUE

@@ -727,14 +727,6 @@ export const knowledgeApi = {
       },
     ),
 
-  processingOverview: (projectId: string) =>
-    authedJsonRequest<KnowledgeProcessingOverviewResponse>(
-      `/api/projects/${projectId}/knowledge/processing-overview`,
-      {
-        method: 'GET',
-      },
-    ),
-
   fragments: (projectId: string, documentId: string, limit = 5) =>
     authedJsonRequest<KnowledgeAnswerDraftsResponse>(
       `/api/projects/${projectId}/knowledge/${documentId}/fragments?limit=${limit}`,

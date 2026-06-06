@@ -585,17 +585,6 @@ export const KnowledgePage: React.FC = () => {
     ? documentsQuery.data
     : [];
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
-  const processingOverviewQuery = useQuery({
-    queryKey: ["knowledge-processing-overview", projectId],
-    queryFn: async () => {
-      if (!projectId) return undefined;
-      const { data } = await knowledgeApi.processingOverview(projectId);
-      return data;
-    },
-    enabled: !!projectId && baseHasProcessingDocuments,
-    retry: false,
-    refetchInterval: baseHasProcessingDocuments ? 3000 : false,
-  });
   const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
   const reportableDocuments = documents.filter(
@@ -642,10 +631,7 @@ export const KnowledgePage: React.FC = () => {
       !baseHasProcessingDocuments,
     retry: false,
   });
-  const processingReports =
-    processingOverviewQuery.data?.processing_reports ||
-    processingReportsQuery.data ||
-    {};
+  const processingReports = processingReportsQuery.data || {};
   const importQualityDocumentIds = hasProcessingDocuments
     ? []
     : documents.map((doc) => doc.id).sort();
@@ -1041,9 +1027,6 @@ export const KnowledgePage: React.FC = () => {
         queryKey: ["knowledge-documents", projectId],
       });
       await queryClient.invalidateQueries({
-        queryKey: ["knowledge-processing-overview", projectId],
-      });
-      await queryClient.invalidateQueries({
         queryKey: ["knowledge-usage", projectId],
       });
       await queryClient.invalidateQueries({
@@ -1110,9 +1093,6 @@ export const KnowledgePage: React.FC = () => {
         queryKey: ["knowledge-documents", projectId],
       });
       await queryClient.invalidateQueries({
-        queryKey: ["knowledge-processing-overview", projectId],
-      });
-      await queryClient.invalidateQueries({
         queryKey: ["knowledge-usage", projectId],
       });
       await queryClient.invalidateQueries({
@@ -1173,9 +1153,6 @@ export const KnowledgePage: React.FC = () => {
       toast.success("Обработка документа возобновлена");
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-processing-overview", projectId],
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-usage", projectId],
