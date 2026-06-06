@@ -27,8 +27,8 @@ from src.infrastructure.llm.faq_workbench_claim_observations_generator import (
     FaqWorkbenchClaimObservationsGenerator,
     FaqWorkbenchClaimObservationsGeneratorConfig,
 )
-from src.infrastructure.llm.groq_llm_json_invocation import (
-    GroqLlmJsonInvocationAdapter,
+from src.infrastructure.llm.workbench_qwen_json_invocation import (
+    WorkbenchQwenLlmJsonInvocationAdapter,
 )
 from src.application.services.faq_workbench_parallel_processing_coordinator_service import (
     FaqWorkbenchParallelProcessingCoordinatorService,
@@ -334,7 +334,7 @@ def make_workbench_claim_observations_generator(
         llm_invocation=(
             llm_json_invocation
             if llm_json_invocation is not None
-            else GroqLlmJsonInvocationAdapter.create_default()
+            else WorkbenchQwenLlmJsonInvocationAdapter.create_default()
         ),
         config=FaqWorkbenchClaimObservationsGeneratorConfig(prompt_path=prompt_path),
     )

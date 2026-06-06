@@ -34,8 +34,8 @@ from src.infrastructure.llm.faq_workbench_registry_merge_generator import (
     FaqWorkbenchRegistryMergeGenerator,
     FaqWorkbenchRegistryMergeGeneratorConfig,
 )
-from src.infrastructure.llm.groq_llm_json_invocation import (
-    GroqLlmJsonInvocationAdapter,
+from src.infrastructure.llm.workbench_qwen_json_invocation import (
+    WorkbenchQwenLlmJsonInvocationAdapter,
 )
 from src.infrastructure.llm.workbench_local_claim_embedding_adapter import (
     WorkbenchLocalClaimEmbeddingAdapter,
@@ -234,7 +234,7 @@ def make_workbench_canonicalization_barrier_service_from_repository(
     llm_json_invocation = (
         dependencies.llm_json_invocation
         if dependencies.llm_json_invocation is not None
-        else GroqLlmJsonInvocationAdapter.create_default()
+        else WorkbenchQwenLlmJsonInvocationAdapter.create_default()
     )
     registry_merge_generator = _instantiate_with_available_kwargs(
         FaqWorkbenchRegistryMergeGenerator,
