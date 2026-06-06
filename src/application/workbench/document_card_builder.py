@@ -79,6 +79,9 @@ class WorkbenchDocumentCardSource:
     embedding_indexed_claims: int = 0
     embedding_indexed_node_runs: int = 0
 
+    workbench_claim_preview: object = ()
+    workbench_claim_preview_count: int = 0
+
     canonical_fact_count: int = 0
     final_registry_snapshot_id: str | None = None
     registry_retained: bool = False
@@ -224,6 +227,8 @@ def build_workbench_document_card_view(
                 "embedding_indexed_claims": source.embedding_indexed_claims,
                 "embedding_indexed_node_runs": source.embedding_indexed_node_runs,
             },
+            "workbench_claim_preview": source.workbench_claim_preview,
+            "workbench_claim_preview_count": source.workbench_claim_preview_count,
         },
     )
 

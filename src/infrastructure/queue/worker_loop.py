@@ -72,34 +72,64 @@ async def run_worker_loop(
             )
 
             try:
-                await dispatcher.dispatch(job_record, worker_id=resolved_worker_id)
-            except PermanentJobError as exc:
-                logger.warning(
-                    "Job failed permanently",
-                    extra={"job_id": job_id, "task_type": task_type, "error": str(exc)},
+                try:
+                    await dispatcher.dispatch(job_record, worker_id=resolved_worker_id)
+                except PermanentJobError as exc:
+                    logger.warning(
+                        "Job failed permanently",
+                        extra={
+                            "job_id": job_id,
+                            "task_type": task_type,
+                            "error": str(exc),
+                        },
+                    )
+                    await queue_repo.complete_job(job_id, success=False, error=str(exc))
+                except TransientJobError as exc:
+                    decision = build_retry_decision(
+                        job_record,
+                        str(exc),
+                        retry_after_seconds=exc.retry_after_seconds,
+                    )
+                    await queue_repo.fail_job(
+                        job_id,
+                        increment_attempt=True,
+                        retry_delay_seconds=decision.backoff_seconds,
+                        error=str(exc),
+                    )
+                    if (
+                        decision.exhausted
+                        and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT
+                    ):
+                        await mark_process_workbench_document_exhausted(
+                            job_record,
+                        )
+                else:
+                    await queue_repo.complete_job(job_id, success=True)
+                    logger.info(
+                        "Job completed successfully",
+                        extra={"job_id": job_id, "task_type": task_type},
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "Unexpected job dispatch error",
+                    extra={
+                        "job_id": job_id,
+                        "task_type": task_type,
+                        "worker_id": resolved_worker_id,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:240],
+                    },
                 )
-                await queue_repo.complete_job(job_id, success=False, error=str(exc))
-            except TransientJobError as exc:
                 decision = build_retry_decision(
                     job_record,
-                    str(exc),
-                    retry_after_seconds=exc.retry_after_seconds,
+                    f"unexpected_dispatch_error:{type(exc).__name__}:{exc}",
+                    retry_after_seconds=1.0,
                 )
                 await queue_repo.fail_job(
                     job_id,
                     increment_attempt=True,
                     retry_delay_seconds=decision.backoff_seconds,
                     error=str(exc),
-                )
-                if decision.exhausted and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT:
-                    await mark_process_workbench_document_exhausted(
-                        job_record,
-                    )
-            else:
-                await queue_repo.complete_job(job_id, success=True)
-                logger.info(
-                    "Job completed successfully",
-                    extra={"job_id": job_id, "task_type": task_type},
                 )
         except Exception as exc:
             logger.error(

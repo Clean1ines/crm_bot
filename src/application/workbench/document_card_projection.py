@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, MutableMapping
 from dataclasses import fields, is_dataclass
 from datetime import datetime
@@ -128,6 +129,8 @@ def card_source_from_document_row(
         ),
         embedding_indexed_claims=_int(row, "embedding_indexed_claims"),
         embedding_indexed_node_runs=_int(row, "embedding_indexed_node_runs"),
+        workbench_claim_preview=_json_array(row, "workbench_claim_preview"),
+        workbench_claim_preview_count=_int(row, "workbench_claim_preview_count"),
         canonical_fact_count=_int(row, "canonical_fact_count"),
         final_registry_snapshot_id=final_snapshot_id,
         registry_retained=registry_retained,
@@ -228,3 +231,18 @@ __all__ = [
     "with_workbench_document_card_view",
     "with_workbench_document_card_views",
 ]
+
+
+def _json_array(row: Mapping[str, object], key: str) -> list[object]:
+    value = row.get(key)
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []

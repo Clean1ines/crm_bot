@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from src.domain.project_plane.knowledge_workbench import DomainInvariantError
+from src.application.ports.faq_workbench_claim_observations_generator import (
+    FaqWorkbenchClaimObservationsGenerationError,
+)
 from src.infrastructure.queue.handlers.workbench_parallel_processing import (
     WorkbenchParallelProcessingJobPayloadDto,
     handle_workbench_parallel_processing_job_from_connection,
@@ -25,6 +28,15 @@ async def handle_workbench_parallel_processing_job_terminal(
             payload=dto,
             connection=connection,
         )
+    except FaqWorkbenchClaimObservationsGenerationError as exc:
+        retry_after_seconds = (
+            float(exc.cooldown_seconds) if exc.cooldown_seconds is not None else 1.0
+        )
+
+        raise TransientJobError(
+            f"retryable Prompt A invocation failure: {exc}",
+            retry_after_seconds=max(retry_after_seconds, 1.0),
+        ) from exc
     except DomainInvariantError as exc:
         if _is_retryable_prompt_a_contract_failure(exc):
             raise TransientJobError(

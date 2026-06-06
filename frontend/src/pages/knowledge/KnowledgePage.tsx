@@ -864,6 +864,11 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId,
     retry: false,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return Array.isArray(data) && data.some(isDocumentProcessing) ? 2000 : false;
+    },
+    refetchIntervalInBackground: false,
   });
 
   const baseDocuments = Array.isArray(documentsQuery.data)

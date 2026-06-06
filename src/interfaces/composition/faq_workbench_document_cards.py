@@ -55,9 +55,45 @@ class WorkbenchDocumentCardsQuery:
                 pr.last_error_kind AS processing_last_error_kind,
                 pr.last_user_message AS processing_last_user_message,
                 COALESCE(section_counts.total_sections, 0) AS section_count,
-                COALESCE(section_counts.processed_sections, 0) AS processed_section_count,
-                COALESCE(section_counts.failed_sections, 0) AS failed_section_count,
-                COALESCE(section_counts.pending_sections, 0) AS pending_section_count,
+                COALESCE(
+                    section_queue_stats.prompt_a_done_count,
+                    section_counts.processed_sections,
+                    0
+                ) AS processed_section_count,
+                COALESCE(
+                    section_queue_stats.failed_count,
+                    section_counts.failed_sections,
+                    0
+                ) AS failed_section_count,
+                GREATEST(
+                    COALESCE(section_counts.total_sections, 0)
+                    - COALESCE(section_queue_stats.prompt_a_done_count, 0)
+                    - COALESCE(section_queue_stats.failed_count, 0),
+                    0
+                ) AS pending_section_count,
+
+                COALESCE(section_queue_stats.ready_count, 0) AS section_queue_ready_count,
+                COALESCE(section_queue_stats.leased_count, 0) AS section_queue_leased_count,
+                COALESCE(section_queue_stats.prompt_a_done_count, 0) AS prompt_a_completed_sections,
+                COALESCE(section_queue_stats.registry_application_queued_count, 0) AS section_queue_registry_application_queued_count,
+                COALESCE(section_queue_stats.registry_application_applied_count, 0) AS section_queue_registry_application_applied_count,
+                COALESCE(section_queue_stats.waiting_for_fresh_registry_count, 0) AS section_queue_waiting_for_fresh_registry_count,
+                COALESCE(section_queue_stats.failed_count, 0) AS section_queue_failed_count,
+                COALESCE(section_queue_stats.total_attempt_count, 0) AS section_queue_total_attempt_count,
+                COALESCE(section_queue_stats.max_attempt_count, 0) AS section_queue_max_attempt_count,
+
+                0::int AS registry_application_ready_count,
+                0::int AS registry_application_leased_count,
+                0::int AS registry_application_waiting_for_fresh_registry_count,
+                0::int AS registry_application_applied_count,
+                0::int AS registry_application_failed_count,
+
+                0::int AS embedding_indexed_claims,
+                0::int AS embedding_indexed_node_runs,
+
+                COALESCE(local_claim_preview.claim_preview, '[]'::jsonb) AS workbench_claim_preview,
+                COALESCE(local_claim_preview.claim_count, 0) AS workbench_claim_preview_count,
+
                 COALESCE(registry_summary.canonical_fact_count, 0) AS canonical_fact_count,
                 registry_summary.final_registry_snapshot_id,
                 COALESCE(runtime_summary.runtime_entry_count, 0) AS runtime_entry_count,
@@ -77,6 +113,87 @@ class WorkbenchDocumentCardsQuery:
                 WHERE s.project_id = d.project_id
                   AND s.document_id = d.document_id
             ) AS section_counts ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*) FILTER (WHERE q.status = 'ready')::int AS ready_count,
+                    COUNT(*) FILTER (WHERE q.status = 'leased')::int AS leased_count,
+                    COUNT(*) FILTER (
+                        WHERE q.status IN (
+                            'claim_observations_persisted',
+                            'registry_application_queued',
+                            'registry_application_applied',
+                            'waiting_for_fresh_registry'
+                        )
+                    )::int AS prompt_a_done_count,
+                    COUNT(*) FILTER (WHERE q.status = 'registry_application_queued')::int AS registry_application_queued_count,
+                    COUNT(*) FILTER (WHERE q.status = 'registry_application_applied')::int AS registry_application_applied_count,
+                    COUNT(*) FILTER (WHERE q.status = 'waiting_for_fresh_registry')::int AS waiting_for_fresh_registry_count,
+                    COUNT(*) FILTER (WHERE q.status = 'failed')::int AS failed_count,
+                    COALESCE(SUM(q.attempt_count), 0)::int AS total_attempt_count,
+                    COALESCE(MAX(q.attempt_count), 0)::int AS max_attempt_count
+                FROM knowledge_workbench_section_batch_queue_items AS q
+                WHERE q.project_id = d.project_id
+                  AND q.document_id = d.document_id
+                  AND (
+                    d.current_processing_run_id IS NULL
+                    OR q.processing_run_id = d.current_processing_run_id
+                  )
+            ) AS section_queue_stats ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT
+                    COUNT(*)::int AS claim_count,
+                    COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'claim_id', claim_rows.claim_id,
+                                'node_run_id', claim_rows.node_run_id,
+                                'section_id', claim_rows.section_id,
+                                'section_index', claim_rows.section_index,
+                                'section_title', claim_rows.section_title,
+                                'local_ref', claim_rows.claim_json ->> 'local_ref',
+                                'claim', claim_rows.claim_json ->> 'claim',
+                                'claim_kind', claim_rows.claim_json ->> 'claim_kind',
+                                'granularity', claim_rows.claim_json ->> 'granularity',
+                                'evidence_block', claim_rows.claim_json ->> 'evidence_block',
+                                'scope', claim_rows.claim_json ->> 'scope',
+                                'exclusion_scope', claim_rows.claim_json ->> 'exclusion_scope',
+                                'possible_questions', COALESCE(claim_rows.claim_json -> 'possible_questions', '[]'::jsonb),
+                                'triples', COALESCE(claim_rows.claim_json -> 'triples', '[]'::jsonb),
+                                'local_relations', COALESCE(claim_rows.claim_json -> 'local_relations', '[]'::jsonb),
+                                'confidence', claim_rows.claim_json -> 'confidence'
+                            )
+                            ORDER BY claim_rows.section_index, claim_rows.ordinality
+                        ),
+                        '[]'::jsonb
+                    ) AS claim_preview
+                FROM (
+                    SELECT
+                        a.node_run_id,
+                        a.section_id,
+                        s.section_index,
+                        s.title AS section_title,
+                        claim_items.claim_json,
+                        claim_items.ordinality,
+                        a.node_run_id || ':' || claim_items.ordinality::text AS claim_id
+                    FROM knowledge_workbench_processing_node_artifacts AS a
+                    LEFT JOIN knowledge_workbench_document_sections AS s
+                      ON s.project_id = a.project_id
+                     AND s.document_id = a.document_id
+                     AND s.section_id = a.section_id
+                    CROSS JOIN LATERAL jsonb_array_elements(
+                        COALESCE(a.payload_json -> 'claim_observations', '[]'::jsonb)
+                    ) WITH ORDINALITY AS claim_items(claim_json, ordinality)
+                    WHERE a.project_id = d.project_id
+                      AND a.document_id = d.document_id
+                      AND (
+                        d.current_processing_run_id IS NULL
+                        OR a.processing_run_id = d.current_processing_run_id
+                      )
+                      AND lower(a.artifact_type::text) = 'parsed_llm_output'
+                    ORDER BY s.section_index NULLS LAST, claim_items.ordinality
+                    LIMIT 20
+                ) AS claim_rows
+            ) AS local_claim_preview ON TRUE
             LEFT JOIN LATERAL (
                 SELECT
                     COUNT(f.fact_id)::int AS canonical_fact_count,

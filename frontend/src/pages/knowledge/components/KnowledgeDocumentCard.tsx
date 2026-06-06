@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, FileText, Trash2, Zap } from 'lucide-react';
 
 import { t } from '@shared/i18n';
@@ -49,8 +49,29 @@ type WorkbenchPhaseMetadata = Record<
   string | number | boolean | null | undefined
 >;
 
+type WorkbenchLocalClaimPreview = {
+  claim_id?: string | null;
+  node_run_id?: string | null;
+  section_id?: string | null;
+  section_index?: number | string | null;
+  section_title?: string | null;
+  local_ref?: string | null;
+  claim?: string | null;
+  claim_kind?: string | null;
+  granularity?: string | null;
+  evidence_block?: string | null;
+  scope?: string | null;
+  exclusion_scope?: string | null;
+  possible_questions?: string[] | null;
+  triples?: object[] | null;
+  local_relations?: object[] | null;
+  confidence?: number | string | null;
+};
+
 type WorkbenchCardMetadata = {
   workbench_phase?: WorkbenchPhaseMetadata | null;
+  workbench_claim_preview?: WorkbenchLocalClaimPreview[] | null;
+  workbench_claim_preview_count?: number | string | null;
 };
 
 const metadataNumber = (
@@ -67,6 +88,30 @@ const metadataNumber = (
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+};
+
+const metadataRootNumber = (
+  metadata: WorkbenchCardMetadata | undefined,
+  key: keyof WorkbenchCardMetadata,
+): number => {
+  const value = metadata?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
+const metadataText = (value: string | number | null | undefined): string => {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
+};
+
+const stringifyDetails = (value: object[] | null | undefined): string => {
+  if (!Array.isArray(value) || value.length === 0) return '';
+  return JSON.stringify(value, null, 2);
 };
 
 const translateDynamic = t as (key: string) => string;
@@ -148,6 +193,23 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   knowledgeProcessingModeLabel,
 }) => {
   const cardView = doc.card_view;
+  const timerStartedAt = cardView?.timer.current_active_started_at || null;
+  const isLiveTimer = cardView?.timer.mode === 'running' && Boolean(timerStartedAt);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [expandedClaimIds, setExpandedClaimIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  useEffect(() => {
+    if (!isLiveTimer) return undefined;
+
+    setNowMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isLiveTimer, timerStartedAt]);
 
   if (!cardView) {
     return null;
@@ -184,6 +246,24 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     cardMetadata,
     'embedding_indexed_claims',
   );
+  const claimPreview = Array.isArray(cardMetadata?.workbench_claim_preview)
+    ? cardMetadata.workbench_claim_preview
+    : [];
+  const claimPreviewCount =
+    metadataRootNumber(cardMetadata, 'workbench_claim_preview_count') ||
+    claimPreview.length;
+
+  const toggleClaimPreview = (claimId: string): void => {
+    setExpandedClaimIds((current) => {
+      const next = new Set(current);
+      if (next.has(claimId)) {
+        next.delete(claimId);
+      } else {
+        next.add(claimId);
+      }
+      return next;
+    });
+  };
 
   const sectionProgressCurrent =
     promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0
@@ -216,9 +296,22 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             : ''
         }`;
 
+  const timerStartedAtMs = timerStartedAt ? Date.parse(timerStartedAt) : Number.NaN;
+  const liveActiveElapsedSeconds =
+    isLiveTimer && Number.isFinite(timerStartedAtMs)
+      ? Math.max(
+          cardView.timer.active_elapsed_seconds,
+          Math.floor((nowMs - timerStartedAtMs) / 1000),
+        )
+      : cardView.timer.active_elapsed_seconds;
+  const liveWallElapsedSeconds =
+    isLiveTimer && Number.isFinite(timerStartedAtMs)
+      ? Math.max(cardView.timer.wall_elapsed_seconds, liveActiveElapsedSeconds)
+      : cardView.timer.wall_elapsed_seconds;
+
   const elapsedText = `активно ${formatDuration(
-    cardView.timer.active_elapsed_seconds,
-  )} · всего ${formatDuration(cardView.timer.wall_elapsed_seconds)}`;
+    liveActiveElapsedSeconds,
+  )} · всего ${formatDuration(liveWallElapsedSeconds)}`;
 
   const llmUsageText = `${formatNumber(
     cardView.usage.total_tokens,
@@ -410,6 +503,11 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               Embeddings: {formatNumber(embeddingIndexedClaims)} claims
             </span>
           )}
+          {claimPreviewCount > 0 && (
+            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              Извлечено claims: {formatNumber(claimPreviewCount)}
+            </span>
+          )}
           {cardView.registry.final_snapshot_id && (
             <span
               className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]"
@@ -452,6 +550,121 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               cardView.error.user_message.i18n_key,
               cardView.error.user_message.default_message,
             )}
+          </div>
+        )}
+
+        {claimPreview.length > 0 && (
+          <div className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="font-semibold text-[var(--text-primary)]">
+                Извлечённые факты Prompt A
+              </div>
+              <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                {formatNumber(claimPreviewCount)}
+              </span>
+            </div>
+
+            <div className="space-y-2">
+              {claimPreview.map((claim, index) => {
+                const claimId =
+                  metadataText(claim.claim_id) ||
+                  metadataText(claim.node_run_id) ||
+                  `claim-${index + 1}`;
+                const isExpanded = expandedClaimIds.has(claimId);
+                const claimText =
+                  metadataText(claim.claim) || `Claim ${index + 1}`;
+                const evidence = metadataText(claim.evidence_block);
+                const triples = stringifyDetails(claim.triples);
+                const relations = stringifyDetails(claim.local_relations);
+                const possibleQuestions = Array.isArray(claim.possible_questions)
+                  ? claim.possible_questions.filter(Boolean)
+                  : [];
+
+                return (
+                  <div
+                    key={claimId}
+                    className="rounded-lg bg-[var(--surface-elevated)] p-2"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleClaimPreview(claimId)}
+                      className="flex w-full items-start justify-between gap-2 text-left"
+                    >
+                      <span>
+                        <span className="font-medium text-[var(--text-primary)]">
+                          {claimText}
+                        </span>
+                        <span className="mt-1 block text-[var(--text-muted)]">
+                          {metadataText(claim.claim_kind) || 'claim'} · секция{' '}
+                          {metadataText(claim.section_index) || '?'}
+                          {metadataText(claim.local_ref)
+                            ? ` · ${metadataText(claim.local_ref)}`
+                            : ''}
+                        </span>
+                      </span>
+                      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                        {isExpanded ? 'скрыть' : 'детали'}
+                      </span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="mt-2 space-y-2 border-t border-[var(--border-subtle)] pt-2">
+                        {evidence && (
+                          <div>
+                            <div className="font-medium text-[var(--text-primary)]">
+                              Evidence
+                            </div>
+                            <div className="mt-1 whitespace-pre-wrap">
+                              {evidence}
+                            </div>
+                          </div>
+                        )}
+                        {metadataText(claim.scope) && (
+                          <div>
+                            <span className="font-medium text-[var(--text-primary)]">
+                              Scope:
+                            </span>{' '}
+                            {metadataText(claim.scope)}
+                          </div>
+                        )}
+                        {possibleQuestions.length > 0 && (
+                          <div>
+                            <div className="font-medium text-[var(--text-primary)]">
+                              Возможные вопросы
+                            </div>
+                            <ul className="mt-1 list-disc pl-4">
+                              {possibleQuestions.map((question) => (
+                                <li key={question}>{question}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {triples && (
+                          <div>
+                            <div className="font-medium text-[var(--text-primary)]">
+                              Triples
+                            </div>
+                            <pre className="mt-1 overflow-x-auto rounded bg-[var(--control-bg)] p-2">
+                              {triples}
+                            </pre>
+                          </div>
+                        )}
+                        {relations && (
+                          <div>
+                            <div className="font-medium text-[var(--text-primary)]">
+                              Relations
+                            </div>
+                            <pre className="mt-1 overflow-x-auto rounded bg-[var(--control-bg)] p-2">
+                              {relations}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
@@ -521,7 +734,12 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               >
                 Открыть trace и курацию
               </button>
-              {cardView.registry.final_snapshot_id && (
+              {claimPreviewCount > 0 && (
+            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              Извлечено claims: {formatNumber(claimPreviewCount)}
+            </span>
+          )}
+          {cardView.registry.final_snapshot_id && (
                 <span
                   className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[var(--text-muted)]"
                   title={cardView.registry.final_snapshot_id}
